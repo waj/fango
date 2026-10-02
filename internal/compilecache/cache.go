@@ -103,9 +103,6 @@ type slotStore struct {
 }
 
 func newStore(entry string) *slotStore {
-	return newStoreNamespace(entry, "")
-}
-func newStoreNamespace(entry, namespace string) *slotStore {
 	abs, err := filepath.Abs(entry)
 	if err != nil {
 		return &slotStore{}
@@ -118,9 +115,9 @@ func newStoreNamespace(entry, namespace string) *slotStore {
 	if err != nil {
 		return &slotStore{}
 	}
-	roots := []string{filepath.Join(local, "v1", fp, namespace)}
+	roots := []string{filepath.Join(local, "v1", fp)}
 	if fallback != "" {
-		roots = append(roots, filepath.Join(fallback, "v1", fp, namespace))
+		roots = append(roots, filepath.Join(fallback, "v1", fp))
 	}
 	return &slotStore{bytes: artifactstore.New(roots...)}
 }

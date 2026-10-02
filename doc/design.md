@@ -62,11 +62,6 @@ module-owned output, tail loops, build caching, scalar sidecars, and native work
 [Structured Go lowering](design/lowering.md) — verified statements, callback contracts,
 selected invocation modes, and split Exit results.
 
-## Experimental LLVM backend
-
-[LLVM backend](design/llvm.md) — typed Clang lowering, native representations,
-BDWGC, C sidecars, and isolated artifacts.
-
 ## Formatting
 
 [Formatter](design/formatter.md) — pre-fixity printing, source layout,
@@ -81,7 +76,7 @@ import increments, generations, and transactions.
 
 [Verification](design/verification.md) — commands, fixture conventions,
 differential tests, deterministic emission, and manual timing gates.
-[Typed JSON comparison](design/json-performance.md) — the 10 MB Go/LLVM/Aeson
+[Typed JSON comparison](design/json-performance.md) — the 10 MB Go/Aeson
 workload, measurement contracts, and retained performance evidence.
 
 ## Known limitations

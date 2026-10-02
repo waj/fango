@@ -75,9 +75,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	fmt.Fprint(w, `usage:
-  fango build [--backend go|llvm] [-o out] [--emit-go] [verbosity] main.fango
-  fango run [--backend go|llvm] [verbosity] main.fango [--] [args...]
-  fango check [--backend go|llvm] [verbosity] main.fango
+  fango build [-o out] [--emit-go] [verbosity] main.fango
+  fango run [verbosity] main.fango [--] [args...]
+  fango check [verbosity] main.fango
   fango fmt [-w] [-l] [file...]
   fango repl [dir]
   fango clean main.fango
@@ -178,7 +178,6 @@ func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	out := fs.String("o", "", "output binary path, or project directory with --emit-go")
 	emit := fs.Bool("emit-go", false, "write the generated Go project and exit")
-	backend := fs.String("backend", "go", "code generation backend: go or llvm")
 	observed := reporting(fs, stderr)
 	if fs.Parse(args) != nil || fs.NArg() != 1 {
 		usage(stderr)
@@ -186,17 +185,6 @@ func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 	}
 	session, report := observed()
 	entry := fs.Arg(0)
-	if *backend == "llvm" {
-		if *emit {
-			fmt.Fprintln(stderr, "--emit-go requires --backend go")
-			return 2
-		}
-		return llvmBuild(entry, *out, stderr, session, report)
-	}
-	if *backend != "go" {
-		fmt.Fprintf(stderr, "unknown backend %q\n", *backend)
-		return 2
-	}
 	if *emit {
 		dest := *out
 		if dest == "" {
@@ -236,7 +224,6 @@ func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 func cmdRun(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	backend := fs.String("backend", "go", "code generation backend: go or llvm")
 	observed := reporting(fs, stderr)
 	// Parsing stops at the entry path, so everything after it — including a
 	// `--` separator and any flag the program itself defines — reaches the
@@ -247,13 +234,6 @@ func cmdRun(args []string, stderr io.Writer) int {
 	}
 	session, report := observed()
 	args = fs.Args()
-	if *backend == "llvm" {
-		return llvmRun(args[0], args[1:], stderr, session, report)
-	}
-	if *backend != "go" {
-		fmt.Fprintf(stderr, "unknown backend %q\n", *backend)
-		return 2
-	}
 	dir, program, ok := ensureBuilt(args[0], stderr, session, report)
 	if !ok {
 		return 1

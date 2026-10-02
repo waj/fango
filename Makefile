@@ -1,7 +1,7 @@
 # Convenience wrappers for the repository verification gates; see
 # doc/design.md, "Testing and performance".
 
-.PHONY: build install test test-llvm test-short test-grammar test-perf update-goldens update-baselines fmt fmt-fango vet ci clean
+.PHONY: build install test test-short test-grammar test-perf update-goldens update-baselines fmt fmt-fango vet ci clean
 
 build:
 	go build -o fango ./cmd/fango
@@ -18,14 +18,12 @@ FANGO_SOURCES = $(shell find stdlib examples -name '*.fango' -type f -print)
 install: build
 	install -d $(PREFIX)/bin $(LIBDIR)/stdlib
 	install -m 755 fango $(PREFIX)/bin/fango
-	find stdlib -type f \( -name '*.fango' -o -name '*.native.go' -o -name '*.native.c' -o -name 'native_support.go' \) -print | while IFS= read -r f; do \
+	find stdlib -type f \( -name '*.fango' -o -name '*.native.go' -o -name 'native_support.go' \) -print | while IFS= read -r f; do \
 		rel=$${f#stdlib/}; \
 		case "$$rel" in */*) dest=$(LIBDIR)/stdlib/$${rel%/*};; *) dest=$(LIBDIR)/stdlib;; esac; \
 		install -d "$$dest"; \
 		install -m 644 "$$f" "$$dest"; \
 	done
-	install -d $(LIBDIR)/runtime/llvm
-	install -m 644 runtime/llvm/fango.h runtime/llvm/fango.hpp runtime/llvm/fango.cpp $(LIBDIR)/runtime/llvm
 	for pkg in fangort nativewire nativeworker; do \
 		install -d $(LIBDIR)/runtime/$$pkg; \
 		for f in runtime/$$pkg/*.go; do \
@@ -45,10 +43,6 @@ install: build
 # This includes the full compiler/interpreter differential suite.
 test:
 	go test -parallel 16 $$(go list ./... | grep -v benchmarks)
-
-# Experimental macOS ARM64 backend. Requires the Nix LLVM/BDWGC toolchain.
-test-llvm:
-	FANGO_TEST_LLVM=1 go test ./cmd/fango -run 'TestLLVM' -timeout 30m
 
 # The TextMate grammar in editors/vscode/ encodes exact lexer rules, so a
 # change to the surface syntax must be re-checked against it: this tokenizes

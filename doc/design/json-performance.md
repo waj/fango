@@ -36,12 +36,11 @@ evidence records `parser: "resumable"` and `scan_enabled: true`; the older
 streaming comparisons below retain their original library snapshots and results.
 
 The optional `jsoncompare` Nix shell adds GHC and Aeson without changing the
-ordinary development shell. Include `-aeson` for the Haskell workload and
-`-llvm` for Fango's LLVM backend:
+ordinary development shell. Include `-aeson` for the Haskell workload:
 
 ```sh
 nix develop .#jsoncompare -c go run ./benchmarks/jsoncompare \
-  -out /tmp/fango-json-aeson-evidence -aeson -llvm -runs 7
+  -out /tmp/fango-json-aeson-evidence -aeson -runs 7
 ```
 
 The Haskell program uses Aeson's generic `FromJSON` instances, strict typed
@@ -70,7 +69,7 @@ one thousand operations; fixed activation allocations are reported separately.
 Fifteen alternating paired fresh-process samples per case compare the preceding
 dual-method resumable implementation with the single-parser implementation.
 The latter includes scalar phase resumption, compact integer continuation state,
-the LLVM allocation-root fix, and removal of a float fallback closure allocated
+and removal of a float fallback closure allocated
 on successful buffered reads. One warmup precedes each case; case order rotates.
 Both use the same 10,000,260-byte fixtures, default runtime settings, and verified
 checksums. Builds and correctness tests finish before timing begins.
@@ -78,26 +77,16 @@ checksums. Builds and correctness tests finish before timing begins.
 | Backend | Field order | Input chunks | Dual-method resumable | Single parser |
 | --- | --- | --- | ---: | ---: |
 | Go | Declaration | Normal | 0.1481 s | 0.1457 s |
-| LLVM | Declaration | Normal | 0.0834 s | 0.0837 s |
 | Go | Reversed | Normal | 0.1982 s | 0.1978 s |
-| LLVM | Reversed | Normal | 0.0958 s | 0.0954 s |
 | Go | Declaration | 64 bytes | 0.3203 s | 0.3030 s |
-| LLVM | Declaration | 64 bytes | 0.2046 s | 0.2090 s |
 | Go | Reversed | 64 bytes | 0.3436 s | 0.3288 s |
-| LLVM | Reversed | 64 bytes | 0.2113 s | 0.2091 s |
 
 All normal-chunk paired bootstrap 95% intervals include zero change. With
 64-byte chunks, Go time falls by 5.4% for declaration order (interval 4.2–6.9%)
-and 4.3% for reversed order (3.9–5.4%). LLVM's corresponding estimates are
-2.2% slower and 1.1% faster; both intervals include zero change. The small-chunk
+and 4.3% for reversed order (3.9–5.4%). The small-chunk
 control includes the same extra Reader layer in both variants. Raw samples,
 binary/input hashes, settings, and bootstrap intervals are retained in
 `/tmp/fango-refill-prototype/unified-no-factory-comparison-20261002-010224.json`.
-
-The LLVM allocation fix also passes forty additional 10 MB decodes with
-64-byte chunks and frequent collection, split equally between the two layouts.
-Those checks are untimed. The full CI and LLVM correctness suites pass;
-the final float-closure cleanup also passes both backends' JSON differential suites.
 
 Earlier fixture controls and optimization measurements are retained in the
 [comparison baselines](json-performance-baselines.md).

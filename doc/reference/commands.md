@@ -24,9 +24,9 @@ projects or other ignored application data.
 `build`, `run`, `check`, and `clean` accept one `.fango` source file:
 
 ```text
-fango build [--backend go|llvm] [-o out] [--emit-go] [verbosity] main.fango
-fango run [--backend go|llvm] [verbosity] main.fango [--] [args...]
-fango check [--backend go|llvm] [verbosity] main.fango
+fango build [-o out] [--emit-go] [verbosity] main.fango
+fango run [verbosity] main.fango [--] [args...]
+fango check [verbosity] main.fango
 fango fmt [-w] [-l] [file...]
 fango repl [dir]
 fango clean main.fango
@@ -34,9 +34,6 @@ fango clean main.fango
 
 Flags precede the source path, because everything after it belongs to the
 program `run` is about to start.
-
-The default backend is Go. [Experimental LLVM](llvm.md) documents the alternate
-backend, toolchain, C sidecars, and supported platform.
 
 `build` writes a native executable (defaulting to the source basename without
 `.fango`). `run` builds if needed and runs the cached executable, forwarding

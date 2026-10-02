@@ -191,7 +191,6 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 	}
 	g.observe.Timed("parse", name, parseStart)
 	n := &node{name: name, path: path, content: b, mod: mm, sourceHash: hashBytes(b), bundled: bundled, nativeModule: name}
-	n.nativeC = g.bundled.NativeC
 	n.deps = syntaxDependencies(mm, name)
 	var np string
 	var nb []byte

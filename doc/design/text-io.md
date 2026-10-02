@@ -94,7 +94,7 @@ buffer's current length, which makes it the newest version; otherwise it
 copies that prefix into a fresh buffer. Bytes below any version's length are
 never rewritten, so persistence needs no copying for ordered use. The Go
 buffer serializes appends and reads with a lock because tasks may share
-versions; the LLVM backend runs a single thread and needs none. The
+versions. The
 interpreter runs the same Go natives in-process, and in-process bundled
 natives apply the same wrapper boundary as sidecar calls.
 

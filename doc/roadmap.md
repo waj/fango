@@ -199,18 +199,17 @@ conversion from `Type a` to `Meta.TypeRepr` remains a separate future feature.
 
 ## Longer-term candidates
 
-The [LLVM experiment](design/llvm.md) is implemented for macOS ARM64. Follow-up
-work includes Async/native tasks, other targets, module-level LLVM emission reuse,
-and idle-host runtime evidence. These remain separate from the default Go backend.
-
-The [polymorphic cleanup regression](../testdata/llvm/poly_failure_structural.fango)
-passes in LLVM and the interpreter. Generated Go currently panics when inspecting
-its nested structural payload because the payload disagrees with the checked type
-descriptor. Repairing the Go representation at that boundary remains unfinished;
-the LLVM experiment does not modify the Go emitter or runtime.
+The [polymorphic cleanup regression](../testdata/pending/poly_failure_structural.fango)
+passes in the interpreter. Generated Go panics when inspecting its nested
+structural payload because the payload disagrees with the checked type
+descriptor. Repairing the Go representation at that boundary remains
+unfinished; once it passes, move the fixture into `testdata/run`.
 
 These are directions, not commitments or an ordering:
 
+- A second, native backend. An experimental LLVM backend for macOS ARM64 was
+  removed so the language keeps one backend whose compile speed it can rely on;
+  its last implementation, with C sidecars and a BDWGC runtime, is at `2de4f1f`.
 - Richer safe sidecar types and panic/error translation, driven by concrete APIs.
 - Transparent aliases, including effect-row aliases.
 - Inline record variant payloads: settle construction, matching, and visibility.

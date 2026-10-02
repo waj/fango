@@ -42,11 +42,6 @@ The bundled library is experimental and versioned with the compiler.
 
 [Native Go sidecars](reference/native.md) — Declarations, boundary types, FangoHost, and native workers.
 
-## Experimental LLVM backend
-
-[Experimental LLVM backend](reference/llvm.md) — backend selection, platform
-support, and parallel C sidecars.
-
 ## Values and operators
 
 [Values and operators](reference/syntax.md#values-and-operators) — Scalar literals, operators, precedence, and fixity.

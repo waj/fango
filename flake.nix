@@ -20,11 +20,6 @@
             gnumake  # Makefile convenience targets
             nodejs   # runs the TextMate grammar check
             python3  # repository scripts and ad hoc development tools
-            llvmPackages_21.clang # experimental LLVM backend and C sidecars
-            llvmPackages_21.llvm  # LLVM IR verification and inspection
-            boehmgc  # experimental native runtime collector
-            zlib     # native GZip sidecar
-            pkg-config
           ];
 
           # The grammar check tokenizes with vscode-textmate. Build its two

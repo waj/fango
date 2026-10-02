@@ -174,9 +174,6 @@ and `TimedOut`; other failures use `Other` and retain the system message.
 available. Listener and connection values are abstract resource wrappers over
 `Runtime.Native.Any`; no native handle table or public release operation exists.
 
-The [LLVM experiment](llvm.md) supports these synchronous APIs. Async adapters
-require the Go backend.
-
 The runnable [echo server](../../examples/echo.fango) shows the adapters used
 together with a bounded `Reader` and a flushing `Writer.over` loop. It listens
 on port 8000 by default, or on the port passed as its sole argument:

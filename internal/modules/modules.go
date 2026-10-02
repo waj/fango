@@ -43,8 +43,7 @@ type Provider interface {
 type StageObserver = compileevent.Observer
 
 type FSProvider struct {
-	Root    string
-	NativeC bool
+	Root string
 }
 
 // OverlayProvider reads unsaved editor content at the same logical paths as
@@ -120,11 +119,6 @@ func readExact(root, rel string) ([]byte, error) {
 }
 
 func (p FSProvider) Native(module string) (string, []byte, error) {
-	if p.NativeC {
-		rel := filepath.FromSlash(strings.ReplaceAll(module, ".", "/") + ".native.c")
-		b, err := readExact(p.Root, rel)
-		return filepath.ToSlash(rel), b, err
-	}
 	rel := filepath.FromSlash(strings.ReplaceAll(module, ".", "/") + ".native.go")
 	b, err := readExact(p.Root, rel)
 	return filepath.ToSlash(rel), b, err
@@ -134,18 +128,15 @@ func (p FSProvider) Native(module string) (string, []byte, error) {
 // root. It reports paths under the logical <stdlib>/ prefix rather than the
 // root they were read from, so a build manifest identifies a bundled module
 // the same way wherever the library is installed.
-type BundledProvider struct{ NativeC bool }
+type BundledProvider struct{}
 
 func (BundledProvider) Source(module string) (string, []byte, error) {
 	rel := strings.ReplaceAll(module, ".", "/") + ".fango"
 	b, err := libroot.ReadStdlib(rel)
 	return "<stdlib>/" + rel, b, err
 }
-func (p BundledProvider) Native(module string) (string, []byte, error) {
+func (BundledProvider) Native(module string) (string, []byte, error) {
 	rel := strings.ReplaceAll(module, ".", "/") + ".native.go"
-	if p.NativeC {
-		rel = strings.ReplaceAll(module, ".", "/") + ".native.c"
-	}
 	b, err := libroot.ReadStdlib(rel)
 	return "<stdlib>/" + rel, b, err
 }
@@ -261,7 +252,6 @@ type node struct {
 	nativePath   string
 	native       []byte
 	nativeModule string
-	nativeC      bool
 	// resolved is the module's declaration list after name resolution, in
 	// source order, as the checker consumes it.
 	resolved []ast.Decl
@@ -291,8 +281,6 @@ func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
 }
 
 type LoadOptions struct {
-	// NativeC selects the experimental LLVM C boundary. The default is Go.
-	NativeC bool
 	Observe StageObserver
 	// Root defaults to the entry file's directory. Editor clients may set it
 	// when opening an imported module in a nested directory.
@@ -340,12 +328,11 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		entryName = m.Header.Name
 	}
 	options.Observe.Timed("parse", entryName, parseStart)
-	var provider Provider = FSProvider{Root: root, NativeC: options.NativeC}
+	var provider Provider = FSProvider{Root: root}
 	if options.Overlays != nil {
-		provider = OverlayProvider{FSProvider: FSProvider{Root: root, NativeC: options.NativeC}, Overlays: options.Overlays}
+		provider = OverlayProvider{FSProvider: FSProvider{Root: root}, Overlays: options.Overlays}
 	}
 	g := newGraph(provider)
-	g.bundled.NativeC = options.NativeC
 	g.observe = options.Observe
 	bundledEntry := false
 	if !private {
@@ -375,12 +362,7 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		rootNode.path = "<stdlib>/" + filepath.ToSlash(relEntry)
 		rootNode.bundled = true
 	}
-	rootNode.nativeC = options.NativeC
-	ext := ".native.go"
-	if options.NativeC {
-		ext = ".native.c"
-	}
-	rootNativePath := strings.TrimSuffix(relEntry, ".fango") + ext
+	rootNativePath := strings.TrimSuffix(relEntry, ".fango") + ".native.go"
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
 		if bundledEntry {
 			rootNativePath = "<stdlib>/" + filepath.ToSlash(rootNativePath)
@@ -695,20 +677,10 @@ func validateModuleDecls(n *node) []diag.Error {
 		return errs
 	}
 	if n.native == nil {
-		if n.nativeC && n.bundled && n.name == "Async" {
-			return errs // Reachable Async is rejected by LLVM lowering.
-		}
 		for _, d := range callDecls {
-			ext := ".native.go"
-			if n.nativeC {
-				ext = ".native.c"
-			}
-			errs = append(errs, diag.Errorf(d.Native.Sp, "MISSING NATIVE SIDECAR", "Native `%s` requires `%s%s` beside the module source.", d.Name, n.name, ext))
+			errs = append(errs, diag.Errorf(d.Native.Sp, "MISSING NATIVE SIDECAR", "Native `%s` requires `%s.native.go` beside the module source.", d.Name, n.name))
 		}
 		return errs
-	}
-	if n.nativeC {
-		return errs // Clang validates the generated typed ABI declarations.
 	}
 	return append(errs, validateSidecar(n, callDecls, opDecls)...)
 }

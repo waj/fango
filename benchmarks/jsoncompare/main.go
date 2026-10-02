@@ -85,7 +85,6 @@ func run() error {
 	compiler := flag.String("compiler", "", "existing compiler binary; otherwise build working tree")
 
 	aeson := flag.Bool("aeson", false, "also compare Haskell/Aeson (requires the jsoncompare Nix shell)")
-	llvm := flag.Bool("llvm", false, "also compare Fango's LLVM backend")
 	noScan := flag.Bool("no-scan", false, "obsolete: the separate streaming decoder has been removed")
 	fieldOrder := flag.String("field-order", "declaration", "generated fixture's record keys: declaration or reverse")
 	diagnostics := flag.Bool("diagnostics", false, "also isolate reader layers and generated state/evidence dispatch on this fixture")
@@ -187,17 +186,6 @@ func run() error {
 	}
 	programs := []string{"go", "fango"}
 	toolchain := map[string]string{}
-	if *llvm {
-		if _, err = command(repo, env, compilerPath, "build", "--backend", "llvm", "-o", filepath.Join(dest, "fango-llvm"), filepath.Join(dest, "main.fango")); err != nil {
-			return err
-		}
-		version, e := command(repo, env, "clang", "--version")
-		if e != nil {
-			return e
-		}
-		toolchain["clang"] = strings.SplitN(strings.TrimSpace(string(version)), "\n", 2)[0]
-		programs = append(programs, "fango-llvm")
-	}
 	if *aeson {
 		source := filepath.Join(dest, "main.hs")
 		if err = os.WriteFile(source, []byte(haskellWorkload), 0644); err != nil {

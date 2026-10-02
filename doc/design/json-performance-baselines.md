@@ -12,55 +12,41 @@ previous commit's binaries: alternating fresh-process pairs on the
 runtime settings, matching checksums, and no builds or tests during samples.
 Medians, with pair counts of 11 unless noted:
 
-| Change | Go backend | LLVM backend |
-| --- | ---: | ---: |
-| `matchWindow` compares UTF-8 keys in place (`Encoding.matchAt`) | 145.8 → 142.2 ms | 84.4 → 84.3 ms |
-| `readWindow` decodes one-byte ASCII itself | 143.2 → 115.7 ms | 84.7 → 67.0 ms |
-| punctuation and integer digits branch on `asciiAt` codes | 114.4 → 102.5 ms | 66.3 → 65.3 ms |
-| string spans use a precomputed `AsciiSet` and one validating pass | 103.2 → 97.4 ms | 64.9 → 66.4 ms (21 pairs) |
-| 64 KiB file pulls; the C sidecar reads large requests directly | 97.9 → 96.8 ms | 67.1 → 60.1 ms |
+| Change | Go backend |
+| --- | ---: |
+| `matchWindow` compares UTF-8 keys in place (`Encoding.matchAt`) | 145.8 → 142.2 ms |
+| `readWindow` decodes one-byte ASCII itself | 143.2 → 115.7 ms |
+| punctuation and integer digits branch on `asciiAt` codes | 114.4 → 102.5 ms |
+| string spans use a precomputed `AsciiSet` and one validating pass | 103.2 → 97.4 ms |
+| 64 KiB file pulls | 97.9 → 96.8 ms |
 
-Fifteen final pairs measure 148.3 → 98.1 ms for Go (33.9% less time) and
-86.2 → 60.5 ms for LLVM (29.9%). The plain Go control takes 68.9 ms in the
-same session, so Go is about 1.4× the control and LLVM about 12% faster.
+Fifteen final pairs measure 148.3 → 98.1 ms for Go (33.9% less time). The
+plain Go control takes 68.9 ms in the same session, so Go is about 1.4× the
+control.
 
-The `readWindow` gain on both backends came from removing the
+The `readWindow` gain came from removing the
 `peekWindow → decodeScalar → byteAt → fromCode` chain: Go's inliner rejects
 each function, and the nested result values moved through memory. An
-`asciiAt` whitespace loop saved a further ~7% on Go but cost LLVM 11%.
-Clang then stopped inlining `fastWhite` at its call sites; re-optimizing the
-same bitcode with `-inline-threshold=600` recovered the earlier LLVM time,
-so the loss is an inlining decision that depends on the size of the
-generated record and sum code.
-
-Removing the tag from LLVM single-constructor products, and the unreachable
-panic default from exhaustive switches, then took LLVM from 59.7 to 57.7 ms
-(11 pairs). With that change the ASCII whitespace loop helps both backends:
-Go 95.9 → 89.3 ms and LLVM 57.5 → 53.4 ms (11 pairs).
+`asciiAt` whitespace loop then took Go from 95.9 to 89.3 ms (11 pairs).
 
 Accumulating escaped strings in a `Text.Builder` instead of a reversed
-fragment list took Go from 88.6 to 81.1 ms and LLVM from 52.8 to 51.0 ms
-(11 pairs).
+fragment list took Go from 88.6 to 81.1 ms (11 pairs).
 
 The [Core inliner](core.md#inlining) then took Go from 82.0 to 75.1 ms
-(11 pairs). LLVM measured 51.5 → 52.0 ms over 21 pairs, within run
-variation: Clang already inlined these helpers across the linked program.
+(11 pairs).
 
 Two cursor reductions were measured with timing-only library copies and
 rejected. Removing every per-token column addition from the scanners, an
 upper bound for deriving columns from a line start, measured 81.9 → 81.7 ms
-on Go and 50.0 → 51.0 ms on LLVM: the additions cost nothing measurable, and
+on Go: the additions cost nothing measurable, and
 a line-start field would not shrink the cursor. Making the window buffer a
 single-constructor product, with empty bytes in place of the empty case,
-measured 82.7 → 125.7 ms on Go and 50.5 → 54.2 ms on LLVM, because the
-product is stored inline in every window while the sum is one pointer. The span
-change costs LLVM one more call per string, where the predicate loop was
-already inlined. Before the chunk change the C file handle answered at most
-4096 bytes per pull whatever the request.
+measured 82.7 → 125.7 ms on Go, because the
+product is stored inline in every window while the sum is one pointer.
 
 Seven measured runs of the same 10,000,260-byte fixture, following one warmup
 per implementation, compared GHC 9.10.3/Aeson 2.2.4.1 (`-O2`, default RTS) with
-Go 1.26.7 and both Fango backends using [pure buffered value scans](json.md)
+Go 1.26.7 and Fango's Go backend using [pure buffered value scans](json.md)
 on the macOS ARM64 host. All checksums matched; generation, compilation,
 builds, and correctness tests were
 outside the timed samples.
@@ -69,11 +55,10 @@ outside the timed samples.
 | --- | ---: | ---: |
 | Plain Go | 0.0656 s | 50.4 MB |
 | Haskell/Aeson, generic instances | 0.1343 s | 113.2 MB |
-| Fango, LLVM backend | 0.1008 s | 45.5 MB |
 | Fango, Go backend | 0.1662 s | 27.3 MB |
 
-Aeson takes about 2.0× the Go control's time; Fango LLVM takes about 25% less
-time than Aeson, while Fango Go takes about 1.2× Aeson's time. The fixture's
+Aeson takes about 2.0× the Go control's time, and Fango Go takes about 1.2×
+Aeson's time. The fixture's
 required record fields arrive in declaration order, exercising generated
 straight-line scanning and bulk encoded key matches. These results precede
 pure scan continuation for reordered keys and do not establish its timing.
@@ -84,8 +69,7 @@ applies to this typed workload and these default runtime settings.
 
 Five additional rotated paired runs compare the final binaries against saved
 shared-window-cursor binaries on that same fixture, after one warmup each.
-Fango Go changes from 0.2661 s to 0.1662 s (37.6% less time), and LLVM from
-0.1678 s to 0.1014 s (39.6% less time). All checksums match; builds and tests
+Fango Go changes from 0.2661 s to 0.1662 s (37.6% less time). All checksums match; builds and tests
 are excluded from the samples. The change combines pure buffered record/list
 decoding, direct integer accumulation, and encoded key matching, rather than
 isolating their individual contributions.
@@ -101,12 +85,10 @@ tests precede the samples, with one warmup per binary. All checksums match.
 | Backend | Tuple slots, Scan disabled | Field arguments, Scan disabled | Field arguments, Scan enabled |
 | --- | ---: | ---: | ---: |
 | Go | 0.2547 s | 0.2212 s | 0.1579 s |
-| LLVM | 0.1581 s | 0.1316 s | 0.0968 s |
 
-Field arguments reduce streaming time by 13.2% on Go and 16.8% on LLVM.
+Field arguments reduce streaming time by 13.2% on Go.
 The same rotated runs measure plain Go at 0.0661 s and Aeson at 0.1251 s.
-Streaming LLVM takes about 5% more time than Aeson's median; keeping Scan
-enabled reduces LLVM time by a further 26.4% and Go time by 28.6%. The fixture
+Keeping Scan enabled reduces Go time by a further 28.6%. The fixture
 still has fields in declaration order, so these comparisons measure forced
 streaming of the same data, not the timing of alternative object layouts.
 
@@ -123,19 +105,17 @@ compilation and correctness suites finish before the measurements.
 | Backend | Field order | Ordered-only Scan | Scan with continuation |
 | --- | --- | ---: | ---: |
 | Go | Declaration | 0.1586 s | 0.1589 s |
-| LLVM | Declaration | 0.0962 s | 0.0949 s |
 | Go | Reversed | 0.2291 s | 0.2009 s |
-| LLVM | Reversed | 0.1305 s | 0.1063 s |
 
-Continuation reduces reversed-key time by 12.3% on Go and 18.5% on LLVM.
+Continuation reduces reversed-key time by 12.3% on Go.
 Declaration-order timings remain within the observed run variation. On the
 reversed fixture, the same runs measure plain Go at 0.0674 s and Aeson at
-0.1262 s; LLVM takes about 16% less time than Aeson. This comparison measures
+0.1262 s. This comparison measures
 fully reversed keys, rather than the timing of every supported permutation.
 
 The earlier dual-method resumable scanner keeps completed record/list prefixes
 across refills and creates diagnostic paths only while suspended work executes.
-Fifteen paired fresh-process runs per backend and layout, after one warmup,
+Fifteen paired fresh-process runs per layout, after one warmup,
 compare saved `c3009c7` binaries with the resumable scanner and its supporting
 compiler fixes. They use the same fixtures, default runtime settings, and
 verified checksums as above. Case order rotates, and each case alternates
@@ -146,14 +126,11 @@ binaries. No builds or tests run during the samples.
 | Backend | Field order | Optional Scan | Resumable Scan |
 | --- | --- | ---: | ---: |
 | Go | Declaration | 0.1590 s | 0.1496 s |
-| LLVM | Declaration | 0.0964 s | 0.0854 s |
 | Go | Reversed | 0.2005 s | 0.2014 s |
-| LLVM | Reversed | 0.1072 s | 0.0981 s |
 
-Declaration-order time falls by 5.9% in Go and 11.5% in LLVM. Reversed Go
+Declaration-order time falls by 5.9% in Go. Reversed Go
 remains within run variation: its 0.4% slower point estimate has a paired
-bootstrap 95% interval spanning 2.1% slower to 1.7% faster. Reversed LLVM falls
-by 8.4%.
+bootstrap 95% interval spanning 2.1% slower to 1.7% faster.
 
 A boundary-heavy control caps the chunks supplied to JSON at 64 bytes through
 an additional Reader layer over the ordinary buffered file source. Both
@@ -164,12 +141,10 @@ runs with the same ordering and warmup protocol give:
 | Backend | Field order | Optional Scan, 64-byte chunks | Resumable Scan, 64-byte chunks |
 | --- | --- | ---: | ---: |
 | Go | Declaration | 0.3659 s | 0.3343 s |
-| LLVM | Declaration | 0.2309 s | 0.2141 s |
 | Go | Reversed | 0.3732 s | 0.3567 s |
-| LLVM | Reversed | 0.2311 s | 0.2191 s |
 
-Declaration-order time falls by 8.6% in Go and 7.3% in LLVM; reversed-field
-time falls by 4.4% and 5.2%. Every checksum matches. The extra reader layer's
+Declaration-order time falls by 8.6% in Go; reversed-field
+time falls by 4.4%. Every checksum matches. The extra reader layer's
 cost is included, so these absolute times describe this controlled source.
 
 Keeping the Scan cursor at its original size matters: an earlier otherwise
@@ -178,8 +153,8 @@ reversed Go, versus 0.1993 s for its paired baseline.
 
 An earlier effectful-cursor experiment measured diagnostic path cost separately.
 Removing path entry/restoration only in a private benchmark copy changed
-declaration-order Go from 0.1955 s to 0.1806 s, and LLVM from 0.1044 s to
-0.0988 s. Its paired optional-scan baseline measured 0.1611 s and 0.0959 s.
+declaration-order Go from 0.1955 s to 0.1806 s. Its paired optional-scan
+baseline measured 0.1611 s.
 The seven rotated runs verified all checksums but did not establish diagnostic
 correctness for that copy. Line/column tracking stayed enabled. Path allocation
 contributes to the cost, but removing it did not recover the Go fast path;
@@ -371,11 +346,10 @@ throughput or a claim about other input shapes.
 | Implementation | Before | Shared-window cursor | Median peak RSS before / after |
 | --- | ---: | ---: | ---: |
 | Fango, Go backend | 0.341 s | 0.272 s | 28.7 / 29.1 MB |
-| Fango, LLVM backend | 0.239 s | 0.174 s | 54.5 / 50.8 MB |
 | Plain Go control | 0.079 s | 0.079 s | 50.3 / 50.3 MB |
 
-The redesign reduces wall time by 20.2% for Go and 27.2% for LLVM. The remaining
-gaps to the Go control are about 3.5× and 2.2×. Unlike the rejected larger
+The redesign reduces wall time by 20.2%. The remaining gap to the Go control
+is about 3.5×. Unlike the rejected larger
 window-in-state experiment above, this cursor shares the immutable buffer
 description and moves only its pointer and position; fused keys and typed
 scalar reads also avoid intermediate tokens. These measurements cover the

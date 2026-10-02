@@ -9,7 +9,6 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 | Command | Purpose |
 | --- | --- |
 | make test | Correctness, including full interpreter/compiler differential tests |
-| make test-llvm | Opt-in LLVM differential and command gate in the Nix shell on macOS ARM64 |
 | make test-short | Short-mode tests without compiled differential legs |
 | make test-grammar | TextMate tokenization of every .fango file under stdlib, testdata, and examples |
 | make ci | Go/Fango formatting, go vet, and correctness |
@@ -41,7 +40,6 @@ exercise independent rejection.
 | .status | Expected exit status |
 | .files/ | Seed data copied to a fresh working directory for each backend |
 | .native.go | Sidecar installed in a private interpreter worker |
-| .native.c | Parallel sidecar used by the experimental LLVM gate |
 
 Portable failure tests use missing paths or a directory opened as a file, not chmod.
 Stateful command examples run sequences in isolated directories with matched argv
@@ -81,22 +79,6 @@ leg too. This checks runtime reentrancy before a source-level concurrent
 executor is available.
 
 ## Performance evidence
-
-### LLVM backend comparison
-
-```sh
-nix develop
-go run ./benchmarks/llvmcompare -out /tmp/fango-llvm-evidence
-```
-
-This opt-in command builds Go and LLVM executables from the existing whole-document
-typed JSON workload, generates a ten-megabyte input (or accepts `-input`), checks
-matching output, warms both programs, and alternates their order in three paired
-fresh-process rounds. `evidence.json` records input/source checksums, Clang identity,
-elapsed time including process startup, and macOS maximum resident memory.
-Compilation and warmup are excluded from measured rounds. Run on an otherwise idle
-macOS ARM64 host. There is no CI threshold or required speedup; no LLVM performance
-result has been recorded yet.
 
 The immutable List and native task redesign has no new timing measurements.
 Run performance comparisons only on an idle host. Existing thresholds and
