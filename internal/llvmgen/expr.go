@@ -142,7 +142,7 @@ func (g *generator) expr(e core.Expr) string {
 		return g.typ(e.Ty) + "{}"
 	case *core.ResumeTail:
 		value := g.expr(e.Value)
-		if e.NextState != nil {
+		if e.NextState != nil && !g.keepsState(e.NextState) {
 			next := g.expr(e.NextState)
 			g.line("*%s=%s;", g.state, next)
 		}

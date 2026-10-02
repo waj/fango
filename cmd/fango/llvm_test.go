@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -87,6 +88,59 @@ func TestLLVMDifferential(t *testing.T) {
 				return "", 1
 			})
 		})
+	}
+}
+
+// Emission needs no LLVM toolchain. A clause resuming with its own snapshot
+// stores nothing back; one resuming with a new value still commits it.
+func TestLLVMUnchangedStateCommitsNothing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "counter.fango")
+	source := `effect Counter
+    get : () -> Int
+    put : Int -> ()
+
+bump : () ->{Counter} Int
+bump () =
+    put (get() + 1)
+    get()
+
+main() =
+    print (handle bump() with current = 41 of
+        get () -> resume current with current
+        put next -> resume () with next)
+`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var diagnostics bytes.Buffer
+	result, ok := checkGraph(path, &diagnostics, &compilationSession{nativeC: true})
+	if !ok {
+		t.Fatal(diagnostics.String())
+	}
+	emitted, _, err := llvmgen.Emit(result.Program, result.Checker.B, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clause := func(slot string) []string {
+		var bodies []string
+		for _, part := range strings.Split(string(emitted), "->"+slot+"=")[1:] {
+			bodies = append(bodies, part[:strings.Index(part, "fg_op_exit")])
+		}
+		if len(bodies) == 0 {
+			t.Fatalf("no %s clause emitted", slot)
+		}
+		return bodies
+	}
+	store := regexp.MustCompile(`(?m)^\*fg_t\d+=`)
+	for _, body := range clause("op0") {
+		if store.MatchString(body) {
+			t.Errorf("get commits its unchanged snapshot:\n%s", body)
+		}
+	}
+	for _, body := range clause("op1") {
+		if !store.MatchString(body) {
+			t.Errorf("put lost its commit:\n%s", body)
+		}
 	}
 }
 

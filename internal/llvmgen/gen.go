@@ -36,6 +36,7 @@ type generator struct {
 	serial             *int
 	pending, exitLabel string
 	state              string
+	stateName          string
 	nativeUsed         map[string]bool
 }
 
@@ -173,6 +174,14 @@ func (g *generator) reset() {
 	g.pending = "fg_pending"
 	g.exitLabel = "fg_exit_label"
 	g.state = ""
+	g.stateName = ""
+}
+
+// keepsState reports a next state that is the clause's own snapshot binder.
+// Core never shadows, so committing it would store back the cell's value.
+func (g *generator) keepsState(next core.Expr) bool {
+	ref, ok := next.(*core.VarRef)
+	return ok && g.stateName != "" && ref.Name == g.stateName
 }
 func (g *generator) clone() *generator {
 	n := *g

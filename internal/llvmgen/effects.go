@@ -120,6 +120,10 @@ func (g *generator) handle(e *core.Handle) string {
 		op.pending = "fg_pending"
 		op.exitLabel = "fg_op_exit"
 		op.state = state
+		op.stateName = ""
+		if e.State != nil {
+			op.stateName = e.State.Name
+		}
 		for _, v := range c.LocalVars {
 			op.names[v.ID] = "fg_any"
 		}
@@ -216,7 +220,7 @@ func (g *generator) resumeTail(e core.Expr) {
 	switch e := e.(type) {
 	case *core.ResumeTail:
 		v := g.expr(e.Value)
-		if e.NextState != nil {
+		if e.NextState != nil && !g.keepsState(e.NextState) {
 			n := g.expr(e.NextState)
 			g.line("*%s=%s;", g.state, n)
 		}

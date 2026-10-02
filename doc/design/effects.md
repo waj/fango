@@ -65,7 +65,7 @@ Handler implementations own operation-level synchronization. No continuation
 is captured.
 The Go backend omits a clause's initial snapshot when its Core body never
 mentions the state binder, as in an unconditional cell write. A resume whose
-next state is the clause's own state binder commits nothing in either backend:
+next state is the clause's own state binder commits nothing in any backend:
 Core never shadows, so the binder still holds the snapshot, and storing it back
 would only overwrite a task's concurrent commit with an older value. Other
 commits and their synchronization are unchanged.
