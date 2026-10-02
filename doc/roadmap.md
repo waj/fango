@@ -37,8 +37,8 @@ build directly without a reversal, and bound callbacks for simple local
 effect forwarders call the captured operation slot directly. Window reads
 decode ASCII without the scalar decoding chain, punctuation and integers branch
 on ASCII codes, string spans are a single validating pass, keys match in
-place, and file pulls are 64 KiB; the measured series is in the
-[comparison baselines](design/json-performance-baselines.md).
+place, and file pulls are 64 KiB; current numbers and the measured series are in the
+[typed JSON comparison](design/json-performance.md).
 
 [Generated-code performance](roadmap-performance.md) owns the next measured
 round: static-argument specialization.

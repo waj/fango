@@ -133,7 +133,7 @@ The generic worker remains available and all variants pass ordinary lint.
 ## Inlining
 
 Elaboration inlines saturated calls to small first-order pure workers after
-scalar specialization, so the interpreter and both backends run the same
+scalar specialization, so the interpreter and generated Go run the same
 result. A candidate has Direct control, no evidence, effect, or row
 parameters, no function in its type or in the constructors of its parameter
 types, and a body of literals, variables, negation, natives, conditionals,

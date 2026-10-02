@@ -77,7 +77,7 @@ import increments, generations, and transactions.
 [Verification](design/verification.md) — commands, fixture conventions,
 differential tests, deterministic emission, and manual timing gates.
 [Typed JSON comparison](design/json-performance.md) — the 10 MB Go/Aeson
-workload, measurement contracts, and retained performance evidence.
+workload, current results, measurement contracts, and history.
 
 ## Known limitations
 

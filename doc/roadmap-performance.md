@@ -2,16 +2,16 @@
 
 This document owns the next round of performance work found while closing the
 typed JSON gap. The measured motivation is in the
-[JSON baselines](design/json-performance-baselines.md#ascii-fast-paths-and-single-pass-spans);
+[JSON history](design/json-performance.md#ascii-fast-paths-and-single-pass-spans);
 the main [roadmap](roadmap.md#json-and-generated-code-performance) links here.
 When a milestone lands, its durable contracts move to [design](design.md) and
 [reference](reference.md) and its section is removed.
 
 Every milestone keeps semantics unchanged and passes `make ci`. Each is timed
 with alternating fresh-process pairs of the previous commit's binaries on the
-10 MB typed JSON fixture, both backends, as in the baselines. A change that
-helps one backend and costs the other states both numbers in its commit and
-in the baselines.
+10 MB typed JSON fixture, as in the [JSON history](design/json-performance.md#history),
+and replaces the [current results](design/json-performance.md#current-results)
+when it moves them.
 
 ## P5 — static-argument specialization
 
