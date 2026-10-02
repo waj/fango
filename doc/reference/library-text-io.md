@@ -21,6 +21,10 @@ decode : Encoding -> Bytes -> Result Error String
 message : Error -> String
 decodeAt : Encoding -> Bytes -> Int -> Result Error (Maybe (Char, Int))
 matchAt : Encoding -> Bytes -> Int -> String -> Maybe Int
+
+type AsciiSet -- opaque
+asciiSet : (Char -> Bool) -> AsciiSet
+spanUntil : Encoding -> AsciiSet -> Bytes -> Int -> Int
 ```
 
 UTF-8 decoding rejects malformed sequences, including overlong forms,
@@ -50,6 +54,13 @@ when its encoding occurs in `bytes` starting at `offset`, and `Nothing`
 otherwise, including for text the encoding cannot represent or an offset
 outside the bytes. Empty text matches at any offset from zero through the
 length. Bytes after the match are not inspected.
+
+`asciiSet member` records which ASCII characters satisfy `member`, calling it
+once per ASCII code when the set is built; characters at or above U+0080 are
+never members. `spanUntil encoding stops bytes offset` returns the end of the
+longest run of complete, valid scalars starting at `offset` that contains no
+member of `stops`. A malformed or incomplete sequence ends the run, as does
+the end of the bytes; an offset outside the bytes is returned unchanged.
 
 ## Text.Reader
 
@@ -90,6 +101,7 @@ readWindow : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
 asciiAt : Window -> Int
 skipAscii : Window -> Window
 spanWindow : Window -> (Char -> Bool) -> Result Encoding.Error (String, Int, Window)
+spanWindowUntil : Window -> Encoding.AsciiSet -> Result Encoding.Error (String, Int, Window)
 windowText : Window -> Window -> Result Encoding.Error String
 commitWindow : Text.Reader.Reader e -> Window ->{e} ()
 refillWindow : Text.Reader.Reader e -> Window ->{e} (Window, Bool)
@@ -135,6 +147,9 @@ prefix, and the next window read reports the error. `windowPosition` counts byte
 from the original snapshot start. Decoding error offsets are also relative to
 that start. An empty window is not necessarily source EOF; incomplete sequences
 are reported without pulling more input.
+`spanWindowUntil snapshot stops` has the `spanWindow` contract for a predicate
+that rejects exactly the members of `stops`; it finds and validates the run in
+one pass without calling a predicate per character.
 
 `asciiAt snapshot` returns the code of a one-byte ASCII character at the
 window position, `-1` at the end of the window, and `-2` for any other byte,

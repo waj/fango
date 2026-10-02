@@ -111,6 +111,9 @@ var Table = func() map[string]Spec {
 	t["Encoding.utf8CodeAt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.Utf8CodeAt(args[0].(fangort.Bytes), args[1].(int64)), nil
 	}}
+	t["Encoding.utf8SpanUntil"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.Utf8SpanUntil(args[0].(fangort.Bytes), args[1].(fangort.Bytes), args[2].(int64)), nil
+	}}
 	t["Encoding.utf8MatchAt"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.Utf8MatchAt(args[0].(fangort.Bytes), args[1].(int64), args[2].(string)), nil
 	}}

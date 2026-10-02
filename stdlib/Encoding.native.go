@@ -30,3 +30,28 @@ func Utf8MatchAt(bytes []byte, offset int64, text string) bool {
 	}
 	return string(bytes[offset:offset+int64(len(text))]) == text
 }
+
+// Utf8SpanUntil scans complete valid scalars from offset, stopping at an
+// ASCII byte whose table entry is nonzero, a malformed or incomplete
+// sequence, or the end. One pass both finds the run and validates it.
+func Utf8SpanUntil(table []byte, bytes []byte, offset int64) int64 {
+	if offset < 0 || len(table) < utf8.RuneSelf {
+		return offset
+	}
+	i := int(offset)
+	for i < len(bytes) {
+		if first := bytes[i]; first < utf8.RuneSelf {
+			if table[first] != 0 {
+				break
+			}
+			i++
+			continue
+		}
+		char, size := utf8.DecodeRune(bytes[i:])
+		if char == utf8.RuneError && size == 1 {
+			break
+		}
+		i += size
+	}
+	return int64(i)
+}

@@ -53,3 +53,20 @@ func TestUtf8MatchAt(t *testing.T) {
 		}
 	}
 }
+
+func TestUtf8SpanUntil(t *testing.T) {
+	table := make([]byte, 128)
+	table['"'], table['\\'] = 1, 1
+	for _, c := range []struct {
+		text   string
+		offset int64
+		want   int64
+	}{
+		{`abc"d`, 0, 3}, {`café\n`, 0, 5}, {`東京🚚"`, 0, 10}, {`"`, 0, 0}, {`ab`, 1, 2},
+		{"a\xffb", 0, 1}, {"a\xe6\x9d", 0, 1}, {"a\xef\xbf\xbd\"", 0, 4}, {"x", 5, 5}, {"x", -1, -1},
+	} {
+		if got := Utf8SpanUntil(table, []byte(c.text), c.offset); got != c.want {
+			t.Errorf("Utf8SpanUntil(%q, %d) = %d, want %d", c.text, c.offset, got, c.want)
+		}
+	}
+}

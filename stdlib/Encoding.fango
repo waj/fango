@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Encoding exposing (Encoding, Error(..), decode, decodeAt, encode, latin1, matchAt, message, utf8)
+module Encoding exposing (AsciiSet, Encoding, Error(..), asciiSet, decode, decodeAt, encode, latin1, matchAt, message, spanUntil, utf8)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes)
@@ -98,3 +98,42 @@ matchAt encoding bytes offset text =
             Ok expected ->
                 if Bytes.startsWith expected (Bytes.slice offset (Bytes.length bytes) bytes) then Just (Bytes.length expected)
                 else Nothing
+
+-- One byte per ASCII code, nonzero for members. Bytes at or above 128 are
+-- never members, so a set describes stops only within ASCII.
+type AsciiSet = AsciiSet Bytes
+
+asciiCodes : (Char -> Bool) -> Int -> List.List Int -> List.List Int
+asciiCodes member code flags =
+    if code < 0 then flags
+    else
+        flag = case Char.fromCode code of
+            Just char -> if member char then 1 else 0
+            Nothing -> 0
+        asciiCodes member (code - 1) [flag | flags]
+
+-- Build the set once, outside a scanning loop: the predicate runs for every
+-- ASCII code here and never during spanUntil.
+asciiSet : (Char -> Bool) -> AsciiSet
+asciiSet member = AsciiSet (Bytes.fromList (asciiCodes member 127 []))
+
+utf8SpanUntil : Bytes -> Bytes -> Int -> Int
+utf8SpanUntil = native
+
+latin1SpanUntil : Bytes -> Bytes -> Int -> Int
+latin1SpanUntil table bytes offset =
+    case Bytes.byteAt offset bytes of
+        Nothing -> offset
+        Just code ->
+            if code >= 128 || Bytes.byteAt code table == Just 0 then latin1SpanUntil table bytes (offset + 1)
+            else offset
+
+-- spanUntil answers the end of the longest run of complete valid scalars
+-- from offset that contains no member of the set. A malformed or incomplete
+-- sequence ends the run, as does the end of the bytes.
+spanUntil : Encoding -> AsciiSet -> Bytes -> Int -> Int
+spanUntil encoding (AsciiSet table) bytes offset =
+    if offset < 0 || offset >= Bytes.length bytes then offset
+    else case encoding of
+        Utf8 -> utf8SpanUntil table bytes offset
+        Latin1 -> latin1SpanUntil table bytes offset

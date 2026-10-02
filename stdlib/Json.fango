@@ -353,6 +353,9 @@ plainStringChar char = case char of
     '\\' -> False
     _ -> Char.toCode char >= 32
 
+plainStringStops : Encoding.AsciiSet
+plainStringStops = Encoding.asciiSet { char -> plainStringChar char == False }
+
 stringFragments : String -> List String -> String
 stringFragments current reverse =
     case reverse of
@@ -529,7 +532,7 @@ fastEscape snapshot =
 
 stringRun : TextReader.Window -> String -> List String -> Result (TextReader.Window, String, List String) (String, TextReader.Window)
 stringRun snapshot current reverse =
-    case TextReader.spanWindow snapshot plainStringChar of
+    case TextReader.spanWindowUntil snapshot plainStringStops of
         Err _ -> Err (snapshot, current, reverse)
         Ok (text, _, afterPlain) ->
             fragment = if text == "" then current else text

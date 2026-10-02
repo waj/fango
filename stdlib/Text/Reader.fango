@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Text.Reader exposing (Read(..), Reader, Window, asciiAt, atEnd, chunks, commitWindow, matchWindow, over, overWith, peekChar, peekWindow, position, readChar, readExactly, readLine, readUntil, readUpTo, readWindow, refillWindow, skipAscii, spanWindow, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, window, windowPosition, windowText, withString)
+module Text.Reader exposing (Read(..), Reader, Window, asciiAt, atEnd, chunks, commitWindow, matchWindow, over, overWith, peekChar, peekWindow, position, readChar, readExactly, readLine, readUntil, readUpTo, readWindow, refillWindow, skipAscii, spanWindow, spanWindowUntil, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, window, windowPosition, windowText, withString)
 
 import Basics exposing (..)
 import Bytes
@@ -239,6 +239,21 @@ spanWindow snapshot keep =
                 EmptyBuffer -> Ok ("", 0, snapshot)
                 Buffered encoding bytes _ ->
                     end = prefixWidth encoding bytes keep snapshot.index
+                    case Encoding.decode encoding (Bytes.slice snapshot.index end bytes) of
+                        Err error -> Err error
+                        Ok text -> Ok (text, end - snapshot.index, { snapshot | index = end })
+
+-- The span contract of spanWindow for a fixed set of ASCII stops. The run
+-- is found and validated in one pass, without a predicate call per byte.
+spanWindowUntil : Window -> Encoding.AsciiSet -> Result Encoding.Error (String, Int, Window)
+spanWindowUntil snapshot stops =
+    case peekWindow snapshot of
+        Err error -> Err error
+        Ok _ ->
+            case snapshot.buffer of
+                EmptyBuffer -> Ok ("", 0, snapshot)
+                Buffered encoding bytes _ ->
+                    end = Encoding.spanUntil encoding stops bytes snapshot.index
                     case Encoding.decode encoding (Bytes.slice snapshot.index end bytes) of
                         Err error -> Err error
                         Ok text -> Ok (text, end - snapshot.index, { snapshot | index = end })

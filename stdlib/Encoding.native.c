@@ -33,3 +33,38 @@ bool FANGO_NATIVE(Utf8MatchAt)(fango_bytes bytes, int64_t offset, fango_string t
     return false;
   return text.length == 0 || memcmp(bytes.data + offset, text.data, text.length) == 0;
 }
+
+int64_t FANGO_NATIVE(Utf8SpanUntil)(fango_bytes table, fango_bytes bytes, int64_t offset) {
+  if (offset < 0 || table.length < 128)
+    return offset;
+  uint64_t i = (uint64_t)offset;
+  while (i < bytes.length) {
+    unsigned char first = bytes.data[i];
+    if (first < 0x80) {
+      if (table.data[first])
+        break;
+      i++;
+      continue;
+    }
+    // Validate the sequence in place, with the bounds Utf8CodeAt applies:
+    // no overlong forms, surrogates, or values above U+10FFFF.
+    const unsigned char *p = bytes.data + i;
+    uint64_t n = bytes.length - i;
+    uint64_t needed = first >= 0xC2 && first <= 0xDF   ? 2
+                      : first >= 0xE0 && first <= 0xEF ? 3
+                      : first >= 0xF0 && first <= 0xF4 ? 4
+                                                       : 0;
+    if (!needed || n < needed)
+      break;
+    if ((first == 0xE0 && p[1] < 0xA0) || (first == 0xED && p[1] >= 0xA0) ||
+        (first == 0xF0 && p[1] < 0x90) || (first == 0xF4 && p[1] >= 0x90))
+      break;
+    uint64_t k = 1;
+    while (k < needed && (p[k] & 0xC0) == 0x80)
+      k++;
+    if (k < needed)
+      break;
+    i += needed;
+  }
+  return (int64_t)i;
+}

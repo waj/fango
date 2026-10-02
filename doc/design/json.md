@@ -20,7 +20,9 @@ again. The parent and text reader must not be advanced independently while
 the pull handler owns the cursor.
 
 Ordinary strings return one buffered span without fragment-list allocation or
-concatenation; escaped strings collect fragments and join them once. Buffered
+concatenation. The span stops at a quote, backslash, or control character
+through a precomputed `Encoding.AsciiSet`, so locating and validating it is a
+single pass with no per-character predicate call; escaped strings collect fragments and join them once. Buffered
 numbers use a compact grammar-phase loop and materialize one source slice,
 preserving their original lexeme. Buffered typed integers instead accumulate a negative
 magnitude directly while validating digits, leading zeros, and signed 64-bit
