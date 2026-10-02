@@ -95,6 +95,12 @@ The common `decodeValue` driver always starts this parser at `currentScan`,
 runs its steps, and publishes the completed position. Pending lookahead uses
 the same parser entry and continuation flow. There is no separate streaming
 record/list parser or container restart fallback.
+Mismatch diagnostics point at the start of the offending token. The handler
+keeps that start alongside its cursor while the token is current, and forgets
+it when the cursor moves on by a container step or a published scan, so the
+reported position never depends on whether a value took the buffered or the
+token path. Pure scans hand a start to the handler only before a source-aware
+tail or on failure; successful buffered scans carry no extra position.
 Nested scans build no diagnostic path on success. Only executing a child's
 suspended action enters its key/index path, and cleanup restores it on normal
 or exiting completion. Source effects propagate through the same boundary.

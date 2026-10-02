@@ -83,5 +83,5 @@ main() =
     )
     print (case nested 256 of
             Ok _ -> False
-            Err error -> error.message == "JSON nesting exceeds 256 levels" && error.offset == 257
+            Err error -> error.message == "JSON nesting exceeds 256 levels" && error.offset == 256
     )

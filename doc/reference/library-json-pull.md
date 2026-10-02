@@ -69,7 +69,12 @@ selects the encoding. Both return `Result Json.Error a`. `next()` consumes a
 `Token`, which derives `Eq` and `Show`; `peek()` reads ahead without consuming
 it, and `at()` returns the current source position as a `Json.Error` with an
 empty message, publishing buffered consumption. `fail message` raises a
-`Json.Error` with that message at the current position and path.
+`Json.Error` with that message at the current path. Its position is the start
+of the token most recently returned by `next()` or `peek()` or consumed by a
+`decoded*` operation, so a decoder that rejects a token reports where that
+token begins. Once the cursor moves on by another route (`nextElement`,
+`nextKey`, `decodeValue`, or `acceptScan`), `fail` uses the current position,
+as `at()` does; pending lookahead keeps its start.
 
 `beginArray`, `nextElement`, `beginObject`, `nextKey`,
 and `skipValue` help decoders consume a container. `nextElement first` consumes
@@ -95,7 +100,7 @@ consume a scalar and return `Result String a`: a type or conversion mismatch
 returns its diagnostic message after consuming the token. Lexical and encoding
 failures are handled by the pull handler as usual. The primitive
 `Decode` instances turn these mismatch messages into `Json.Error` at the
-current position and path.
+start of the scalar and the current path.
 
 `bufferedScan()` obtains a speculative view of the current Pull cursor,
 or `Nothing` when a lookahead token is pending. `currentScan()` also

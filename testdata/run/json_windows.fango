@@ -151,7 +151,7 @@ main() =
     print (Reader.withBytes (Bytes.fromString (String.padLeft 300 '[' "")) { reader ->
         outcome = Json.Pull.withReader reader { Json.Pull.readValue() }
         failed = case outcome of
-            Err error -> error.message == "JSON nesting exceeds 256 levels" && error.offset == 257
+            Err error -> error.message == "JSON nesting exceeds 256 levels" && error.offset == 256
             Ok _ -> False
         failed && Reader.readUpTo reader 300 == Bytes.fromString (String.padLeft 43 '[' "")
     })

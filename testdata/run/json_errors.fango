@@ -15,6 +15,21 @@ report result =
         Ok _ -> "ok"
         Err error -> error.message ++ " @" ++ error.path ++ " " ++ show error.line ++ ":" ++ show error.column
 
+-- Feeds the input one byte per refill.
+trickle : String -> Result Json.Error (List Int)
+trickle text = Runtime.Local.run (Bytes.fromString text) { cell ->
+    source = Bytes.Source
+        { pull = {
+            remaining = cell.read()
+            if Bytes.length remaining == 0 then Nothing
+            else
+                cell.write (Bytes.slice 1 (Bytes.length remaining) remaining)
+                Just (Bytes.slice 0 1 remaining)
+          }
+        }
+    Reader.over source { reader -> Json.read @(List Int) reader }
+}
+
 main() =
     print (report (Json.parse @Person "{\"name\":\"Ada\",\"age\":4,\"age\":5}"))
     print (report (Json.parse @Person "{\"name\":\"Ada\"}"))
@@ -42,21 +57,14 @@ main() =
     case Json.number "1.20e+3" of
         Ok value -> print (Json.numberText value)
         Err error -> print error.message
-    result = Runtime.Local.run (Bytes.fromString "[1,2,3]") { cell ->
-        source = Bytes.Source
-            { pull = {
-                remaining = cell.read()
-                if Bytes.length remaining == 0 then Nothing
-                else
-                    cell.write (Bytes.slice 1 (Bytes.length remaining) remaining)
-                    Just (Bytes.slice 0 1 remaining)
-              }
-            }
-        Reader.over source { reader -> Json.read @(List Int) reader }
-    }
-    print (report result)
+    print (report (trickle "[1,2,3]"))
+    -- Error positions do not depend on how the input is buffered.
+    print (report (Json.parse @(List Int) "[1, 99999999999999999999]"))
+    print (report (trickle "[1, 99999999999999999999]"))
+    print (report (trickle "[1, true]"))
+    print (report (Json.parse @(List Float) "[1, 1e999]"))
     print (Json.parse @Int "true")
-    print (Json.parse @Int "true" == Err (Json.Error { message = "Expected JSON number", offset = 4, line = 1, column = 5, path = "" }))
+    print (Json.parse @Int "true" == Err (Json.Error { message = "Expected JSON number", offset = 0, line = 1, column = 1, path = "" }))
     tokens = Reader.withBytes (Bytes.fromString "[true]") { reader ->
         Json.Pull.withReader reader { [Json.Pull.next(), Json.Pull.next(), Json.Pull.next(), Json.Pull.next()] }
     }

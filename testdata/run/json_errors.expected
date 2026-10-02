@@ -1,27 +1,31 @@
 Duplicate JSON field: age @/age 1:29
 Missing JSON field: age @/age 1:15
-Expected JSON string @/name 1:10
+Expected JSON string @/name 1:9
 Leading zero in JSON number @/extra 1:33
-Expected JSON number @/1 1:9
+Expected JSON number @/1 1:5
 ok
 ok
-Expected JSON number @/8 1:22
-Expected JSON number @/0/1 1:8
+Expected JSON number @/8 1:18
+Expected JSON number @/0/1 1:5
 Leading zero in JSON number @/ 1:7
-Expected object key @ 1:3
-Trailing object comma @ 1:24
-Expected comma or object end @ 1:20
+Expected object key @ 1:2
+Trailing object comma @ 1:23
+Expected comma or object end @ 1:15
 ok
-Expected one JSON character @ 1:5
+Expected one JSON character @ 1:1
 Leading zero in JSON number @ 1:3
 Invalid JSON literal @ 1:9
-Trailing array comma @ 1:8
-Trailing JSON input @ 1:4
+Trailing array comma @ 1:7
+Trailing JSON input @ 1:3
 Invalid UTF-8 in JSON input @ 1:2
-JSON nesting exceeds 256 levels 1:258
+JSON nesting exceeds 256 levels 1:257
 1.20e+3
 ok
-Err Error { message = Expected JSON number, offset = 4, line = 1, column = 5, path =  }
+Expected 64-bit JSON integer @/1 1:5
+Expected 64-bit JSON integer @/1 1:5
+Expected JSON number @/1 1:5
+JSON number is outside Float range @/1 1:5
+Err Error { message = Expected JSON number, offset = 0, line = 1, column = 1, path =  }
 True
 Ok [BeginArray, BooleanToken True, EndArray, EndInput]
 True

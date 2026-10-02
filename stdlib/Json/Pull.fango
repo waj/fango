@@ -68,6 +68,8 @@ effect Pull
     next : () -> Token
     peek : () -> Token
     at : () -> Error
+    tokenAt : () -> Error
+    markToken : Scan -> ()
     nextElement : Bool -> Bool
     nextKey : Bool -> Maybe String
     decodedString : () -> Result String String
@@ -457,33 +459,36 @@ fastString snapshot built = case stringRun snapshot built of
 
 -- One lexer dispatches the token once. Its scalar loops run purely within
 -- each window and resume their saved phase after source refills.
-lex : TextReader.Reader e -> Cursor ->{Fail Error | e} (Token, Cursor)
+lex : TextReader.Reader e -> Cursor ->{Fail Error | e} (Token, Cursor, Cursor)
 lex reader before =
     cursor = case fastWhite before.window before.line before.column of
         Nothing -> skipWhite reader before
         Just (start, line, column) -> { before | window = start, offset = before.offset + TextReader.windowPosition start - TextReader.windowPosition before.window, line = line, column = column }
     (got, after) = takeChar reader cursor
     case got of
-        Nothing -> (EndInput, after)
-        Just '{' -> (BeginObject, after)
-        Just '}' -> (EndObject, after)
-        Just '[' -> (BeginArray, after)
-        Just ']' -> (EndArray, after)
-        Just ':' -> (Colon, after)
-        Just ',' -> (Comma, after)
+        Nothing -> (EndInput, cursor, after)
+        Just '{' -> (BeginObject, cursor, after)
+        Just '}' -> (EndObject, cursor, after)
+        Just '[' -> (BeginArray, cursor, after)
+        Just ']' -> (EndArray, cursor, after)
+        Just ':' -> (Colon, cursor, after)
+        Just ',' -> (Comma, cursor, after)
         Just '"' ->
             (value, rest) = scanString reader after Builder.empty
-            (StringToken value, rest)
-        Just 't' -> (BooleanToken True, literal reader after "rue")
-        Just 'f' -> (BooleanToken False, literal reader after "alse")
-        Just 'n' -> (NullToken, literal reader after "ull")
+            (StringToken value, cursor, rest)
+        Just 't' -> (BooleanToken True, cursor, literal reader after "rue")
+        Just 'f' -> (BooleanToken False, cursor, literal reader after "alse")
+        Just 'n' -> (NullToken, cursor, literal reader after "ull")
         Just char ->
             if char == '-' || digit char then
                 (value, rest) = scanNumber reader cursor.window after char
-                (NumberToken value, rest)
+                (NumberToken value, cursor, rest)
             else badAt reader cursor after "Unexpected character in JSON"
 
-type PullState = { cursor : Cursor, pending : Maybe Token, depth : Int }
+-- `mark` is the start of the token most recently read, kept until the cursor
+-- moves past it by any other route, so a mismatch reports where that token
+-- begins rather than where it ends.
+type PullState = { cursor : Cursor, pending : Maybe Token, depth : Int, mark : Maybe Cursor }
 
 -- A pure, bounded view of one immutable text window. A completed value keeps
 -- its container allowance unchanged. Negative allowance marks lookahead that
@@ -535,29 +540,45 @@ mapScan convert result = case result of
         ScanDone (convert value) rest
     }
 
-tokenDepth : TextReader.Reader e -> Token -> Int -> Cursor ->{Fail Error | e} Int
-tokenDepth reader token depth cursor =
+tokenDepth : TextReader.Reader e -> Token -> Int -> Cursor -> Cursor ->{Fail Error | e} Int
+tokenDepth reader token depth site consumed =
     case token of
-        BeginArray -> if depth >= 256 then bad reader cursor "JSON nesting exceeds 256 levels" else depth + 1
-        BeginObject -> if depth >= 256 then bad reader cursor "JSON nesting exceeds 256 levels" else depth + 1
+        BeginArray -> if depth >= 256 then badAt reader site consumed "JSON nesting exceeds 256 levels" else depth + 1
+        BeginObject -> if depth >= 256 then badAt reader site consumed "JSON nesting exceeds 256 levels" else depth + 1
         EndArray -> depth - 1
         EndObject -> depth - 1
         _ -> depth
 
+-- The start of the current token, at the current path.
+tokenSite : PullState -> Cursor
+tokenSite state = case state.mark of
+    Just start -> { start | path = state.cursor.path }
+    Nothing -> state.cursor
+
+badToken : TextReader.Reader e -> PullState -> String ->{Fail Error | e} a
+badToken reader state message = badAt reader (tokenSite state) state.cursor message
+
+-- Moving past a token by a route other than reading one forgets its start;
+-- pending lookahead keeps it, since that token is still the current one.
+settled : PullState -> PullState
+settled state = case state.pending of
+    Nothing -> { state | mark = Nothing }
+    Just _ -> state
+
 consumeToken : TextReader.Reader e -> PullState ->{Fail Error | e} (Token, PullState)
 consumeToken reader state =
-    (token, cursor) = case state.pending of
-        Just token -> (token, state.cursor)
+    (token, start, cursor) = case state.pending of
+        Just token -> (token, tokenSite state, state.cursor)
         Nothing -> lex reader state.cursor
-    depth = tokenDepth reader token state.depth cursor
-    (token, { state | cursor = cursor, pending = Nothing, depth = depth })
+    depth = tokenDepth reader token state.depth start cursor
+    (token, { state | cursor = cursor, pending = Nothing, depth = depth, mark = Just start })
 
 elementStart : TextReader.Reader e -> Bool -> PullState ->{Fail Error | e} (Bool, PullState)
 elementStart reader trailing state =
     case state.pending of
         Just EndArray ->
             (_, after) = consumeToken reader state
-            if trailing then bad reader after.cursor "Trailing array comma" else (False, after)
+            if trailing then badToken reader after "Trailing array comma" else (False, after)
         Just _ -> (True, state)
         Nothing ->
             ready = skipWhite reader state.cursor
@@ -565,7 +586,7 @@ elementStart reader trailing state =
             if got == Just ']' then
                 (_, rest) = takeChar reader cursor
                 after = { state | cursor = rest, depth = state.depth - 1 }
-                if trailing then bad reader rest "Trailing array comma" else (False, after)
+                if trailing then badAt reader cursor rest "Trailing array comma" else (False, after)
             else (True, { state | cursor = cursor })
 
 elementState : TextReader.Reader e -> Bool -> PullState ->{Fail Error | e} (Bool, PullState)
@@ -576,7 +597,7 @@ elementState reader first state =
         case separator of
             EndArray -> (False, after)
             Comma -> elementStart reader True after
-            _ -> bad reader after.cursor "Expected comma or array end"
+            _ -> badToken reader after "Expected comma or array end"
 
 type ElementRun = { more : Bool, window : TextReader.Window, line : Int, column : Int }
 
@@ -605,7 +626,7 @@ colonState reader key state =
     (token, after) = consumeToken reader state
     case token of
         Colon -> (Just key, after)
-        _ -> bad reader after.cursor "Expected colon"
+        _ -> badToken reader after "Expected colon"
 
 keyState : TextReader.Reader e -> Bool -> PullState ->{Fail Error | e} (Maybe String, PullState)
 keyState reader first state =
@@ -614,16 +635,16 @@ keyState reader first state =
         EndObject -> (Nothing, after)
         StringToken key ->
             if first then colonState reader key after
-            else bad reader after.cursor "Expected comma or object end"
+            else badToken reader after "Expected comma or object end"
         Comma ->
-            if first then bad reader after.cursor "Expected object key"
+            if first then badToken reader after "Expected object key"
             else
                 (keyToken, afterKey) = consumeToken reader after
                 case keyToken of
-                    EndObject -> bad reader afterKey.cursor "Trailing object comma"
+                    EndObject -> badToken reader afterKey "Trailing object comma"
                     StringToken key -> colonState reader key afterKey
-                    _ -> bad reader afterKey.cursor "Expected object key"
-        _ -> bad reader after.cursor (if first then "Expected object key" else "Expected comma or object end")
+                    _ -> badToken reader afterKey "Expected object key"
+        _ -> badToken reader after (if first then "Expected object key" else "Expected comma or object end")
 
 type KeyRun = { key : Maybe String, window : TextReader.Window, line : Int, column : Int }
 
@@ -701,16 +722,16 @@ integerFirst snapshot negative =
     if code >= 48 && code <= 57 then integerDigits (TextReader.skipAscii snapshot) negative (code == 48) (48 - code)
     else IntegerRun { value = 0, window = snapshot, phase = if negative then 5 else 6 }
 
-fastIntegerValue : TextReader.Window -> Int -> Int -> Maybe (IntegerRun, Int, Int)
-fastIntegerValue snapshot line column = case fastWhite snapshot line column of
-    Nothing -> Nothing
-    Just (start, nextLine, nextColumn) ->
-        code = TextReader.asciiAt start
-        if code == 45 || (code >= 48 && code <= 57) then
-            after = TextReader.skipAscii start
-            scanned = if code == 45 then integerFirst after True else integerDigits after False (code == 48) (48 - code)
-            Just (scanned, nextLine, nextColumn + TextReader.windowPosition scanned.window - TextReader.windowPosition start)
-        else Nothing
+-- Scans an integer starting at `start`, after whitespace, returning the run
+-- and the column after it.
+fastIntegerAt : TextReader.Window -> Int -> Maybe (IntegerRun, Int)
+fastIntegerAt start column =
+    code = TextReader.asciiAt start
+    if code == 45 || (code >= 48 && code <= 57) then
+        after = TextReader.skipAscii start
+        scanned = if code == 45 then integerFirst after True else integerDigits after False (code == 48) (48 - code)
+        Just (scanned, column + TextReader.windowPosition scanned.window - TextReader.windowPosition start)
+    else Nothing
 
 integerWindows : TextReader.Reader e -> Cursor -> IntegerRun ->{Fail Error | e} (Result String Int, Cursor)
 integerWindows reader before scanned =
@@ -765,6 +786,7 @@ scanNumeric cursor =
                         Ok text -> Ok (text, rest)
                         Err _ -> scanNumericToken cursor
                     else Err {
+                        markToken { cursor | window = start, line = line, column = column }
                         -- The source driver receives the completed window run,
                         -- so it can refill without revisiting its digits.
                         position = { cursor | window = after, line = line, column = column + TextReader.windowPosition after - TextReader.windowPosition start }
@@ -912,6 +934,21 @@ scanCursor before scanned =
     width = TextReader.windowPosition scanned.window - TextReader.windowPosition before.window
     { before | window = scanned.window, offset = before.offset + width, line = scanned.line, column = scanned.column }
 
+tokenInteger : TextReader.Reader e -> PullState ->{Fail Error | e} (Result String Int, PullState)
+tokenInteger reader state =
+    (token, after) = consumeToken reader state
+    value = case token of
+        NumberToken text -> integerResult text
+        _ -> Err "Expected JSON number"
+    (value, after)
+
+-- The scan positioned at the start of its next token. Only failures use it,
+-- so the whitespace is skipped a second time instead of on every scan.
+tokenScan : Scan -> Scan
+tokenScan cursor = case fastWhite cursor.window cursor.line cursor.column of
+    Just (start, line, column) -> { cursor | window = start, line = line, column = column }
+    Nothing -> cursor
+
 withReader : Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
 withReader reader action =
     TextReader.over reader { text -> withTextReader text action }
@@ -920,22 +957,22 @@ withTextReader : TextReader.Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result
 withTextReader reader action =
     initial = TextReader.window reader
     Fail.attempt {
-        handle Runtime.Scope.finally action { ignore at() } with state = PullState { cursor = Cursor { window = initial, ended = False, offset = 0, line = 1, column = 1, path = [] }, pending = Nothing, depth = 0 } of
+        handle Runtime.Scope.finally action { ignore at() } with state = PullState { cursor = Cursor { window = initial, ended = False, offset = 0, line = 1, column = 1, path = [] }, pending = Nothing, depth = 0, mark = Nothing } of
             peek () ->
                 case state.pending of
                     Just token -> resume token with state
                     Nothing ->
-                        (token, cursor) = lex reader state.cursor
-                        resume token with { state | cursor = cursor, pending = Just token }
+                        (token, start, cursor) = lex reader state.cursor
+                        resume token with { state | cursor = cursor, pending = Just token, mark = Just start }
             next () ->
                 case state.pending of
                     Just token ->
-                        depth = tokenDepth reader token state.depth state.cursor
+                        depth = tokenDepth reader token state.depth (tokenSite state) state.cursor
                         resume token with { state | pending = Nothing, depth = depth }
                     Nothing ->
-                        (token, cursor) = lex reader state.cursor
-                        depth = tokenDepth reader token state.depth cursor
-                        resume token with { state | cursor = cursor, pending = Nothing, depth = depth }
+                        (token, start, cursor) = lex reader state.cursor
+                        depth = tokenDepth reader token state.depth start cursor
+                        resume token with { state | cursor = cursor, pending = Nothing, depth = depth, mark = Just start }
             nextElement first ->
                 buffered = case state.pending of
                     Just _ -> Nothing
@@ -943,12 +980,12 @@ withTextReader reader action =
                 case buffered of
                     Nothing ->
                         (more, after) = elementState reader first state
-                        resume more with after
+                        resume more with settled after
                     Just scanned ->
                         width = TextReader.windowPosition scanned.window - TextReader.windowPosition state.cursor.window
                         cursor = { state.cursor | window = scanned.window, offset = state.cursor.offset + width, line = scanned.line, column = scanned.column }
                         depth = if scanned.more then state.depth else state.depth - 1
-                        resume scanned.more with { state | cursor = cursor, depth = depth }
+                        resume scanned.more with { state | cursor = cursor, depth = depth, mark = Nothing }
             nextKey first ->
                 buffered = case state.pending of
                     Just _ -> Nothing
@@ -956,14 +993,14 @@ withTextReader reader action =
                 case buffered of
                     Nothing ->
                         (key, after) = keyState reader first state
-                        resume key with after
+                        resume key with settled after
                     Just scanned ->
                         width = TextReader.windowPosition scanned.window - TextReader.windowPosition state.cursor.window
                         cursor = { state.cursor | window = scanned.window, offset = state.cursor.offset + width, line = scanned.line, column = scanned.column }
                         depth = case scanned.key of
                             Nothing -> state.depth - 1
                             Just _ -> state.depth
-                        resume scanned.key with { state | cursor = cursor, depth = depth }
+                        resume scanned.key with { state | cursor = cursor, depth = depth, mark = Nothing }
             decodedString () ->
                 (token, after) = consumeToken reader state
                 value = case token of
@@ -973,18 +1010,19 @@ withTextReader reader action =
             decodedInt () ->
                 buffered = case state.pending of
                     Just _ -> Nothing
-                    Nothing -> fastIntegerValue state.cursor.window state.cursor.line state.cursor.column
+                    Nothing -> fastWhite state.cursor.window state.cursor.line state.cursor.column
                 case buffered of
-                    Just (scanned, line, column) ->
-                        width = TextReader.windowPosition scanned.window - TextReader.windowPosition state.cursor.window
-                        before = { state.cursor | window = scanned.window, offset = state.cursor.offset + width, line = line, column = column }
-                        (value, cursor) = integerWindows reader before scanned
-                        resume value with { state | cursor = cursor }
+                    Just (start, line, column) -> case fastIntegerAt start column of
+                        Just (scanned, endColumn) ->
+                            site = { state.cursor | window = start, offset = state.cursor.offset + TextReader.windowPosition start - TextReader.windowPosition state.cursor.window, line = line, column = column }
+                            before = { site | window = scanned.window, offset = site.offset + endColumn - column, column = endColumn }
+                            (value, cursor) = integerWindows reader before scanned
+                            resume value with { state | cursor = cursor, mark = Just site }
+                        Nothing ->
+                            (value, after) = tokenInteger reader state
+                            resume value with after
                     Nothing ->
-                        (token, after) = consumeToken reader state
-                        value = case token of
-                            NumberToken text -> integerResult text
-                            _ -> Err "Expected JSON number"
+                        (value, after) = tokenInteger reader state
                         resume value with after
             decodedFloat () ->
                 (token, after) = consumeToken reader state
@@ -1020,10 +1058,15 @@ withTextReader reader action =
                 resume (value, scanState after) with after
             acceptScan scanned ->
                 if scanned.allowance < 0 then resume () with state
-                else resume () with { state | cursor = scanCursor state.cursor scanned, depth = 256 - scanned.allowance }
+                else resume () with { state | cursor = scanCursor state.cursor scanned, depth = 256 - scanned.allowance, mark = Nothing }
             at () ->
                 TextReader.commitWindow reader state.cursor.window
                 resume (errorAt state.cursor "") with state
+            tokenAt () ->
+                TextReader.commitWindow reader state.cursor.window
+                resume (errorAt (tokenSite state) "") with state
+            markToken scanned ->
+                resume () with { state | mark = Just (scanCursor state.cursor scanned) }
             enter segment ->
                 resume () with { state | cursor = { state.cursor | path = [Segment { key = segment, index = Nothing } | state.cursor.path] } }
             enterIndex index ->
@@ -1036,7 +1079,7 @@ withTextReader reader action =
     }
 
 fail : String ->{Pull, Fail Error} a
-fail message = Fail.fail { at() | message = message }
+fail message = Fail.fail { tokenAt() | message = message }
 
 withKey : String -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
 withKey segment action =
@@ -1205,35 +1248,42 @@ scanStringValue cursor =
 
 instance Decode Int
     scanValue cursor =
-        buffered = if cursor.allowance < 0 then Nothing else fastIntegerValue cursor.window cursor.line cursor.column
+        buffered = if cursor.allowance < 0 then Nothing else fastWhite cursor.window cursor.line cursor.column
         case buffered of
-            Just (scanned, line, column) ->
-                rest = { cursor | window = scanned.window, line = line, column = column }
-                if scanned.phase == 4 then Ok (scanned.value, rest)
-                else Err {
-                    (result, after) = integerTail rest scanned
-                    case result of
-                        Ok value -> ScanDone value after
-                        Err message -> fail message
-                }
-            Nothing -> scanFromPull cursor {
-                case decodedInt() of
-                    Ok value -> value
-                    Err message -> fail message
-            }
+            Just (start, line, column) -> case fastIntegerAt start column of
+                Just (scanned, endColumn) ->
+                    rest = { cursor | window = scanned.window, line = line, column = endColumn }
+                    if scanned.phase == 4 then Ok (scanned.value, rest)
+                    else Err {
+                        markToken { cursor | window = start, line = line, column = column }
+                        (result, after) = integerTail rest scanned
+                        case result of
+                            Ok value -> ScanDone value after
+                            Err message -> fail message
+                    }
+                Nothing -> pullInteger cursor
+            Nothing -> pullInteger cursor
+
+pullInteger : Scan -> Result (() ->{Pull, Fail Error} ScanStep Int) (Int, Scan)
+pullInteger cursor = scanFromPull cursor {
+    case decodedInt() of
+        Ok value -> value
+        Err message -> fail message
+}
 
 instance Decode Float
     scanValue cursor = case scanNumeric cursor of
         Ok (text, rest) -> case floatResult text of
             Ok value -> Ok (value, rest)
-            Err message -> scanFromPull rest { fail message }
+            Err message -> scanFromPull rest {
+                markToken (tokenScan cursor)
+                fail message
+            }
         Err suspendedAction -> Err {
             (text, rest) = runScan (Err suspendedAction)
             case floatResult text of
                 Ok value -> ScanDone value rest
-                Err message ->
-                    acceptScan rest
-                    fail message
+                Err message -> fail message
         }
 
 instance Decode Bool
