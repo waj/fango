@@ -6,7 +6,8 @@ and [socket layer](reference/library-io.md#net). Memory fixtures and loopback
 checks cover malformed framing, truncated bodies, oversized headers, chunked
 requests, keep-alive, simultaneous clients, and GZip.
 
-TLS and HTTP/2 are deferred. A policy for request bodies that an application
+Server-side TLS and HTTP/2 are deferred. Client-side TLS is part of the
+[HTTP client proposal](roadmap-http-client.md#hc4-tls). A policy for request bodies that an application
 leaves unread is also deferred: the current server closes a connection when
 its handler leaves the request body incomplete. A future API may expose a
 deliberate drain policy.

@@ -99,7 +99,8 @@ for otherwise unavailable semantics or measured performance needs.
 implemented over [buffered readers and writers](reference/library-readers.md),
 [Net](reference/library-io.md#net), and [Async](reference/library-async.md).
 [HTTP follow-up work](roadmap-io.md) tracks transport acceptance coverage and
-future protocol variants.
+future protocol variants. The [HTTP client proposal](roadmap-http-client.md)
+covers the client API, mocking, and client-side TLS.
 
 ## Addressing a specific handler
 
