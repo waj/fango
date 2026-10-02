@@ -34,8 +34,21 @@ paths are a segment stack, keys and separators are consumed without
 lookahead, renaming temporaries are elided from emitted Go, and cleanup
 scopes over literal callbacks lower at their call sites. Short decoded lists
 build directly without a reversal, and bound callbacks for simple local
-effect forwarders call the captured operation slot directly; the measured series
-is in the [comparison baselines](design/json-performance-baselines.md).
+effect forwarders call the captured operation slot directly. Window reads
+decode ASCII without the scalar decoding chain, punctuation and integers branch
+on ASCII codes, string spans are a single validating pass, keys match in
+place, and file pulls are 64 KiB; the measured series is in the
+[comparison baselines](design/json-performance-baselines.md).
+
+Remaining measured costs: escaped strings (about 15% of Go decode time on the
+fixture, from per-escape fragment strings, list cells, and the final reverse
+and join); the 6-word `Scan` cursor and its interface-backed `Window` buffer
+copied through every scan result; Go's inliner rejecting small generated
+functions, which a Core-level inliner with known-constructor simplification
+and static-argument specialization would address in both backends; and LLVM
+record/sum lowering, whose per-access tag checks inflate function size enough
+to change Clang's inlining decisions (an ASCII whitespace loop is held back
+for that reason).
 
 The [buffered pull cursor](design/json.md) shares its text window's buffer
 description, defers reader commits to refills and scope exit, and fuses record

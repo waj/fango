@@ -4,6 +4,38 @@ The [current harness and parser measurements](json-performance.md) own the
 active comparison and measurement contract. These recorded baselines retain
 their original versions, inputs, and controls.
 
+## ASCII fast paths and single-pass spans
+
+Five changes after the single parser were measured one at a time against the
+previous commit's binaries: alternating fresh-process pairs on the
+10,000,260-byte declaration-order fixture, one warmup per binary, default
+runtime settings, matching checksums, and no builds or tests during samples.
+Medians, with pair counts of 11 unless noted:
+
+| Change | Go backend | LLVM backend |
+| --- | ---: | ---: |
+| `matchWindow` compares UTF-8 keys in place (`Encoding.matchAt`) | 145.8 → 142.2 ms | 84.4 → 84.3 ms |
+| `readWindow` decodes one-byte ASCII itself | 143.2 → 115.7 ms | 84.7 → 67.0 ms |
+| punctuation and integer digits branch on `asciiAt` codes | 114.4 → 102.5 ms | 66.3 → 65.3 ms |
+| string spans use a precomputed `AsciiSet` and one validating pass | 103.2 → 97.4 ms | 64.9 → 66.4 ms (21 pairs) |
+| 64 KiB file pulls; the C sidecar reads large requests directly | 97.9 → 96.8 ms | 67.1 → 60.1 ms |
+
+Fifteen final pairs measure 148.3 → 98.1 ms for Go (33.9% less time) and
+86.2 → 60.5 ms for LLVM (29.9%). The plain Go control takes 68.9 ms in the
+same session, so Go is about 1.4× the control and LLVM about 12% faster.
+
+The `readWindow` gain on both backends came from removing the
+`peekWindow → decodeScalar → byteAt → fromCode` chain: Go's inliner rejects
+each function, and the nested result values moved through memory. An
+`asciiAt` whitespace loop saved a further ~7% on Go but cost LLVM 11%.
+Clang then stopped inlining `fastWhite` at its call sites; re-optimizing the
+same bitcode with `-inline-threshold=600` recovered the earlier LLVM time,
+so the loss is an inlining decision that depends on the size of the
+generated record and sum code. Whitespace keeps its scalar loop. The span
+change costs LLVM one more call per string, where the predicate loop was
+already inlined. Before the chunk change the C file handle answered at most
+4096 bytes per pull whatever the request.
+
 Seven measured runs of the same 10,000,260-byte fixture, following one warmup
 per implementation, compared GHC 9.10.3/Aeson 2.2.4.1 (`-O2`, default RTS) with
 Go 1.26.7 and both Fango backends using [pure buffered value scans](json.md)
