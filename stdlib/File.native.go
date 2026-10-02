@@ -2,6 +2,7 @@ package native
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
@@ -159,6 +160,11 @@ func ReadHandleBytes(value any, max int64) ([]byte, error) {
 	n, err := h.reader.Read(buf)
 	if err != nil && err != io.EOF {
 		return nil, relabel(err, h.path)
+	}
+	// A short read must not retain the whole requested array: copy it out,
+	// so a small file costs its own size rather than the maximum ask.
+	if n < len(buf)/2 {
+		return bytes.Clone(buf[:n:n]), nil
 	}
 	return buf[:n:n], nil
 }

@@ -139,6 +139,20 @@ fango_native_error FANGO_NATIVE(ReadHandleBytes)(fango_opaque value,
   }
   if (max > 65536)
     max = 65536;
+  // A large read with nothing buffered goes straight into its result, as
+  // Go's bufio does, rather than arriving one 4096-byte buffer at a time.
+  if (h->from >= h->to && max > 4096) {
+    unsigned char *data = fango_alloc_atomic(max);
+    ssize_t n;
+    do {
+      n = read(fileno(h->file), data, max);
+    } while (n < 0 && errno == EINTR);
+    if (n < 0)
+      return fango_io_error(errno, h->path);
+    // A short read keeps only its own size, not the whole requested array.
+    *result = n < max / 2 ? fango_bytes_copy(data, n) : (fango_bytes){data, (size_t)n};
+    return (fango_native_error){0};
+  }
   fango_native_error error = fill_file(h);
   if (error.failed)
     return error;
