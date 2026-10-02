@@ -22,7 +22,10 @@ the pull handler owns the cursor.
 Ordinary strings return one buffered span without fragment-list allocation or
 concatenation. The span stops at a quote, backslash, or control character
 through a precomputed `Encoding.AsciiSet`, so locating and validating it is a
-single pass with no per-character predicate call; escaped strings collect fragments and join them once. Buffered
+single pass with no per-character predicate call. From a string's first
+escape, its spans and decoded escapes accumulate in a `Text.Builder`, which a
+stopped scan hands to the source-aware driver; the builder copies once into
+the result. Buffered
 numbers use a compact grammar-phase loop and materialize one source slice,
 preserving their original lexeme. Buffered typed integers instead accumulate a negative
 magnitude directly while validating digits, leading zeros, and signed 64-bit

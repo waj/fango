@@ -36,7 +36,11 @@ generated record and sum code.
 Removing the tag from LLVM single-constructor products, and the unreachable
 panic default from exhaustive switches, then took LLVM from 59.7 to 57.7 ms
 (11 pairs). With that change the ASCII whitespace loop helps both backends:
-Go 95.9 → 89.3 ms and LLVM 57.5 → 53.4 ms (11 pairs). The span
+Go 95.9 → 89.3 ms and LLVM 57.5 → 53.4 ms (11 pairs).
+
+Accumulating escaped strings in a `Text.Builder` instead of a reversed
+fragment list took Go from 88.6 to 81.1 ms and LLVM from 52.8 to 51.0 ms
+(11 pairs). The span
 change costs LLVM one more call per string, where the predicate loop was
 already inlined. Before the chunk change the C file handle answered at most
 4096 bytes per pull whatever the request.

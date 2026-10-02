@@ -605,7 +605,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			if in.compileTime && !spec.CompileTimeSafe {
 				return nil, &UnsafeNativeError{Name: e.Name, Reason: "observes external or nondeterministic state"}
 			}
-			return spec.Eval(in.nativeRuntime(), args)
+			return in.tableCall(spec, in.env.natives[e.Name], e.Name, args)
 		}
 		if in.compileTime {
 			return nil, &UnsafeNativeError{Name: e.Name, Reason: "is implemented by a Go sidecar the interpreter cannot load"}

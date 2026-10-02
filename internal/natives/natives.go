@@ -15,6 +15,7 @@ import (
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/runtime/fangort"
 	stdlib "github.com/waj/fango/stdlib"
+	textnative "github.com/waj/fango/stdlib/Text"
 )
 
 type Runtime struct {
@@ -110,6 +111,21 @@ var Table = func() map[string]Spec {
 	}}
 	t["Encoding.utf8CodeAt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.Utf8CodeAt(args[0].(fangort.Bytes), args[1].(int64)), nil
+	}}
+	t["Text.Builder.newBuffer"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return textnative.NewBuffer(args[0].(string)), nil
+	}}
+	t["Text.Builder.extendBuffer"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
+		return textnative.ExtendBuffer(args[0], args[1].(int64), args[2].(string)), nil
+	}}
+	t["Text.Builder.newBufferChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return textnative.NewBufferChar(args[0].(rune)), nil
+	}}
+	t["Text.Builder.extendBufferChar"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
+		return textnative.ExtendBufferChar(args[0], args[1].(int64), args[2].(rune)), nil
+	}}
+	t["Text.Builder.bufferText"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
+		return textnative.BufferText(args[0], args[1].(int64)), nil
 	}}
 	t["Encoding.utf8SpanUntil"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.Utf8SpanUntil(args[0].(fangort.Bytes), args[1].(fangort.Bytes), args[2].(int64)), nil

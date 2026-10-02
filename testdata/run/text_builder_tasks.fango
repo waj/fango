@@ -1,0 +1,24 @@
+import Async exposing (Outcome(..))
+import Fail exposing (Fail)
+import List
+import Result exposing (Result(..))
+import String
+import Text.Builder as Builder
+
+-- Tasks extending one shared version each get their own text; whichever
+-- extends the buffer in place, the others copy the shared prefix.
+extend : Builder.Builder -> String -> String
+extend base suffix = Builder.toString (List.foldl { _ builder -> Builder.append builder suffix } base (List.range 1 200))
+
+main() =
+    base = Builder.append Builder.empty "shared:"
+    outcome = Async.run { _ ->
+        tasks = List.map { suffix -> Async.spawn { _ -> extend base suffix } } ["a", "b", "c", "d"]
+        List.map { task -> Async.await task } tasks
+    }
+    case outcome of
+        Completed (Ok texts) ->
+            print (List.map { text -> String.length text } texts)
+            print (List.map { text -> String.slice 0 8 text } texts)
+            print (Builder.toString base)
+        _ -> print "unexpected"

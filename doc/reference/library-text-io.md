@@ -5,7 +5,8 @@ writers](library-readers.md). Text counts use Unicode scalars; transport framing
 continues to use bytes.
 
 [Reference index](../reference.md). Sources: [Encoding](../../stdlib/Encoding.fango),
-[Text.Reader](../../stdlib/Text/Reader.fango), [Text.Writer](../../stdlib/Text/Writer.fango).
+[Text.Reader](../../stdlib/Text/Reader.fango), [Text.Writer](../../stdlib/Text/Writer.fango),
+[Text.Builder](../../stdlib/Text/Builder.fango).
 
 ## Encoding
 
@@ -264,6 +265,29 @@ the sink.
 to their caller. It performs no final flush; explicit `flush` still forwards
 to the parent. JSON's byte-writer entry points use this scope.
 
-`collecting` joins written strings on successful completion and has a no-op
+`collecting` accumulates written strings in a `Text.Builder` and returns its
+text on successful completion and has a no-op
 flush. It is pure when its consumer has no other effects. Writers and their
 operation callbacks cannot escape their scopes.
+
+## Text.Builder
+
+`Text.Builder.Builder` is an opaque, immutable value holding text assembled by
+appending.
+
+```fango
+empty : Builder
+append : Builder -> String -> Builder
+appendChar : Builder -> Char -> Builder
+isEmpty : Builder -> Bool
+toString : Builder -> String
+```
+
+Appending returns a new builder and leaves its argument unchanged: every
+builder keeps answering exactly the text it was built from, however many
+builders extend it, in whatever order, and from whichever tasks. `toString`
+copies the text once. Appending to the most recently extended builder reuses
+its storage, so a sequence of appends in order costs amortized time
+proportional to the text appended; extending an older builder first copies
+its text. Builders have no equality or display.
+

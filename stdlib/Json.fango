@@ -21,6 +21,7 @@ import Reader exposing (Reader)
 import Result exposing (Result(..))
 import Runtime.Scope
 import String
+import Text.Builder as Builder exposing (Builder)
 import Text.Reader as TextReader
 import Text.Writer as TextWriter
 import Tuple
@@ -62,7 +63,7 @@ effect Pull
     decodedFloat : () -> Result String Float
     bufferedScan : () -> Maybe Scan
     currentScan : () -> Scan
-    stringTail : Scan -> String -> List String -> (String, Scan)
+    stringTail : Scan -> Builder -> (String, Scan)
     literalTail : Scan -> String -> Scan
     numberTail : Scan -> TextReader.Window -> NumberRun -> (String, Scan)
     integerTail : Scan -> IntegerRun -> (Result String Int, Scan)
@@ -365,25 +366,27 @@ stringFragments current reverse =
 priorFragment : String -> List String -> List String
 priorFragment current reverse = if current == "" then reverse else [current | reverse]
 
-scanString : TextReader.Reader e -> Cursor -> String -> List String ->{Fail Error | e} (String, Cursor)
-scanString reader cursor current reverse =
-    case stringRun cursor.window current reverse of
+-- The builder holds the text decoded so far; it stays empty until a string
+-- needs more than one span.
+scanString : TextReader.Reader e -> Cursor -> Builder ->{Fail Error | e} (String, Cursor)
+scanString reader cursor built =
+    case stringRun cursor.window built of
         Ok (text, snapshot) ->
             width = TextReader.windowPosition snapshot - TextReader.windowPosition cursor.window
             (text, { cursor | window = snapshot, offset = cursor.offset + width, column = cursor.column + width })
-        Err (snapshot, fragment, fragments) ->
+        Err (snapshot, pending) ->
             width = TextReader.windowPosition snapshot - TextReader.windowPosition cursor.window
             afterPlain = { cursor | window = snapshot, offset = cursor.offset + width, column = cursor.column + width }
             (got, after) = takeChar reader afterPlain
             case got of
                 Nothing -> bad reader after "Unterminated JSON string"
-                Just '"' -> (stringFragments fragment fragments, after)
+                Just '"' -> (Builder.toString pending, after)
                 Just '\\' ->
                     (char, rest) = escaped reader after
-                    scanString reader rest (String.fromChar char) (priorFragment fragment fragments)
+                    scanString reader rest (Builder.appendChar pending char)
                 Just char ->
                     if Char.toCode char < 32 then badAt reader afterPlain after "Unescaped control character in JSON string"
-                    else scanString reader after (String.fromChar char) (priorFragment fragment fragments)
+                    else scanString reader after (Builder.appendChar pending char)
 
 digit : Char -> Bool
 digit char = char >= '0' && char <= '9'
@@ -532,22 +535,23 @@ fastEscape snapshot =
             _ -> Nothing
         _ -> Nothing
 
-stringRun : TextReader.Window -> String -> List String -> Result (TextReader.Window, String, List String) (String, TextReader.Window)
-stringRun snapshot current reverse =
+-- A string without escapes returns its one span directly. From the first
+-- escape on, spans and decoded escapes accumulate in a builder, which a
+-- stopped scan hands to the source-aware driver.
+stringRun : TextReader.Window -> Builder -> Result (TextReader.Window, Builder) (String, TextReader.Window)
+stringRun snapshot built =
     case TextReader.spanWindowUntil snapshot plainStringStops of
-        Err _ -> Err (snapshot, current, reverse)
+        Err _ -> Err (snapshot, built)
         Ok (text, _, afterPlain) ->
-            fragment = if text == "" then current else text
-            fragments = if text == "" then reverse else priorFragment current reverse
-            case TextReader.readWindow afterPlain of
-                Ok (Just ('"', _, rest)) -> Ok (stringFragments fragment fragments, rest)
-                Ok (Just ('\\', _, rest)) -> case fastEscape rest of
-                    Nothing -> Err (afterPlain, fragment, fragments)
-                    Just (char, afterEscape) -> stringRun afterEscape (String.fromChar char) (priorFragment fragment fragments)
-                _ -> Err (afterPlain, fragment, fragments)
+            code = TextReader.asciiAt afterPlain
+            if code == 34 then Ok (if Builder.isEmpty built then text else Builder.toString (Builder.append built text), TextReader.skipAscii afterPlain)
+            else if code == 92 then case fastEscape (TextReader.skipAscii afterPlain) of
+                Nothing -> Err (afterPlain, Builder.append built text)
+                Just (char, afterEscape) -> stringRun afterEscape (Builder.appendChar (Builder.append built text) char)
+            else Err (afterPlain, Builder.append built text)
 
-fastString : TextReader.Window -> String -> List String -> Maybe (String, TextReader.Window)
-fastString snapshot current reverse = case stringRun snapshot current reverse of
+fastString : TextReader.Window -> Builder -> Maybe (String, TextReader.Window)
+fastString snapshot built = case stringRun snapshot built of
     Ok value -> Just value
     Err _ -> Nothing
 
@@ -568,7 +572,7 @@ lex reader before =
         Just ':' -> (Colon, after)
         Just ',' -> (Comma, after)
         Just '"' ->
-            (value, rest) = scanString reader after "" []
+            (value, rest) = scanString reader after Builder.empty
             (StringTokenValue value, rest)
         Just 't' -> (BooleanToken True, literal reader after "rue")
         Just 'f' -> (BooleanToken False, literal reader after "alse")
@@ -733,7 +737,7 @@ fastKeyColon snapshot key line column =
 
 fastKeyString : TextReader.Window -> Int -> Int -> Maybe KeyRun
 fastKeyString snapshot line column =
-    case fastString snapshot "" [] of
+    case fastString snapshot Builder.empty of
         Nothing -> Nothing
         Just (key, rest) -> fastKeyColon rest key line (column + TextReader.windowPosition rest - TextReader.windowPosition snapshot)
 
@@ -1094,9 +1098,9 @@ withTextPull reader action =
                     Nothing -> Just (scanState state)
                 resume view with state
             currentScan () -> resume (scanState state) with state
-            stringTail scanned current reverse ->
+            stringTail scanned built ->
                 before = scanCursor state.cursor scanned
-                (text, cursor) = scanString reader before current reverse
+                (text, cursor) = scanString reader before built
                 after = { state | cursor = cursor, depth = 256 - scanned.allowance }
                 resume (text, scanState after) with after
             literalTail scanned remaining ->
@@ -1328,12 +1332,12 @@ scanStringValue cursor =
     else case fastWhite cursor.window cursor.line cursor.column of
         Nothing -> scanFromPull cursor { pullString() }
         Just (start, line, column) -> case TextReader.readWindow start of
-            Ok (Just ('"', _, afterQuote)) -> case stringRun afterQuote "" [] of
+            Ok (Just ('"', _, afterQuote)) -> case stringRun afterQuote Builder.empty of
                 Ok (text, rest) -> Ok (text, { cursor | window = rest, line = line, column = column + TextReader.windowPosition rest - TextReader.windowPosition start })
-                Err (stopped, current, reverse) ->
+                Err (stopped, built) ->
                     rest = { cursor | window = stopped, line = line, column = column + TextReader.windowPosition stopped - TextReader.windowPosition start }
                     Err {
-                        (value, after) = stringTail rest current reverse
+                        (value, after) = stringTail rest built
                         ScanDone value after
                     }
             _ -> scanFromPull cursor { pullString() }

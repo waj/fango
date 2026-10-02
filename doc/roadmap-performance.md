@@ -13,48 +13,6 @@ with alternating fresh-process pairs of the previous commit's binaries on the
 helps one backend and costs the other states both numbers in its commit and
 in the baselines.
 
-## P2 — a text builder for escaped strings and collectors
-
-**Problem.** Escaped JSON strings cost about 15% of Go decode time on the
-fixture, around 110 ns per escape. Each escape builds a one-character string
-and two list cells, and the end of the string reverses the list and joins it.
-`Writer.collecting` and `Text.Writer.collecting`, and therefore
-`Json.stringify`, use the same reversed-fragment pattern.
-
-**Change.** Add an opaque, persistent `Text.Builder`:
-
-```fango
-empty : Builder
-append : Builder -> String -> Builder
-appendChar : Builder -> Char -> Builder
-toString : Builder -> String
-```
-
-It is an ordinary immutable value: appending returns a new builder, and an
-older builder still answers exactly its own text. The shared representation
-(in `runtime/fangort` for the interpreter and Go, with a C++ counterpart for
-LLVM) is a growable buffer shared by successive versions, plus each version's
-length. An append writes in place only when the version it extends is the
-newest one, claimed by an atomic compare-and-swap on the buffer's committed
-length; otherwise it copies. Bytes below a version's length are never
-rewritten, so the result is safe under tasks and never mutates text another
-holder can observe. `toString` copies once.
-
-JSON's string scanners carry a builder instead of a fragment list, appending
-plain spans from the window and decoded escape characters. The two
-collectors switch to it. The fragment-list helpers are removed once unused.
-
-**Decision recorded here.** This adds one runtime type rather than a
-JSON-specific unescape native, because parsing stays in Fango and three
-consumers share the pattern. A cheaper constant-factor fix (literal strings
-for common escapes, joining without the reverse) was considered but keeps
-per-escape list cells.
-
-**Acceptance.** Reference documentation for the module. Differential fixtures
-cover persistence (appending twice to one builder, and appending to an older
-version after a newer one) and a builder shared by concurrent tasks. Escape-
-and collector-heavy JSON fixtures keep their output.
-
 ## P3 — smaller window and scan cursors
 
 **Problem.** Every buffered scan returns its advanced cursor, usually inside a

@@ -8,6 +8,7 @@ import List
 import Result exposing (Result(..))
 import Runtime.Local
 import String
+import Text.Builder as Builder
 import Writer as ByteWriter
 
 type Output e = { emit : String ->{e} (), attempt : String ->{e} Result Encoding.Error (), flush : () ->{e} () }
@@ -78,17 +79,17 @@ borrow parent use =
 {-# scoped s #-}
 collecting : (Writer s ->{s} a) ->{e} (a, String)
 collecting use =
-    Runtime.Local.run [] { parts ->
+    Runtime.Local.run Builder.empty { built ->
         result = use (Writer (Output
-            { emit = { text -> parts.write [text | parts.read()] }
+            { emit = { text -> built.write (Builder.append built.read() text) }
             , attempt = { text ->
-                parts.write [text | parts.read()]
+                built.write (Builder.append built.read() text)
                 Ok ()
               }
             , flush = { () }
             }
         ))
-        (result, String.concat (List.reverse parts.read()))
+        (result, Builder.toString built.read())
     }
 
 write : Writer e -> String ->{e} ()

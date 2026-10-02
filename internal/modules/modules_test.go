@@ -206,6 +206,7 @@ func TestBundledPureNativeSidecars(t *testing.T) {
 		"Random:<stdlib>/Random.native.go",
 		"String:<stdlib>/String.native.go",
 		"Encoding:<stdlib>/Encoding.native.go",
+		"Text.Builder:<stdlib>/Text/Builder.native.go",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("bundled native sources = %v, want %v", got, want)

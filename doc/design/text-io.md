@@ -85,3 +85,16 @@ String construction from character lists and string chunks uses shared
 runtime helpers for typed and interpreter-erased lists. Both helpers size the
 output before building it. String.span slices at a validated byte boundary
 after scanning characters, avoiding a second scan of the unvisited suffix.
+
+`Text.Builder` versions share one growable UTF-8 buffer through a native
+handle and record their own byte lengths as ordinary fields, so a version
+is a small product and appending allocates no version object. A native
+append extends the buffer in place only when the version's length equals the
+buffer's current length, which makes it the newest version; otherwise it
+copies that prefix into a fresh buffer. Bytes below any version's length are
+never rewritten, so persistence needs no copying for ordered use. The Go
+buffer serializes appends and reads with a lock because tasks may share
+versions; the LLVM backend runs a single thread and needs none. The
+interpreter runs the same Go natives in-process, and in-process bundled
+natives apply the same wrapper boundary as sidecar calls.
+
