@@ -24,7 +24,6 @@ type Runtime struct {
 	Writer io.Writer
 	Args   []string
 	Dir    string
-	Equal  func(any, any) bool
 
 	// Expand renders a compile-time code value as surface AST. Only the
 	// compiler's own evaluator supplies it: the Meta natives that build code
@@ -56,21 +55,14 @@ var Table = func() map[string]Spec {
 	installMeta(t)
 	installScalarInstances(t)
 	installBytes(t)
-	// The operator-named Basics values. The registry key is the canonical
-	// symbol, so it wears the operator spelling; the evaluator tag stays
-	// the alphabetic name of the scalar operation it dispatches to.
-	for spelling, op := range map[string]string{
-		"+": "add", "-": "sub", "*": "mul", "/": "fdiv", "++": "append",
-		"==": "eq", "/=": "neq", "<": "lt", ">": "gt", "<=": "le", ">=": "ge",
-	} {
-		op := op
-		t["Basics."+spelling] = Spec{Arity: 2, Foldable: op == "add" || op == "sub" || op == "mul" || op == "fdiv", Eval: func(rt *Runtime, args []any) (any, error) {
-			if len(args) != 2 {
-				return nil, fmt.Errorf("native Basics.%s expects 2 arguments", op)
-			}
-			return evalBasics(op, args[0], args[1], rt.Equal), nil
-		}}
-	}
+	// The two operator-named Basics natives. The registry key is the
+	// canonical symbol, so it wears the operator spelling.
+	t["Basics./"] = Spec{Arity: 2, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) {
+		return args[0].(float64) / args[1].(float64), nil
+	}}
+	t["Basics.++"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
+		return args[0].(string) + args[1].(string), nil
+	}}
 	t["Basics.remainderBy"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
 		return args[1].(int64) % args[0].(int64), nil
 	}}

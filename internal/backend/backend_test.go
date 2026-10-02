@@ -30,18 +30,6 @@ func (c *memoryCache) Store(key string, data []byte) {
 	c.entries[key] = append([]byte(nil), data...)
 }
 
-func compile(t *testing.T, entry string, cache check.ObjectCache) *check.Result {
-	t.Helper()
-	result, diagnostics, internalErr := (&check.Session{Cache: cache, DisableObjectCache: cache == nil}).Compile(entry)
-	if internalErr != nil {
-		t.Fatal(internalErr)
-	}
-	if len(diagnostics) != 0 {
-		t.Fatal(diagnostics)
-	}
-	return result
-}
-
 func unitsOf(result *check.Result) []codegen.Unit {
 	units := make([]codegen.Unit, len(result.Graph.Units))
 	for i, unit := range result.Graph.Units {

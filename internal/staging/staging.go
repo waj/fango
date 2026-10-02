@@ -21,7 +21,6 @@ import (
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/infer"
-	"github.com/waj/fango/internal/types"
 )
 
 // Install gives ck a compile-time evaluator. Both the batch pipeline and the
@@ -418,16 +417,4 @@ func (ev *evaluator) sync() []diag.Error {
 	}
 	ev.installedDecls, ev.installedGroups, ev.installedInstances = nextDecls, nextGroups, max(ev.installedInstances, nextInstances)
 	return nil
-}
-
-func (ev *evaluator) program(defs []core.Def) *core.Prog {
-	effects := make([]*types.EffectInfo, 0, len(ev.ck.EffectsByUnique))
-	for _, effect := range ev.ck.EffectsByUnique {
-		effects = append(effects, effect)
-	}
-	intrinsics := make(map[string]bool, len(ev.ck.Intrinsics))
-	for name := range ev.ck.Intrinsics {
-		intrinsics[name] = true
-	}
-	return &core.Prog{ADTs: ev.ck.ADTOrder, Effects: effects, Defs: defs, Natives: ev.ck.Natives, Intrinsics: intrinsics}
 }

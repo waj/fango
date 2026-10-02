@@ -30,20 +30,6 @@ func (l List[T]) Tail() List[T] {
 	return l.node.tail
 }
 
-// ListEq is structural equality, the runtime half of the derived eq for List.
-// It deliberately has no representation-identity short circuit: two lists that
-// share a tail are still compared element by element, because a
-// list holding a NaN is not equal to itself.
-func ListEq[T any](eq func(T, T) bool, a, b List[T]) bool {
-	for !a.IsEmpty() && !b.IsEmpty() {
-		if !eq(a.Head(), b.Head()) {
-			return false
-		}
-		a, b = a.Tail(), b.Tail()
-	}
-	return a.IsEmpty() && b.IsEmpty()
-}
-
 // ListMap visits elements in source order and builds a private result spine.
 // No result node is published until every callback has completed. Callback
 // failures therefore cannot expose partially initialized storage.

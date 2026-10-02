@@ -157,13 +157,6 @@ func OpKind(text string) Kind {
 	return OP
 }
 
-// IsReservedOp reports whether an operator spelling is reserved by the
-// grammar and therefore unavailable as a name.
-func IsReservedOp(text string) bool {
-	_, ok := reservedOps[text]
-	return ok
-}
-
 type Token struct {
 	Kind Kind
 	Text string

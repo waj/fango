@@ -72,9 +72,6 @@ func NewGraph(root string) (*Graph, *PreludeResult, []diag.Error) {
 	return g, p, nil
 }
 
-// Fixities is the shared operator table.
-func (g *Graph) Fixities() fixity.Table { return g.fixities }
-
 // Loaded reports whether the graph already holds module name.
 func (g *Graph) Loaded(name string) bool { return g.nodes[name] != nil }
 

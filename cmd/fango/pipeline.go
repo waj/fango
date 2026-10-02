@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go/format"
 	"io"
-	"path/filepath"
 
 	"github.com/waj/fango/internal/backend"
 	"github.com/waj/fango/internal/build"
@@ -70,18 +69,6 @@ func checkGraph(entry string, stderr io.Writer, session *compilationSession) (*c
 		return nil, false
 	}
 	return result, true
-}
-
-func entryOwner(units []modules.Unit, entry string) string {
-	for _, unit := range units {
-		if unit.Entry {
-			if unit.Name != "" {
-				return unit.Name
-			}
-			return "<entry>"
-		}
-	}
-	return filepath.Base(entry)
 }
 
 func report(stderr io.Writer, errs []diag.Error) bool {

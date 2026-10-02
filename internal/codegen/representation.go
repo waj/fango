@@ -123,14 +123,6 @@ func (g *gen) productSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stm
 	return append(body, g.treeStmts(c.Tree, leaf)...)
 }
 
-func (g *gen) productEq(adt *types.ADTInfo) []goast.Stmt {
-	var result goast.Expr = ident("true")
-	for i, f := range adt.Ctors[0].Fields {
-		result = binExpr(gotoken.LAND, result, g.eqField(f, selector("a", fieldName(i)), selector("b", fieldName(i))))
-	}
-	return []goast.Stmt{returnStmt(result)}
-}
-
 func (g *gen) taggedDecl(adt *types.ADTInfo, args []goast.Expr) []goast.Decl {
 	fields := []*goast.Field{{Names: []*goast.Ident{ident("Tag")}, Type: ident("uint8")}}
 	for _, ctor := range adt.Ctors {
@@ -173,19 +165,6 @@ func (g *gen) taggedSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt
 		cases[len(cases)-1].(*goast.CaseClause).List = nil
 	}
 	return []goast.Stmt{&goast.SwitchStmt{Tag: selector(scrut, "Tag"), Body: &goast.BlockStmt{List: cases}}}
-}
-
-func (g *gen) taggedEq(adt *types.ADTInfo) []goast.Stmt {
-	var cases []goast.Stmt
-	for _, ctor := range adt.Ctors {
-		var equal goast.Expr = ident("true")
-		for i, f := range ctor.Fields {
-			field := representationField(adt, ctor, i)
-			equal = binExpr(gotoken.LAND, equal, g.eqField(f, selector("a", field), selector("b", field)))
-		}
-		cases = append(cases, &goast.CaseClause{List: []goast.Expr{intLit(int64(ctor.Index))}, Body: []goast.Stmt{returnStmt(equal)}})
-	}
-	return []goast.Stmt{ifStmt(binExpr(gotoken.NEQ, selector("a", "Tag"), selector("b", "Tag")), []goast.Stmt{returnStmt(ident("false"))}, nil), &goast.SwitchStmt{Tag: selector("a", "Tag"), Body: &goast.BlockStmt{List: cases}}, returnStmt(ident("false"))}
 }
 
 func (g *gen) convertTagged(value goast.Expr, from, to *types.TCon, adt *types.ADTInfo) goast.Expr {

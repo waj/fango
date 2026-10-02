@@ -108,10 +108,3 @@ func (g *gen) descriptorParams(params []*types.TVar) []paramSpec {
 	}
 	return result
 }
-func (g *gen) descriptorParamArgs(params []*types.TVar) []goast.Expr {
-	var result []goast.Expr
-	for _, param := range params {
-		result = append(result, g.typeDescriptor(param))
-	}
-	return result
-}

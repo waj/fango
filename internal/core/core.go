@@ -13,7 +13,7 @@ type Prog struct {
 	// DisableOptimizations is an internal differential-test switch.
 	DisableOptimizations bool `object:"omit"`
 	// ADTs lists declared types in declaration order — codegen emits marker
-	// interfaces, constructor structs, and derived eq/show from it. Bool is
+	// interfaces and constructor structs from it. Bool is
 	// absent (native Go bool forever, doc/design.md, "Go backend and runtime").
 	ADTs       []*types.ADTInfo
 	Effects    []*types.EffectInfo

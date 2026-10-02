@@ -17,20 +17,18 @@ func bytesADT(sup *types.Supply) *types.ADTInfo {
 }
 
 // What the Bytes representation costs the backend: no emitted type, the
-// runtime Go type everywhere the declared one would appear, the private
-// constructor as the runtime empty value, and a derived eq that keeps the
-// name and signature ordinary lowering gives it.
+// runtime Go type everywhere the declared one would appear, and the private
+// constructor as the runtime empty value.
 //
-// Nothing in the bundled library reaches `$eq` or matches on the
-// private constructor, so those two paths have no fixture coverage; the Core
-// below is the only way to reach them.
+// Nothing in the bundled library matches on the private constructor, so that
+// path has no fixture coverage; the Core below is the only way to reach it.
 func TestBytesUsesTheRuntimeRepresentationEverywhere(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	adt := bytesADT(sup)
 	bytesTy := adt.Con
 
-	eqTmpl := "$eq($1, $2)"
+	eqTmpl := "fangort.BytesEq($1, $2)"
 	natives := map[string]*types.NativeInfo{
 		"Bytes.sameBytes": {Name: "Bytes.sameBytes", Module: "Bytes", Arity: 2, Template: &eqTmpl,
 			Scheme: types.Scheme{Body: &types.TFun{Arg: bytesTy, Ret: &types.TFun{Arg: bytesTy, Ret: b.Bool}}}},
@@ -70,11 +68,6 @@ func TestBytesUsesTheRuntimeRepresentationEverywhere(t *testing.T) {
 	emit(Unit{Name: "Main", Program: "Main", Entry: true}) // the entry unit must still emit
 
 	for _, want := range []string{
-		// The same exported name an emitted eq has, over the runtime type.
-		"func EqT_Bytes_dot_Bytes(a, b fangort.Bytes) bool",
-		"return fangort.BytesEq(a, b)",
-		// Because the signature did not move, the call site is unchanged.
-		"EqT_Bytes_dot_Bytes(v_xs, v_ys)",
 		// The private constructor is the runtime empty value, and the
 		// declared type appears as fangort.Bytes in every signature.
 		"fangort.BytesEmpty()",

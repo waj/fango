@@ -56,12 +56,6 @@ func (s *Session) reusable(path, digest string) ([]byte, bool) {
 	return source, true
 }
 
-func (s *Session) event(stage, owner string) {
-	if s != nil {
-		s.Observe.Stage(stage, owner)
-	}
-}
-
 func (s *Session) timed(stage, owner string, start time.Time) {
 	if s != nil {
 		s.Observe.Timed(stage, owner, start)

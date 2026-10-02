@@ -140,8 +140,6 @@ type programExecutor interface {
 	Execute(context.Context, fangort.SessionHost, *execcodec.Payload) (any, error)
 }
 
-type NativeHost = fangort.SessionHost
-
 func NewIOContext(r io.Reader, w io.Writer) *IOContext {
 	br, ok := r.(*bufio.Reader)
 	if !ok {
@@ -1087,7 +1085,7 @@ func cloneEvidence(src map[types.EffectKey]*evidence) map[types.EffectKey]*evide
 }
 
 func (in *interp) nativeRuntime() *natives.Runtime {
-	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Equal: eqValue, Expand: in.env.Expand}
+	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Expand: in.env.Expand}
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.
@@ -1321,38 +1319,9 @@ func (e *Env) endCellWait(from, target *Cell) {
 	e.waitMu.Unlock()
 }
 
-// eqValue is structural equality — the interpreter's mirror of the derived
-// eqT_X functions (doc/design.md, "Go backend and runtime"). Function-containing types were rejected by the
-// checker, so every reachable field compares.
 // listNilIndex and listConsIndex mirror the bundled declaration's layout,
 // which infer's markListRepr verifies before any of this runs.
 const (
 	listNilIndex  = 0
 	listConsIndex = 1
 )
-
-func eqValue(l, r Value) bool {
-	if lb, ok := l.(fangort.Bytes); ok {
-		// Like List below, Bytes is deliberately not comparable with Go ==.
-		return fangort.BytesEq(lb, r.(fangort.Bytes))
-	}
-	if ll, ok := l.(fangort.List[Value]); ok {
-		// Must precede the scalar fallback: List is deliberately not
-		// comparable with Go ==, so reaching the fallback would panic rather
-		// than answer.
-		return fangort.ListEq(eqValue, ll, r.(fangort.List[Value]))
-	}
-	if lc, ok := l.(*CtorVal); ok {
-		rc := r.(*CtorVal)
-		if lc.Ctor.Index != rc.Ctor.Index {
-			return false
-		}
-		for i := range lc.Fields {
-			if !eqValue(lc.Fields[i], rc.Fields[i]) {
-				return false
-			}
-		}
-		return true
-	}
-	return l == r // scalars: identical to the native Go operators
-}

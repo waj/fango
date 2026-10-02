@@ -4,9 +4,8 @@ import (
 	stdlib "github.com/waj/fango/stdlib"
 )
 
-// evalBasics implements the interpreter half of the inline Basics templates.
-// equal supplies structural equality for interpreter ADT values.
-func evalBasics(name string, left, right any, equal func(any, any) bool) any {
+// evalBasics implements the interpreter half of the scalar Basics natives.
+func evalBasics(name string, left, right any) any {
 	switch l := left.(type) {
 	case int64:
 		r := right.(int64)
@@ -19,8 +18,6 @@ func evalBasics(name string, left, right any, equal func(any, any) bool) any {
 			return l * r
 		case "eq":
 			return l == r
-		case "neq":
-			return l != r
 		case "lt":
 			return l < r
 		case "gt":
@@ -39,12 +36,8 @@ func evalBasics(name string, left, right any, equal func(any, any) bool) any {
 			return l - r
 		case "mul":
 			return l * r
-		case "fdiv":
-			return l / r
 		case "eq":
 			return l == r
-		case "neq":
-			return l != r
 		case "lt":
 			return l < r
 		case "gt":
@@ -57,12 +50,8 @@ func evalBasics(name string, left, right any, equal func(any, any) bool) any {
 	case string:
 		r := right.(string)
 		switch name {
-		case "append":
-			return l + r
 		case "eq":
 			return l == r
-		case "neq":
-			return l != r
 		case "lt":
 			return l < r
 		case "gt":
@@ -77,15 +66,6 @@ func evalBasics(name string, left, right any, equal func(any, any) bool) any {
 		if name == "eq" {
 			return l == r
 		}
-		if name == "neq" {
-			return l != r
-		}
-	}
-	if name == "eq" {
-		return equal(left, right)
-	}
-	if name == "neq" {
-		return !equal(left, right)
 	}
 	panic("invalid Basics native application: " + name)
 }

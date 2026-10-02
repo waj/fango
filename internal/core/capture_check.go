@@ -30,10 +30,6 @@ func InferCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 	return nil
 }
 
-func verifyCaptures(p *Prog, b *types.Builtins) []error {
-	return verifyCapturesIn(p, nil, b)
-}
-
 func verifyCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 	copyProg := *p
 	copyProg.Defs = append([]Def(nil), p.Defs...)

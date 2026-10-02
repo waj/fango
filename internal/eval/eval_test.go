@@ -20,8 +20,15 @@ import (
 // the operator's declared native, named by its canonical symbol. Core has no
 // operator node — once fixity resolution has grouped a run, an operator is
 // an ordinary value and `1 + 2` reaches Core as a call.
+// binOp calls the scalar Basics native implementing op at the operands'
+// type, as an instance method body would; `/` and `++` are natives of their own.
 func binOp(op string, ty types.Type, l, r core.Expr) core.Expr {
-	return &core.NativeCall{Name: "Basics." + op, Module: "Basics", Ty: ty, Args: []core.Expr{l, r}}
+	name := "Basics." + op
+	if op != "/" && op != "++" {
+		prefix := strings.ToLower(l.Type().(*types.TCon).Name)
+		name = "Basics." + prefix + map[string]string{"+": "Add", "-": "Sub", "*": "Mul", "<": "Lt", "==": "Eq"}[op]
+	}
+	return &core.NativeCall{Name: name, Module: "Basics", Ty: ty, Args: []core.Expr{l, r}}
 }
 
 func intTy() *types.TCon    { return &types.TCon{Unique: 0, Name: "Int"} }

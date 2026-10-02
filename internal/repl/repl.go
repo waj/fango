@@ -94,10 +94,6 @@ type Session struct {
 	promptDefs map[string]core.Def
 }
 
-func NewSession(out io.Writer) *Session {
-	return NewSessionWith(out, Options{})
-}
-
 func NewSessionWith(out io.Writer, opts Options) *Session {
 	root := opts.Root
 	if root == "" {
@@ -828,18 +824,6 @@ func (s *Session) activeExecutionDefs() []core.Def {
 		defs = append(defs, s.promptDefs[name])
 	}
 	return defs
-}
-
-func (s *Session) program(defs []core.Def) *core.Prog {
-	effects := make([]*types.EffectInfo, 0, len(s.ck.EffectsByUnique))
-	for _, effect := range s.ck.EffectsByUnique {
-		effects = append(effects, effect)
-	}
-	intrinsics := make(map[string]bool, len(s.ck.Intrinsics))
-	for name := range s.ck.Intrinsics {
-		intrinsics[name] = true
-	}
-	return &core.Prog{ADTs: s.ck.ADTOrder, Effects: effects, Defs: defs, Natives: s.ck.Natives, Intrinsics: intrinsics}
 }
 
 func (s *Session) typeOf(src string) {

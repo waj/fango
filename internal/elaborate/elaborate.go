@@ -172,13 +172,6 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 	return p.Defs, errs
 }
 
-// LintProg checks a set of definitions against the Core invariants in the
-// context of the checker's current types, effects, and natives — the REPL's
-// counterpart to the lint the batch pipeline runs on a whole program.
-func LintProg(defs []core.Def, ck *infer.Checker) []error {
-	return core.Lint(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}, ck.B)
-}
-
 // LintProgIn validates an owned module increment against installed dependency
 // signatures and capture contracts without traversing dependency bodies.
 func LintProgIn(defs, context []core.Def, ck *infer.Checker) []error {
@@ -488,14 +481,6 @@ func rowControl(row types.Row, ck *infer.Checker) types.Control {
 	return out
 }
 
-// Expr elaborates one expression against the checker's solved types. The
-// returned aux Defs are lambda-lifted polymorphic block bindings (REPL
-// inputs can contain blocks); the caller must install them before
-// evaluating the expression.
-func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
-	return ExprIn(e, nil, ck)
-}
-
 // ExprIn is Expr with the session's installed definitions as capture-analysis
 // context, so a prompt expression's calls into installed runners are checked.
 func ExprIn(e ast.Expr, context []core.Def, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
@@ -787,32 +772,6 @@ func handlerPatternParam(p ast.Pattern) string {
 		return "()"
 	}
 	return corePatternParam(p)
-}
-
-type patternName struct {
-	name    string
-	pattern ast.Pattern
-}
-
-func inferPatternNames(p ast.Pattern) []patternName {
-	var out []patternName
-	var walk func(ast.Pattern)
-	walk = func(p ast.Pattern) {
-		switch p := p.(type) {
-		case *ast.PVar:
-			out = append(out, patternName{name: p.Name, pattern: p})
-		case *ast.PCtor:
-			for _, a := range p.Args {
-				walk(a)
-			}
-		case *ast.PRecord:
-			for _, f := range p.Fields {
-				walk(f.Pattern)
-			}
-		}
-	}
-	walk(p)
-	return out
 }
 
 func (el *elab) expr(e ast.Expr) (out core.Expr) {

@@ -230,23 +230,6 @@ func TestAsyncChannelRingPreservesOrder(t *testing.T) {
 	}
 }
 
-func TestAsyncCompletedFailureParticipatesInScope(t *testing.T) {
-	for _, observed := range []bool{false, true} {
-		root := NewAsyncScope(nil)
-		task := CompletedAsync(root, AsyncCompletion{Failed: true, Failure: "completed"})
-		if observed {
-			task.Wait()
-		}
-		got := root.Finish(AsyncCompletion{Value: 5})
-		if got.Failed == observed {
-			t.Fatalf("observed=%v: %+v", observed, got)
-		}
-		if got.Cancelled {
-			t.Fatal("completed failure became cancellation")
-		}
-	}
-}
-
 func TestAsyncSpawnFinishRace(t *testing.T) {
 	for range 20 {
 		root := NewAsyncScope(nil)

@@ -275,11 +275,6 @@ func Load(entry string) (*Result, []diag.Error) {
 	return LoadWithOptions(entry, LoadOptions{})
 }
 
-// LoadObserved is Load with per-module parse and resolve notifications.
-func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
-	return LoadWithOptions(entry, LoadOptions{Observe: observe})
-}
-
 type LoadOptions struct {
 	Observe StageObserver
 	// Root defaults to the entry file's directory. Editor clients may set it
@@ -720,7 +715,7 @@ func validateTemplate(template string, arity int, sp source.Span) []diag.Error {
 			errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE PLACEHOLDER", "Template must use `$%d` exactly once; found %d uses.", i+1, count))
 		}
 	}
-	s := strings.ReplaceAll(template, "$eq", "__fango_eq")
+	s := template
 	for i := arity; i >= 1; i-- {
 		s = strings.ReplaceAll(s, fmt.Sprintf("$%d", i), fmt.Sprintf("__fango_p%d", i))
 	}
@@ -736,30 +731,10 @@ func validateTemplate(template string, arity int, sp source.Span) []diag.Error {
 				errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE IDENTIFIER", "Only the `fangort` qualifier is allowed in a native template."))
 			}
 		}
-		if call, ok := node.(*goast.CallExpr); ok {
-			if id, ok := call.Fun.(*goast.Ident); ok {
-				want := -1
-				if id.Name == "__fango_eq" {
-					want = 2
-				}
-				if want >= 0 && len(call.Args) != want {
-					errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE INTRINSIC", "Template intrinsic requires %d argument(s).", want))
-				} else if want >= 0 {
-					for _, arg := range call.Args {
-						placeholder, ok := arg.(*goast.Ident)
-						if !ok || !strings.HasPrefix(placeholder.Name, "__fango_p") {
-							errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE INTRINSIC", "Template intrinsics accept positional placeholders directly."))
-							break
-						}
-					}
-				}
-			}
-		}
 		return true
 	})
 	allowed := map[string]bool{
-		"fangort": true, "__fango_eq": true,
-		"true": true, "false": true, "nil": true,
+		"fangort": true, "true": true, "false": true, "nil": true,
 		"append": true, "cap": true, "clear": true, "close": true, "complex": true,
 		"copy": true, "delete": true, "imag": true, "len": true, "make": true,
 		"max": true, "min": true, "new": true, "panic": true, "print": true,

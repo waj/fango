@@ -33,7 +33,6 @@ func TestNativeTemplateValidation(t *testing.T) {
 		{"duplicate", "$1 + $1", "NATIVE TEMPLATE PLACEHOLDER", 1},
 		{"syntax", "$1 +", "INVALID NATIVE TEMPLATE", 1},
 		{"identifier", "helper($1)", "NATIVE TEMPLATE IDENTIFIER", 1},
-		{"intrinsic", "$eq($1)", "NATIVE TEMPLATE INTRINSIC", 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			errs := validateTemplate(tt.template, tt.arity, source.Span{})

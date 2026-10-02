@@ -42,14 +42,6 @@ func NewInstaller(ck *infer.Checker, stage *staging.Session, cache ObjectCache, 
 		summaries: map[string]moduleSummary{}, sources: map[string]*source.File{}}
 }
 
-// Adopt records definitions already installed in the checker by another path,
-// so elaboration and Core lint see the context their calls resolve against.
-func (i *Installer) Adopt(defs []core.Def) {
-	i.installed = append(i.installed, defs...)
-}
-
-func (i *Installer) event(stage, owner string) { i.observe.Stage(stage, owner) }
-
 func (i *Installer) timed(stage, owner string, start time.Time) { i.observe.Timed(stage, owner, start) }
 
 func (i *Installer) begin(stage, owner string) time.Time { return i.observe.Begin(stage, owner) }
@@ -58,9 +50,6 @@ func (i *Installer) begin(stage, owner string) time.Time { return i.observe.Begi
 func (i *Installer) artifact(stage, owner string, start time.Time, bytes int) {
 	i.observe.Report(compileevent.Event{Stage: stage, Owner: owner, Duration: time.Since(start), Bytes: bytes})
 }
-
-// Installed is every definition this installer has taken in, in order.
-func (i *Installer) Installed() []core.Def { return i.installed }
 
 // Objects and States describe the modules installed so far.
 func (i *Installer) Objects() []*ModuleObject     { return i.objects }

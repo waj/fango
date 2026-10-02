@@ -90,19 +90,6 @@ func (t *AsyncTask) publish(result AsyncCompletion) {
 	close(t.done)
 }
 
-func CompletedAsync(owner *AsyncScope, result AsyncCompletion) *AsyncTask {
-	task := &AsyncTask{owner: owner, done: make(chan struct{})}
-	owner.mu.Lock()
-	if owner.closing {
-		result = AsyncCompletion{Cancelled: true}
-	} else {
-		owner.children = append(owner.children, task)
-	}
-	owner.mu.Unlock()
-	task.publish(result)
-	return task
-}
-
 func (t *AsyncTask) Cancel() {
 	if t.scope != nil {
 		t.scope.Cancel()

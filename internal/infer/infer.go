@@ -2417,23 +2417,6 @@ func (g *generator) operationSpine(e *ast.App) (*types.EffectOp, int) {
 	return g.ck.Operations[v.Name], n
 }
 
-// function checks a function definition (top-level or block-local): the
-// name is pre-bound to a fresh monotype in the same scope as the params so
-// the body's self-references type — monomorphic recursion. The fresh var
-// lives in the block scope, never in Env, so failed REPL definitions need
-// no rollback and redefinition resolves self-references to the new body.
-func (g *generator) function(name string, nameSpan source.Span, params []ast.Pattern, body ast.Expr) types.Type {
-	return g.functionEquations(name, nameSpan, []ast.Equation{{Params: params, Body: body, NameSpan: nameSpan}}, nil)
-}
-
-// functionWithAnnotatedParams uses only the annotation's argument types while
-// independently inferring every arrow's effects. This lets callback effects
-// flow into a higher-order body without allowing an overstated result row to
-// manufacture effects the body never performs.
-func (g *generator) functionWithAnnotatedParams(name string, nameSpan source.Span, params []ast.Pattern, body ast.Expr, ann types.Type) types.Type {
-	return g.functionEquations(name, nameSpan, []ast.Equation{{Params: params, Body: body, NameSpan: nameSpan}}, ann)
-}
-
 func declEquations(d *ast.ValueDecl) []ast.Equation {
 	if len(d.Equations) > 0 {
 		return d.Equations

@@ -612,10 +612,7 @@ type TypeDecl struct {
 	Ctors        []CtorDef
 	RecordFields []RecordFieldDef // non-nil for `type T = { field : Type }`
 	Deriving     []TName
-	// ReflectionVisible is a resolver snapshot of nominal schemas accessible
-	// where this declaration was written. Derived metadata inherits it.
-	ReflectionVisible map[string]bool
-	Sp                source.Span
+	Sp           source.Span
 }
 
 // AttributeGroup preserves source grouping; consumers flatten it in order.

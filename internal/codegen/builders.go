@@ -57,14 +57,6 @@ func paramFields(params []paramSpec) *goast.FieldList {
 	return &goast.FieldList{List: fields}
 }
 
-// funcType is the curried arrow mapping T⟦a->b⟧ = func(A) B (doc/design.md, "Go backend and runtime").
-func funcType(param, result goast.Expr) goast.Expr {
-	return &goast.FuncType{
-		Params:  &goast.FieldList{List: []*goast.Field{{Type: param}}},
-		Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
-	}
-}
-
 func funcLitParams(params []paramSpec, result goast.Expr, body []goast.Stmt) goast.Expr {
 	return &goast.FuncLit{
 		Type: &goast.FuncType{
@@ -182,16 +174,6 @@ func funcDecl(name string, body ...goast.Stmt) goast.Decl {
 		Type: &goast.FuncType{Params: &goast.FieldList{}},
 		Body: &goast.BlockStmt{List: body},
 	}
-}
-
-func importDecl(paths ...string) goast.Decl {
-	specs := make([]goast.Spec, len(paths))
-	for i, p := range paths {
-		specs[i] = &goast.ImportSpec{
-			Path: &goast.BasicLit{Kind: gotoken.STRING, Value: strconv.Quote(p)},
-		}
-	}
-	return &goast.GenDecl{Tok: gotoken.IMPORT, Specs: specs}
 }
 
 func assignBlank(rhs goast.Expr) goast.Stmt {

@@ -101,9 +101,6 @@ func Dump(p *Prog) string {
 // contexts (tests, literal dedup keys).
 func DumpExpr(e Expr) string { return dumpExpr(e, types.NewPrinter()) }
 
-// DumpTree renders a decision tree with a fresh printer.
-func DumpTree(t Tree) string { return dumpTree(t, types.NewPrinter()) }
-
 func dumpExpr(e Expr, pr *types.Printer) string {
 	switch e := e.(type) {
 	case *AttributeLookup:

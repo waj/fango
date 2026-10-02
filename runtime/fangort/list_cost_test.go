@@ -159,7 +159,7 @@ func TestMapForwardMatchesMapRec(t *testing.T) {
 				t.Fatal("tail of a non-trivial list is empty")
 			}
 			want, got := mapRec(plainCB, src), ListMap(plainCB, src)
-			if !ListEq(func(a, b int64) bool { return a == b }, want, got) {
+			if !listsEqual(func(a, b int64) bool { return a == b }, want, got) {
 				t.Fatalf("n=%d: forward map disagrees with the recursive one", n)
 			}
 		}
@@ -196,7 +196,7 @@ func TestMapAccumReverseMatchesListMap(t *testing.T) {
 			l = ListCons(i, l)
 		}
 		eq := func(a, b int64) bool { return a == b }
-		if !ListEq(eq, mapAccumReverse(plainCB, l), ListMap(plainCB, l)) {
+		if !listsEqual(eq, mapAccumReverse(plainCB, l), ListMap(plainCB, l)) {
 			t.Fatalf("n=%d: one-pass map disagrees with accumulate-and-reverse", n)
 		}
 	}

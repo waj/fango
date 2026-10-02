@@ -332,18 +332,6 @@ func paramNames(params []ast.Param) []string {
 	return out
 }
 
-// equationBroke reports whether the author put a newline anywhere between the
-// name that starts an equation and the end of its body — either a body moved
-// below the `=`, or a break inside the body itself. Both mean the equation has
-// a line structure the printer cannot yet reproduce.
-func equationBroke(eq ast.Equation) bool {
-	body := eq.Body.Span()
-	if body.File == nil || eq.NameSpan.File == nil || eq.NameSpan.Start > body.End {
-		return false
-	}
-	return bytes.ContainsRune(body.File.Content[eq.NameSpan.Start:body.End], '\n')
-}
-
 // renderEquationHead writes the left of an `=`. A Unit parameter written
 // against the name keeps that spelling, the same adjacency rule application
 // obeys. Patterns may themselves have a block form.

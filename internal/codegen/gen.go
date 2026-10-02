@@ -169,8 +169,6 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		lowered:              lowered,
 		b:                    b,
 		adts:                 map[int]*types.ADTInfo{},
-		neededEq:             map[int]bool{},
-		scalarEq:             map[int]bool{},
 		caseVarTys:           map[string]types.Type{},
 		evidence:             map[types.EffectKey][]goast.Expr{},
 		evidenceModes:        map[types.EffectKey][]types.Transport{},
@@ -281,10 +279,6 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		}
 	}
 
-	// Derived eq/show, discovered during emission (on demand, doc/design.md, "Go backend and runtime"), plus
-	// the scalar element-op helpers their synthesis demanded.
-	decls = append(decls, g.derivedDecls(adts)...)
-	decls = append(decls, g.scalarHelperDecls()...)
 	decls = append(decls, g.descriptorDecls...)
 	decls = append(decls, g.callableDecls...)
 	// Imports come from emission (fangort for prints, math for float
@@ -325,7 +319,6 @@ func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
 type gen struct {
 	b               *types.Builtins
 	adts            map[int]*types.ADTInfo
-	neededEq        map[int]bool
 	tmp             int // type-switch binding counter (ts0, ts1, …)
 	usesFangort     bool
 	usesMath        bool
@@ -341,14 +334,6 @@ type gen struct {
 	// (positional: A0, A1, …). Reset per definition.
 	tyParamNames        map[int]string
 	polyDescriptorNames map[int]string // clause-local descriptors supplied by PolyRequest
-
-	// eqParamNames maps an ADT's rigid params to the element-operation
-	// parameters of the derived eq being emitted (doc/design.md, "Go backend and runtime").
-	eqParamNames map[int]string
-
-	// scalarEq tracks which scalar element-op helpers (eqInt, …) call-site
-	// synthesis demanded.
-	scalarEq map[int]bool
 
 	// caseVarTys records the (instantiated) types of locals visible to a
 	// decision tree: worker/lambda parameters, case scrutinee binders, and
@@ -540,14 +525,6 @@ func (g *gen) controlledType(t types.Type, visiting map[int]bool) bool {
 	return types.ControlledRepresentation(t, g.adts)
 }
 
-func (g *gen) eqName(adt *types.ADTInfo) string {
-	return "EqT_" + linkName(adt.Con.Name)
-}
-
-func (g *gen) eqRef(adt *types.ADTInfo) goast.Expr {
-	return g.qualified(symbolOwner(adt.Con.Name), g.eqName(adt))
-}
-
 func (g *gen) evidenceName(name string) string {
 	return "ev_" + linkName(name)
 }
@@ -570,37 +547,6 @@ func (g *gen) ownedEffects(in []*types.EffectInfo) []*types.EffectInfo {
 		}
 	}
 	return out
-}
-
-func (g *gen) derivable(t types.Type, visiting map[int]bool) bool {
-	switch t := t.(type) {
-	case *types.TVar:
-		return true
-	case *types.TFun:
-		return false
-	case *types.TCon:
-		for _, arg := range t.Args {
-			if !g.derivable(arg, visiting) {
-				return false
-			}
-		}
-		adt := g.adts[t.Unique]
-		if adt == nil || visiting[t.Unique] {
-			return true
-		}
-		visiting[t.Unique] = true
-		defer delete(visiting, t.Unique)
-		for _, ctor := range adt.Ctors {
-			for _, field := range ctor.Fields {
-				if !g.derivable(field, visiting) {
-					return false
-				}
-			}
-		}
-		return true
-	default:
-		return false
-	}
 }
 
 func (g *gen) importsDecl(decls []goast.Decl) goast.Decl {
@@ -1200,13 +1146,6 @@ func (g *gen) paramWrapper(n *types.NativeInfo, i int) *types.CtorInfo {
 	return nil
 }
 
-// unwrapBoundary projects a wrapper value to its scalar: `v.(*C_Wrap).F0`.
-// A wrapper has exactly one constructor, so the assertion is a projection
-// that cannot fail, not a type check.
-func (g *gen) unwrapBoundary(wrapper *types.CtorInfo, value goast.Expr) goast.Expr {
-	return g.unwrapBoundaryAt(wrapper, wrapper.Result, value)
-}
-
 func (g *gen) boundaryTypeArgs(wrapper *types.CtorInfo, ty types.Type) []types.Type {
 	if con, ok := ty.(*types.TCon); ok {
 		return runtimeADTArgs(g.adts[wrapper.Result.Unique], con.Args)
@@ -1296,7 +1235,7 @@ func (g *gen) fallibleNativeResult(call *core.NativeCall, n *types.NativeInfo, i
 }
 
 func (g *gen) nativeTemplateExpr(call *core.NativeCall, template string, parentPrec int) goast.Expr {
-	s := strings.ReplaceAll(template, "$eq", "__fango_eq")
+	s := template
 	for i := len(call.Args); i >= 1; i-- {
 		s = strings.ReplaceAll(s, fmt.Sprintf("$%d", i), fmt.Sprintf("__fango_p%d", i))
 	}
@@ -1326,14 +1265,6 @@ func (g *gen) nativeTemplateExpr(call *core.NativeCall, template string, parentP
 			}
 			return &goast.SelectorExpr{X: splice(x.X, 0), Sel: ident(x.Sel.Name)}
 		case *goast.CallExpr:
-			if id, ok := x.Fun.(*goast.Ident); ok && id.Name == "__fango_eq" {
-				a, b := splice(x.Args[0], 0), splice(x.Args[1], 0)
-				i := nativePlaceholderIndex(x.Args[0])
-				if g.adtOf(call.Args[i].Type()) != nil {
-					return g.eqCall(call.Args[i].Type(), a, b)
-				}
-				return binExpr(gotoken.EQL, a, b)
-			}
 			args := make([]goast.Expr, len(x.Args))
 			for i, a := range x.Args {
 				args[i] = splice(a, 0)
@@ -1385,12 +1316,6 @@ func (g *gen) nativeStmts(call *core.NativeCall) []goast.Stmt {
 	}
 	prelude, invoke := g.nativeSidecarCall(call, n)
 	return append(prelude, exprStmt(invoke))
-}
-
-func nativePlaceholderIndex(x goast.Expr) int {
-	id := x.(*goast.Ident) // validated by modules.validateTemplate
-	i, _ := strconv.Atoi(strings.TrimPrefix(id.Name, "__fango_p"))
-	return i - 1
 }
 
 func exportNativeName(name string) string {

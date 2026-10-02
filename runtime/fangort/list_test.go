@@ -1,7 +1,6 @@
 package fangort
 
 import (
-	"math"
 	"sync"
 	"testing"
 )
@@ -198,44 +197,15 @@ func TestListAgainstSliceModel(t *testing.T) {
 	}
 }
 
-func TestListEq(t *testing.T) {
-	eq := func(a, b int) bool { return a == b }
-	long := make([]int, 2*32+3)
-	for i := range long {
-		long[i] = i
-	}
-	cases := []struct {
-		name string
-		a, b List[int]
-		want bool
-	}{
-		{"both empty", ListNil[int](), ListNil[int](), true},
-		{"empty vs one", ListNil[int](), listOf(1), false},
-		{"one vs empty", listOf(1), ListNil[int](), false},
-		{"equal", listOf(1, 2, 3), listOf(1, 2, 3), true},
-		{"differing element", listOf(1, 2, 3), listOf(1, 9, 3), false},
-		{"prefix", listOf(1, 2), listOf(1, 2, 3), false},
-		{"across chunks", listOf(long...), listOf(long...), true},
-	}
-	for _, c := range cases {
-		if got := ListEq(eq, c.a, c.b); got != c.want {
-			t.Errorf("%s: ListEq = %v, want %v", c.name, got, c.want)
+// listsEqual compares two lists element by element for the tests.
+func listsEqual[T any](eq func(T, T) bool, a, b List[T]) bool {
+	for !a.IsEmpty() && !b.IsEmpty() {
+		if !eq(a.Head(), b.Head()) {
+			return false
 		}
+		a, b = a.Tail(), b.Tail()
 	}
-}
-
-// A representation-identity short circuit would make this list equal to
-// itself, which Fango's Float equality says it is not.
-func TestListEqHasNoIdentityShortCircuit(t *testing.T) {
-	eq := func(a, b float64) bool { return a == b }
-	nan := ListCons(math.NaN(), ListCons(1.0, ListNil[float64]()))
-	if ListEq(eq, nan, nan) {
-		t.Fatal("a list containing NaN must not compare equal to itself")
-	}
-	ok := ListCons(2.0, ListCons(1.0, ListNil[float64]()))
-	if !ListEq(eq, ok, ok) {
-		t.Fatal("a NaN-free list must compare equal to itself")
-	}
+	return a.IsEmpty() && b.IsEmpty()
 }
 
 // Iteration is allocation-free: Tail returns a value, so generated Go keeps it

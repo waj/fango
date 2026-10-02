@@ -283,7 +283,7 @@ type linter struct {
 	scope            map[string]bool       // def names + enclosing Let/param names: no shadowing
 	localTypes       map[string]types.Type // binding ABIs; occurrences cannot retag a stored callback
 	workers          map[string]*Def
-	adts             map[int]*types.ADTInfo // declared ADTs: equatable via derived eq
+	adts             map[int]*types.ADTInfo // declared ADTs
 	effects          map[int]*types.EffectInfo
 	tyParams         map[int]bool // the enclosing def's declared rigid vars
 	evidence         map[types.EffectKey]int

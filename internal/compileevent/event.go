@@ -40,11 +40,6 @@ func (o Observer) Report(event Event) {
 	}
 }
 
-// Stage reports a stage that carries neither a duration nor a payload size.
-func (o Observer) Stage(stage, owner string) {
-	o.Report(Event{Stage: stage, Owner: owner})
-}
-
 // Timed reports a stage with the elapsed time since start.
 func (o Observer) Timed(stage, owner string, start time.Time) {
 	o.Report(Event{Stage: stage, Owner: owner, Duration: time.Since(start)})

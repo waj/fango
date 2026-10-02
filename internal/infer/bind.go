@@ -30,15 +30,6 @@ func boundHandler(bind []*HandlerInfo, label types.EffLabel) *HandlerInfo {
 	return nil
 }
 
-func rowHasLabel(r types.Row, u int) bool {
-	for _, l := range r.Labels {
-		if l.Unique == u {
-			return true
-		}
-	}
-	return false
-}
-
 func rowHasApplication(r types.Row, label types.EffLabel) bool {
 	for _, l := range r.Labels {
 		if sameOrUnresolvedEffect(l, label) {
