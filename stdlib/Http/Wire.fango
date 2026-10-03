@@ -1,4 +1,9 @@
 {-# no-prelude #-}
+-- HTTP/1.1 framing that requests and responses share: header blocks, body
+-- framing, and writing a message after its start line.
+--
+-- `Http.Server` and `Http.Client` build on it; applications rarely need it
+-- directly. Failures raise `Http.Protocol.invalid`.
 module Http.Wire exposing (Framing(..), allToken, checkMessage, decodeField, emptyBody, framing, headerLines, responseFraming, withBody, writeCheckedMessage, writeMessage)
 
 import Basics exposing (..)
@@ -15,7 +20,17 @@ import Writer exposing (Writer(..))
 {- HTTP/1.1 framing shared by both directions: header blocks, body framing,
 and message serialization. Start lines belong to the direction. -}
 
-type Framing = NoBody | Fixed Int | Chunked | UntilClose deriving (Eq)
+-- How a message's body is delimited.
+type Framing
+    -- There is no body.
+    = NoBody
+    -- `Content-Length`: exactly this many bytes.
+    | Fixed Int
+    -- `Transfer-Encoding: chunked`.
+    | Chunked
+    -- A response without framing headers lasts until the connection closes.
+    | UntilClose
+    deriving (Eq)
 type ChunkState = { remaining : Int, done : Bool, total : Int }
 type ChunkCell e = { read : () ->{e} ChunkState, write : ChunkState ->{e} () }
 
@@ -45,6 +60,17 @@ tokenByte code = (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (co
     || code == 39 || code == 42 || code == 43 || code == 45 || code == 46
     || code == 94 || code == 95 || code == 96 || code == 124 || code == 126
 
+-- Whether the bytes from `index` on are all HTTP token characters, and the
+-- whole is nonempty, as a header name or method must be.
+--
+-- ```fango
+-- import Bytes
+-- import Http.Wire
+--
+-- Http.Wire.allToken (Bytes.fromString "Content-Type") 0
+-- Http.Wire.allToken (Bytes.fromString "bad name") 0 == False
+-- Http.Wire.allToken Bytes.empty 0 == False
+-- ```
 allToken : Bytes -> Int -> Bool
 allToken bytes index =
     if index >= Bytes.length bytes then index > 0
@@ -78,6 +104,7 @@ owsEnd bytes end =
             Just code -> if code == 32 || code == 9 then owsEnd bytes (end - 1) else end
             Nothing -> end
 
+-- A header field's text, failing with `Malformed` when it is not UTF-8.
 decodeField : Bytes ->{Protocol} String
 decodeField bytes =
     case Bytes.toString bytes of
@@ -97,6 +124,9 @@ headerLine bytes =
                 trimmed = Bytes.slice (owsStart value 0) (owsEnd value (Bytes.length value)) value
                 Header { name = decodeField name, value = decodeField trimmed }
 
+-- Reads a header block up to its empty line, failing with `HeadersTooLarge`
+-- when it exceeds `remaining` bytes, and prepends its fields, in order, to
+-- the reversed list given.
 headerLines : Reader e -> Int -> List Header ->{Protocol | e} List Header
 headerLines reader remaining reversed =
     if remaining < 2 then invalid HeadersTooLarge
@@ -215,6 +245,7 @@ withChunked input maxBody headersLimit action =
         }
     }
 
+-- A reader with no bytes, for a message without a body.
 emptyBody : Reader e
 emptyBody = Reader
     { buffered = { Bytes.empty }
@@ -335,6 +366,10 @@ checkMessage headers body framed =
             else if length < 0 then invalid (InvalidMessage "declared body length is negative")
             else ()
 
+-- Checks a message with `checkMessage` and writes it after its start line:
+-- the start line, its headers, and its body framed as `Content-Length` or
+-- chunked. `framed` False marks a message that cannot carry a body;
+-- `sendBody` False writes only the head, as for HEAD.
 writeMessage : Writer {Protocol | e} -> String -> List Header -> Body {Protocol | e} -> Bool -> Bool ->{Protocol | e} ()
 writeMessage output startLine headers body framed sendBody =
     checkMessage headers body framed

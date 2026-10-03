@@ -1,4 +1,15 @@
 {-# no-prelude #-}
+-- Concurrent tasks, cancellation, and channels.
+--
+-- `run` starts a root scope in which tasks share a failure type `err`; tasks
+-- spawned inside it run in parallel, and every scope waits for its children
+-- before it completes. A child inherits the resumptive handlers around it,
+-- sharing their state cells, but must handle abort effects other than
+-- `Fail err` inside itself. A failed task cancels its siblings, but not the
+-- parent body, which can observe and handle the failure. Cancellation is
+-- cooperative: sleeps, channel transfers, and task waits respond to it, but
+-- CPU loops need `checkpoint`, and blocking IO is not interrupted except by
+-- the cancellation-aware `Net` operations.
 module Async exposing
     ( Async, Channel, Outcome(..), Task
     , await, awaitResult, cancel, cancelScope, cancelled, channel, checkpoint
@@ -23,16 +34,28 @@ type Context = Context Runtime.Native.Any
 {-# resource #-}
 type RawTask result = RawTask Runtime.Native.Any
 
+-- A running or finished task that answers a `value` or fails with an `err`.
+-- A task handle may outlive the scope that started it.
 type Task err value = Task (RawTask (Result err value))
 
+-- A channel carrying values between tasks. It lives independently of the
+-- tasks that use it.
 {-# resource #-}
 type Channel value = Channel Runtime.Native.Any
 
 {-# resource #-}
 type ReadResult value = ReadResult Runtime.Native.Any
 
-type Outcome value = Completed value | Cancelled deriving (Eq, Show)
+-- How a task or scope ended.
+type Outcome value
+    -- It finished with this value.
+    = Completed value
+    -- It was cancelled first.
+    | Cancelled
+    deriving (Eq, Show)
 
+-- Running inside a task scope whose tasks fail with `err`. Only `run`
+-- handles it.
 effect Async err
     current : () -> Scope err
     active : () -> Scope err
@@ -47,7 +70,8 @@ childScope = native
 scopeContext : Scope err -> Context
 scopeContext = native
 
--- Opaque cancellation token for blocking native IO owned by this task.
+-- The current task's opaque cancellation context, for native sidecars that
+-- must interrupt a blocking operation when the task is cancelled.
 contextToken : () ->{Async err} Runtime.Native.Any
 contextToken() =
     case scopeContext current() of
@@ -137,9 +161,16 @@ runIn owner body =
         finish owner outcome
     }
 
+-- Runs `body` in a new root scope and answers how it ended: completed with
+-- its value or its failure, or cancelled. The scope waits for every task it
+-- started. When the body succeeds, the earliest failure of a task nobody
+-- observed becomes the scope's failure; a failure of the body itself wins.
 run : (() ->{Async err, IO, Fail err | effects} value) ->{IO | effects} Outcome (Result err value)
 run body = supervise { runIn newRoot() body }
 
+-- Runs `body` in a nested scope that waits for the tasks it starts before
+-- returning. Its failure fails the caller; its cancellation cancels the
+-- caller's scope.
 within : (() ->{Async err, Fail err | effects} value) ->{Async err, Fail err | effects} value
 within body =
     owner = active()
@@ -150,11 +181,15 @@ within body =
             cancelOwner owner
             stopCurrent()
 
+-- Starts `body` as a child task of the current scope and answers its handle
+-- at once. The child catches its own `Fail err` locally; an ordinary `Err`
+-- it returns is a successful value.
 spawn : (() ->{Async err, IO, Fail err | effects} value) ->{Async err | effects} Task err value
 spawn body =
     owner = active()
     Task (launch owner { child -> runIn child { rebase body } })
 
+-- A task that has already finished with `result`.
 completed : Result err value ->{Async err} Task err value
 completed result =
     owner = active()
@@ -166,11 +201,16 @@ completed result =
 
 observe task = if taskStatus task == 2 then Cancelled else Completed (taskValue task)
 
+-- Waits, outside any task scope, for the task to finish and answers how it
+-- ended.
 wait : Task err value ->{IO} Outcome (Result err value)
 wait (Task task) =
     waitTask task
     observe task
 
+-- Waits for the task to finish and answers how it ended, without failing.
+-- Observing a task marks its failure as handled; repeated observations
+-- answer the same result. Cancelling the waiting task interrupts the wait.
 awaitResult : Task err value ->{Async err} Outcome (Result err value)
 awaitResult (Task task) =
     owner = active()
@@ -179,6 +219,8 @@ awaitResult (Task task) =
     else
         stopCurrent()
 
+-- Waits for the task and answers its value. A failed task fails the caller
+-- with the same error; a cancelled one cancels the caller's scope.
 await : Task err value ->{Async err, Fail err} value
 await task =
     case awaitResult task of
@@ -187,14 +229,18 @@ await task =
             cancelScope()
             stopCurrent()
 
+-- Requests the task's cancellation, and its children's. It does not cancel
+-- the caller.
 cancel : Task err value ->{Async err} ()
 cancel (Task task) =
     ignore current()
     cancelTask task
 
+-- Requests cancellation of the current scope and its children.
 cancelScope : () ->{Async err} ()
 cancelScope() = cancelOwner current()
 
+-- Whether the current scope has been cancelled.
 cancelled : () ->{Async err} Bool
 cancelled() = scopeCancelled current()
 
@@ -204,14 +250,21 @@ stopCurrent() =
     ignore active()
     stopCurrent()
 
+-- Leaves the current task if it has been cancelled, running cleanup on the
+-- way; otherwise does nothing. Long computations call it to respond to
+-- cancellation.
 checkpoint : () ->{Async err} ()
 checkpoint() = ignore active()
 
+-- Pauses the task for `milliseconds`, waking early when it is cancelled. A
+-- duration of zero or less is a checkpoint.
 sleep : Int ->{Async err} ()
 sleep milliseconds =
     owner = active()
     if sleepIn (scopeContext owner) milliseconds then () else checkpoint()
 
+-- A new channel buffering up to `capacity` values. Zero or less makes it
+-- unbuffered: each send waits for a receiver.
 channel : Int ->{Async err} Channel value
 channel capacity =
     ignore active()
@@ -219,6 +272,8 @@ channel capacity =
     setCapacity result capacity
     result
 
+-- Sends a value, waiting while the buffer is full. Answers `False` when the
+-- channel is closed, including while waiting.
 send : Channel value -> value ->{Async err} Bool
 send ch value =
     owner = active()
@@ -228,6 +283,8 @@ send ch value =
         checkpoint()
         False
 
+-- The next value, waiting while none is buffered, or `Nothing` once the
+-- channel is closed and drained.
 receive : Channel value ->{Async err} Maybe value
 receive ch =
     owner = active()
@@ -238,11 +295,21 @@ receive ch =
             checkpoint()
             Nothing
 
+-- Closes the channel, waking blocked senders and receivers. Closing it again
+-- does nothing.
 close : Channel value ->{Async err} ()
 close ch =
     ignore current()
     closeChannel ch
 
--- Pure ordered mapping with a bounded internal worker pool.
+-- Applies a pure function to every element in parallel, keeping their order.
+-- It uses at most one worker per available processor and needs no task
+-- scope.
+--
+-- ```fango
+-- import Async
+--
+-- Async.parMap { n -> n * n } [1, 2, 3] == [1, 4, 9]
+-- ```
 parMap : (a -> b) -> List a -> List b
 parMap = native

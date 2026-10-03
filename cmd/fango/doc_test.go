@@ -197,7 +197,7 @@ func TestDocWholeLibrary(t *testing.T) {
 // documentedModules have been migrated to source documentation. Each stays
 // complete under --strict, and its examples keep holding.
 var documentedModules = []string{
-	"Basics", "Bytes", "Char", "Console", "Derive", "Dict", "Encoding", "Fail", "Failure", "File", "IO", "Iterator", "List", "Maybe", "Net",
+	"Async", "Basics", "Bytes", "Char", "Console", "Derive", "Dict", "Encoding", "Fail", "Failure", "File", "Http", "Http.Client", "Http.GZip", "Http.Server", "Http.Server.Route", "Http.Wire", "IO", "Iterator", "List", "Maybe", "Net",
 	"Prelude", "Process", "Random", "Range", "Reader", "Regex", "Result", "Runtime.Local", "Runtime.Native", "Runtime.Prompt",
 	"Runtime.Scope", "State", "Stream", "String", "Text.Builder", "Text.Reader", "Text.Writer", "Tuple", "Url", "Writer",
 }
@@ -367,14 +367,19 @@ func fencedBlocks(text string) []string {
 	return blocks
 }
 
-// declares reports whether a top-level example line starts a binding: a
-// standalone `=` or `:` comes before any comparison.
+// declares reports whether a top-level example line starts a binding: it
+// begins with a plain lowercase name, and a standalone `=` or `:` comes
+// before any bracket, quote, or comparison.
 func declares(line string) bool {
-	for _, field := range strings.Fields(line) {
-		switch field {
-		case "=", ":":
+	fields := strings.Fields(line)
+	if len(fields) == 0 || strings.ContainsAny(fields[0], ".([{\"") || fields[0][0] < 'a' || fields[0][0] > 'z' {
+		return false
+	}
+	for _, field := range fields[1:] {
+		switch {
+		case field == "=" || field == ":":
 			return true
-		case "==", "/=", "<", ">", "<=", ">=":
+		case strings.ContainsAny(field[:1], "([{\"'") || slices.Contains([]string{"==", "/=", "<", ">", "<=", ">=", "&&", "||"}, field):
 			return false
 		}
 	}

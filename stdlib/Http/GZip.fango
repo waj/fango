@@ -1,4 +1,9 @@
 {-# no-prelude #-}
+-- Gzip content coding for HTTP bodies.
+--
+-- `wrap` compresses a handler's responses for clients that accept gzip, and
+-- `decodeRequests` decompresses gzip request bodies before a handler sees
+-- them. Compression and decompression both stream.
 module Http.GZip exposing (acceptsGzip, decodeRequests, decoding, encoding, wrap)
 
 import Basics exposing (..)
@@ -153,6 +158,18 @@ hasToken wanted tokens =
         [token | rest] ->
             if Http.equalAscii wanted (String.trim token) then True else hasToken wanted rest
 
+-- Whether the request's `Accept-Encoding` headers accept gzip, honouring
+-- quality values and the `*` wildcard.
+--
+-- ```fango
+-- import Http exposing (Header(..))
+-- import Http.GZip
+--
+-- Http.GZip.acceptsGzip [{ name = "Accept-Encoding", value = "br, gzip;q=0.5" }]
+-- Http.GZip.acceptsGzip [{ name = "Accept-Encoding", value = "gzip;q=0, *" }] == False
+-- Http.GZip.acceptsGzip [{ name = "Accept-Encoding", value = "*" }]
+-- Http.GZip.acceptsGzip [] == False
+-- ```
 acceptsGzip : List Http.Header -> Bool
 acceptsGzip headers =
     case Http.getHeaders "accept-encoding" headers of
@@ -201,6 +218,11 @@ compressBody original output =
     tail = finish compressor
     Writer.write output tail
 
+-- Runs `handler` and compresses its response when the request accepts gzip.
+-- `HEAD` requests, 204 and 304 responses, empty bodies, and responses that
+-- already have a `Content-Encoding` pass through unchanged. A compressed
+-- response streams chunked, even from a sized body, and gains
+-- `Content-Encoding: gzip` and `Vary: Accept-Encoding`.
 wrap : (Request e ->{e} Response e) -> Request e ->{e} Response e
 wrap handler request =
     response = handler request

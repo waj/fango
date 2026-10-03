@@ -1,4 +1,8 @@
 {-# no-prelude #-}
+-- Routing requests to handlers by method and path.
+--
+-- A route's pattern is a path whose segments are literal or `:name`, which
+-- captures one decoded segment. `dispatch` tries routes in order.
 module Http.Server.Route exposing (Param(..), Route(..), dispatch, lookup, path)
 
 import Basics exposing (..)
@@ -9,13 +13,35 @@ import Maybe exposing (Maybe(..))
 import String
 import Url
 
-type Param = { name : String, value : String } deriving (Eq, Show)
+-- A path segment captured by a `:name` pattern segment.
+type Param =
+    {
+      -- The name after the `:`.
+      name : String
+      -- The decoded segment.
+    , value : String
+    }
+    deriving (Eq, Show)
+
+-- A handler for requests with one method whose path matches a pattern.
 type Route e =
-    { method : String
+    {
+      -- The method it answers, such as `"GET"`.
+      method : String
+      -- The path pattern, such as `"/users/:id"`.
     , pattern : String
+      -- Answers a matching request, given its captured parameters in order.
     , handler : List Param -> Request e ->{e} Response e
     }
 
+-- The value captured under `name`.
+--
+-- ```fango
+-- import Http.Server.Route exposing (Param(..))
+--
+-- Http.Server.Route.lookup "id" [{ name = "id", value = "7" }] == Just "7"
+-- Http.Server.Route.lookup "user" [] == Nothing
+-- ```
 lookup : String -> List Param -> Maybe String
 lookup name params =
     case params of
@@ -49,6 +75,15 @@ joinSlash parts =
         [part] -> part
         [part | rest] -> part ++ "/" ++ joinSlash rest
 
+-- The path of a request target, without its query, and taken out of an
+-- absolute-form target.
+--
+-- ```fango
+-- import Http.Server.Route
+--
+-- Http.Server.Route.path "/a/b?x=1" == "/a/b"
+-- Http.Server.Route.path "http://host/a" == "/a"
+-- ```
 path : String -> String
 path target = absolutePath (beforeQuery target)
 
@@ -106,6 +141,11 @@ dispatchHelp routes fallback request actual allowed =
                     if route.method == request.method then route.handler params request
                     else dispatchHelp rest fallback request actual [route.method | allowed]
 
+-- Answers the request with the first route whose method and pattern match.
+-- When the path matches only routes of other methods, it answers 405 with
+-- an `Allow` header; when nothing matches, `fallback` answers. Path segments
+-- are percent-decoded first; a malformed escape, invalid UTF-8, or an
+-- encoded `/` or `\` fails with `Malformed`.
 dispatch : List (Route e) -> (Request e ->{e} Response e) -> Request e ->{Protocol | e} Response e
 dispatch routes fallback request =
     actual = segments (path request.target)

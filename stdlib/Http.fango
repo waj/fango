@@ -1,4 +1,10 @@
 {-# no-prelude #-}
+-- What HTTP/1.1 requests and responses share: headers, bodies, versions, and
+-- protocol errors.
+--
+-- `Http.Server` serves requests and `Http.Client` sends them; `Http.Wire`
+-- frames messages for both. Header names compare without ASCII case, and a
+-- header list keeps duplicate fields unless one is replaced.
 module Http exposing (Body(..), Error(..), Header(..), Protocol(..), Version(..), abortBody, equalAscii, fileBody, getHeader, getHeaders, hasHeader, removeHeader, setHeader)
 
 import Basics exposing (..)
@@ -13,27 +19,64 @@ import Writer exposing (Writer)
 {- Types both HTTP directions share. Framing lives in `Http.Wire`, the server
 in `Http.Server`. -}
 
+-- A protocol failure. The server answers the status noted with each one.
 type Error
+    -- Invalid syntax in a start line, header, or chunk, or a fixed-length
+    -- body that ended early (400).
     = Malformed String
+    -- A request line over its limit (414).
     | LineTooLong
+    -- A header block or trailers over the limit (431).
     | HeadersTooLarge
+    -- A body over its limit (413).
     | BodyTooLarge
+    -- An unknown transfer coding (501).
     | Unsupported String
+    -- A response the application built is invalid: a framing header, a body
+    -- on a status that cannot carry one, or a sized body whose length does
+    -- not match (500 when nothing has been written yet).
     | InvalidMessage String
+    -- A body stopped on purpose through `abortBody`, after the head was
+    -- written.
     | BodyAborted String
     deriving (Eq, Show)
 
+-- Failing an HTTP exchange with a protocol error. The server and client
+-- handle it.
 effect Protocol
+    -- Fails the exchange with `error`.
     abort invalid : Error -> value
 
-type Version = Http11 deriving (Eq, Show)
-type Header = { name : String, value : String } deriving (Eq, Show)
+-- The protocol version.
+type Version
+    -- HTTP/1.1, the only version supported.
+    = Http11
+    deriving (Eq, Show)
 
--- A streaming body pushes into the writer; a sized one declares its length.
+-- One header field. Incoming values are valid UTF-8.
+type Header =
+    {
+      -- The field name, compared without ASCII case.
+      name : String
+      -- The field value.
+    , value : String
+    }
+    deriving (Eq, Show)
+
+-- A message body whose writes perform `e`. A streaming body runs with the
+-- handler's effects, so it can produce its output while writing it, holding
+-- one buffer rather than the whole payload. A body that fails partway
+-- leaves the message truncated, never padded or terminated.
 type Body e
+    -- No body.
     = Empty
+    -- These bytes, sent with their length.
     | BytesBody Bytes
+    -- Bytes pushed into the writer and sent chunked, in chunks of up to
+    -- 8 KiB; an explicit `flush` sends whatever is pending.
     | StreamBody (Writer e ->{e} ())
+    -- Bytes pushed into the writer and sent with this declared length. A
+    -- write past it, or returning short of it, fails with `InvalidMessage`.
     | SizedBody Int (Writer e ->{e} ())
 
 -- Stops a streaming body on purpose. The message is left truncated and the
@@ -69,6 +112,15 @@ equalAsciiAt left right index length =
                 if asciiLower a == asciiLower b then equalAsciiAt left right (index + 1) length else False
             _ -> False
 
+-- Whether two strings are equal ignoring ASCII case, as header names
+-- compare.
+--
+-- ```fango
+-- import Http
+--
+-- Http.equalAscii "Content-Length" "content-length"
+-- Http.equalAscii "É" "é" == False
+-- ```
 equalAscii : String -> String -> Bool
 equalAscii left right =
     a = Bytes.fromString left
@@ -76,6 +128,20 @@ equalAscii left right =
     size = Bytes.length a
     Bytes.length b == size && equalAsciiAt a b 0 size
 
+-- The values of every header with this name, in order.
+--
+-- ```fango
+-- import Http exposing (Header(..))
+--
+-- headers : List Http.Header
+-- headers =
+--     [ { name = "Content-Type", value = "text/plain" }
+--     , { name = "Set-Cookie", value = "a=1" }
+--     , { name = "set-cookie", value = "b=2" }
+--     ]
+--
+-- Http.getHeaders "SET-COOKIE" headers == ["a=1", "b=2"]
+-- ```
 getHeaders : String -> List Header -> List String
 getHeaders name headers =
     case headers of
@@ -84,20 +150,65 @@ getHeaders name headers =
             if equalAscii name header.name then [header.value | getHeaders name rest]
             else getHeaders name rest
 
+-- The value of the first header with this name.
+--
+-- ```fango
+-- import Http exposing (Header(..))
+--
+-- headers : List Http.Header
+-- headers =
+--     [ { name = "Content-Type", value = "text/plain" }
+--     , { name = "Set-Cookie", value = "a=1" }
+--     , { name = "set-cookie", value = "b=2" }
+--     ]
+--
+-- Http.getHeader "content-type" headers == Just "text/plain"
+-- Http.getHeader "Host" headers == Nothing
+-- ```
 getHeader : String -> List Header -> Maybe String
 getHeader name headers =
     case getHeaders name headers of
         [] -> Nothing
         [value | _] -> Just value
 
+-- Whether any header has this name.
 hasHeader : String -> List Header -> Bool
 hasHeader name headers =
     case getHeader name headers of
         Nothing -> False
         Just _ -> True
 
+-- The headers without any of this name.
+--
+-- ```fango
+-- import Http exposing (Header(..))
+--
+-- headers : List Http.Header
+-- headers =
+--     [ { name = "Content-Type", value = "text/plain" }
+--     , { name = "Set-Cookie", value = "a=1" }
+--     , { name = "set-cookie", value = "b=2" }
+--     ]
+--
+-- Http.getHeaders "set-cookie" (Http.removeHeader "Set-Cookie" headers) == []
+-- ```
 removeHeader : String -> List Header -> List Header
 removeHeader name headers = List.filter { header -> if equalAscii name header.name then False else True } headers
 
+-- The headers with every one of this name replaced by a single new one,
+-- placed first.
+--
+-- ```fango
+-- import Http exposing (Header(..))
+--
+-- headers : List Http.Header
+-- headers =
+--     [ { name = "Content-Type", value = "text/plain" }
+--     , { name = "Set-Cookie", value = "a=1" }
+--     , { name = "set-cookie", value = "b=2" }
+--     ]
+--
+-- Http.getHeaders "set-cookie" (Http.setHeader "Set-Cookie" "c=3" headers) == ["c=3"]
+-- ```
 setHeader : String -> String -> List Header -> List Header
 setHeader name value headers = [Header { name = name, value = value } | removeHeader name headers]

@@ -1,4 +1,12 @@
 {-# no-prelude #-}
+-- A concurrent HTTP/1.1 server.
+--
+-- `serve` accepts connections with a pool of tasks and answers each request
+-- with a handler. A connection serves consecutive requests while each body
+-- was read to its end and neither side asked to close. Invalid request
+-- framing gets its error status and closes the connection; so does a
+-- response that fails its checks (500), and a body that fails after its head
+-- was written leaves the response incomplete and closes the connection.
 module Http.Server exposing (Config(..), Request(..), Response(..), defaultConfig, serve, withRequest, writeResponse)
 
 import Async exposing (Async, Channel, Outcome(..), Task)
@@ -16,17 +24,33 @@ import Result exposing (Result(..))
 import String
 import Writer exposing (Writer(..))
 
+-- A request whose body reads perform `e`.
 type Request e =
-    { method : String
+    {
+      -- The method, such as `"GET"`.
+      method : String
+      -- The raw request target, query included; `Http.Server.Route.path`
+      -- extracts the path.
     , target : String
+      -- The protocol version.
     , version : Version
+      -- The header fields in order.
     , headers : List Header
+      -- The body, framed to its declared length or chunks.
     , body : Reader e
     }
 
+-- A response whose body writes perform `e`. Its status is final, 200 to 599
+-- except 101, and its headers may not set `Content-Length` or
+-- `Transfer-Encoding`, which the server supplies from the body.
 type Response e =
-    { status : Int
+    {
+      -- The status code.
+      status : Int
+      -- The header fields: names must be tokens, and values cannot hold
+      -- control characters other than tab.
     , headers : List Header
+      -- The body. 204 and 304 responses cannot carry one.
     , body : Body e
     }
 
@@ -74,8 +98,13 @@ readHead reader lineLimit headersLimit bodyLimit =
                     Just (Head { method = method, target = target, headers = headers, framing = bodyFraming })
                 _ -> invalid (Malformed "HTTP/1.1 requires one Host header")
 
--- A protocol scope retains the request reader until the response body has run.
--- The Bool reports whether the handler consumed the whole framed body.
+-- Parses one request from `reader` and runs `action` with it, answering
+-- `Nothing` at a clean end of input, or `Just` the result and whether the
+-- body was read to its end. Request lines, header blocks, and bodies have
+-- separate byte limits. The parser requires an HTTP/1.1 request line and one
+-- `Host` field, and accepts one `Content-Length` or `Transfer-Encoding:
+-- chunked`; anything else raises `Http.Protocol.invalid`. A response whose
+-- body reads the request must be written inside `action`.
 {-# scoped s #-}
 withRequest : Int -> Int -> Int -> Reader e -> (Request s ->{s} a) ->{Protocol | e} Maybe (a, Bool)
 withRequest lineLimit headersLimit bodyLimit input action =
@@ -101,23 +130,48 @@ writeChecked method output response =
     Wire.writeCheckedMessage { error -> invalid error } output ("HTTP/1.1 " ++ show response.status ++ " ") response.headers response.body
         (framedStatus response.status) (method /= "HEAD")
 
+-- Checks a response and writes it as the answer to a request with `method`.
+-- The server supplies `Content-Length` for empty, byte, and sized bodies and
+-- chunked encoding for streams; a `HEAD` request gets only the head. Every
+-- check runs before the first byte is written.
 writeResponse : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} ()
 writeResponse method output response =
     checkResponse response
     writeChecked method output response
 
+-- How `serve` listens and what it allows. `defaultConfig` fills in limits.
 type Config =
-    { port : Int
+    {
+      -- The port to listen on, at every address.
+      port : Int
+      -- How many connections are served at once.
     , workers : Int
+      -- The longest request line, in bytes, before 414.
     , requestLineLimit : Int
+      -- The largest header block, in bytes, before 431.
     , headerLimit : Int
+      -- The largest body, in bytes, before 413.
     , bodyLimit : Int
+      -- How long reading a request's head may take, in milliseconds.
     , headerDeadlineMs : Int
+      -- How long reading a request's body may take, in milliseconds.
     , bodyDeadlineMs : Int
+      -- How long writing a response may take, in milliseconds.
     , writeDeadlineMs : Int
+      -- How long stopping waits for active connections before cancelling
+      -- them, in milliseconds.
     , shutdownGraceMs : Int
     }
 
+-- The configuration for `port`: 64 workers, 8 KiB request lines, 64 KiB
+-- header blocks, 16 MiB bodies, 10 s to read a head, 30 s to read a body or
+-- write a response, and 5 s of shutdown grace.
+--
+-- ```fango
+-- import Http.Server
+--
+-- (Http.Server.defaultConfig 8080).workers == 64
+-- ```
 defaultConfig : Int -> Config
 defaultConfig port = Config
     { port = port
@@ -264,8 +318,13 @@ runListener config stop listener process =
             _ -> ()
     }
 
--- Handlers and their bodies may raise `Protocol`; the connection then ends as
--- for any other protocol failure.
+-- Serves `handler` on `config.port` until a value arrives on `stop`, then
+-- closes the listener, waits up to `shutdownGraceMs` for active connections,
+-- and cancels the rest, closing their sockets. Handlers and their bodies may
+-- raise `Protocol`: before the head is written the server answers with the
+-- error's status, and afterwards it closes the connection, so
+-- `Http.Server.Route.dispatch` and `Http.abortBody` need no handler of their
+-- own. Handle application errors inside the handler.
 {-# scoped s #-}
 serve : Config -> Channel () -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{Async Net.Error, IO, Fail Net.Error | e} ()
 serve config stop handler =

@@ -1,4 +1,11 @@
 {-# no-prelude #-}
+-- An HTTP/1.1 client.
+--
+-- Code that makes requests performs the `Http` effect and `Fail Error`, and
+-- needs no `IO`: `run` connects `Http` to sockets where the program starts
+-- it, and `stub` answers requests from memory, for tests. Requests follow
+-- redirects, decompress gzip responses, reuse connections, and support
+-- `https`. A URL without a scheme resolves against the configured base URL.
 module Http.Client exposing
     ( Config(..), Connection, Error(..), Http, Reply(..), Request(..)
     , Response(..)
@@ -29,27 +36,46 @@ import Writer exposing (Writer(..))
 transport that `run` connects to sockets; framing, header policy, and URL
 resolution run in the caller's code under every transport. -}
 
--- `url` is parsed when the request is sent.
+-- A request whose body writes perform `e`. Build one with `request`.
 type Request e =
-    { method : String
+    {
+      -- The method, such as `"GET"`.
+      method : String
+      -- The URL, parsed when the request is sent.
     , url : String
+      -- The request's own headers, which replace same-named configured ones.
+      -- `Host`, `Content-Length`, `Transfer-Encoding`, and `Connection` are
+      -- the client's to write.
     , headers : List Header
+      -- The body. It runs between the client's writes, with the caller's
+      -- effects, so a large payload is produced while it is sent.
     , body : Body e
     }
 
 -- A response whose body streams inside `send`'s callback.
 type Response e =
-    { url : Url
+    {
+      -- Where the response came from, after any redirects.
+      url : Url
+      -- The status code.
     , status : Int
+      -- The header fields; a decompressed body loses its `Content-Encoding`
+      -- and `Content-Length`.
     , headers : List Header
+      -- The body, readable only while the callback runs.
     , body : Reader e
     }
 
 -- A response with its body read into memory.
 type Reply =
-    { url : Url
+    {
+      -- Where the response came from, after any redirects.
+      url : Url
+      -- The status code.
     , status : Int
+      -- The header fields.
     , headers : List Header
+      -- The whole body.
     , body : Bytes
     }
     deriving (Eq, Show)
@@ -57,29 +83,54 @@ type Reply =
 -- What can go wrong with a request. Only the helpers that read a body as
 -- data raise `BadStatus` and `BadBody`.
 type Error
+    -- The URL does not parse, has no host, carries user information, uses a
+    -- scheme other than `http` or `https`, or is relative with no base URL.
     = InvalidUrl String
+    -- Connecting, reading, or writing failed, including TLS verification.
     | Transport Net.Error
+    -- A connect, read, or write wait exceeded its timeout.
     | Timeout
+    -- The exchange broke HTTP framing, in either direction.
     | Protocol Http.Error
+    -- More redirects than `maxRedirects`.
     | TooManyRedirects
+    -- A body helper got a status other than 2xx.
     | BadStatus Reply
+    -- A JSON helper could not decode the body.
     | BadBody Json.Error
     deriving (Eq, Show)
 
+-- How requests are sent. `configure` adjusts it for a part of the program.
 type Config =
-    { baseUrl : Maybe Url
+    {
+      -- What a URL without a scheme resolves against.
+      baseUrl : Maybe Url
+      -- Headers sent with every request; a request's own replace them.
     , headers : List Header
+      -- The `User-Agent` header.
     , userAgent : String
+      -- Whether to ask for gzip responses and decode them as they stream.
     , decompress : Bool
+      -- How long connecting, including a TLS handshake, may take, in
+      -- milliseconds.
     , connectTimeoutMs : Int
+      -- How long each wait to read may take, in milliseconds.
     , readTimeoutMs : Int
+      -- How long each wait to write may take, in milliseconds.
     , writeTimeoutMs : Int
+      -- The largest status line and header block, in bytes.
     , maxHeaderBytes : Int
+      -- The largest body read into memory, in bytes.
     , maxBodyBytes : Int
+      -- How many redirects to follow; zero returns redirects as they are.
     , maxRedirects : Int
+      -- A PEM file of certificate authorities trusted besides the system's.
     , caFile : Maybe String
     }
 
+-- No base URL or headers, the user agent `fango`, decompression on, a 10 s
+-- connect timeout, 30 s read and write timeouts, 64 KiB of headers, 10 MiB
+-- of body, up to 10 redirects, and no extra certificate authorities.
 defaultConfig : Config
 defaultConfig = Config
     { baseUrl = Nothing
@@ -102,6 +153,8 @@ type Endpoint = { secure : Bool, host : String, port : Int, connectTimeoutMs : I
 -- reused from the pool.
 type Connection = Socket Net.Connection Bool | Memory Int
 
+-- Sending requests over some transport: `run` for sockets, `stub` for
+-- memory.
 effect Http
     connect : Endpoint -> Result Error Connection
     transmit : Connection -> Bytes -> Int -> Result Error ()
@@ -157,8 +210,12 @@ socketRelease connection reusable =
         Socket socket _ -> fromNet (Net.poolRelease socket reusable)
         Memory _ -> foreign
 
--- Runs requests over TCP with `defaultConfig`, which `configure` adjusts.
--- Idle connections are kept for reuse until `run` returns.
+-- Runs requests over TCP and TLS with `defaultConfig`, which `configure`
+-- adjusts. Idle connections are kept for reuse, up to 8 per endpoint for up
+-- to 60 s, until `run` returns; tasks that inherit the handler share them. A
+-- request that fails on a reused connection before any response arrives is
+-- retried once on a new one when it is idempotent and its body can be sent
+-- again.
 run : (() ->{Http | e} a) ->{IO | e} a
 run action =
     pool = Net.newPool 8 60000
@@ -171,7 +228,25 @@ run action =
             currentConfig () -> resume defaultConfig
     } { ignore (Net.closePool pool) }
 
--- Runs `action` with the configuration adjusted. Overrides nest.
+-- Runs `action` with the configuration adjusted. Overrides nest, and apply
+-- under every transport.
+--
+-- ```fango
+-- import Bytes exposing (Bytes)
+-- import Fail
+-- import Http.Client as Client
+-- import Result exposing (Result(..))
+--
+-- ok : Bytes -> Result Client.Error Bytes
+-- ok _ = Ok (Bytes.fromString "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n42")
+--
+-- agent =
+--     Fail.attempt {
+--         Client.stub ok { Client.configure { config -> { config | userAgent = "test" } } { (Client.get "http://h/").status } }
+--     }
+--
+-- agent == Ok 200
+-- ```
 configure : (Config -> Config) -> (() ->{Http | e} a) ->{Http | e} a
 configure adjust action =
     handle action() on
@@ -183,9 +258,23 @@ configure adjust action =
 
 type Exchange = { request : Bytes, response : Maybe Bytes }
 
--- Answers each request from `respond`, given the request's bytes as written,
--- without sockets. `respond` may use the caller's effects, for example to
--- record requests. Requests run one at a time.
+-- Answers each request without sockets: `respond` receives the request's
+-- bytes exactly as written and answers a response's bytes, or an `Error` to
+-- fail the request with. It may use the caller's effects, for example to
+-- record requests. Requests run one at a time, starting from
+-- `defaultConfig`.
+--
+-- ```fango
+-- import Bytes exposing (Bytes)
+-- import Fail
+-- import Http.Client as Client
+-- import Result exposing (Result(..))
+--
+-- ok : Bytes -> Result Client.Error Bytes
+-- ok _ = Ok (Bytes.fromString "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n42")
+--
+-- Fail.attempt { Client.stub ok { Client.getText "http://example.com/" } } == Ok "42"
+-- ```
 stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http | e} a) ->{e} a
 stub respond action =
     handle action() with exchange = Exchange { request = Bytes.empty, response = Nothing } on
@@ -469,9 +558,14 @@ exchange config outgoing target crossOrigin hops fresh action =
                 step
     }
 
--- Sends `request` and streams the response to `action`, which may read the body
--- only while it runs. Redirects are followed up to `maxRedirects`; any other
--- status is a normal response.
+-- Sends `request` and streams the response to `action`, which may read the
+-- body only while it runs; a value that does not depend on the reader can
+-- leave. Redirects (301, 302, 303, 307, 308) are followed first, up to
+-- `maxRedirects`: a 303, or a 301 or 302 answering other than GET or HEAD,
+-- continues as a GET; credentials are dropped once a redirect leaves the
+-- original origin; and a redirect from `https` to another scheme, or one
+-- needing a stream body again, is returned as it is. Any status is a normal
+-- response.
 {-# scoped s #-}
 send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
 send outgoing action =
@@ -496,7 +590,8 @@ collect reader limit parts size =
     else if size + Bytes.length chunk > limit then failWith (Protocol Http.BodyTooLarge)
     else collect reader limit [chunk | parts] (size + Bytes.length chunk)
 
--- Sends `request` and reads the whole body, up to `maxBodyBytes`.
+-- Sends `request` and reads the whole body, failing with
+-- `Protocol BodyTooLarge` beyond `maxBodyBytes`. Any status is a reply.
 fetch : Request {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
 fetch outgoing =
     limit = currentConfig().maxBodyBytes
@@ -526,6 +621,14 @@ get target = fetch (request "GET" target)
 post : String -> Body {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
 post target body = fetch (withBody body (request "POST" target))
 
+-- The request with a header set, replacing any of the same name.
+--
+-- ```fango
+-- import Http exposing (Header(..))
+-- import Http.Client as Client
+--
+-- (Client.withHeader "Accept" "text/plain" (Client.request "GET" "/x")).headers == [{ name = "Accept", value = "text/plain" }]
+-- ```
 withHeader : String -> String -> Request e -> Request e
 withHeader name value outgoing = { outgoing | headers = Http.setHeader name value outgoing.headers }
 
@@ -534,9 +637,11 @@ compressRequest : Request e -> Request e
 compressRequest outgoing =
     { outgoing | headers = Http.setHeader "Content-Encoding" "gzip" outgoing.headers, body = GZip.encoding outgoing.body }
 
+-- The request with this body.
 withBody : Body e -> Request e -> Request e
 withBody body outgoing = { outgoing | body = body }
 
+-- The request with an `Authorization: Bearer` header for `token`.
 withBearer : String -> Request e -> Request e
 withBearer token outgoing = withHeader "Authorization" ("Bearer " ++ token) outgoing
 
@@ -545,9 +650,24 @@ expectSuccess : Reply ->{Fail Error} Reply
 expectSuccess reply =
     if reply.status >= 200 && reply.status < 300 then reply else failWith (BadStatus reply)
 
+-- Sends a GET and answers the body of a 2xx reply, failing with
+-- `BadStatus` otherwise.
+--
+-- ```fango
+-- import Bytes exposing (Bytes)
+-- import Fail
+-- import Http.Client as Client
+-- import Result exposing (Result(..))
+--
+-- ok : Bytes -> Result Client.Error Bytes
+-- ok _ = Ok (Bytes.fromString "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n42")
+--
+-- Fail.attempt { Client.stub ok { Client.getBytes "http://h/" } } == Ok (Bytes.fromString "42")
+-- ```
 getBytes : String ->{Http, Fail Error} Bytes
 getBytes raw = (expectSuccess (get raw)).body
 
+-- `getBytes` as text, with U+FFFD in place of malformed UTF-8.
 getText : String ->{Http, Fail Error} String
 getText raw = Bytes.toStringLossy (getBytes raw)
 
@@ -570,12 +690,29 @@ decodeReply witness limit response =
         body = collect response.body limit [] 0
         failWith (BadStatus (Reply { url = response.url, status = response.status, headers = response.headers, body = body }))
 
+-- Sends a GET asking for JSON and decodes a 2xx body as it streams,
+-- failing with `BadStatus` for another status and `BadBody` for a body that
+-- does not decode.
+--
+-- ```fango
+-- import Bytes exposing (Bytes)
+-- import Fail
+-- import Http.Client as Client
+-- import Result exposing (Result(..))
+--
+-- ok : Bytes -> Result Client.Error Bytes
+-- ok _ = Ok (Bytes.fromString "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n42")
+--
+-- Fail.attempt { Client.stub ok { Client.getJson @Int "http://h/" } } == Ok 42
+-- ```
 getJson : Decode a => Type a -> String ->{Http, Fail Error} a
 getJson witness raw =
     limit = currentConfig().maxBodyBytes
     outgoing = withDefaultHeader "Accept" "application/json" (request "GET" raw)
     send outgoing { response -> decodeReply witness limit response }
 
+-- Sends `value` as a JSON POST, streamed as it is encoded, and decodes a 2xx
+-- JSON response like `getJson`.
 postJson : (Encode b, Decode a) => Type a -> String -> b ->{Http, Fail Error} a
 postJson witness raw value =
     limit = currentConfig().maxBodyBytes
