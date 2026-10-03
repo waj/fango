@@ -1,0 +1,8 @@
+import State exposing (State, get, put)
+
+both : (() ->{State Int, State String | e} a) ->{e} a
+both action = State.run "s" { State.run 1 { action() } } |> { r -> r.value.value }
+
+-- A class constraint on the result does not name an application either; the
+-- report is the ambiguity, not a missing `Num String` instance.
+main() = print (both { put (get() + 1); get() ++ "!" })

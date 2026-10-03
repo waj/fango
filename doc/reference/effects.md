@@ -82,7 +82,9 @@ printStrings action = handle action() on
 outer handler. If nothing determines the argument, an operation call reports
 `AMBIGUOUS EFFECT APPLICATION` and any other use reports `AMBIGUOUS EFFECT`;
 nesting two `handle` expressions whose clauses ignore their payload types is
-rejected this way. A function's result annotation is checked after its body,
+rejected this way. Another call of the same effect in the same body does not
+decide it either: with `State Int` and `State String` both in scope, a bare
+`get()` is ambiguous even beside a `get() ++ "!"` that is plainly `String`. A function's result annotation is checked after its body,
 so it does not determine the argument. No additional source syntax is
 required.
 

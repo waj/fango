@@ -18,7 +18,11 @@ arguments still contain type variables overlap until inference resolves them;
 the solver unifies their arguments and reconciles rows after the group is
 solved. An unresolved occurrence that could match several applications is
 never matched by label order: the solver retries its constraint after the
-others and reports it if it is still ambiguous. Core keys lexical evidence by the full application. Residual rows and
+others and reports it if it is still ambiguous. Nor is it matched by a
+sibling occurrence: an inclusion whose unresolved application enters a row
+that may still grow is placed after the other inclusions, so it meets the
+row's final applications rather than whichever one a neighbouring call had
+already contributed. Core keys lexical evidence by the full application. Residual rows and
 inherited handler evidence carry type descriptors so runtime projection makes
 the same distinction across module boundaries. Source-defined
 resumptive operations may quantify unconstrained variables independently at

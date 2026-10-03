@@ -105,7 +105,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			for _, p := range bounds {
 				left, lok := sub.Apply(p.c.Left).(types.Row)
 				right, rok := sub.Apply(p.c.Right).(types.Row)
-				if !lok || !rok || len(left.Labels) == 0 {
+				if !lok || !rok || len(left.Labels) == 0 || awaitsAmbient(p.c, sub) {
 					continue
 				}
 				trial := maps.Clone(sub)
@@ -144,16 +144,28 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			break
 		}
 	}
-	for _, p := range bounds {
+	// An inclusion whose own labels still have unresolved arguments, going
+	// into a row that may still grow, waits for the other inclusions. Solved
+	// early, its unresolved application would pair with whichever sibling
+	// occurrence of the effect had already reached that row, and a body's
+	// statement order would decide which of several applications it means.
+	// Solved after the others, it meets the row's final applications, so one
+	// candidate is taken and several are reported as ambiguous.
+	var awaiting []pending
+	place := func(p pending, postpone bool) {
 		i, constraint := p.at, p.c
 		if bindable(constraint, sub) {
 			bound = append(bound, p)
-			continue
+			return
+		}
+		if postpone && awaitsAmbient(constraint, sub) {
+			awaiting = append(awaiting, p)
+			return
 		}
 		labels, tail, split := splitRigidTail(constraint, sub)
 		if !split {
 			solve(i, constraint)
-			continue
+			return
 		}
 		// The labels go in now — that keeps the surrounding row open — and the
 		// rigid tail waits, so a body's statement order cannot decide whether
@@ -163,12 +175,18 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			c := constraint
 			c.Left = types.Row{Labels: labels}
 			if !solve(i, c) {
-				continue
+				return
 			}
 		}
 		c := constraint
 		c.Left = types.Row{Tail: tail}
 		deferred = append(deferred, pending{at: i, c: c})
+	}
+	for _, p := range bounds {
+		place(p, true)
+	}
+	for _, p := range awaiting {
+		place(p, false)
 	}
 	// A deferred tail is solved as soon as something else has closed the
 	// surrounding row's own tail — an annotation, most often. Each pass may
@@ -443,4 +461,27 @@ func reconcileRows(t types.Type, sub Subst, bi *types.Builtins, sup *types.Suppl
 		}
 	}
 	return nil
+}
+
+// awaitsAmbient reports an inclusion whose subrow names an application with
+// unresolved arguments and whose superrow may still gain applications: its
+// tail is a flexible row variable. Such a constraint is solved after the
+// other inclusions so the final row, not a sibling occurrence, decides
+// whether the application is unique.
+func awaitsAmbient(c Constraint, sub Subst) bool {
+	left, lok := sub.Apply(c.Left).(types.Row)
+	right, rok := sub.Apply(c.Right).(types.Row)
+	if !lok || !rok {
+		return false
+	}
+	tail, ok := right.Tail.(*types.TVar)
+	if !ok || tail.Rigid {
+		return false
+	}
+	for _, label := range left.Labels {
+		if unresolvedEffectArgs(label.Args) {
+			return true
+		}
+	}
+	return false
 }

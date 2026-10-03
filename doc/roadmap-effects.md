@@ -164,17 +164,6 @@ These are not automatically prerequisites for the first coroutine milestone:
   Invalid use of an effect parameter as both an ordinary type and a row
   reports a kind mismatch; declaration acceptance alone does not establish
   support for row-kinded effect parameters.
-- **Sibling performs decide an application.** When two applications of one
-  effect are in scope, a perform whose arguments are still unresolved is
-  reported as `AMBIGUOUS EFFECT`, unless another perform of that effect in
-  the same body is already resolved: row unification pairs an unresolved
-  label with a resolved one of the same effect before the ambient row is
-  consulted (`unifyRows` in `internal/infer/unify.go`), so
-  `x = get(); ignore (get() ++ "!"); x` under `State Int` and `State String`
-  silently makes `x` a `String`, and `put (get() + 1); get() ++ "!"` reports
-  `Num String` instead of the ambiguity. The pairing is right under one
-  application and wrong under two; the retry should treat such a label as
-  unresolved whenever the ambient row offers several applications.
 - **Complete builtin IO interception.** It still depends on actual native
   declarations and evidence fitting a checked operation ABI. Fixed-signature
   domain effects and suspending interpretations remain useful independently.

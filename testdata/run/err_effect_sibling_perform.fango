@@ -1,0 +1,8 @@
+import State exposing (State, get, put)
+
+both : (() ->{State Int, State String | e} a) ->{e} a
+both action = State.run "s" { State.run 1 { action() } } |> { r -> r.value.value }
+
+-- The second `get()` is `State String`; the first says nothing about which
+-- application it means, and a sibling call must not decide for it.
+main() = print (both { x = get(); ignore (get() ++ "!"); x })
