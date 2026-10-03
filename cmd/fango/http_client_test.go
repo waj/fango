@@ -7,12 +7,14 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -174,5 +176,57 @@ func TestHTTPClientTLS(t *testing.T) {
 	}
 	if want := "secure hello\nrejected\nrejected\n"; string(out) != want {
 		t.Fatalf("output:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+// TestHTTPClientKeepAlive counts the connections a sequence of requests uses:
+// a connection is reused until the server closes it, says Connection: close,
+// or a response body is left with more than the client drains.
+func TestHTTPClientKeepAlive(t *testing.T) {
+	t.Parallel()
+	var connections atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("/a", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "a") })
+	mux.HandleFunc("/kill", func(w http.ResponseWriter, r *http.Request) {
+		conn, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		buffered.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nk")
+		buffered.Flush()
+		conn.Close()
+	})
+	mux.HandleFunc("/closing", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		io.WriteString(w, "c")
+	})
+	mux.HandleFunc("/large", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(bytes.Repeat([]byte("L"), 1<<20))
+	})
+	mux.HandleFunc("/small", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(bytes.Repeat([]byte("s"), 1000))
+	})
+	server := httptest.NewUnstartedServer(mux)
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	out, err := exec.Command(cliCompiledBinary(t, filepath.Join("testdata", "http_keepalive.fango")), server.URL).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	want := "/a 200 a\n/a 200 a\n/a 200 a\n/kill 200 k\n/a 200 a\n/closing 200 c\n/a 200 a\n/large 200 L\n/a 200 a\n/small 200 s\n/a 200 a\nOk ()\n"
+	if string(out) != want {
+		t.Fatalf("output:\n%s\nwant:\n%s", out, want)
+	}
+	// One connection until /kill, one until /closing, one until /large, and
+	// one for the rest, /small being drained.
+	if got := connections.Load(); got != 4 {
+		t.Fatalf("%d connections, want 4", got)
 	}
 }

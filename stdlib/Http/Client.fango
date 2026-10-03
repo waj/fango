@@ -94,16 +94,18 @@ defaultConfig = Config
     , caFile = Nothing
     }
 
-type Endpoint = { secure : Bool, host : String, port : Int, connectTimeoutMs : Int, caFile : Maybe String }
+-- `fresh` asks for a new connection rather than an idle one.
+type Endpoint = { secure : Bool, host : String, port : Int, connectTimeoutMs : Int, caFile : Maybe String, fresh : Bool }
 
--- A transport's handle on one connection.
-type Connection = Socket Net.Connection | Memory Int
+-- A transport's handle on one connection; a socket knows whether it was
+-- reused from the pool.
+type Connection = Socket Net.Connection Bool | Memory Int
 
 effect Http
     connect : Endpoint -> Result Error Connection
     transmit : Connection -> Bytes -> Int -> Result Error ()
     receive : Connection -> Int -> Int -> Result Error (Maybe Bytes)
-    release : Connection -> Result Error ()
+    release : Connection -> Bool -> Result Error ()
     currentConfig : () -> Config
 
 -- Running
@@ -120,19 +122,17 @@ fromNet result =
 foreign : Result Error a
 foreign = Err (Protocol (Http.InvalidMessage "connection belongs to another transport"))
 
-dial : Endpoint ->{IO} Result Error Connection
-dial endpoint =
-    dialed =
-        if endpoint.secure then Net.dialTls endpoint.host endpoint.port endpoint.connectTimeoutMs (Maybe.withDefault "" endpoint.caFile)
-        else Net.dialTimeout endpoint.host endpoint.port endpoint.connectTimeoutMs
-    case dialed of
-        Ok connection -> Ok (Socket connection)
+dial : Net.Pool -> Endpoint ->{IO} Result Error Connection
+dial pool endpoint =
+    roots = Maybe.withDefault "" endpoint.caFile
+    case Net.poolConnect pool endpoint.host endpoint.port endpoint.connectTimeoutMs endpoint.secure roots endpoint.fresh of
+        Ok connection -> Ok (Socket connection (Net.connectionReused connection))
         Err error -> Err (netError error)
 
 socketWrite : Connection -> Bytes -> Int ->{IO} Result Error ()
 socketWrite connection bytes timeout =
     case connection of
-        Socket socket ->
+        Socket socket _ ->
             case fromNet (Net.setWriteDeadline socket timeout) of
                 Ok _ -> fromNet (Net.writeConnectionBytes socket bytes)
                 Err error -> Err error
@@ -141,7 +141,7 @@ socketWrite connection bytes timeout =
 socketRead : Connection -> Int -> Int ->{IO} Result Error (Maybe Bytes)
 socketRead connection most timeout =
     case connection of
-        Socket socket ->
+        Socket socket _ ->
             case fromNet (Net.setReadDeadline socket timeout) of
                 Err error -> Err error
                 Ok _ ->
@@ -150,21 +150,25 @@ socketRead connection most timeout =
                         Err error -> Err error
         Memory _ -> foreign
 
-socketClose : Connection ->{IO} Result Error ()
-socketClose connection =
+socketRelease : Connection -> Bool ->{IO} Result Error ()
+socketRelease connection reusable =
     case connection of
-        Socket socket -> fromNet (Net.closeConnection socket)
+        Socket socket _ -> fromNet (Net.poolRelease socket reusable)
         Memory _ -> foreign
 
--- Runs requests over TCP with `config` as the global configuration.
+-- Runs requests over TCP with `config` as the global configuration. Idle
+-- connections are kept for reuse until `run` returns.
 run : Config -> (() ->{Http, Fail Error | e} a) ->{IO, Fail Error | e} a
 run config action =
-    handle action() of
-        connect endpoint -> resume (dial endpoint)
-        transmit connection bytes timeout -> resume (socketWrite connection bytes timeout)
-        receive connection most timeout -> resume (socketRead connection most timeout)
-        release connection -> resume (socketClose connection)
-        currentConfig () -> resume config
+    pool = Net.newPool 8 60000
+    Runtime.Scope.finally {
+        handle action() of
+            connect endpoint -> resume (dial pool endpoint)
+            transmit connection bytes timeout -> resume (socketWrite connection bytes timeout)
+            receive connection most timeout -> resume (socketRead connection most timeout)
+            release connection reusable -> resume (socketRelease connection reusable)
+            currentConfig () -> resume config
+    } { ignore (Net.closePool pool) }
 
 -- Runs `action` with the configuration adjusted. Overrides nest.
 configure : (Config -> Config) -> (() ->{Http | e} a) ->{Http | e} a
@@ -173,7 +177,7 @@ configure adjust action =
         connect endpoint -> resume (connect endpoint)
         transmit connection bytes timeout -> resume (transmit connection bytes timeout)
         receive connection most timeout -> resume (receive connection most timeout)
-        release connection -> resume (release connection)
+        release connection reusable -> resume (release connection reusable)
         currentConfig () -> resume (adjust currentConfig())
 
 type Exchange = { request : Bytes, response : Maybe Bytes }
@@ -194,7 +198,7 @@ stub respond action =
                     case respond exchange.request of
                         Ok bytes -> resume (Ok (if Bytes.length bytes == 0 then Nothing else Just bytes)) with { exchange | response = Just bytes }
                         Err error -> resume (Err error) with exchange
-        release _ -> resume (Ok ()) with exchange
+        release _ _ -> resume (Ok ()) with exchange
         currentConfig () -> resume defaultConfig with exchange
 
 -- Preparing requests
@@ -229,8 +233,8 @@ absolute config target =
                 Just base -> Url.resolve base target
                 Nothing -> failWith (InvalidUrl (Url.toString target))
 
-endpointOf : Config -> Url ->{Fail Error} Endpoint
-endpointOf config target =
+endpointOf : Config -> Url -> Bool ->{Fail Error} Endpoint
+endpointOf config target fresh =
     secure = case target.scheme of
         Just "http" -> False
         Just "https" -> True
@@ -245,7 +249,7 @@ endpointOf config target =
                     port = case target.port of
                         Just number -> number
                         Nothing -> if secure then 443 else 80
-                    Endpoint { secure = secure, host = host, port = port, connectTimeoutMs = config.connectTimeoutMs, caFile = config.caFile }
+                    Endpoint { secure = secure, host = host, port = port, connectTimeoutMs = config.connectTimeoutMs, caFile = config.caFile, fresh = fresh }
 
 hostHeader : Endpoint -> String
 hostHeader endpoint =
@@ -276,7 +280,7 @@ statusCode bytes =
             Just code -> if code >= 100 then Just code else Nothing
             Nothing -> Nothing
 
-statusLine : Bytes ->{Protocol} Int
+statusLine : Bytes ->{Protocol} (Int, Bool)
 statusLine line =
     http11 = Bytes.startsWith (Bytes.fromString "HTTP/1.1 ") line
     http10 = Bytes.startsWith (Bytes.fromString "HTTP/1.0 ") line
@@ -286,19 +290,21 @@ statusLine line =
         if Bytes.length line > 12 && afterCode /= Bytes.fromString " " then invalid (Http.Malformed "invalid status line")
         else
             case statusCode (Bytes.slice 9 12 line) of
-                Just code -> code
+                Just code -> (code, http11)
                 Nothing -> invalid (Http.Malformed "invalid status code")
 
+type Head = { status : Int, http11 : Bool, headers : List Header }
+
 -- Reads a status line and headers, skipping interim 1xx responses.
-readHead : Reader e -> Int ->{Protocol | e} (Int, List Header)
+readHead : Reader e -> Int ->{Protocol | e} Head
 readHead input limit =
     case Reader.readUntil input (Bytes.fromString "\r\n") limit of
         Reader.Found line ->
-            code = statusLine line
+            (code, http11) = statusLine line
             headers = Wire.headerLines input limit []
             if code == 101 then invalid (Http.Unsupported "protocol upgrade")
             else if code < 200 then readHead input limit
-            else (code, headers)
+            else Head { status = code, http11 = http11, headers = headers }
         Reader.Ended _ -> invalid (Http.Malformed "incomplete status line")
         Reader.Overflowed -> invalid Http.LineTooLong
 
@@ -311,30 +317,63 @@ gzipped headers =
         Just coding -> Http.equalAscii (String.trim coding) "gzip"
         Nothing -> False
 
+closes : List Header -> Bool
+closes headers =
+    List.foldl { value found -> found || List.foldl { part seen -> seen || Http.equalAscii (String.trim part) "close" } False (String.split "," value) }
+        False (Http.getHeaders "connection" headers)
+
+-- Reads what the caller left of a body, up to `most` bytes, so the connection
+-- can serve another request. A failure here only costs the connection.
+drain : Reader {Protocol, Fail Error | e} -> Int ->{Protocol, Fail Error | e} ()
+drain body most =
+    if most <= 0 then ()
+    else
+        chunk = Reader.readUpTo body most
+        if Bytes.length chunk == 0 then () else drain body (most - Bytes.length chunk)
+
+drainQuietly : Reader {Protocol, Fail Error | e} ->{e} ()
+drainQuietly body =
+    ignore (attempt {
+            handle drain body 65536 of
+                Http.invalid _ -> ()
+    })
+
+-- Scopes the body of a response whose head was read to `use`, and reports
+-- whether the connection can serve another request.
+{-# scoped s #-}
+responseBody : Url -> Bool -> Bool -> Int -> Head -> Reader {Fail Error | e} -> (Response s ->{s} a) ->{Protocol, Fail Error | e} (a, Bool)
+responseBody target headRequest decode headerLimit head input use =
+    bodyFraming =
+        if headRequest || head.status == 204 || head.status == 304 then NoBody
+        else Wire.responseFraming head.headers largest
+    (value, complete) = Wire.withBody bodyFraming input largest headerLimit { body ->
+        result =
+            if decode && bodyFraming /= NoBody && gzipped head.headers then
+                plain = Http.removeHeader "content-encoding" (Http.removeHeader "content-length" head.headers)
+                use (Response { url = target, status = head.status, headers = plain, body = GZip.decoding largest body })
+            else use (Response { url = target, status = head.status, headers = head.headers, body = body })
+        drainQuietly body
+        result
+    }
+    reusable = complete && head.http11 && bodyFraming /= UntilClose && closes head.headers == False
+    (value, reusable)
+
 -- Parses a response from `input` and scopes its body to `use`. A response to
 -- HEAD, and a 204 or 304, has no body; any other is framed by Content-Length,
 -- chunked encoding, or the connection closing. With `decode`, a gzip body is
 -- decompressed and loses the headers that described its encoded form.
 {-# scoped s #-}
-withResponse : Url -> Bool -> Bool -> Int -> Int -> Reader e -> (Response s ->{s} a) ->{Protocol | e} a
-withResponse target headRequest decode headerLimit bodyLimit input use =
-    (status, headers) = readHead input headerLimit
-    bodyFraming =
-        if headRequest || status == 204 || status == 304 then NoBody
-        else Wire.responseFraming headers bodyLimit
-    (value, _) = Wire.withBody bodyFraming input bodyLimit headerLimit { body ->
-        if decode && bodyFraming /= NoBody && gzipped headers then
-            plain = Http.removeHeader "content-encoding" (Http.removeHeader "content-length" headers)
-            use (Response { url = target, status = status, headers = plain, body = GZip.decoding largest body })
-        else use (Response { url = target, status = status, headers = headers, body = body })
-    }
+withResponse : Url -> Bool -> Bool -> Int -> Reader {Fail Error | e} -> (Response s ->{s} a) ->{Protocol, Fail Error | e} a
+withResponse target headRequest decode headerLimit input use =
+    head = readHead input headerLimit
+    (value, _) = responseBody target headRequest decode headerLimit head input use
     value
 
 -- Sending
 
--- One hop of a request: the caller's result, or where a redirect leads and
--- whether it keeps the method and body.
-type Step a = Done a | Follow Url Bool
+-- One hop of a request: the caller's result, where a redirect leads and
+-- whether it keeps the method and body, or a retry on a new connection.
+type Step a = Done a | Follow Url Bool | Retry
 
 redirectStatus : Int -> Bool
 redirectStatus status = status == 301 || status == 302 || status == 303 || status == 307 || status == 308
@@ -372,36 +411,61 @@ originOf target = (target.scheme, target.host, target.port)
 withoutCredentials : List Header -> List Header
 withoutCredentials headers = Http.removeHeader "authorization" (Http.removeHeader "proxy-authorization" headers)
 
+-- A request that may be sent again when a reused connection turns out closed.
+retryable : Request e -> Bool
+retryable request =
+    idempotent = List.foldl { method found -> found || method == request.method } False ["GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"]
+    idempotent && replayable request.body
+
+reused : Connection -> Bool
+reused connection =
+    case connection of
+        Socket _ again -> again
+        Memory _ -> False
+
 -- Sends one request to `target`. `hops` redirects were followed before it.
 {-# scoped s #-}
-exchange : Config -> Request {Http, Fail Error | e} -> Url -> Bool -> Int -> (Response s ->{s} a) ->{Http, Fail Error | e} Step a
-exchange config request target crossOrigin hops use =
-    endpoint = endpointOf config target
+exchange : Config -> Request {Http, Fail Error | e} -> Url -> Bool -> Int -> Bool -> (Response s ->{s} a) ->{Http, Fail Error | e} Step a
+exchange config request target crossOrigin hops fresh use =
+    endpoint = endpointOf config target fresh
     defaults = [Header { name = "User-Agent", value = config.userAgent } | if config.decompress then [Header { name = "Accept-Encoding", value = "gzip" }] else []]
     merged = overlay (overlay defaults config.headers) request.headers
     headers = if crossOrigin then withoutCredentials merged else merged
     decode = config.decompress && Http.hasHeader "accept-encoding" config.headers == False && Http.hasHeader "accept-encoding" request.headers == False
-    wireHeaders = [Header { name = "Host", value = hostHeader endpoint } | List.foldr { header rest -> [header | rest] } [Header { name = "Connection", value = "close" }] headers]
+    wireHeaders = [Header { name = "Host", value = hostHeader endpoint } | headers]
     framed = framedRequest request.method request.body
     protocol { Wire.checkMessage wireHeaders request.body framed }
-    Runtime.Scope.bracket { fromResult (connect endpoint) } { connection -> ignore (release connection) } { connection ->
+    Runtime.Scope.bracket { fromResult (connect endpoint) } { connection -> ignore (release connection False) } { connection ->
+        -- A reused connection the server already closed fails before any
+        -- response byte; such a request starts over on a new connection.
+        stale = reused connection && retryable request
         output = Writer
             { emit = { bytes -> fromResult (transmit connection bytes config.writeTimeoutMs) }
             , flush = { () }
             }
-        Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (request.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
-            wireHeaders request.body framed True
-        Reader.over (Source { pull = { fromResult (receive connection 65536 config.readTimeoutMs) } }) { input ->
-            protocol {
-                withResponse target (request.method == "HEAD") decode config.maxHeaderBytes largest input { response ->
-                    next = if config.maxRedirects > 0 then redirection request target response.status response.headers else Nothing
-                    case next of
-                        Just (location, keep) ->
-                            if hops >= config.maxRedirects then failWith TooManyRedirects else Follow location keep
-                        Nothing -> Done (use response)
-                }
-            }
+        written = attempt {
+            Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (request.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
+                wireHeaders request.body framed True
         }
+        case written of
+            Err error -> if stale then Retry else failWith error
+            Ok _ ->
+                (step, reusable) = Reader.over (Source { pull = { fromResult (receive connection 65536 config.readTimeoutMs) } }) { input ->
+                    case attempt { protocol { readHead input config.maxHeaderBytes } } of
+                        Err error -> if stale then (Retry, False) else failWith error
+                        Ok head ->
+                            protocol {
+                                responseBody target (request.method == "HEAD") decode config.maxHeaderBytes head input { response ->
+                                    next = if config.maxRedirects > 0 then redirection request target response.status response.headers else Nothing
+                                    case next of
+                                        Just (location, keep) ->
+                                            if hops >= config.maxRedirects then failWith TooManyRedirects else Follow location keep
+                                        Nothing -> Done (use response)
+                                }
+                            }
+                }
+                ignore (release connection reusable)
+                step
     }
 
 -- Sends `request` and streams the response to `use`, which may read the body
@@ -415,13 +479,14 @@ send request use =
     checkHeaders request.headers
     if Wire.allToken (Bytes.fromString request.method) 0 == False then failWith (Protocol (Http.InvalidMessage "invalid method")) else ()
     first = absolute config request.url
-    follow current target hops =
-        case exchange config current target (originOf target /= originOf first) hops use of
+    follow current target hops fresh =
+        case exchange config current target (originOf target /= originOf first) hops fresh use of
             Done value -> value
+            Retry -> follow current target hops True
             Follow next keep ->
                 following = if keep then { current | url = next } else { current | method = if current.method == "HEAD" then "HEAD" else "GET", body = Empty, url = next }
-                follow following next (hops + 1)
-    follow request first 0
+                follow following next (hops + 1) False
+    follow request first 0 False
 
 collect : Reader {Fail Error | e} -> Int -> List Bytes -> Int ->{Fail Error | e} Bytes
 collect reader limit parts size =

@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Net exposing (Connection, Error(..), Kind(..), Listener, accept, acceptAsync, closeConnection, dialTimeout, dialTls, listenerStopped, readConnectionBytes, setReadDeadline, setWriteDeadline, sink, sinkAsync, source, sourceAsync, stopListener, withClient, withListener, writeConnectionBytes)
+module Net exposing (Connection, Error(..), Kind(..), Listener, Pool, accept, acceptAsync, closeConnection, closePool, connectionReused, dialTimeout, dialTls, listenerStopped, newPool, poolConnect, poolRelease, readConnectionBytes, setReadDeadline, setWriteDeadline, sink, sinkAsync, source, sourceAsync, stopListener, withClient, withListener, writeConnectionBytes)
 
 import Async
 import Basics exposing (..)
@@ -54,6 +54,30 @@ dialTimeout = native
 -- in the PEM file at `roots`, unless it is "".
 dialTls : String -> Int -> Int -> String ->{IO} Result Error Connection
 dialTls = native
+
+-- Idle client connections kept per endpoint, shared safely between tasks.
+type Pool = Pool Runtime.Native.Any
+
+-- At most `maxIdle` idle connections per endpoint, each kept `idleMillis`.
+newPool : Int -> Int ->{IO} Pool
+newPool = native
+
+-- Leases an idle connection to the endpoint, unless `fresh`, or dials one like
+-- `dialTls` (when secure, trusting `roots`) or `dialTimeout`.
+poolConnect : Pool -> String -> Int -> Int -> Bool -> String -> Bool ->{IO} Result Error Connection
+poolConnect = native
+
+-- Ends a lease: a reusable connection returns to the pool, anything else is
+-- closed. Releasing again does nothing.
+poolRelease : Connection -> Bool ->{IO} Result Error ()
+poolRelease = native
+
+-- Whether a leased connection came from the pool rather than a new dial.
+connectionReused : Connection ->{IO} Bool
+connectionReused = native
+
+closePool : Pool ->{IO} Result Error ()
+closePool = native
 
 closeConnection : Connection ->{IO} Result Error ()
 closeConnection = native

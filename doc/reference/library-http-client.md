@@ -28,6 +28,16 @@ configure : (Config -> Config) -> (() ->{Http | e} a) ->{Http | e} a
 stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http, Fail Error | e} a) ->{Fail Error | e} a
 ```
 
+`run` keeps idle connections for reuse, up to 8 per scheme, host, and port,
+for up to 60 s each, and closes them when it returns. Tasks that inherit the
+handler share them. A connection returns to the pool when its response was
+read to the end, both sides speak HTTP/1.1, neither said `Connection: close`,
+and the body was framed by length or chunks. A body the caller leaves unread is
+drained if 64 KiB or less remains, and otherwise its connection is closed. An
+idle connection the server has closed is detected before reuse; if one still
+fails before any response byte arrives, an idempotent request whose body can
+be sent again is retried once on a new connection.
+
 `configure adjust action` runs `action` with `adjust` applied to the
 configuration in effect. Overrides nest and apply under every transport,
 `stub` included. A per-request timeout is a `configure` around that request.
@@ -37,8 +47,6 @@ the request's bytes exactly as the client wrote them and returns the bytes of a
 response, or an `Error` to fail the request with. It may use the caller's
 effects, for example to record requests. Under `stub`, requests run one at a
 time and the configuration starts from `defaultConfig`.
-
-Each request uses a new connection and sends `Connection: close`.
 
 ## Configuration
 

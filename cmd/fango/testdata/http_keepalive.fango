@@ -1,0 +1,29 @@
+import Bytes
+import Fail exposing (Fail)
+import Http.Client as Client
+import IO
+import List exposing (List)
+import Reader
+import Url
+
+-- Each step's request, in order; the server counts the connections they use.
+steps : List String
+steps = ["/a", "/a", "/a", "/kill", "/a", "/closing", "/a", "/large", "/a", "/small", "/a"]
+
+-- Reads one byte of the body and leaves the rest to the client.
+peek : String ->{Client.Http, Fail Client.Error} String
+peek path =
+    Client.send (Client.get (Client.url path)) { response ->
+        show response.status ++ " " ++ Bytes.toStringLossy (Reader.readUpTo response.body 1)
+    }
+
+main() =
+    case IO.args() of
+        [base] ->
+            config = { Client.defaultConfig | baseUrl = Url.parse base }
+            print (Client.attempt {
+                    Client.run config {
+                        List.each { path -> print (path ++ " " ++ peek path) } steps
+                    }
+            })
+        _ -> IO.exit 2

@@ -38,6 +38,12 @@ func listenerValue(value any) (*listener, error) {
 }
 
 func connectionValue(value any) (*connection, error) {
+	if l, ok := value.(*lease); ok {
+		if l == nil || l.done.Load() {
+			return nil, errors.New("closed connection")
+		}
+		value = l.conn
+	}
 	c, ok := value.(*connection)
 	if !ok || c == nil || c.closed.Load() {
 		return nil, errors.New("closed connection")
@@ -142,6 +148,12 @@ func DialTls(host string, port int64, millis int64, rootsPath string) (any, erro
 }
 
 func CloseConnection(value any) error {
+	if l, ok := value.(*lease); ok && l != nil {
+		if l.done.Swap(true) {
+			return nil
+		}
+		value = l.conn
+	}
 	c, ok := value.(*connection)
 	if !ok || c == nil {
 		return errors.New("closed connection")
@@ -269,4 +281,137 @@ func SetWriteDeadline(value any, millis int64) error {
 		deadline = time.Now().Add(time.Duration(millis) * time.Millisecond)
 	}
 	return c.value.SetWriteDeadline(deadline)
+}
+
+// A pool keeps idle client connections per endpoint. Each checkout is a fresh
+// lease, so releasing a lease twice, or after its connection went back to the
+// pool and out again, never touches the connection's next user.
+type pool struct {
+	mu      sync.Mutex
+	idle    map[string][]idleConnection
+	maxIdle int
+	timeout time.Duration
+	closed  bool
+}
+
+type idleConnection struct {
+	conn  *connection
+	since time.Time
+}
+
+type lease struct {
+	conn   *connection
+	pool   *pool
+	key    string
+	reused bool
+	done   atomic.Bool
+}
+
+func NewPool(maxIdle int64, idleMillis int64) any {
+	return &pool{idle: map[string][]idleConnection{}, maxIdle: int(maxIdle), timeout: time.Duration(idleMillis) * time.Millisecond}
+}
+
+func poolKey(host string, port int64, secure bool, roots string) string {
+	return fmt.Sprintf("%t|%s|%d|%s", secure, host, port, roots)
+}
+
+// alive reports whether an idle connection still looks open: the peer has
+// not closed it and sent nothing unasked.
+func alive(c *connection) bool {
+	if err := c.value.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+		return false
+	}
+	_, err := c.reader.Peek(1)
+	_ = c.value.SetReadDeadline(time.Time{})
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func (p *pool) take(key string) *connection {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for {
+		list := p.idle[key]
+		if len(list) == 0 {
+			return nil
+		}
+		last := list[len(list)-1]
+		p.idle[key] = list[:len(list)-1]
+		if time.Since(last.since) < p.timeout && alive(last.conn) {
+			return last.conn
+		}
+		_ = closeRaw(last.conn)
+	}
+}
+
+func closeRaw(c *connection) error {
+	if c.closed.Swap(true) {
+		return nil
+	}
+	return c.value.Close()
+}
+
+// PoolConnect leases an idle connection to the endpoint, unless fresh, or
+// dials a new one as DialTimeout or DialTls would.
+func PoolConnect(value any, host string, port int64, millis int64, secure bool, roots string, fresh bool) (any, error) {
+	p := value.(*pool)
+	key := poolKey(host, port, secure, roots)
+	if !fresh {
+		if c := p.take(key); c != nil {
+			return &lease{conn: c, pool: p, key: key, reused: true}, nil
+		}
+	}
+	var dialed any
+	var err error
+	if secure {
+		dialed, err = DialTls(host, port, millis, roots)
+	} else {
+		dialed, err = DialTimeout(host, port, millis)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &lease{conn: dialed.(*connection), pool: p, key: key}, nil
+}
+
+// PoolRelease ends a lease: a reusable connection goes back to the pool,
+// anything else is closed. Later releases of the same lease do nothing.
+func PoolRelease(value any, reusable bool) error {
+	l := value.(*lease)
+	if l.done.Swap(true) {
+		return nil
+	}
+	c := l.conn
+	if reusable && !c.closed.Load() {
+		p := l.pool
+		p.mu.Lock()
+		if !p.closed && len(p.idle[l.key]) < p.maxIdle {
+			_ = c.value.SetDeadline(time.Time{})
+			p.idle[l.key] = append(p.idle[l.key], idleConnection{conn: c, since: time.Now()})
+			p.mu.Unlock()
+			return nil
+		}
+		p.mu.Unlock()
+	}
+	return closeRaw(c)
+}
+
+func ConnectionReused(value any) bool {
+	l, ok := value.(*lease)
+	return ok && l.reused
+}
+
+// ClosePool closes every idle connection; leases still out close on release.
+func ClosePool(value any) error {
+	p := value.(*pool)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closed = true
+	for key, list := range p.idle {
+		for _, idle := range list {
+			_ = closeRaw(idle.conn)
+		}
+		delete(p.idle, key)
+	}
+	return nil
 }

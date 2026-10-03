@@ -86,6 +86,14 @@ so a failure reaches the caller's own `attempt` rather than the handler outside
 write); only then do `configure` overrides, which sit inside `run`, reach the
 transport.
 
+Idle connections live in a pool owned by `run` and implemented in `Net`'s
+native code, whose lock makes it safe across tasks without requiring `Async`.
+Each checkout is a new lease on a connection, and releasing a lease again does
+nothing. So the cleanup that closes a connection after a failed request can
+never close one a later request took from the pool. A request releases its
+lease explicitly once it knows whether the connection is reusable; the
+surrounding bracket's release only matters when the request fails.
+
 The request is written through an unbuffered writer over `transmit`. A
 `Writer.over` buffer would carry a local permission that the caller's body,
 typed before the request runs, cannot accept. The shared chunked and sized

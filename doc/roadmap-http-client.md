@@ -1,35 +1,13 @@
 # Roadmap: HTTP client
 
-The HTTP/1.1 [client](reference/library-http-client.md) with TLS, gzip, and
-redirects, the shared [bodies and errors](reference/library-http.md), and
+The HTTP/1.1 [client](reference/library-http-client.md) with TLS, gzip,
+redirects, and connection reuse, the shared
+[bodies and errors](reference/library-http.md), and
 [URLs](reference/library-url.md) are implemented; the
 [HTTP design](design/http.md#the-client-transport) explains the client's
-transport effect. This document tracks what remains: connection reuse and
-mocking. The [HTTP roadmap](roadmap-io.md) tracks the remaining server
+transport effect. This document tracks what remains: mocking, and the open
+questions below. The [HTTP roadmap](roadmap-io.md) tracks the remaining server
 follow-ups.
-
-## Connection reuse
-
-Every request uses a new connection and sends `Connection: close`. HC5b adds a
-pool to each `run`:
-
-- Idle connections are keyed by `Endpoint` without its timeout (secure,
-  host, port), with a limit on idle connections per key and an idle timeout.
-- `release` gains a flag saying whether the connection can be reused, and
-  returns a connection to the pool when the response was fully read, neither
-  side sent `Connection: close`, and nothing aborted. Redirect responses are
-  drained the same way before the next hop.
-  A response body that the callback left unread is drained up to a small
-  limit (64 KiB) and otherwise closed. This is the client side of the drain
-  policy that [the server roadmap](roadmap-io.md) also leaves open.
-- A reused connection can turn out to have been closed by the server. If it
-  fails before any response byte arrives, and the request is idempotent with
-  a body that can be sent again, the request is retried once on a new
-  connection.
-- The pool is shared by every task that inherits the handler, so it needs
-  explicit synchronization, through an `Async` channel or a pool backed by
-  native code. That choice is made in HC5b and ties into the cancellation
-  question below.
 
 ## Mocking
 
@@ -73,7 +51,7 @@ follow allocation order, not that order.
 | HC2 Client core over plain HTTP | HC1, HC6 (DONE) |
 | HC7 GZip | HC2 (DONE) |
 | HC4 TLS | HC2 (DONE) |
-| HC5 Redirects and keep-alive | HC2, HC6 |
+| HC5 Redirects and keep-alive | HC2, HC6 (DONE) |
 | HC3 Mock | HC2, the [test framework](roadmap-testing.md) |
 
 ### HC1 Module split
@@ -114,8 +92,7 @@ DONE. See [redirects](reference/library-http-client.md#redirects).
 
 #### HC5b Keep-alive
 
-The [connection pool](#connection-reuse), with draining, the retry rule, and
-a loopback test that counts accepted connections.
+DONE. See [running requests](reference/library-http-client.md#running-requests).
 
 ### HC7 GZip
 
@@ -128,7 +105,7 @@ and [server GZip](reference/library-http.md#routing-and-gzip).
   `Async.contextToken`), or should synchronous `Net` calls with deadlines be
   enough? `Net` already has `…Async` variants that take a context token, so
   `run`'s handler could use them when an `Async` handler is in scope without
-  `run` requiring `Async`. The answer also shapes the pool's synchronization.
+  `run` requiring `Async`.
 - A deadline for a whole request, as opposed to the idle timeouts per
   operation.
 - A server may answer before the client has sent the whole request body, for
