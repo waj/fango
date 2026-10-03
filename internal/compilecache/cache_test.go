@@ -117,6 +117,7 @@ func TestFingerprintFailureIsSticky(t *testing.T) {
 	fingerprint = &fingerprintResult{}
 	executablePath = func() (string, error) { return "/not/an/executable", nil }
 	calls := 0
+	cacheFiles.readHead = func(string) ([]byte, error) { return []byte("no build ID here"), nil }
 	cacheFiles.readFile = func(string) ([]byte, error) {
 		calls++
 		if calls == 1 {
@@ -129,6 +130,35 @@ func TestFingerprintFailureIsSticky(t *testing.T) {
 	}
 	if value, err := compilerFingerprint(); err == nil || value != "" || calls != 1 {
 		t.Fatalf("cached fingerprint failure = %q, %v; reads=%d", value, err, calls)
+	}
+}
+
+// The fingerprint reads the toolchain's build ID when the executable has one
+// and hashes the whole file only when it does not.
+func TestFingerprintPrefersTheGoBuildID(t *testing.T) {
+	head := []byte("\x00\x01\xff Go build ID: \"aaa/bbb/ccc/ddd\"\n \xff\x00")
+	if id, ok := goBuildID(head); !ok || id != "aaa/bbb/ccc/ddd" {
+		t.Fatalf("goBuildID = %q, %v", id, ok)
+	}
+	for _, missing := range []string{"", "\xff Go build ID: \"\"\n \xff", "\xff Go build ID: \"a//b\"\n \xff", "\xff Go build ID: \"unterminated"} {
+		if id, ok := goBuildID([]byte(missing)); ok {
+			t.Fatalf("goBuildID(%q) = %q, want none", missing, id)
+		}
+	}
+	oldFingerprint, oldExecutable, oldFiles := fingerprint, executablePath, cacheFiles
+	t.Cleanup(func() { fingerprint, executablePath, cacheFiles = oldFingerprint, oldExecutable, oldFiles })
+	executablePath = func() (string, error) { return "/not/an/executable", nil }
+	cacheFiles.readHead = func(string) ([]byte, error) { return head, nil }
+	cacheFiles.readFile = func(string) ([]byte, error) { return nil, errors.New("read the whole executable") }
+	fingerprint = &fingerprintResult{}
+	byID, err := compilerFingerprint()
+	if err != nil || byID == "" {
+		t.Fatalf("fingerprint from build ID = %q, %v", byID, err)
+	}
+	cacheFiles.readHead = func(string) ([]byte, error) { return []byte("\xff Go build ID: \"aaa/bbb/ccc/eee\"\n \xff"), nil }
+	fingerprint = &fingerprintResult{}
+	if other, err := compilerFingerprint(); err != nil || other == byID {
+		t.Fatalf("a different build ID kept the fingerprint %q (%v)", other, err)
 	}
 }
 

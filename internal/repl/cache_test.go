@@ -4,12 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/waj/fango/internal/compileevent"
 )
 
 type objectCache struct {
+	mu      sync.Mutex
 	objects map[string][]byte
 }
 
@@ -18,10 +20,14 @@ func newObjectCache() *objectCache {
 }
 
 func (c *objectCache) LoadObject(slot string) ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	data, ok := c.objects[slot]
 	return data, ok
 }
 func (c *objectCache) StoreObject(slot string, data []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.objects[slot] = append([]byte(nil), data...)
 }
 

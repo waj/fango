@@ -27,6 +27,7 @@ import (
 // one's contents.
 type tree struct {
 	once  sync.Once
+	dir   string
 	names map[string]bool
 	err   error
 
@@ -55,11 +56,15 @@ func lookup(rel string) (*tree, error) {
 	}
 	treesMu.Unlock()
 
-	dir, err := exactDirectory(root, rel)
-	if err != nil {
-		return nil, err
-	}
+	// The directory's exact spelling is checked with the index, once per
+	// process, rather than by listing every ancestor on every read.
 	t.once.Do(func() {
+		dir, err := exactDirectory(root, rel)
+		if err != nil {
+			t.err = err
+			return
+		}
+		t.dir = dir
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			t.err = err

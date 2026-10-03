@@ -129,10 +129,10 @@ func unify(a, b types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *m
 	// only to themselves, a mismatch against everything else — the direction
 	// that keeps an annotation's variables fully general (doc/design.md, "Type inference").
 	if av, ok := a.(*types.TVar); ok && !av.Rigid {
-		return bindVar(av, b, sub, bi)
+		return bindVar(av, b, sub, bi, sup)
 	}
 	if bv, ok := b.(*types.TVar); ok && !bv.Rigid {
-		return bindVar(bv, a, sub, bi)
+		return bindVar(bv, a, sub, bi, sup)
 	}
 	if av, ok := a.(*types.TVar); ok {
 		if bv, ok := b.(*types.TVar); ok && bv.ID == av.ID {
@@ -192,7 +192,38 @@ func rigidMismatch(a, b types.Type, v *types.TVar) *mismatch {
 
 // bindVar binds metavariable v to t, respecting kinds and the occurs check.
 // t is already walked and is not a bound variable.
-func bindVar(v *types.TVar, t types.Type, sub Subst, bi *types.Builtins) *mismatch {
+// bind writes one entry, recording what it replaces while a trial is open.
+func (sub Subst) bind(id int, t types.Type, sup *types.Supply) {
+	if sup != nil && sup.Trail != nil {
+		old, had := sub[id]
+		*sup.Trail = append(*sup.Trail, types.TrailEntry{ID: id, Old: old, Had: had})
+	}
+	sub[id] = t
+}
+
+// trial runs try against sub and keeps its writes only if it succeeds. An
+// enclosing trial sees the kept writes as its own, so it can still undo them.
+func (sub Subst) trial(sup *types.Supply, try func() *mismatch) *mismatch {
+	outer := sup.Trail
+	var trail []types.TrailEntry
+	sup.Trail = &trail
+	m := try()
+	sup.Trail = outer
+	if m != nil {
+		for i := len(trail) - 1; i >= 0; i-- {
+			if e := trail[i]; e.Had {
+				sub[e.ID] = e.Old
+			} else {
+				delete(sub, e.ID)
+			}
+		}
+	} else if outer != nil {
+		*outer = append(*outer, trail...)
+	}
+	return m
+}
+
+func bindVar(v *types.TVar, t types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
 	if tv, ok := t.(*types.TVar); ok && tv.ID == v.ID {
 		return nil
 	}
@@ -207,7 +238,7 @@ func bindVar(v *types.TVar, t types.Type, sub Subst, bi *types.Builtins) *mismat
 		if _, ok := t.(types.Row); ok {
 			return &mismatch{a: v, b: t, note: "an effect row cannot be used as a value type"}
 		}
-		sub[v.ID] = t
+		sub.bind(v.ID, t, sup)
 		return nil
 	case types.RowVar:
 		switch t := t.(type) {
@@ -215,10 +246,10 @@ func bindVar(v *types.TVar, t types.Type, sub Subst, bi *types.Builtins) *mismat
 			if t.Kind != types.RowVar {
 				return &mismatch{a: v, b: t, note: "an effect row cannot be a value type"}
 			}
-			sub[v.ID] = t
+			sub.bind(v.ID, t, sup)
 			return nil
 		case types.Row:
-			sub[v.ID] = t
+			sub.bind(v.ID, t, sup)
 			return nil
 		default:
 			return &mismatch{a: v, b: t, note: "an effect row cannot be a value type"}
@@ -462,7 +493,7 @@ func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup 
 				return nil
 			}
 			if !left.Rigid {
-				return bindVar(left, types.Row{Labels: missing, Tail: sup.FreshVar(types.RowVar)}, sub, bi)
+				return bindVar(left, types.Row{Labels: missing, Tail: sup.FreshVar(types.RowVar)}, sub, bi, sup)
 			}
 		}
 	}
@@ -473,7 +504,7 @@ func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup 
 					return nil
 				}
 				if tv, ok := superrow.Tail.(*types.TVar); ok && !tv.Rigid && tv.Kind == types.RowVar {
-					return bindVar(tv, sv, sub, bi)
+					return bindVar(tv, sv, sub, bi, sup)
 				}
 			}
 		}

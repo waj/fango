@@ -40,13 +40,25 @@ presents them as progress and build statistics behind its verbosity flags. An
 absent observer costs the pipeline nothing, which is what the commands install
 by default.
 
+The command disables the Go runtime's heap-profile sampling unless `GODEBUG`
+asks for a profile. The batch commands — `build`, `run`, and `check` — also run
+the collector at a quarter of its default frequency unless `GOGC` is set: a
+compile is short-lived and its heap is mostly garbage by the time it ends. The
+language server and the REPL are long-lived and keep the default.
+
 `internal/check` owns the semantic path, and its installer is shared: a batch
 command installs a whole entry graph, a REPL session installs its Prelude roots
 and then one prompt import increment at a time into the checker it keeps. The
 loader retains a merged AST only as a differential-test adapter; normal compilation consumes
 resolved modules in dependency-first order. Each module is checked against the
 declaration state already installed in the session, elaborated immediately,
-and semantically linted before the next module. Runtime and stage elaborations check their respective definitions. Core lint
+and semantically linted before the next module. What a module's object
+needs after that — its fingerprints, foreign scope names, and publication —
+reads only the finished object and copies taken when it was queued, so one
+background worker computes it, in module order, while later modules are
+checked; the summaries it produces are folded in before anything consults them
+(a cache lookup that found an artifact, or the end of the group), and the group
+waits for every artifact it publishes before it returns. Runtime and stage elaborations check their respective definitions. Core lint
 reconstructs structural summaries after transforms; it performs no lifetime flow
 analysis. Emission rechecks the owned Core against dependency signatures.
 The entry/dependency role and
@@ -108,26 +120,36 @@ Thus an importer never retains a foreign dependency's stale file pointer or
 blindly applies an old byte offset. Resolver objects contain only exported
 maps; installing one cannot expose private names.
 
+A group reads and decodes the artifacts in every slot it may consult before it
+checks its first module, across the available processors: reading depends on
+nothing the graph computes. Accepting an artifact — comparing its record with
+the dependencies' summaries — and installing it stay in dependency order. A
+decoded object belongs to its installation, so interning rewrites it in place
+rather than copying it; a nominal already rewritten is still looked up by the
+identity it was written with.
+
 Installing a decoded object defers its stage Core rather than installing it.
 Completing a module's stage snapshot elaborates its declarations against the
 installed stage definitions of its dependencies, so a module checked from
 source needs all of them and a compile whose modules all come from cache needs
-none. Deferred sections are forced in installation order immediately before
+none. Deferred sections are decoded concurrently, each through its own
+object's decoder, and installed in installation order, immediately before
 the first module is checked from source, and again before a prompt runs a
 splice, which is the only way the REPL reaches the evaluator without going
 through installation. A deferral holds the object's own decoder and remapper,
 so the stage half comes back as the same pointers for structure the installed
 half already holds and is interned against the same declarations; a section
 that cannot be read is a violated compiler invariant rather than a miss,
-because its object is already installed. Reading a section is also where the
-object's recorded stage fingerprint is checked against its contents, which
-installation therefore does not recompute.
+because its object is already installed. Its stage fingerprint, like the
+object's other own fingerprints, is carried by the verified frame and is not
+recomputed when the section is read.
 
-Module installation validates all decoded state before publication and uses a
-checker checkpoint for the remaining mutation. Types, effects, classes,
-instances, native/intrinsic metadata, IO identity, structural capture summaries,
-visibility, templates, and the staging evaluator commit together. Rollback
-retains fresh-supply advancement but restores every published table. Persistent
+Module installation validates all decoded state, instance cutoffs included,
+before it mutates the checker, so nothing after that point can reject the
+object. Types, effects, classes, instances, native/intrinsic metadata, IO
+identity, structural capture summaries, visibility, templates, and the staging
+evaluator commit together, and a rejected object leaves every published table
+as it was; fresh-supply advancement is retained. Persistent
 lookup treats any decode or compatibility failure as a miss and checks the
 owner normally. An owner whose dependencies are not all summarized is checked
 and left unpublished, as is every later consumer of it; caching never decides

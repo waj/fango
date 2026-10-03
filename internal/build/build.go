@@ -386,7 +386,11 @@ func stamp(files []codegen.File) []byte {
 // The differential test harness uses it to build every fixture in a single
 // invocation.
 func GoBuildPackages(dir, dest string, patterns ...string) error {
-	cmd := exec.Command("go", append([]string{"build", "-o", dest}, patterns...)...)
+	// The generated module usually sits inside the user's repository, where
+	// the toolchain would otherwise run git to stamp version-control status
+	// into every link — about a sixth of a warm link — for a tree that is
+	// generated, not versioned.
+	cmd := exec.Command("go", append([]string{"build", "-buildvcs=false", "-o", dest}, patterns...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOTOOLCHAIN=local")
 	out, err := cmd.CombinedOutput()

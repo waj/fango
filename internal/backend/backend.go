@@ -6,7 +6,9 @@
 package backend
 
 import (
+	"runtime"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/waj/fango/internal/check"
@@ -20,7 +22,9 @@ import (
 // Cache is the byte-storage seam for emitted units. A slot holds one owner's
 // current record and a store replaces it; whether the generated file that
 // record describes is still the right one is decided here. Missing, damaged,
-// and unwritable entries are misses; the backend never reports them.
+// and unwritable entries are misses; the backend never reports them. Owners
+// are stored as they are emitted, concurrently, so a cache must accept calls
+// from several goroutines at once.
 type Cache interface {
 	Load(slot string) ([]byte, bool)
 	Store(slot string, data []byte)
@@ -92,6 +96,7 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 	links := entryNativeLinks(result.Program)
 	closure := linkClosure(result.Graph)
 	files := make([]codegen.File, 0, len(units))
+	var work []emission
 	for _, unit := range units {
 		owner := ownerLabel(unit.Name)
 		record, recorded := emissionRecord(result, unit, summaries, closure, links, printMain)
@@ -116,21 +121,94 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 				s.artifact("emitted-cache-miss", owner, lookupStart, read)
 			}
 		}
-		unitProg := codegen.UnitProgram(result.Program, unit)
-		emitStart := s.begin("emission", owner)
-		file, err := codegen.EmitUnit(unitProg, result.Checker.B, unit, printMain)
-		if err != nil {
-			return nil, err
-		}
-		s.timed("emission", owner, emitStart)
-		if recorded && cache != nil {
-			storeStart := time.Now()
-			s.artifact("emitted-cache-store", owner, storeStart, storeUnit(cache, slot, record, file))
-		}
-		files = append(files, file)
+		work = append(work, emission{unit: unit, owner: owner, record: record, recorded: recorded, slot: slot})
+	}
+	if err := s.emit(result, cache, work, printMain); err != nil {
+		return nil, err
+	}
+	for _, w := range work {
+		files = append(files, w.file)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
+}
+
+// emission is one owner the cache could not supply.
+type emission struct {
+	unit     codegen.Unit
+	owner    string
+	record   unitRecord
+	recorded bool
+	slot     string
+
+	file    codegen.File
+	elapsed time.Duration
+	err     error
+	// stored is the artifact written for the owner, when it has a record.
+	stored, storing time.Duration
+	bytes           int
+}
+
+// emit lowers, emits, and stores the owners in work concurrently. Each owner
+// is lowered from its own Core and the dependency headers it links against,
+// so no two owners share mutable state. Events stay on the caller's goroutine
+// and in owner order; each owner's emission and store times are their share
+// of the phase's elapsed time, so the stages still add up to the build.
+func (s *Session) emit(result *check.Result, cache Cache, work []emission, printMain bool) error {
+	if len(work) == 0 {
+		return nil
+	}
+	for i := range work {
+		s.begin("emission", work[i].owner)
+	}
+	phase := time.Now()
+	next := make(chan int, len(work))
+	for i := range work {
+		next <- i
+	}
+	close(next)
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), len(work)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				w := &work[i]
+				start := time.Now()
+				w.file, w.err = codegen.EmitUnit(codegen.UnitProgram(result.Program, w.unit), result.Checker.B, w.unit, printMain)
+				w.elapsed = time.Since(start)
+				if w.err == nil && w.recorded && cache != nil {
+					start = time.Now()
+					w.bytes = storeUnit(cache, w.slot, w.record, w.file)
+					w.storing = time.Since(start)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(phase)
+	var busy time.Duration
+	for i := range work {
+		if work[i].err != nil {
+			return work[i].err
+		}
+		busy += work[i].elapsed + work[i].storing
+	}
+	share := func(d time.Duration) time.Duration {
+		if busy == 0 {
+			return 0
+		}
+		return time.Duration(float64(elapsed) * float64(d) / float64(busy))
+	}
+	for i := range work {
+		s.Observe.Report(compileevent.Event{Stage: "emission", Owner: work[i].owner, Duration: share(work[i].elapsed)})
+	}
+	for i := range work {
+		if work[i].recorded && cache != nil {
+			s.Observe.Report(compileevent.Event{Stage: "emitted-cache-store", Owner: work[i].owner, Duration: share(work[i].storing), Bytes: work[i].bytes})
+		}
+	}
+	return nil
 }
 
 // unitSlot names the one artifact this owner keeps. The entry answers to its

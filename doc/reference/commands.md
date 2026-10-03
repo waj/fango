@@ -176,7 +176,11 @@ check, and the module line alone cannot say which part a pause belongs to. It
 then adds a table of where the time went and what the cache moved. Stages that
 belong to no module — writing the generated project, and the Go toolchain — are
 timed by the command itself, and time that belongs to no stage is reported as
-`other`, so the rows always reconcile with the total — as measured, that is:
+`other`, so the rows always reconcile with the total. Work the compiler runs
+concurrently — emitting several modules at once, reading deferred stage Core,
+storing checked artifacts while later modules are checked — counts the time the
+build spent on it, divided among its modules in proportion to each one's work,
+so overlapping work is not counted twice. The rows reconcile as measured, that is:
 each duration is rounded to the unit it is shown in, and a build of a second or
 more is shown in seconds, so adding up a printed column lands near the printed
 total rather than on it. Modules that arrive from

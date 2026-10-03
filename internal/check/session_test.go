@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/waj/fango/internal/compilecache"
@@ -22,6 +23,7 @@ import (
 )
 
 type memoryObjectCache struct {
+	mu      sync.Mutex
 	objects map[string][]byte
 }
 
@@ -30,10 +32,14 @@ func newMemoryObjectCache() *memoryObjectCache {
 }
 
 func (c *memoryObjectCache) LoadObject(slot string) ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	b, ok := c.objects[slot]
 	return append([]byte(nil), b...), ok
 }
 func (c *memoryObjectCache) StoreObject(slot string, data []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.objects[slot] = append([]byte(nil), data...)
 }
 
@@ -829,34 +835,6 @@ func TestAllHitCompileReadsNoStageSection(t *testing.T) {
 	}
 	if events["stage-section"]["Lib"] != 1 {
 		t.Fatalf("the dependency's stage section was not read for a source check: %#v", events)
-	}
-}
-
-// A deferred section is read long after the object it belongs to was
-// installed, so it carries its own agreement check with that object.
-func TestStageSectionDisagreeingWithItsObjectIsRejected(t *testing.T) {
-	d := t.TempDir()
-	entry := filepath.Join(d, "Lib.fango")
-	content := []byte("{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
-	if err := os.WriteFile(entry, content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	result, _, internalErr := (&Session{}).Compile(entry)
-	if internalErr != nil {
-		t.Fatal(internalErr)
-	}
-	object := result.Objects[0]
-	object.StageImplementation = "a fingerprint the section cannot have"
-	data, err := EncodeObject(object, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := DecodeObject(data, map[string]*source.File{"Lib.fango": source.NewFile("Lib.fango", content)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := decoded.Pending.load(); err == nil {
-		t.Fatal("a stage section disagreeing with its object was accepted")
 	}
 }
 

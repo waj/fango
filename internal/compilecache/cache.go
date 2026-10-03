@@ -12,8 +12,10 @@
 package compilecache
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -47,11 +49,59 @@ var executablePath = os.Executable
 var cacheRoots = build.CacheDirs
 
 type fileOperations struct {
+	readHead func(string) ([]byte, error)
 	readFile func(string) ([]byte, error)
 }
 
 // cacheFiles reads the running executable for the compiler fingerprint.
-var cacheFiles = fileOperations{os.ReadFile}
+var cacheFiles = fileOperations{readHead, os.ReadFile}
+
+// buildIDSpan is how far into an executable the Go linker's build ID is
+// sought. It sits at the start of the text segment, a page into the file.
+const buildIDSpan = 64 << 10
+
+func readHead(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	head := make([]byte, buildIDSpan)
+	n, err := io.ReadFull(f, head)
+	if err == io.ErrUnexpectedEOF || err == io.EOF {
+		err = nil
+	}
+	return head[:n], err
+}
+
+// goBuildID returns the build ID the Go toolchain embeds in an executable.
+// Its last component is a digest of the linked binary's own content, so it
+// identifies a compiler build as well as hashing the file does, without
+// reading the whole file. An executable without a well-formed one — linked
+// with -buildid= — has no such digest.
+func goBuildID(head []byte) (string, bool) {
+	const prefix, suffix = "\xff Go build ID: \"", "\"\n \xff"
+	i := bytes.Index(head, []byte(prefix))
+	if i < 0 {
+		return "", false
+	}
+	rest := head[i+len(prefix):]
+	j := bytes.Index(rest, []byte(suffix))
+	if j < 0 {
+		return "", false
+	}
+	id := string(rest[:j])
+	parts := strings.Split(id, "/")
+	if len(parts) != 2 && len(parts) != 4 {
+		return "", false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return "", false
+		}
+	}
+	return id, true
+}
 
 // compilerFingerprint selects a namespace per compiler build. Both its value
 // and any failure to compute it are stable for the process, so a compiler that
@@ -61,6 +111,16 @@ func compilerFingerprint() (string, error) {
 		path, err := executablePath()
 		if err != nil {
 			fingerprint.err = err
+			return
+		}
+		head, err := cacheFiles.readHead(path)
+		if err != nil {
+			fingerprint.err = err
+			return
+		}
+		if id, ok := goBuildID(head); ok {
+			h := sha256.Sum256([]byte("go build ID " + id))
+			fingerprint.value = hex.EncodeToString(h[:])
 			return
 		}
 		data, err := cacheFiles.readFile(path)

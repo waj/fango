@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/waj/fango/internal/check"
@@ -12,6 +13,7 @@ import (
 )
 
 type memoryCache struct {
+	mu      sync.Mutex
 	entries map[string][]byte
 	loads   int
 }
@@ -19,6 +21,8 @@ type memoryCache struct {
 func newMemoryCache() *memoryCache { return &memoryCache{entries: map[string][]byte{}} }
 
 func (c *memoryCache) Load(key string) ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	data, ok := c.entries[key]
 	if ok {
 		c.loads++
@@ -27,6 +31,8 @@ func (c *memoryCache) Load(key string) ([]byte, bool) {
 }
 
 func (c *memoryCache) Store(key string, data []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.entries[key] = append([]byte(nil), data...)
 }
 

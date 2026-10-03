@@ -1,7 +1,6 @@
 package infer
 
 import (
-	"maps"
 	"sort"
 
 	"github.com/waj/fango/internal/diag"
@@ -108,10 +107,9 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 				if !lok || !rok || len(left.Labels) == 0 || awaitsAmbient(p.c, sub) {
 					continue
 				}
-				trial := maps.Clone(sub)
-				if includeRows(types.Row{Labels: left.Labels}, right, trial, bi, sup) == nil {
-					maps.Copy(sub, trial)
-				}
+				sub.trial(sup, func() *mismatch {
+					return includeRows(types.Row{Labels: left.Labels}, right, sub, bi, sup)
+				})
 			}
 			if labels() == before {
 				break

@@ -166,7 +166,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 	specializeScalars(p, kept, ck)
 	inlineDefs(p.Defs, context, ck)
 	bindRows(p.Defs, ck)
-	errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, source.Span{})...)
+	errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, ck.B, context), ck, source.Span{})...)
 	installCaptureSummaries(p.Defs, ck)
 	core.SummarizeABI(p, context)
 	return p.Defs, errs
@@ -222,11 +222,11 @@ func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 // DeclIn is Decl with the session's installed definitions as capture-analysis
 // context, so a prompt definition's calls into installed runners are checked.
 func DeclIn(info infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {
-	return DeclsIn([]infer.DeclInfo{info}, context, ck)
+	return DeclsIn([]infer.DeclInfo{info}, ck, context)
 }
 
 // DeclsIn elaborates complete dependency groups before analyzing captures.
-func DeclsIn(infos []infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {
+func DeclsIn(infos []infer.DeclInfo, ck *infer.Checker, contexts ...[]core.Def) ([]core.Def, []diag.Error) {
 	var defs []core.Def
 	var errs []diag.Error
 	for _, info := range infos {
@@ -245,7 +245,7 @@ func DeclsIn(infos []infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]c
 	if len(errs) == 0 {
 		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 		bindRows(p.Defs, ck)
-		errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, info.NameSpan)...)
+		errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, ck.B, contexts...), ck, info.NameSpan)...)
 		installCaptureSummaries(defs, ck)
 		for i := range defs {
 			for _, err := range core.VerifyResumeStructure(defs[i].Body) {
@@ -495,7 +495,7 @@ func ExprIn(e ast.Expr, context []core.Def, ck *infer.Checker) (core.Expr, []cor
 		defs = append(defs, core.Def{Name: "_expression", Type: ce.Type(), Control: core.ExprControl(ce), Body: ce})
 		bindRows(defs, ck)
 		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
-		el.errs = append(el.errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, e.Span())...)
+		el.errs = append(el.errs, captureDiagnostics(core.InferCapturesIn(p, ck.B, context), ck, e.Span())...)
 		for _, err := range core.VerifyResumeStructure(ce) {
 			el.errs = append(el.errs, diag.Errorf(e.Span(), "INTERNAL RESUME INVARIANT", "%v", err))
 		}

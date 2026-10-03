@@ -15,6 +15,8 @@ import (
 // ObjectCache is the byte-storage seam for checked module objects. A slot
 // holds one module's current artifact and a store replaces it; deciding
 // whether that artifact is still the right one belongs here, not to the store.
+// An installer stores objects in the background while it checks later
+// modules, so a cache must accept calls from several goroutines at once.
 type ObjectCache interface {
 	LoadObject(slot string) ([]byte, bool)
 	StoreObject(slot string, data []byte)
@@ -115,70 +117,99 @@ func decodeRecord(data []byte, base, module string, summaries map[string]moduleS
 	return record, nil
 }
 
-// loadCachedObject also reports the artifact bytes it read, whether or not the
-// slot proved usable, so a miss can be told apart from a cache that was never
-// consulted.
-func loadCachedObject(cache ObjectCache, slot, base string, module modules.ResolvedModule, summaries map[string]moduleSummary, sources map[string]*source.File) (*ModuleObject, int, bool) {
+// cachedObject is a slot's artifact read and decoded, not yet accepted: its
+// record still has to match the graph, which needs the dependencies' summaries.
+// read is the artifact's size whether or not it proves usable, so a miss can
+// be told apart from a cache that was never consulted.
+type cachedObject struct {
+	read   int
+	record []byte
+	object *ModuleObject
+}
+
+// readCachedObject reads and decodes a slot. It depends on nothing the graph
+// computes, so an installer reads every slot it will consult concurrently,
+// before checking the first module.
+func readCachedObject(cache ObjectCache, slot string, sources map[string]*source.File) cachedObject {
 	data, ok := cache.LoadObject(slot)
 	if !ok {
-		return nil, 0, false
+		return cachedObject{}
 	}
 	read := len(data)
 	recordData, sections, err := SplitObject(data)
 	if err != nil {
-		return nil, read, false
-	}
-	record, err := decodeRecord(recordData, base, module.Name, summaries)
-	if err != nil {
-		return nil, read, false
+		return cachedObject{read: read}
 	}
 	object, err := DecodeObjectSections(sections, sources)
-	if err != nil || object.State == nil || object.State.Name != module.Name {
-		return nil, read, false
+	if err != nil {
+		return cachedObject{read: read}
+	}
+	return cachedObject{read: read, record: recordData, object: object}
+}
+
+// acceptCachedObject decides whether a decoded artifact is this module as the
+// graph now stands.
+func acceptCachedObject(cached cachedObject, base string, module modules.ResolvedModule, summaries map[string]moduleSummary) (*ModuleObject, bool) {
+	object := cached.object
+	if object == nil {
+		return nil, false
+	}
+	record, err := decodeRecord(cached.record, base, module.Name, summaries)
+	if err != nil {
+		return nil, false
+	}
+	if object.State == nil || object.State.Name != module.Name {
+		return nil, false
 	}
 	if len(object.CheckStageDependencies) != len(record.StageDependencies) {
-		return nil, read, false
+		return nil, false
 	}
 	for i, input := range record.StageDependencies {
 		if object.CheckStageDependencies[i] != input.Module {
-			return nil, read, false
+			return nil, false
 		}
 	}
 	// The frame verifies the object bytes, including the own fingerprints
 	// computed when it was published. Recomputing them over the decoded Core
 	// on every hit costs more than decoding the object itself.
 	ownSemantic, ownABI := object.OwnSemantic, object.OwnABI
-	// The stage fingerprint is checked against stage Core when that deferred
-	// section is read, rather than forcing it on every cache hit.
+	// The stage fingerprint is carried by the frame like the others; stage
+	// Core is a deferred section that a hit does not read.
 	ownStage := object.StageImplementation
 	semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Semantic })
 	abiDeps, abiOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.ABI })
 	stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, summaries, func(s moduleSummary) string { return s.Stage })
 	unfoldingDeps, unfoldingOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Unfolding })
 	if !semanticOK || !abiOK || !stageOK || !unfoldingOK || ownSemantic == "" || ownABI == "" || ownStage == "" || object.OwnUnfolding == "" || object.Implementation == "" {
-		return nil, read, false
+		return nil, false
 	}
 	object.Unfolding = combinedFingerprint("unfolding", object.OwnUnfolding, unfoldingDeps)
 	if object.Semantic != combinedFingerprint("semantic", ownSemantic, semanticDeps) ||
 		object.ABI != combinedFingerprint("abi", ownABI, abiDeps) {
-		return nil, read, false
+		return nil, false
 	}
 	object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
-	return object, read, true
+	return object, true
 }
 
-// publishCachedObject reports the bytes it wrote, or zero when the object
-// could not be published. A failure to write stays silent: it is an
-// optimization declining, not a diagnostic.
-func publishCachedObject(cache ObjectCache, slot, base string, object *ModuleObject, summaries map[string]moduleSummary) int {
+// encodeRecord is the part of publishing that reads the graph's summaries,
+// which later modules extend; the rest touches only the object.
+func encodeRecord(base string, object *ModuleObject, summaries map[string]moduleSummary) ([]byte, bool) {
 	record, ok := makeRecord(base, object, summaries)
 	if !ok {
-		return 0
+		return nil, false
 	}
 	recordData, err := json.Marshal(record)
 	if err != nil {
-		return 0
+		return nil, false
 	}
+	return recordData, true
+}
+
+// storeCachedObject reports the bytes it wrote, or zero when the object could
+// not be published. A failure to write stays silent: it is an optimization
+// declining, not a diagnostic.
+func storeCachedObject(cache ObjectCache, slot string, object *ModuleObject, recordData []byte) int {
 	data, err := EncodeObject(object, recordData)
 	if err != nil {
 		return 0

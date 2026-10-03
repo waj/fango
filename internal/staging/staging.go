@@ -10,8 +10,10 @@ import (
 
 	"context"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/waj/fango/internal/compileevent"
 
@@ -33,10 +35,13 @@ type Observer = compileevent.Observer
 // tell reuse from work.
 func (s *Session) Observe(observe Observer) { s.ev.observe = observe }
 
-// deferred is one module's stage Core, recorded but not yet read. load also
+// deferred is one module's stage Core, recorded but not yet read. read is the
+// part of reading it that touches nothing shared, so the sections being forced
+// together read concurrently; load then installs each, in order. load also
 // reports the encoded size of the section it read, for cache accounting.
 type deferred struct {
 	owner string
+	read  func()
 	load  func() ([]core.Def, []Group, int, error)
 }
 
@@ -71,8 +76,8 @@ func Install(ck *infer.Checker) *Session {
 // snapshot elaborates a module's declarations against the installed stage
 // definitions of its dependencies, so a single module checked from source
 // needs all of them; a compile whose modules all come from cache needs none.
-func (s *Session) Defer(owner string, load func() ([]core.Def, []Group, int, error)) {
-	s.ev.pending = append(s.ev.pending, deferred{owner: owner, load: load})
+func (s *Session) Defer(owner string, read func(), load func() ([]core.Def, []Group, int, error)) {
+	s.ev.pending = append(s.ev.pending, deferred{owner: owner, read: read, load: load})
 }
 
 // Force installs every deferred section in the order it was recorded. Callers
@@ -84,16 +89,58 @@ func (s *Session) Force() error { return s.ev.force() }
 func (ev *evaluator) force() error {
 	pending := ev.pending
 	ev.pending = nil
-	for _, section := range pending {
+	shares := readAll(pending)
+	for n, section := range pending {
 		start := time.Now()
 		defs, groups, size, err := section.load()
 		if err != nil {
 			return fmt.Errorf("stage Core for module %s: %w", section.owner, err)
 		}
-		ev.observe.Report(compileevent.Event{Stage: "stage-section", Owner: section.owner, Duration: time.Since(start), Bytes: size})
+		ev.observe.Report(compileevent.Event{Stage: "stage-section", Owner: section.owner, Duration: shares[n] + time.Since(start), Bytes: size})
 		(&Session{ev: ev}).InstallCore(defs, groups)
 	}
 	return nil
+}
+
+// readAll runs the sections' independent reads across the available
+// processors and returns when all of them are done. Each section answers for
+// its share of the elapsed time, in proportion to its own work, so the sections
+// still add up to the time the build spent reading them.
+func readAll(pending []deferred) []time.Duration {
+	busy := make([]time.Duration, len(pending))
+	next := make(chan int, len(pending))
+	for n, section := range pending {
+		if section.read != nil {
+			next <- n
+		}
+	}
+	close(next)
+	start := time.Now()
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), len(next)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := range next {
+				begin := time.Now()
+				pending[n].read()
+				busy[n] = time.Since(begin)
+			}
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+	var total time.Duration
+	for _, d := range busy {
+		total += d
+	}
+	shares := make([]time.Duration, len(pending))
+	for n, d := range busy {
+		if total > 0 {
+			shares[n] = time.Duration(float64(elapsed) * float64(d) / float64(total))
+		}
+	}
+	return shares
 }
 
 // BeginModule resets compile-time dependency collection for one owner. Every
@@ -388,8 +435,7 @@ func (ev *evaluator) sync() []diag.Error {
 	var groupCutoffs [][]infer.DeclRef
 	for i := ev.installedGroups; i < nextGroups; i++ {
 		group := ev.ck.CompletionGroups[i]
-		context := append(append([]core.Def(nil), ev.defs...), defs...)
-		add(elaborate.DeclsIn(group.Infos, context, ev.ck))
+		add(elaborate.DeclsIn(group.Infos, ev.ck, ev.defs, defs))
 		groupEnds = append(groupEnds, len(defs))
 		groupCutoffs = append(groupCutoffs, group.Cutoff)
 	}

@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/infer"
@@ -14,8 +17,9 @@ import (
 )
 
 // InstallObject interns a decoded module object into ck and installs its stage
-// Core without replaying source inference or elaboration. The mutation is
-// transactional; the fresh supply intentionally remains advanced on failure.
+// Core without replaying source inference or elaboration. Everything that can
+// reject the object is checked before ck is mutated, so a failure leaves ck as
+// it was; the fresh supply intentionally remains advanced.
 //
 // A decoded object's stage Core is deferred rather than installed, because
 // nothing needs it until some module is checked from source. The deferral
@@ -31,22 +35,31 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 	if err := r.remap(); err != nil {
 		return err
 	}
-	*object = *r.object
-	object.Pending = pending
 	state := object.State
 	compatBase := &infer.ModuleState{Instances: append([]*infer.InstanceInfo(nil), ck.Instances...), Derivers: ck.Derivers}
 	if errs := infer.ValidateModuleStates([]*infer.ModuleState{compatBase, state}); len(errs) != 0 {
 		return fmt.Errorf("module compatibility: %s: %s", errs[0].Title, errs[0].Body)
 	}
-	restore := ck.Checkpoint()
-	committed := false
-	defer func() {
-		if !committed {
-			restore()
-		}
-	}()
 	if err := validateInstall(ck, state); err != nil {
 		return err
+	}
+	// Each instance's cutoff names instances before it, installed or in this
+	// object, and freezes the instance environment at the latest of them.
+	refs := map[infer.DeclRef]int{}
+	for i, instance := range ck.Instances {
+		refs[instance.Ref] = i + 1
+	}
+	limits := make([]int, len(state.Instances))
+	for i, instance := range state.Instances {
+		position := len(ck.Instances) + i + 1
+		refs[instance.Ref] = position
+		for _, ref := range instance.Cutoff {
+			n, ok := refs[ref]
+			if !ok {
+				return fmt.Errorf("instance %s has unknown cutoff reference %v", instance.Name, ref)
+			}
+			limits[i] = max(limits[i], n)
+		}
 	}
 	for name, alias := range state.Aliases {
 		ck.Aliases[name] = alias
@@ -76,25 +89,9 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 	for name, method := range state.Methods {
 		ck.Methods[name] = method
 	}
-	refs := map[infer.DeclRef]int{}
-	for i, instance := range ck.Instances {
-		refs[instance.Ref] = i + 1
-	}
-	for _, instance := range state.Instances {
-		refs[instance.Ref] = len(ck.Instances) + 1
-		limit := 0
-		for _, ref := range instance.Cutoff {
-			n, ok := refs[ref]
-			if !ok {
-				return fmt.Errorf("instance %s has unknown cutoff reference %v", instance.Name, ref)
-			}
-			if n > limit {
-				limit = n
-			}
-		}
-		instance.Limit = limit
+	for i, instance := range state.Instances {
+		instance.Limit = limits[i]
 		ck.Instances = append(ck.Instances, instance)
-		refs[instance.Ref] = len(ck.Instances)
 	}
 	for name, scheme := range state.Schemes {
 		ck.Env.Bind(name, scheme)
@@ -128,18 +125,17 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 	ck.InstanceImports[state.Name] = visible
 	ck.Templates.Append(object.Templates)
 	if pending != nil {
-		stage.Defer(state.Name, func() ([]core.Def, []staging.Group, int, error) { return r.stage(pending) })
+		stage.Defer(state.Name, pending.decode, func() ([]core.Def, []staging.Group, int, error) { return r.stage(pending) })
 	} else {
 		stage.InstallCore(object.Stage, object.StageGroups)
 	}
-	committed = true
 	return nil
 }
 
 // stage reads and interns a deferred stage section. Decoding it through the
 // object's own decoder returns the same pointers for structure the installed
-// half already holds, and this remapper's memo maps those to the copies it
-// installed, so the two halves cannot acquire disagreeing identities.
+// half already holds, and this remapper's memo recognizes those as already
+// remapped, so the two halves cannot acquire disagreeing identities.
 func (r *remapper) stage(pending *PendingStage) ([]core.Def, []staging.Group, int, error) {
 	size := pending.size()
 	payload, err := pending.load()
@@ -147,15 +143,11 @@ func (r *remapper) stage(pending *PendingStage) ([]core.Def, []staging.Group, in
 		return nil, nil, 0, err
 	}
 	r.extend(reflect.ValueOf(payload))
-	v, err := r.rewrite(reflect.ValueOf(payload))
-	if err != nil {
-		return nil, nil, 0, err
-	}
+	r.pointer(reflect.ValueOf(payload))
 	if r.err != nil {
 		return nil, nil, 0, r.err
 	}
-	out := v.Interface().(*stagePayload)
-	return out.Stage, out.Groups, size, nil
+	return payload.Stage, payload.Groups, size, nil
 }
 
 func validateInstall(ck *infer.Checker, state *infer.ModuleState) error {
@@ -199,17 +191,22 @@ type remapper struct {
 	scopes                   map[types.ScopeID]types.ScopeID
 	resumes                  map[types.ResumeID]types.ResumeID
 	memo                     map[uintptr]reflect.Value
-	ownedADTs                map[*types.ADTInfo]bool
-	ownedCtors               map[*types.CtorInfo]bool
-	ownedEffects             map[*types.EffectInfo]bool
-	ownedOps                 map[*types.EffectOp]bool
-	ownedClasses             map[*types.ClassInfo]bool
-	err                      error
+	// written holds the identity each remapped nominal was written with.
+	// Remapping in place overwrites TCon.Unique, and a later lookup through
+	// the same node must still ask about the identity it was written with;
+	// a node not yet remapped still carries it.
+	written      map[*types.TCon]int
+	ownedADTs    map[*types.ADTInfo]bool
+	ownedCtors   map[*types.CtorInfo]bool
+	ownedEffects map[*types.EffectInfo]bool
+	ownedOps     map[*types.EffectOp]bool
+	ownedClasses map[*types.ClassInfo]bool
+	err          error
 }
 
 func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *remapper {
 	r := &remapper{ck: ck, object: object, templateOld: object.TemplateBase, templateNew: templateBase,
-		unique: map[int]int{}, effect: map[int]int{}, vars: map[int]int{}, captures: map[types.CaptureVar]types.CaptureVar{}, scopes: map[types.ScopeID]types.ScopeID{}, resumes: map[types.ResumeID]types.ResumeID{}, memo: map[uintptr]reflect.Value{},
+		unique: map[int]int{}, effect: map[int]int{}, vars: map[int]int{}, captures: map[types.CaptureVar]types.CaptureVar{}, scopes: map[types.ScopeID]types.ScopeID{}, resumes: map[types.ResumeID]types.ResumeID{}, memo: map[uintptr]reflect.Value{}, written: map[*types.TCon]int{},
 		ownedADTs: map[*types.ADTInfo]bool{}, ownedCtors: map[*types.CtorInfo]bool{}, ownedEffects: map[*types.EffectInfo]bool{}, ownedOps: map[*types.EffectOp]bool{}, ownedClasses: map[*types.ClassInfo]bool{}}
 	for _, adt := range object.State.ADTs {
 		r.ownedADTs[adt] = true
@@ -275,16 +272,11 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 	for _, class := range object.State.Classes {
 		r.ownedClasses[class] = true
 	}
-	installedScopes := map[string]types.ScopeID{}
-	// Keep every contract alias: importing another module can add an earlier
-	// alphabetical name for the same durable scope.
-	for name, summary := range ck.CaptureSummaries {
-		for index, id := range summary.Captures.Scopes {
-			installedScopes[fmt.Sprintf("%s#%d", name, index)] = id
-		}
-	}
+	// A written scope is named `contract#index` after the installed capture
+	// contract that declares it. Any alias resolves: importing another module
+	// can add an earlier alphabetical name for the same durable scope.
 	for id, name := range object.ScopeNames {
-		if installed := installedScopes[name]; installed != 0 {
+		if installed := installedScope(ck, name); installed != 0 {
 			r.scopes[id] = installed
 		} else {
 			r.err = fmt.Errorf("unknown imported capture scope %s", name)
@@ -294,6 +286,22 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 	return r
 }
 
+func installedScope(ck *infer.Checker, written string) types.ScopeID {
+	at := strings.LastIndexByte(written, '#')
+	if at < 0 {
+		return 0
+	}
+	index, err := strconv.Atoi(written[at+1:])
+	if err != nil || index < 0 || strconv.Itoa(index) != written[at+1:] {
+		return 0
+	}
+	summary, ok := ck.CaptureSummaries[written[:at]]
+	if !ok || index >= len(summary.Captures.Scopes) {
+		return 0
+	}
+	return summary.Captures.Scopes[index]
+}
+
 // extend gives a decoded value the identities it needs: foreign declarations
 // keep the installed parameters they describe, and everything the value
 // allocates for itself is renamed in a deterministic order. A deferred stage
@@ -301,8 +309,9 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 // object already installed.
 func (r *remapper) extend(v reflect.Value) {
 	ck := r.ck
-	ids := &remapIDs{permissions: map[int]bool{}, vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
-	collectRemapIDs(v, map[uintptr]bool{}, ids)
+	ids := &remapIDs{permissions: map[int]bool{}, vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{},
+		done: r.memo}
+	collectRemapIDs(v, make(map[uintptr]bool, 1024), ids)
 	r.alignForeignParams(ids)
 	// Fresh permission labels have no module declaration to intern. Allocate
 	// them in source identity order, preserving sharing across deferred sections.
@@ -423,14 +432,20 @@ type remapIDs struct {
 	adts        []*types.ADTInfo
 	effects     []*types.EffectInfo
 	classes     []*types.ClassInfo
+	// done is the remapper's memo. A deferred section shares nodes with its
+	// object, and those already carry this installation's identities, so the
+	// walk does not mistake them for written ones.
+	done map[uintptr]reflect.Value
 }
 
 func collectRemapIDs(v reflect.Value, seen map[uintptr]bool, ids *remapIDs) {
-	if !v.IsValid() || v.Type() == reflect.TypeOf(source.Span{}) {
+	if !v.IsValid() || !planFor(v.Type()).remaps {
 		return
 	}
-	if v.Type() == effLabelReflectType && v.FieldByName("Scoped").Bool() {
-		ids.permissions[int(v.FieldByName("Unique").Int())] = true
+	if v.Type() == effLabelReflectType {
+		if label := v.Interface().(types.EffLabel); label.Scoped {
+			ids.permissions[label.Unique] = true
+		}
 	}
 	if v.Type() == captureVarType {
 		ids.captures[types.CaptureVar(v.Int())] = true
@@ -455,6 +470,9 @@ func collectRemapIDs(v reflect.Value, seen map[uintptr]bool, ids *remapIDs) {
 			return
 		}
 		seen[v.Pointer()] = true
+		if _, done := ids.done[v.Pointer()]; done {
+			return
+		}
 		if v.Type() == tVarPtr {
 			tv := v.Interface().(*types.TVar)
 			if old := ids.vars[tv.ID]; old == nil {
@@ -475,10 +493,8 @@ func collectRemapIDs(v reflect.Value, seen map[uintptr]bool, ids *remapIDs) {
 	}
 	switch v.Kind() {
 	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			if v.Type().Field(i).Tag.Get("object") != "omit" {
-				collectRemapIDs(v.Field(i), seen, ids)
-			}
+		for _, i := range planFor(v.Type()).fields {
+			collectRemapIDs(v.Field(i), seen, ids)
 		}
 	case reflect.Slice:
 		for i := 0; i < v.Len(); i++ {
@@ -493,29 +509,31 @@ func collectRemapIDs(v reflect.Value, seen map[uintptr]bool, ids *remapIDs) {
 	}
 }
 
+// remap interns the decoded object in place. The decoder made it for this
+// installation alone, so nothing else can observe the rewrite.
 func (r *remapper) remap() error {
-	v, err := r.rewrite(reflect.ValueOf(r.object))
-	if err != nil {
-		return err
-	}
-	r.object = v.Interface().(*ModuleObject)
+	r.pointer(reflect.ValueOf(r.object))
 	return r.err
 }
 
 var (
-	tVarPtr        = reflect.TypeOf((*types.TVar)(nil))
-	tConPtr        = reflect.TypeOf((*types.TCon)(nil))
-	adtPtr         = reflect.TypeOf((*types.ADTInfo)(nil))
-	ctorPtr        = reflect.TypeOf((*types.CtorInfo)(nil))
-	effectPtr      = reflect.TypeOf((*types.EffectInfo)(nil))
-	opPtr          = reflect.TypeOf((*types.EffectOp)(nil))
-	classPtr       = reflect.TypeOf((*types.ClassInfo)(nil))
-	methodPtr      = reflect.TypeOf((*types.MethodInfo)(nil))
-	nativePtr      = reflect.TypeOf((*types.NativeInfo)(nil))
-	reprPtr        = reflect.TypeOf((*meta.TypeRepr)(nil))
-	captureVarType = reflect.TypeOf(types.CaptureVar(0))
-	scopeType      = reflect.TypeOf(types.ScopeID(0))
-	resumeType     = reflect.TypeOf(types.ResumeID(0))
+	tVarPtr            = reflect.TypeOf((*types.TVar)(nil))
+	tConPtr            = reflect.TypeOf((*types.TCon)(nil))
+	adtPtr             = reflect.TypeOf((*types.ADTInfo)(nil))
+	ctorPtr            = reflect.TypeOf((*types.CtorInfo)(nil))
+	effectPtr          = reflect.TypeOf((*types.EffectInfo)(nil))
+	opPtr              = reflect.TypeOf((*types.EffectOp)(nil))
+	classPtr           = reflect.TypeOf((*types.ClassInfo)(nil))
+	methodPtr          = reflect.TypeOf((*types.MethodInfo)(nil))
+	nativePtr          = reflect.TypeOf((*types.NativeInfo)(nil))
+	reprPtr            = reflect.TypeOf((*meta.TypeRepr)(nil))
+	spanType           = reflect.TypeOf(source.Span{})
+	effectInstanceType = reflect.TypeOf(core.EffectInstance{})
+	quoteType          = reflect.TypeOf(core.Quote{})
+	codeType           = reflect.TypeOf(meta.Code{})
+	captureVarType     = reflect.TypeOf(types.CaptureVar(0))
+	scopeType          = reflect.TypeOf(types.ScopeID(0))
+	resumeType         = reflect.TypeOf(types.ResumeID(0))
 )
 
 // resumeID is the one mapping from a written resume identity to this
@@ -533,129 +551,170 @@ func (r *remapper) resumeID(old types.ResumeID) types.ResumeID {
 	return n
 }
 
-func (r *remapper) rewrite(v reflect.Value) (reflect.Value, error) {
-	if !v.IsValid() {
-		return v, nil
+// pointer returns what a decoded pointer becomes: an installed declaration it
+// denotes, or the same node with its contents remapped in place. The memo
+// makes shared and cyclic structure, and a deferred section that shares nodes
+// with its object, resolve to one answer.
+func (r *remapper) pointer(v reflect.Value) reflect.Value {
+	key := v.Pointer()
+	if got, ok := r.memo[key]; ok {
+		return got
 	}
-	if v.Type() == reflect.TypeOf(source.Span{}) {
-		return v, nil
+	if replacement := r.intern(v); replacement.IsValid() {
+		r.memo[key] = replacement
+		return replacement
 	}
-	if v.Type() == captureVarType {
-		old := types.CaptureVar(v.Int())
-		if old == 0 {
-			return v, nil
-		}
-		n := r.captures[old]
-		if n == 0 {
-			n = r.ck.Sup.FreshCapture()
-			r.captures[old] = n
-		}
-		out := reflect.New(v.Type()).Elem()
-		out.SetInt(int64(n))
-		return out, nil
+	// v may be a settable location the caller reuses; keep the pointer itself.
+	v = v.Elem().Addr()
+	r.memo[key] = v
+	r.fix(v.Elem())
+	r.remapPointer(v)
+	return v
+}
+
+// fix remaps a settable decoded value in place.
+func (r *remapper) fix(v reflect.Value) {
+	t := v.Type()
+	plan := planFor(t)
+	if !plan.remaps {
+		return
 	}
-	if v.Type() == scopeType {
-		old := types.ScopeID(v.Int())
-		if old == 0 {
-			return v, nil
+	switch t {
+	case captureVarType:
+		if old := types.CaptureVar(v.Int()); old != 0 {
+			n := r.captures[old]
+			if n == 0 {
+				n = r.ck.Sup.FreshCapture()
+				r.captures[old] = n
+			}
+			v.SetInt(int64(n))
 		}
-		n := r.scopes[old]
-		if n == 0 {
-			n = r.ck.Sup.FreshScope()
-			r.scopes[old] = n
+		return
+	case scopeType:
+		if old := types.ScopeID(v.Int()); old != 0 {
+			n := r.scopes[old]
+			if n == 0 {
+				n = r.ck.Sup.FreshScope()
+				r.scopes[old] = n
+			}
+			v.SetInt(int64(n))
 		}
-		out := reflect.New(v.Type()).Elem()
-		out.SetInt(int64(n))
-		return out, nil
-	}
-	if v.Type() == resumeType {
-		out := reflect.New(v.Type()).Elem()
-		out.SetInt(int64(r.resumeID(types.ResumeID(v.Int()))))
-		return out, nil
-	}
-	if v.Kind() == reflect.Interface {
-		if v.IsNil() {
-			return reflect.Zero(v.Type()), nil
-		}
-		x, err := r.rewrite(v.Elem())
-		if err != nil {
-			return reflect.Value{}, err
-		}
-		out := reflect.New(v.Type()).Elem()
-		out.Set(x)
-		return out, nil
-	}
-	if v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return reflect.Zero(v.Type()), nil
-		}
-		key := v.Pointer()
-		if got := r.memo[key]; got.IsValid() {
-			return got, nil
-		}
-		if replacement := r.intern(v); replacement.IsValid() {
-			r.memo[key] = replacement
-			return replacement, nil
-		}
-		out := reflect.New(v.Type().Elem())
-		r.memo[key] = out
-		x, err := r.rewrite(v.Elem())
-		if err != nil {
-			return reflect.Value{}, err
-		}
-		out.Elem().Set(x)
-		r.remapPointer(out)
-		return out, nil
+		return
+	case resumeType:
+		v.SetInt(int64(r.resumeID(types.ResumeID(v.Int()))))
+		return
 	}
 	switch v.Kind() {
+	case reflect.Interface:
+		if v.IsNil() {
+			return
+		}
+		e := v.Elem()
+		if e.Kind() == reflect.Pointer {
+			if p := r.pointer(e); p.Pointer() != e.Pointer() {
+				v.Set(p)
+			}
+			return
+		}
+		if !planFor(e.Type()).remaps {
+			return
+		}
+		x := reflect.New(e.Type()).Elem()
+		x.Set(e)
+		r.fix(x)
+		v.Set(x)
+	case reflect.Pointer:
+		if !v.IsNil() {
+			if p := r.pointer(v); p.Pointer() != v.Pointer() {
+				v.Set(p)
+			}
+		}
 	case reflect.Struct:
-		out := reflect.New(v.Type()).Elem()
-		for i := 0; i < v.NumField(); i++ {
-			if v.Type().Field(i).Tag.Get("object") == "omit" {
-				continue
-			}
-			x, err := r.rewrite(v.Field(i))
-			if err != nil {
-				return reflect.Value{}, err
-			}
-			out.Field(i).Set(x)
+		for _, i := range plan.fields {
+			r.fix(v.Field(i))
 		}
-		r.remapStruct(out)
-		return out, nil
+		r.remapStruct(v)
 	case reflect.Slice:
-		if v.IsNil() {
-			return reflect.Zero(v.Type()), nil
-		}
-		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
 		for i := 0; i < v.Len(); i++ {
-			x, err := r.rewrite(v.Index(i))
-			if err != nil {
-				return reflect.Value{}, err
-			}
-			out.Index(i).Set(x)
+			r.fix(v.Index(i))
 		}
-		return out, nil
 	case reflect.Map:
-		if v.IsNil() {
-			return reflect.Zero(v.Type()), nil
+		if v.Len() == 0 {
+			return
 		}
-		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		out := reflect.MakeMapWithSize(t, v.Len())
+		k, x := reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()
 		it := v.MapRange()
 		for it.Next() {
-			k, err := r.rewrite(it.Key())
-			if err != nil {
-				return reflect.Value{}, err
-			}
-			x, err := r.rewrite(it.Value())
-			if err != nil {
-				return reflect.Value{}, err
-			}
+			k.Set(it.Key())
+			x.Set(it.Value())
+			r.fix(k)
+			r.fix(x)
 			out.SetMapIndex(k, x)
 		}
-		return out, nil
-	default:
-		return v, nil
+		v.Set(out)
 	}
+}
+
+// remapPlan is what installation needs to know about a decoded type: the
+// fields the codec carries, and whether any value of the type can hold an
+// identity to remap. Types that cannot — strings, plain numbers, spans — are
+// skipped without being walked.
+type remapPlan struct {
+	fields []int
+	remaps bool
+}
+
+var remapPlans sync.Map // reflect.Type → *remapPlan
+
+func planFor(t reflect.Type) *remapPlan {
+	if plan, ok := remapPlans.Load(t); ok {
+		return plan.(*remapPlan)
+	}
+	plan := buildPlan(t, map[reflect.Type]bool{})
+	remapPlans.Store(t, plan)
+	return plan
+}
+
+func buildPlan(t reflect.Type, visiting map[reflect.Type]bool) *remapPlan {
+	plan := &remapPlan{}
+	if t.Kind() == reflect.Struct {
+		for i := 0; i < t.NumField(); i++ {
+			if t.Field(i).Tag.Get("object") != "omit" {
+				plan.fields = append(plan.fields, i)
+			}
+		}
+	}
+	plan.remaps = typeRemaps(t, visiting)
+	return plan
+}
+
+func typeRemaps(t reflect.Type, visiting map[reflect.Type]bool) bool {
+	switch t {
+	case spanType:
+		return false
+	case captureVarType, scopeType, resumeType, effLabelReflectType, effectInstanceType, quoteType, codeType:
+		return true
+	}
+	switch t.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		return true
+	case reflect.Slice, reflect.Array:
+		return typeRemaps(t.Elem(), visiting)
+	case reflect.Map:
+		return typeRemaps(t.Key(), visiting) || typeRemaps(t.Elem(), visiting)
+	case reflect.Struct:
+		if visiting[t] {
+			return false
+		}
+		visiting[t] = true
+		for i := 0; i < t.NumField(); i++ {
+			if f := t.Field(i); f.Tag.Get("object") != "omit" && typeRemaps(f.Type, visiting) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *remapper) intern(v reflect.Value) reflect.Value {
@@ -730,25 +789,29 @@ func (r *remapper) uniqueForCon(c *types.TCon) int {
 	if c == nil {
 		return -1
 	}
-	if n, ok := r.unique[c.Unique]; ok {
+	written, ok := r.written[c]
+	if !ok {
+		written = c.Unique
+	}
+	if n, ok := r.unique[written]; ok {
 		return n
 	}
 	builtins := []*types.TCon{r.ck.B.Int, r.ck.B.Float, r.ck.B.String, r.ck.B.Char, r.ck.B.Bool, r.ck.B.Unit}
 	for _, b := range builtins {
 		if c.Name == b.Name {
-			r.unique[c.Unique] = b.Unique
+			r.unique[written] = b.Unique
 			return b.Unique
 		}
 	}
 	for _, ty := range r.ck.TypeNames {
 		if installed, ok := ty.(*types.TCon); ok && installed.Name == c.Name {
-			r.unique[c.Unique] = installed.Unique
+			r.unique[written] = installed.Unique
 			return installed.Unique
 		}
 	}
 	for _, adt := range r.ck.ADTs {
 		if adt.Con.Name == c.Name {
-			r.unique[c.Unique] = adt.Con.Unique
+			r.unique[written] = adt.Con.Unique
 			return adt.Con.Unique
 		}
 	}
@@ -773,6 +836,7 @@ func (r *remapper) remapPointer(v reflect.Value) {
 	case tConPtr:
 		c := v.Interface().(*types.TCon)
 		if n := r.uniqueForCon(c); n >= 0 {
+			r.written[c] = c.Unique
 			c.Unique = n
 		} else if r.err == nil {
 			r.err = fmt.Errorf("unknown nominal identity %q (%d)", c.Name, c.Unique)

@@ -1800,7 +1800,9 @@ func (l *linter) runtimeType(t types.Type) types.Type {
 }
 
 func (l *linter) runtimeInstFields(adt *types.ADTInfo, c *types.CtorInfo, args []types.Type) []types.Type {
-	fields := adt.InstFields(c, args)
+	// InstFields returns the constructor's own field list for a type with no
+	// parameters, which the declaration shares with every reader.
+	fields := append([]types.Type(nil), adt.InstFields(c, args)...)
 	for i := range fields {
 		fields[i] = l.runtimeType(fields[i])
 	}

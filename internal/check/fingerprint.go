@@ -31,24 +31,33 @@ func digest(parts ...string) string {
 }
 
 func ownFingerprints(object *ModuleObject) (semantic, abi, implementation string) {
-	semantic = canonicalDigest(struct {
+	return semanticFingerprint(object), abiFingerprint(object), implementationFingerprint(object)
+}
+
+func semanticFingerprint(object *ModuleObject) string {
+	return canonicalDigest(struct {
 		State    *infer.ModuleState
 		Resolver modules.Interface
 	}{object.State, object.Resolver}, object)
+}
+
+func abiFingerprint(object *ModuleObject) string {
 	headers := append([]core.Def(nil), object.Runtime...)
 	for i := range headers {
 		headers[i].Body = nil
 	}
-	abi = canonicalDigest(headers, object)
-	// The owner's own byte-affecting backend input: runtime Core with bodies,
-	// unlike the header-only ABI summary consumers link against.
-	implementation = canonicalDigest(object.Runtime, object)
-	return
+	return canonicalDigest(headers, object)
 }
 
-// ownStageFingerprint takes the defs separately, so a deferred stage section
-// can be checked against the fingerprint recorded for it when it is read
-// rather than when the rest of the object is installed.
+// implementationFingerprint covers the owner's own byte-affecting backend
+// input: runtime Core with bodies, unlike the header-only ABI summary
+// consumers link against.
+func implementationFingerprint(object *ModuleObject) string {
+	return canonicalDigest(object.Runtime, object)
+}
+
+// ownStageFingerprint takes the defs separately because an object carries its
+// stage Core in a section of its own.
 func ownStageFingerprint(object *ModuleObject, defs []core.Def) string {
 	return canonicalDigest(struct {
 		Defs      []core.Def

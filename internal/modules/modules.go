@@ -1709,15 +1709,17 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 			if existing, exists := r.vals[surface]; exists && (!r.prompt || existing != canon) && r.predeclared[surface] != d {
 				r.errs = append(r.errs, diag.Errorf(d.NameSpan, "UNQUALIFIED COLLISION", "The value `%s` collides with an exposed import or operation.", d.Name))
 			}
-			visible := clone(r.vals)
+			// A function sees itself; a value does not. Either way the name is
+			// bound from here on, so a function binds it before its body
+			// rather than resolving against a copy of the whole scope.
 			if len(d.Params) > 0 {
-				visible[surface] = canon
+				r.vals[surface] = canon
 			}
 			r.typeAnn(d.Ann)
 			if d.Native != nil {
 				d.Native.Module = r.node.nativeModule
 			}
-			r.resolveValueRows(d, visible)
+			r.resolveValueRows(d, r.vals)
 			d.Name = canon
 			r.vals[surface] = canon
 			out = append(out, d)
@@ -1815,13 +1817,6 @@ func (r *resolver) instanceMethodsVisible(d *ast.InstanceDecl) {
 	}
 }
 
-func clone(m map[string]string) map[string]string {
-	n := map[string]string{}
-	for k, v := range m {
-		n[k] = v
-	}
-	return n
-}
 func (r *resolver) add(m map[string]string, k, v string, sp source.Span) {
 	if old, ok := m[k]; ok {
 		if old == v {

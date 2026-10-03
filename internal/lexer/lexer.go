@@ -15,7 +15,10 @@ import (
 )
 
 type lexer struct {
-	f        *source.File
+	f *source.File
+	// text is the file's content as one string, so a token's text is a
+	// slice of it rather than a copy.
+	text     string
 	pos      int
 	toks     []token.Token
 	comments []token.Comment
@@ -50,7 +53,9 @@ func LexWithComments(f *source.File) ([]token.Token, []token.Comment, []diag.Err
 			nil,
 			[]diag.Error{diag.Errorf(sp, "INVALID UTF-8", "Fango source files must be valid UTF-8.")}
 	}
-	l := &lexer{f: f}
+	// Source averages several bytes per token; starting near the final
+	// size saves most of the copies growing the slice would make.
+	l := &lexer{f: f, text: string(f.Content), toks: make([]token.Token, 0, len(f.Content)/6+1)}
 	l.run()
 	return l.toks, l.comments, l.errs
 }
@@ -59,7 +64,7 @@ func LexWithComments(f *source.File) ([]token.Token, []token.Comment, []diag.Err
 func (l *lexer) addComment(start, end int, block bool) {
 	l.comments = append(l.comments, token.Comment{
 		Span:  source.Span{File: l.f, Start: start, End: end},
-		Text:  string(l.f.Content[start:end]),
+		Text:  l.text[start:end],
 		Block: block,
 	})
 }
@@ -233,7 +238,7 @@ func (l *lexer) lexNumber(start int) {
 	if l.scanExponent() {
 		isFloat = true
 	}
-	text := string(l.f.Content[start:l.pos])
+	text := l.text[start:l.pos]
 	sp := source.Span{File: l.f, Start: start, End: l.pos}
 	if isFloat {
 		if v, err := strconv.ParseFloat(text, 64); err != nil || v > 1.7976931348623157e308 {
@@ -345,7 +350,7 @@ func (l *lexer) lexIdent(start int, upper bool) {
 	for l.pos < len(l.f.Content) && isIdentChar(l.f.Content[l.pos]) {
 		l.pos++
 	}
-	text := string(l.f.Content[start:l.pos])
+	text := l.text[start:l.pos]
 	if kw, ok := token.Keywords[text]; ok {
 		l.emit(kw, start, l.pos)
 	} else if upper {
@@ -465,7 +470,7 @@ func (l *lexer) lexOperator(start int) {
 		for l.pos < len(l.f.Content) && token.IsOpChar(l.f.Content[l.pos]) {
 			l.pos++
 		}
-		l.emit(token.OpKind(string(l.f.Content[start:l.pos])), start, l.pos)
+		l.emit(token.OpKind(l.text[start:l.pos]), start, l.pos)
 		return
 	}
 	l.pos++
@@ -491,7 +496,7 @@ func (l *lexer) emit(k token.Kind, start, end int) {
 	}
 	l.toks = append(l.toks, token.Token{
 		Kind: k,
-		Text: string(l.f.Content[start:end]),
+		Text: l.text[start:end],
 		Span: source.Span{File: l.f, Start: start, End: end},
 	})
 }

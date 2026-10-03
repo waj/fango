@@ -552,6 +552,18 @@ type Supply struct {
 	nextUnique  int
 	nextScope   ScopeID
 	nextCapture CaptureVar
+	// Trail, while a speculative solve is running, receives each
+	// substitution entry a unifier writes, so the solve can be undone by
+	// restoring those entries rather than by solving against a copy.
+	Trail *[]TrailEntry
+}
+
+// TrailEntry is one substitution write: the variable bound and what it was
+// bound to before, if anything.
+type TrailEntry struct {
+	ID  int
+	Old Type
+	Had bool
 }
 
 func (s *Supply) FreshVar(kind VarKind) *TVar {

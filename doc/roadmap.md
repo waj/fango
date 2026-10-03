@@ -129,10 +129,6 @@ Artifact framing, the binary object encoding, and deferred stage sections are
   its entry in the build directory's manifest, which also pins the modules only
   it reached. Deciding when a program is gone would answer both, and would say
   whether `clean` should become per-program rather than per-directory.
-- Decode artifacts in parallel. Decoding is pure and the objects are
-  independent, but coordination cost is real for small graphs. `fango build
-  -vv` now measures what decoding costs a build, so the question is whether a
-  given graph spends enough in artifact lookup to pay for the concurrency.
 - Shrink stage Core. A module's stage section is its declarations elaborated a
   second time for the compile-time evaluator, and it is the largest part of
   every object. Changing one module forces it for every module it depends on,

@@ -54,12 +54,12 @@ type ModuleObject struct {
 // PendingStage is a decoded object whose stage Core has not been read yet.
 // Installation defers it, because nothing needs stage Core until some module
 // is checked from source, and it is the largest part of an object.
-// head is the object as decoded, kept because installation replaces the
-// object's fields with interned copies and the recorded fingerprint describes
-// the decoded form.
 type PendingStage struct {
 	decoder *objectcodec.Decoder
-	head    *ModuleObject
+
+	// decoded is the section once decode has run, ahead of load.
+	decoded *stagePayload
+	err     error
 }
 
 type stagePayload struct {
@@ -70,22 +70,28 @@ type stagePayload struct {
 // size is the encoded byte size of the undecoded stage section.
 func (p *PendingStage) size() int { return p.decoder.SectionSize(stageSection) }
 
+// decode reads the stage section ahead of load. It touches only this
+// object's decoder, so the sections of different objects decode concurrently.
+func (p *PendingStage) decode() {
+	if p.decoded == nil && p.err == nil {
+		p.decoded, p.err = p.read()
+	}
+}
+
 // load decodes the stage section through the decoder that produced the rest of
 // the object, so structure shared with it comes back as the same pointers.
 func (p *PendingStage) load() (*stagePayload, error) {
+	p.decode()
+	return p.decoded, p.err
+}
+
+func (p *PendingStage) read() (*stagePayload, error) {
 	var payload *stagePayload
 	if err := p.decoder.Section(stageSection, &payload); err != nil {
 		return nil, err
 	}
 	if payload == nil {
 		payload = &stagePayload{}
-	}
-	// Reading the section is where the object's recorded stage fingerprint is
-	// checked against its contents. Installation does not recompute it, so
-	// this is what keeps a section from disagreeing with the object it
-	// belongs to.
-	if want := p.head.StageImplementation; want != "" && ownStageFingerprint(p.head, payload.Stage) != want {
-		return nil, fmt.Errorf("stage Core does not match the fingerprint recorded for it")
 	}
 	return payload, nil
 }
@@ -152,8 +158,7 @@ func DecodeObjectSections(sections []byte, sources map[string]*source.File) (*Mo
 		return nil, err
 	}
 	if object != nil {
-		head := *object
-		object.Pending = &PendingStage{decoder: decoder, head: &head}
+		object.Pending = &PendingStage{decoder: decoder}
 	}
 	return object, nil
 }

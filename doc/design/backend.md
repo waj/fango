@@ -166,7 +166,9 @@ Classification uses the owning module's body
 and consults only these summaries for installed dependencies.
 
 Each owner is lowered and emitted alone. Its unit program holds its own Core
-plus the installed declarations it links against. Bodies inlined from
+plus the installed declarations it links against. Because no two owners share
+mutable state, the owners the cache cannot supply are lowered, emitted, and
+stored concurrently; their events are reported afterwards in owner order. Bodies inlined from
 dependencies are already part of the owner's Core, copied during elaboration
 under the owner's checked-object key. Ordinary dependency bodies
 are withheld; the only exposed bodies are the bounded
@@ -245,7 +247,10 @@ toolchain and the files it compiles, because a program cannot tell from its own
 writes whether it needs relinking — a sibling's build can update a shared
 module and leave this program's binary stale while this program writes nothing.
 Stamping what is compiled also means a source edit that produces the same Go
-produces the same binary and does not relink. Go's cache reuses unchanged
+produces the same binary and does not relink. The link passes `-buildvcs=false`:
+the generated module usually sits inside the user's repository, and stamping
+version-control status would run git on every link for a tree that is
+generated rather than versioned. Go's cache reuses unchanged
 packages. Build copies the executable; run reuses it while inputs are
 unchanged. [Commands](../reference/commands.md) owns output paths and
 managed-directory safeguards.
@@ -281,9 +286,12 @@ whole-project artifact: every invocation discovers and validates the current
 graph, and one module-artifact pipeline decides what is still valid, so no
 command can be served a stale program by a shortcut that outranks its modules.
 
-The compiler fingerprint is the SHA-256 of the running executable, computed
-once per process; both its value and any computation failure are stable for
-that process, so a failed fingerprint disables cache use. Compiler or schema
+The compiler fingerprint is computed once per process from the running
+executable: from the Go build ID the toolchain embeds near its start, whose
+last component digests the linked binary's content, or, for an executable
+linked without one, from the SHA-256 of the whole file. Both its value and any
+computation failure are stable for that process, so a failed fingerprint
+disables cache use. Compiler or schema
 changes select a cold namespace, and artifacts an older compiler wrote are
 simply never read; `clean` removes them along with everything else. Reads do
 not create directories. If source-local storage cannot be written, writes use a

@@ -1,8 +1,6 @@
 package infer
 
 import (
-	"maps"
-
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/types"
 )
@@ -16,7 +14,7 @@ func (g *generator) solveConstraints(ps []types.Pred) (Subst, []types.Pred, []di
 		g.cs[i].Invariant = invariant
 	}
 	cs := append(append([]Constraint(nil), g.cs...), g.scopeObligations...)
-	sub, residual, errs := Solve(cs, ps, maps.Clone(g.ck.Sub), g.ck.B, g.ck.Sup)
+	sub, residual, errs := Solve(cs, ps, g.ck.Sub, g.ck.B, g.ck.Sup)
 	for _, use := range g.operationUses {
 		ambient, ok := sub.Apply(use.ambient).(types.Row)
 		if !ok {

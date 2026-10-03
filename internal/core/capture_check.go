@@ -10,20 +10,24 @@ import (
 // metadata for lexical evidence. Resources are checked at runtime. Lint independently
 // reconstructs both forms after elaboration transforms.
 func InferCaptures(p *Prog, b *types.Builtins) []error {
-	return InferCapturesIn(p, nil, b)
+	return InferCapturesIn(p, b)
 }
 
-// InferCapturesIn analyzes p with context supplying the definitions p may
+// InferCapturesIn analyzes p with contexts supplying the definitions p may
 // call but does not contain — the modules a REPL session has already
 // installed. Context definitions contribute their names, parameters, and
 // solved summaries to the call-site rules and are never re-solved, so a
 // prompt calling `State.run` or `File.withFile` is checked exactly as the
 // same call inside a program would be.
-func InferCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
+// Earlier contexts take precedence over later ones, as if concatenated; a
+// caller passes its parts rather than copying them into one slice.
+func InferCapturesIn(p *Prog, b *types.Builtins, contexts ...[]Def) []error {
 	a := newCaptureAnalyzer(p, b)
-	for i := range context {
-		if _, own := a.defs[context[i].Name]; !own {
-			a.defs[context[i].Name] = &context[i]
+	for _, context := range contexts {
+		for i := range context {
+			if _, own := a.defs[context[i].Name]; !own {
+				a.defs[context[i].Name] = &context[i]
+			}
 		}
 	}
 	a.solve()

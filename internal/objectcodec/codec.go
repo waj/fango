@@ -15,6 +15,7 @@ import (
 	"math"
 	"reflect"
 	"sort"
+	"sync"
 
 	"github.com/waj/fango/internal/source"
 )
@@ -494,233 +495,279 @@ func (d *decoder) concrete(tag string) (reflect.Type, error) {
 }
 
 func (d *decoder) decode(c *cursor, target reflect.Type) (reflect.Value, error) {
-	tag, err := c.tag()
-	if err != nil {
+	v := reflect.New(target).Elem()
+	if err := d.into(c, v); err != nil {
 		return reflect.Value{}, err
 	}
+	return v, nil
+}
+
+// into decodes one value into dst, which must be settable and zero. Decoding
+// in place, rather than returning a value for the caller to copy, keeps a
+// struct's fields and a slice's elements from each being built and copied.
+func (d *decoder) into(c *cursor, dst reflect.Value) error {
+	target := dst.Type()
+	tag, err := c.tag()
+	if err != nil {
+		return err
+	}
 	if tag == tagNil {
-		return reflect.Zero(target), nil
+		return nil
 	}
 	if tag == tagTyped {
 		index, err := c.uvarint()
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
 		name, err := d.str(index)
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
 		if target.Kind() == reflect.Interface {
-			concrete, err := d.concrete(name)
-			if err != nil {
-				return reflect.Value{}, err
-			}
-			v, err := d.decode(c, concrete)
-			if err != nil {
-				return reflect.Value{}, err
-			}
-			if !v.Type().AssignableTo(target) {
-				return reflect.Value{}, fmt.Errorf("%s does not implement %s", v.Type(), target)
-			}
-			return v, nil
+			return d.element(c, dst, name)
 		}
-		return d.decode(c, target)
+		return d.into(c, dst)
 	}
 	if target.Kind() == reflect.Interface {
 		if tag != tagStruct {
-			return reflect.Value{}, fmt.Errorf("untyped value cannot satisfy %s", target)
+			return fmt.Errorf("untyped value cannot satisfy %s", target)
 		}
 		at := c.at - 1
 		index, err := c.uvarint()
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
 		name, err := d.str(index)
 		if err != nil {
-			return reflect.Value{}, err
-		}
-		concrete, err := d.concrete(name)
-		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
 		c.at = at
-		v, err := d.decode(c, concrete)
-		if err != nil {
-			return reflect.Value{}, err
-		}
-		if !v.Type().AssignableTo(target) {
-			return reflect.Value{}, fmt.Errorf("%s does not implement %s", v.Type(), target)
-		}
-		return v, nil
+		return d.element(c, dst, name)
 	}
 	if target == spanType {
-		return d.span(c, tag)
+		v, err := d.span(c, tag)
+		if err != nil {
+			return err
+		}
+		dst.Set(v)
+		return nil
 	}
 	if tag == tagRef {
-		return d.ref(c, target)
+		v, err := d.ref(c, target)
+		if err != nil {
+			return err
+		}
+		dst.Set(v)
+		return nil
 	}
 	switch target.Kind() {
 	case reflect.Struct:
-		return d.structure(c, tag, target)
+		return d.structure(c, tag, dst)
 	case reflect.Slice:
 		if tag != tagSlice {
-			return reflect.Value{}, fmt.Errorf("want slice, got tag %d", tag)
+			return fmt.Errorf("want slice, got tag %d", tag)
 		}
 		n, err := c.count()
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
 		out := reflect.MakeSlice(target, n, n)
 		for i := 0; i < n; i++ {
-			v, err := d.decode(c, target.Elem())
-			if err != nil {
-				return reflect.Value{}, err
+			if err := d.into(c, out.Index(i)); err != nil {
+				return err
 			}
-			out.Index(i).Set(v)
 		}
-		return out, nil
+		dst.Set(out)
+		return nil
 	case reflect.Map:
 		if tag != tagMap {
-			return reflect.Value{}, fmt.Errorf("want map, got tag %d", tag)
+			return fmt.Errorf("want map, got tag %d", tag)
 		}
 		n, err := c.count()
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
 		out := reflect.MakeMapWithSize(target, n)
+		k, v := reflect.New(target.Key()).Elem(), reflect.New(target.Elem()).Elem()
+		zk, zv := reflect.Zero(target.Key()), reflect.Zero(target.Elem())
 		for i := 0; i < n; i++ {
-			k, err := d.decode(c, target.Key())
-			if err != nil {
-				return reflect.Value{}, err
+			k.Set(zk)
+			v.Set(zv)
+			if err := d.into(c, k); err != nil {
+				return err
 			}
-			v, err := d.decode(c, target.Elem())
-			if err != nil {
-				return reflect.Value{}, err
-			}
-			if out.MapIndex(k).IsValid() {
-				return reflect.Value{}, fmt.Errorf("duplicate map key %v", k.Interface())
+			if err := d.into(c, v); err != nil {
+				return err
 			}
 			out.SetMapIndex(k, v)
+			if out.Len() != i+1 {
+				return fmt.Errorf("duplicate map key %v", k.Interface())
+			}
 		}
-		return out, nil
+		dst.Set(out)
+		return nil
 	case reflect.String:
 		if tag != tagString {
-			return reflect.Value{}, fmt.Errorf("want string, got tag %d", tag)
+			return fmt.Errorf("want string, got tag %d", tag)
 		}
 		index, err := c.uvarint()
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
 		s, err := d.str(index)
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
-		v := reflect.New(target).Elem()
-		v.SetString(s)
-		return v, nil
+		dst.SetString(s)
+		return nil
 	case reflect.Bool:
 		if tag != tagTrue && tag != tagFalse {
-			return reflect.Value{}, fmt.Errorf("want bool, got tag %d", tag)
+			return fmt.Errorf("want bool, got tag %d", tag)
 		}
-		v := reflect.New(target).Elem()
-		v.SetBool(tag == tagTrue)
-		return v, nil
+		dst.SetBool(tag == tagTrue)
+		return nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if tag != tagInt {
-			return reflect.Value{}, fmt.Errorf("want int, got tag %d", tag)
+			return fmt.Errorf("want int, got tag %d", tag)
 		}
 		raw, err := c.uvarint()
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
 		n := int64(raw>>1) ^ -int64(raw&1)
-		v := reflect.New(target).Elem()
-		if v.OverflowInt(n) {
-			return reflect.Value{}, fmt.Errorf("%d overflows %s", n, target)
+		if dst.OverflowInt(n) {
+			return fmt.Errorf("%d overflows %s", n, target)
 		}
-		v.SetInt(n)
-		return v, nil
+		dst.SetInt(n)
+		return nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		if tag != tagUint {
-			return reflect.Value{}, fmt.Errorf("want uint, got tag %d", tag)
+			return fmt.Errorf("want uint, got tag %d", tag)
 		}
 		n, err := c.uvarint()
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
-		v := reflect.New(target).Elem()
-		if v.OverflowUint(n) {
-			return reflect.Value{}, fmt.Errorf("%d overflows %s", n, target)
+		if dst.OverflowUint(n) {
+			return fmt.Errorf("%d overflows %s", n, target)
 		}
-		v.SetUint(n)
-		return v, nil
+		dst.SetUint(n)
+		return nil
 	case reflect.Float32, reflect.Float64:
 		if tag != tagFloat {
-			return reflect.Value{}, fmt.Errorf("want float, got tag %d", tag)
+			return fmt.Errorf("want float, got tag %d", tag)
 		}
 		raw, err := c.take(8)
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
-		v := reflect.New(target).Elem()
-		v.SetFloat(math.Float64frombits(binary.LittleEndian.Uint64(raw)))
-		return v, nil
+		dst.SetFloat(math.Float64frombits(binary.LittleEndian.Uint64(raw)))
+		return nil
 	default:
-		return reflect.Value{}, fmt.Errorf("unsupported decode target %s", target)
+		return fmt.Errorf("unsupported decode target %s", target)
 	}
 }
 
-func (d *decoder) structure(c *cursor, tag byte, target reflect.Type) (reflect.Value, error) {
+// element decodes an interface's concrete value, named by its type tag.
+func (d *decoder) element(c *cursor, dst reflect.Value, name string) error {
+	concrete, err := d.concrete(name)
+	if err != nil {
+		return err
+	}
+	if !concrete.AssignableTo(dst.Type()) {
+		return fmt.Errorf("%s does not implement %s", concrete, dst.Type())
+	}
+	v, err := d.decode(c, concrete)
+	if err != nil {
+		return err
+	}
+	dst.Set(v)
+	return nil
+}
+
+// structPlan is what decoding needs from a struct type, computed once per type
+// rather than once per value: its encoded name and the fields the codec carries.
+type structPlan struct {
+	name   string
+	fields []fieldPlan
+	// err reports an unexported carried field, which no encoding can fill.
+	err error
+}
+
+type fieldPlan struct {
+	index int
+	name  string
+	typ   reflect.Type
+}
+
+var structPlans sync.Map // reflect.Type → *structPlan
+
+func planFor(t reflect.Type) *structPlan {
+	if plan, ok := structPlans.Load(t); ok {
+		return plan.(*structPlan)
+	}
+	plan := &structPlan{name: typeName(t)}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Tag.Get("object") == "omit" {
+			continue
+		}
+		if f.PkgPath != "" && plan.err == nil {
+			plan.err = fmt.Errorf("missing or unexpected field %q in %s", f.Name, t)
+		}
+		plan.fields = append(plan.fields, fieldPlan{index: i, name: f.Name, typ: f.Type})
+	}
+	structPlans.Store(t, plan)
+	return plan
+}
+
+func (d *decoder) structure(c *cursor, tag byte, dst reflect.Value) error {
+	target := dst.Type()
 	if tag != tagStruct {
-		return reflect.Value{}, fmt.Errorf("want struct %s, got tag %d", target, tag)
+		return fmt.Errorf("want struct %s, got tag %d", target, tag)
 	}
 	index, err := c.uvarint()
 	if err != nil {
-		return reflect.Value{}, err
+		return err
 	}
 	name, err := d.str(index)
 	if err != nil {
-		return reflect.Value{}, err
+		return err
 	}
-	if name != typeName(target) {
-		return reflect.Value{}, fmt.Errorf("struct type mismatch: %q, want %q", name, typeName(target))
+	plan := planFor(target)
+	if name != plan.name {
+		return fmt.Errorf("struct type mismatch: %q, want %q", name, plan.name)
 	}
 	count, err := c.count()
 	if err != nil {
-		return reflect.Value{}, err
+		return err
 	}
-	out := reflect.New(target).Elem()
-	seen := 0
-	for i := 0; i < target.NumField(); i++ {
-		want := target.Field(i)
-		if want.Tag.Get("object") == "omit" {
-			continue
+	if count != len(plan.fields) {
+		if count < len(plan.fields) {
+			return fmt.Errorf("missing or unexpected field %q in %s", plan.fields[count].name, target)
 		}
-		if seen >= count || want.PkgPath != "" {
-			return reflect.Value{}, fmt.Errorf("missing or unexpected field %q in %s", want.Name, target)
-		}
+		return fmt.Errorf("extra fields in %s", target)
+	}
+	if plan.err != nil {
+		return plan.err
+	}
+	for _, want := range plan.fields {
 		index, err := c.uvarint()
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
 		got, err := d.str(index)
 		if err != nil {
-			return reflect.Value{}, err
+			return err
 		}
-		if got != want.Name {
-			return reflect.Value{}, fmt.Errorf("missing or unexpected field %q in %s", want.Name, target)
+		if got != want.name {
+			return fmt.Errorf("missing or unexpected field %q in %s", want.name, target)
 		}
-		v, err := d.decode(c, want.Type)
-		if err != nil {
-			return reflect.Value{}, fmt.Errorf("%s.%s: %w", target, want.Name, err)
+		if err := d.into(c, dst.Field(want.index)); err != nil {
+			return fmt.Errorf("%s.%s: %w", target, want.name, err)
 		}
-		out.Field(i).Set(v)
-		seen++
 	}
-	if seen != count {
-		return reflect.Value{}, fmt.Errorf("extra fields in %s", target)
-	}
-	return out, nil
+	return nil
 }
 
 func (d *decoder) ref(c *cursor, target reflect.Type) (reflect.Value, error) {
@@ -741,14 +788,12 @@ func (d *decoder) ref(c *cursor, target reflect.Type) (reflect.Value, error) {
 	if !d.filled[i] && !d.filling[i] {
 		d.filling[i] = true
 		node := &cursor{data: d.area, at: d.nodes[i].at}
-		v, err := d.decode(node, target.Elem())
-		if err != nil {
+		if err := d.into(node, d.values[i].Elem()); err != nil {
 			return reflect.Value{}, fmt.Errorf("reference %d: %w", i, err)
 		}
 		if node.at != d.nodes[i].at+d.nodes[i].size {
 			return reflect.Value{}, fmt.Errorf("reference %d ends at %d, want %d", i, node.at, d.nodes[i].at+d.nodes[i].size)
 		}
-		d.values[i].Elem().Set(v)
 		d.filling[i], d.filled[i] = false, true
 	}
 	return d.values[i], nil
