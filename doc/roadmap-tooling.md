@@ -60,7 +60,7 @@ bundled library. Most modules are documented in source;
 lists them, holds them complete under `--strict`, and runs their examples
 under both backends. A module joins that list when it reaches no gaps.
 
-- Document the remaining bundled modules: Json and its submodules, and Meta. Then replace the library reference topics with links
+- Document the remaining bundled module, Meta. Then replace the library reference topics with links
   to the generated reference once the website renders it.
 - Decide how to document a user's own modules: which modules a local source
   root publishes, and how paths are reported outside the repository.

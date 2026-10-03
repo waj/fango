@@ -1,4 +1,19 @@
 {-# no-prelude #-}
+-- Parsing and emitting JSON as typed values.
+--
+-- `parse`, `read`, `stringify`, and `write` cover whole documents through
+-- the `Decode` and `Encode` classes, which `String`, `Int`, `Float`, `Char`,
+-- `Bool`, `()`, `List a`, `Maybe a`, and `Value` implement, and which a type
+-- derives with `deriving (Encode, Decode)`. Derived records are objects in
+-- declaration order, and decoding accepts their keys in any order and skips
+-- unknown ones; nullary constructors are strings such as `"Red"`, and other
+-- constructors single-key objects such as `{"RGB":[1,2,3]}`; `()` and
+-- `Nothing` are `null`. Record fields can carry `#[Json.Key "name"]`,
+-- ``#[Json.Default `7`]``, and `#[Json.Skip]` (see `FieldOption`).
+--
+-- Reading consumes tokens as needed, and a typed decoder builds no
+-- intermediate `Value`. Custom decoders and token-level parsing live in
+-- `Json.Pull`.
 module Json exposing
     ( Decode, Emit(..), Encode(..), Error(..), FieldOption(..), Number
     , Value(..)
@@ -23,18 +38,19 @@ import Text.Reader as TextReader
 import Text.Writer as TextWriter
 import Writer exposing (Writer)
 
-{- Parse and emit JSON with typed values.
-
-`parse`, `read`, `stringify`, and `write` cover whole documents through the
-`Decode` and `Encode` classes, which types derive. `Value` is the generic
-document tree. Custom decoders and token-level parsing live in `Json.Pull`. -}
-
+-- Writing raw JSON text, as encoders do. `withWriter` and `withTextWriter`
+-- handle it.
 effect Emit
+    -- Writes raw JSON text as it is.
     emit : String -> ()
 
+-- Types that encode as JSON. A handwritten instance writes raw text with
+-- `emit`, or delegates to `encodeValue` for its parts.
 class Encode a
+    -- Writes the value's JSON. A nonfinite Float cannot be encoded.
     encodeValue : a ->{Emit, Fail Error} ()
 
+-- `parse` for UTF-8 bytes.
 parseBytes : Decode a => Type a -> Bytes -> Result Error a
 parseBytes _ input =
     Reader.withBytes input { reader ->
@@ -46,9 +62,23 @@ parseBytes _ input =
         }
     }
 
+-- Parses a whole document as the type the witness names, failing on
+-- trailing input. An `Int` must be a JSON integer in range, a `Float` a
+-- finite number, and a `Char` exactly one character.
+--
+-- ```fango
+-- import Json
+-- import Result exposing (Result(..))
+--
+-- Json.parse @(List Int) "[1, 2, 3]" == Ok [1, 2, 3]
+-- Json.parse @(Maybe String) "null" == Ok Nothing
+-- Result.withDefault [] (Json.parse @(List Int) "[1,") == []
+-- ```
 parse : Decode a => Type a -> String -> Result Error a
 parse witness text = parseBytes witness (Bytes.fromString text)
 
+-- `parse` from a byte reader, which may be any source. It reads only what
+-- the document needs and has the reader's effects.
 read : Decode a => Type a -> Reader e ->{e} Result Error a
 read _ reader =
     Pull.withReader reader {
@@ -58,6 +88,8 @@ read _ reader =
             _ -> Pull.fail "Trailing JSON input"
     }
 
+-- `parse` from a text reader, whose encoding the caller chose. Decoding
+-- errors become `Error` values.
 readText : Decode a => Type a -> TextReader.Reader e ->{e} Result Error a
 readText _ reader =
     Pull.withTextReader reader {
@@ -67,11 +99,26 @@ readText _ reader =
             _ -> Pull.fail "Trailing JSON input"
     }
 
--- The action may perform the writer's own effects between emits, so it can
--- produce a document while it reads its source.
+-- Runs `action`, writing what it emits to a byte writer as UTF-8. The action
+-- may perform the writer's own effects between emits, so it can produce a
+-- document while it reads its source. Flushing is left to the writer's
+-- owner.
+--
+-- ```fango
+-- import Bytes
+-- import Json
+-- import Tuple
+-- import Writer
+--
+-- written = Writer.collecting { writer -> Json.withWriter writer { Json.object [("a", { Json.encodeValue "x" })] } }
+--
+-- Tuple.second written == Bytes.fromString "{\"a\":\"x\"}"
+-- ```
 withWriter : Writer e -> (() ->{Emit, Fail Error | e} a) ->{e} Result Error a
 withWriter writer action = TextWriter.borrow writer { text -> withTextWriter text action }
 
+-- `withWriter` over a text writer, whose encoding the caller chose; a
+-- character it cannot represent fails with an `Error`.
 withTextWriter : TextWriter.Writer e -> (() ->{Emit, Fail Error | e} a) ->{e} Result Error a
 withTextWriter writer action =
     Fail.attempt {
@@ -83,12 +130,25 @@ withTextWriter writer action =
             return value -> value
     }
 
+-- Writes a value's JSON to a byte writer. The writer may already hold part
+-- of the output when encoding fails.
 write : Encode a => Writer e -> a ->{e} Result Error ()
 write writer value = withWriter writer { encodeValue value }
 
+-- Writes a value's JSON to a text writer.
 writeText : Encode a => TextWriter.Writer e -> a ->{e} Result Error ()
 writeText writer value = withTextWriter writer { encodeValue value }
 
+-- The value's JSON as text, without whitespace.
+--
+-- ```fango
+-- import Json
+-- import Result exposing (Result(..))
+--
+-- Json.stringify ["a", "b"] == Ok "[\"a\",\"b\"]"
+-- Json.stringify (Just True) == Ok "true"
+-- Json.stringify () == Ok "null"
+-- ```
 stringify : Encode a => a -> Result Error String
 stringify value =
     (outcome, text) = TextWriter.collecting { writer -> writeText writer value }
@@ -194,7 +254,20 @@ emitObject entries first =
             emitValue value
             emitObject rest False
 
--- Emits a JSON array from a stream, one element at a time.
+-- Emits a JSON array of the stream's elements, stepping the stream as it
+-- writes, so the array is never held in memory.
+--
+-- ```fango
+-- import Bytes
+-- import Json
+-- import Stream
+-- import Tuple
+-- import Writer
+--
+-- written = Writer.collecting { writer -> Json.withWriter writer { Json.array (Stream.fromList ["a", "b"]) } }
+--
+-- Tuple.second written == Bytes.fromString "[\"a\",\"b\"]"
+-- ```
 array : Encode a => Stream state a {Emit, Fail Error | e} ->{Emit, Fail Error | e} ()
 array items =
     emit "["
@@ -206,7 +279,9 @@ array items =
     )
     emit "]"
 
--- Emits a JSON object whose field values are emitted in order, when reached.
+-- Emits a JSON object whose field values are emitted in order, each when it
+-- is reached, so an array field can stream before a later field is
+-- computed.
 object : List (String, () ->{Emit, Fail Error | e} ()) ->{Emit, Fail Error | e} ()
 object fields =
     emit "{"
@@ -288,6 +363,15 @@ deriver Encode
         Field.validateJSONSchema subject
         Meta.match subject valueCode (derivedEncode subject)
 
+-- Validates a JSON number lexeme, keeping it exactly as written.
+--
+-- ```fango
+-- import Json
+-- import Result exposing (Result(..))
+--
+-- Result.map Json.numberText (Json.number "1e3") == Ok "1e3"
+-- Result.withDefault "" (Result.map Json.numberText (Json.number "01")) == ""
+-- ```
 number : String -> Result Error Number
 number text =
     case parse @Value text of

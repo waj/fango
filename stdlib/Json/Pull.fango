@@ -1,4 +1,15 @@
 {-# no-prelude #-}
+-- The JSON pull parser and the decoding protocol behind `Json.Decode`.
+--
+-- Everyday code imports `Json`. This module serves custom `Decode` instances
+-- and code that consumes a document token by token: the `Pull` effect and
+-- its handlers, container and path helpers, and the buffered `Scan`
+-- protocol that derived decoders run on.
+--
+-- Parsing rejects invalid UTF-8, malformed escapes, trailing input, and
+-- nesting deeper than 256 arrays or objects. An error is reported at the
+-- start of the offending token, whatever the input's buffering; a missing
+-- field after its object, and a duplicate one at its value.
 module Json.Pull exposing
     ( Decode(..), Error(..), Number, Pull, Scan, ScanStep(..), Token(..)
     , Value(..)
@@ -24,69 +35,121 @@ import Text.Builder as Builder exposing (Builder)
 import Text.Reader as TextReader
 import Tuple
 
-{- The JSON pull parser and the decoding protocol behind `Json.Decode`.
-
-Everyday code imports `Json`. This module is for custom `Decode` instances
-and for consuming a document token by token: the `Pull` effect and its
-handlers, the container and path helpers, and the buffered `Scan` protocol
-that generated decoders run on. -}
-
+-- A JSON failure and where it happened.
 type Error =
-    { message : String
+    {
+      -- What went wrong.
+      message : String
+      -- The zero-based byte offset; `-1` for a failure while emitting.
     , offset : Int
+      -- The one-based line.
     , line : Int
+      -- The one-based column, counted in bytes.
     , column : Int
+      -- Where in the document, as slash-separated keys and indices, for a
+      -- failure inside a decoded record, list, or value.
     , path : String
     }
     deriving (Eq, Show)
 
+-- One lexical JSON token.
 type Token
+    -- `{`
     = BeginObject
+    -- `}`
     | EndObject
+    -- `[`
     | BeginArray
+    -- `]`
     | EndArray
+    -- `:`
     | Colon
+    -- `,`
     | Comma
+    -- A string, unescaped.
     | StringToken String
+    -- A number, as written.
     | NumberToken String
+    -- `true` or `false`.
     | BooleanToken Bool
+    -- `null`.
     | NullToken
+    -- The end of the input.
     | EndInput
     deriving (Eq, Show)
 
+-- A JSON number kept as its lexeme, so it round-trips without conversion.
+-- `Json.number` makes one and `numberText` reads it.
 type Number = Number String
 
+-- A generic JSON document tree. Object members keep their order.
 type Value
+    -- `null`.
     = Null
+    -- `true` or `false`.
     | Boolean Bool
+    -- A number.
     | Numeric Number
+    -- A string.
     | Text String
+    -- An array.
     | Array (List Value)
+    -- An object's members, in order.
     | Object (List (String, Value))
 
+-- Reading a document token by token. `withReader` and `withTextReader`
+-- handle it.
 effect Pull
+    -- Consumes and answers the next token, or the pending one from `peek`.
     next : () -> Token
+    -- The next token, without consuming it.
     peek : () -> Token
+    -- The current source position, as an `Error` with an empty message. It
+    -- publishes buffered consumption.
     at : () -> Error
     tokenAt : () -> Error
     markToken : Scan -> ()
+    -- Consumes an array's separator or closing bracket and answers whether
+    -- another element follows, leaving that element unscanned. `first` says
+    -- whether no element has been read yet.
     nextElement : Bool -> Bool
+    -- Consumes an object's separator, key, and colon and answers the key, or
+    -- consumes the closing brace and answers `Nothing`. `first` says whether no
+    -- member has been read yet.
     nextKey : Bool -> Maybe String
+    -- Consumes a scalar and answers it as a string, or a message after
+    -- consuming a token of another type.
     decodedString : () -> Result String String
+    -- Consumes a scalar and answers it as an integer, or a message after
+    -- consuming a token of another type or a number out of range.
     decodedInt : () -> Result String Int
+    -- Consumes a scalar and answers it as a finite float, or a message after
+    -- consuming a token of another type or a number out of range.
     decodedFloat : () -> Result String Float
+    -- A speculative scan at the current position, or `Nothing` while a `peek`
+    -- token is pending. It consumes nothing.
     bufferedScan : () -> Maybe Scan
+    -- A scan at the current position that also carries pending lookahead. It
+    -- consumes nothing.
     currentScan : () -> Scan
     stringTail : Scan -> Builder -> (String, Scan)
     literalTail : Scan -> String -> Scan
     numberTail : Scan -> TextReader.Window -> NumberRun -> (String, Scan)
     integerTail : Scan -> IntegerRun -> (Result String Int, Scan)
+    -- Publishes the position a completed scan reached, consuming up to it. Call
+    -- it right away, before other parser operations.
     acceptScan : Scan -> ()
     enter : String -> ()
     enterIndex : Int -> ()
     leave : () -> ()
 
+-- Types that decode from JSON. Derive it, or write `scanValue`; a decoder
+-- written with `Pull` operations is
+-- `scanValue cursor = Json.Pull.scanFromPull cursor { ... }`.
 class Decode a
+    -- Starts a pure buffered scan of one value at `cursor`. `Ok` is the value
+    -- and the position after it; `Err` suspends work that `runScan` will
+    -- run, and is not a JSON error. Creating either consumes nothing.
     scanValue : Scan -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan)
 
 -- One segment of the error path: an object key, or an element index.
@@ -497,7 +560,12 @@ type Scan = { window : TextReader.Window, line : Int, column : Int, allowance : 
 
 -- Suspensions return a step, so a long sequence of refills or unknown keys
 -- runs through runScan's tail loop instead of nesting continuation calls.
-type ScanStep a = ScanDone a Scan | ScanContinue (Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan))
+-- What a suspended scan answers when run.
+type ScanStep a
+    -- The value and the position after it.
+    = ScanDone a Scan
+    -- More work, run in a loop with bounded stack.
+    | ScanContinue (Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan))
 
 -- Every typed value enters the same resumable parser, including when a
 -- custom token consumer has left lookahead pending.
@@ -508,6 +576,7 @@ decodeValue() =
     acceptScan rest
     value
 
+-- Runs suspended scan work until it answers a value and position, or fails.
 runScan : Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan) ->{Pull, Fail Error} (a, Scan)
 runScan result = case result of
     Ok value -> value
@@ -532,6 +601,7 @@ scanFromPull cursor action = Err {
     ScanDone value currentScan()
 }
 
+-- Transforms a scan's value, buffered or resumed alike.
 mapScan : (a -> b) -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan) -> Result (() ->{Pull, Fail Error} ScanStep b) (b, Scan)
 mapScan convert result = case result of
     Ok (value, rest) -> Ok (convert value, rest)
@@ -949,10 +1019,26 @@ tokenScan cursor = case fastWhite cursor.window cursor.line cursor.column of
     Just (start, line, column) -> { cursor | window = start, line = line, column = column }
     Nothing -> cursor
 
+-- Runs `action` with the `Pull` effect over a byte reader, decoding UTF-8.
+-- On return, normally or with `Err`, the reader is positioned after the last
+-- token scanned, `peek` lookahead included; inside, it may lag behind, so
+-- advance it only after the scope.
+--
+-- ```fango
+-- import Bytes
+-- import Json.Pull
+-- import Reader
+-- import Result exposing (Result(..))
+--
+-- tokens = Reader.withBytes (Bytes.fromString "[1]") { reader -> Json.Pull.withReader reader { [Json.Pull.next (), Json.Pull.peek (), Json.Pull.next (), Json.Pull.next ()] } }
+--
+-- tokens == Ok [Json.Pull.BeginArray, Json.Pull.NumberToken "1", Json.Pull.NumberToken "1", Json.Pull.EndArray]
+-- ```
 withReader : Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
 withReader reader action =
     TextReader.over reader { text -> withTextReader text action }
 
+-- `withReader` over a text reader, whose encoding the caller chose.
 withTextReader : TextReader.Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
 withTextReader reader action =
     initial = TextReader.window reader
@@ -1078,23 +1164,51 @@ withTextReader reader action =
             return value -> value
     }
 
+-- Fails with `message` at the current path, positioned at the start of the
+-- token most recently returned by `next` or `peek` or consumed by a
+-- `decoded` operation, or at the current position once the cursor moved on
+-- another way.
+--
+-- ```fango
+-- import Bytes
+-- import Json.Pull
+-- import Reader
+-- import Result exposing (Result(..))
+--
+-- failure : Result Json.Pull.Error Int
+-- failure =
+--     Reader.withBytes (Bytes.fromString "[true]") { reader ->
+--         Json.Pull.withReader reader {
+--             Json.Pull.beginArray ()
+--             ignore (Json.Pull.peek ())
+--             Json.Pull.fail "no booleans"
+--         }
+--     }
+--
+-- Result.mapError { e -> (e.message, e.offset) } failure == Err ("no booleans", 1)
+-- ```
 fail : String ->{Pull, Fail Error} a
 fail message = Fail.fail { tokenAt() | message = message }
 
+-- Runs `action` with `key` added to the path of errors raised inside it.
 withKey : String -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
 withKey segment action =
     Runtime.Scope.bracket { enter segment } { leave() } { action() }
 
+-- Runs `action` with element `index` added to the path of errors raised
+-- inside it.
 withIndex : Int -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
 withIndex index action =
     Runtime.Scope.bracket { enterIndex index } { leave() } { action() }
 
+-- Consumes an array's opening bracket, failing if the next token is another.
 beginArray : () ->{Pull, Fail Error} ()
 beginArray() =
     case next() of
         BeginArray -> ()
         _ -> fail "Expected JSON array"
 
+-- Consumes an object's opening brace, failing if the next token is another.
 beginObject : () ->{Pull, Fail Error} ()
 beginObject() =
     case next() of
@@ -1131,6 +1245,7 @@ decodeUnion nullary payload =
             payload tag
         _ -> fail "Expected tagged JSON union"
 
+-- Consumes the next value and builds its generic tree.
 readValue : () ->{Pull, Fail Error} Value
 readValue() =
     case next() of
@@ -1186,6 +1301,26 @@ readObjectAfterComma reverse =
         EndObject -> fail "Trailing object comma"
         _ -> readObject reverse
 
+-- Consumes and validates the next value without building it.
+--
+-- ```fango
+-- import Bytes
+-- import Json.Pull
+-- import Reader
+-- import Result exposing (Result(..))
+--
+-- rest =
+--     Reader.withBytes (Bytes.fromString "[{\"a\": [1, 2]}, 3]") { reader ->
+--         Json.Pull.withReader reader {
+--             Json.Pull.beginArray ()
+--             Json.Pull.skipValue ()
+--             ignore (Json.Pull.nextElement False)
+--             Json.Pull.next ()
+--         }
+--     }
+--
+-- rest == Ok (Json.Pull.NumberToken "3")
+-- ```
 skipValue : () ->{Pull, Fail Error} ()
 skipValue() =
     case next() of
@@ -1580,5 +1715,6 @@ deriver Decode
             Record ctor -> `$(recordScanner ctor) $(cursor)`
             Union ctors -> `scanFromPull $(cursor) { $(unionParser ctors) }`
 
+-- The number's lexeme as written.
 numberText : Number -> String
 numberText (Number text) = text

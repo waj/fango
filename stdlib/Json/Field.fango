@@ -1,4 +1,10 @@
 {-# no-prelude #-}
+-- The JSON field options and the string escaping both JSON derivers share.
+--
+-- Programs write the options as `#[Json.Key …]`, `#[Json.Skip]`, and
+-- `#[Json.Default …]` through `Json`, which re-exports `FieldOption`. The
+-- rest of this module serves derivers and decoders that must match what the
+-- encoder writes.
 module Json.Field exposing (FieldOption(..), FieldSettings(..), escapeChar, fieldSettings, plainChar, quote, validateJSONSchema)
 
 import Basics exposing (..)
@@ -13,15 +19,35 @@ settings and validate a type's options through this module; `Json` re-exports
 `FieldOption`. It also owns the JSON string escaping rule, so a decoder can
 match a key exactly as the encoder writes it. -}
 
--- Options interpreted by the JSON derivers, using generic Meta attributes.
-type FieldOption = Key String | Skip | Default Code
+-- An option on a record field, read by the JSON derivers. Each may occur
+-- once per field, emitted keys must be unique, and options anywhere but on
+-- a record field are rejected. Violations fail at compile time, at the
+-- attribute.
+type FieldOption
+    -- Use this wire key instead of the field name.
+    = Key String
+    -- Omit the field when encoding and ignore it when decoding. It requires
+    -- `Default` and cannot combine with `Key`.
+    | Skip
+    -- The value to use when decoding finds no key. The code is checked
+    -- against the field's type, keeps the scope it was written in, and runs
+    -- only when the fallback is needed.
+    | Default Code
 
+-- One field's options, collected and checked.
 type FieldSettings =
-    { key : String
+    {
+      -- The wire key: the field name unless `Key` renames it.
+      key : String
+      -- Whether `Skip` applies.
     , skip : Bool
+      -- The `Default` code, if any.
     , fallback : Maybe Code
+      -- Where `Key` was written, for diagnostics.
     , keySite : Maybe Meta.Site
+      -- Where `Skip` was written.
     , skipSite : Maybe Meta.Site
+      -- Where `Default` was written.
     , defaultSite : Maybe Meta.Site
     }
 
@@ -41,6 +67,8 @@ addFieldOption settings attached =
                 Just _ -> Meta.failAt attached.site "This field already has a JSON default option."
                 Nothing -> { settings | fallback = Just code, defaultSite = Just attached.site }
 
+-- The settings of the field `name` with these attributes, failing at compile
+-- time on a repeated option or an invalid combination.
 fieldSettings : String -> Meta.Attributes -> FieldSettings
 fieldSettings name attached =
     initial = FieldSettings { key = name, skip = False, fallback = Nothing, keySite = Nothing, skipSite = Nothing, defaultSite = Nothing }
@@ -110,6 +138,8 @@ validateUnionCtors ctors =
             validateUnionFields ctor.fields
             validateUnionCtors rest
 
+-- Checks every JSON option on a type: unique keys among emitted record
+-- fields, and no options anywhere but on record fields.
 validateJSONSchema : TypeInfo -> ()
 validateJSONSchema subject =
     rejectFieldOptions subject.attributes
@@ -122,6 +152,16 @@ validateJSONSchema subject =
 hexChar : Int -> String
 hexChar value = String.slice value (value + 1) "0123456789abcdef"
 
+-- The JSON escape for a character that cannot appear plainly in a string.
+--
+-- ```fango
+-- import Char
+-- import Json.Field
+--
+-- Json.Field.escapeChar '"' == "\\\""
+-- Json.Field.escapeChar '\n' == "\\n"
+-- Json.Field.escapeChar (Maybe.withDefault 'x' (Char.fromCode 1)) == "\\u0001"
+-- ```
 escapeChar : Char -> String
 escapeChar char =
     code = Char.toCode char
@@ -134,10 +174,17 @@ escapeChar char =
     else if char == '\t' then "\\t"
     else "\\u00" ++ hexChar (quotientBy 16 code) ++ hexChar (remainderBy 16 code)
 
+-- Whether a character appears unescaped in a JSON string.
 plainChar : Char -> Bool
 plainChar char = char /= '"' && char /= '\\' && Char.toCode char >= 32
 
 -- A JSON string literal, quotes included.
+--
+-- ```fango
+-- import Json.Field
+--
+-- Json.Field.quote "a\"b" == "\"a\\\"b\""
+-- ```
 quote : String -> String
 quote text = "\"" ++ quoteBody text "" ++ "\""
 
