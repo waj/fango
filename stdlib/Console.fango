@@ -1,0 +1,27 @@
+{-# no-prelude #-}
+module Console exposing (print, readLine, write)
+
+import Basics exposing (..)
+import Fail
+import IO exposing (IO, Line)
+import Maybe exposing (Maybe(..))
+
+panic : String ->{IO} ()
+panic = native
+
+write : String ->{IO} ()
+write text =
+    handle IO.write IO.stdout text on
+        Fail.fail error -> panic (IO.describeError error)
+        return value -> value
+
+print : Display a => a ->{IO} ()
+print value = write (display value ++ "\n")
+
+readLine : () ->{IO} Maybe Line
+readLine() =
+    handle IO.readLine IO.stdin on
+        Fail.fail error ->
+            panic (IO.describeError error)
+            Nothing
+        return line -> line

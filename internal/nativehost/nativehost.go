@@ -13,6 +13,7 @@ import (
 	goast "go/ast"
 	goparser "go/parser"
 	gotoken "go/token"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -288,8 +289,13 @@ func (e *Executor) exchange(ctx context.Context, host Host, request message, lab
 		case "host_read_line":
 			data, err := host.ReadInputLine()
 			e.reply(dataMessage("host_reply", data, err))
+		case "host_read_bytes":
+			data, err := host.ReadInputBytes(int64(m.Code))
+			e.reply(dataMessage("host_reply", data, err))
 		case "host_write":
 			e.reply(errorMessage("host_reply", host.WriteOutput(m.Data)))
+		case "host_write_error":
+			e.reply(errorMessage("host_reply", host.WriteError(m.Data)))
 		case "host_args":
 			e.reply(message{Kind: "host_reply", Values: append([]string(nil), host.Arguments()...)})
 		case "host_dir":
@@ -362,6 +368,10 @@ func errorMessage(kind string, err error) message {
 	m := message{Kind: kind}
 	if err != nil {
 		m.Error = err.Error()
+		if err != io.EOF {
+			failure := fangort.ClassifyIOError(err)
+			m.Failure = &nativewire.Failure{Kind: failure.Kind, Path: failure.Path, Message: failure.Message}
+		}
 	}
 	return m
 }

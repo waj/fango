@@ -1,7 +1,7 @@
-import IO exposing (write)
+import Console exposing (write)
 import List
 
-mark value = if value < 2 then IO.write "a" else IO.write "b"
+mark value = if value < 2 then Console.write "a" else Console.write "b"
 
 ints : List.List Int
 ints = List.range 0 2
@@ -14,10 +14,10 @@ empty = List.range 3 2
 
 main() =
     List.each mark ints
-    IO.write "|"
+    Console.write "|"
     List.each mark floats
     write "|"
-    List.each ({ _ -> IO.write "bad" }) empty
-    IO.write ""
-    IO.write "二"
+    List.each ({ _ -> Console.write "bad" }) empty
+    Console.write ""
+    Console.write "二"
     print "done"

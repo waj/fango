@@ -136,7 +136,7 @@ instance Show Bytes
 
 They live here, with the value they carry, because everything that produces or
 consumes bytes has to name them: the buffered `Reader` and `Writer`, and the
-`File` and `Net` adapters beneath those. Declaring them in `Reader` and
+`IO` and `Net` adapters beneath those. Declaring them in `Reader` and
 `Writer` instead would make a file import the buffering layer in order to name
 the interface it implements.
 

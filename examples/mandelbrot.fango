@@ -4,13 +4,13 @@ import Range
 printDensity : Int ->{IO} ()
 printDensity density =
     if density > 8 then
-        IO.write " "
+        Console.write " "
     else if density > 4 then
-        IO.write "."
+        Console.write "."
     else if density > 2 then
-        IO.write "*"
+        Console.write "*"
     else
-        IO.write "+"
+        Console.write "+"
 
 mandelConverger : Float -> Float -> Int -> Float -> Float -> Int
 mandelConverger real imaginary iterations constantReal constantImaginary =

@@ -2,7 +2,7 @@ import Stream
 import File
 import Fail
 
-lineStep file = case File.readLine file of
+lineStep file = case IO.readLine file of
     Nothing -> Nothing
     Just line ->
         print ("read " ++ line.text)

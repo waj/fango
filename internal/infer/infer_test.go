@@ -89,9 +89,11 @@ func TestInstallPreludeUsesDeclaredMetadata(t *testing.T) {
 	if len(print.Preds) != 1 || print.Preds[0].Class != "Basics.Display" {
 		t.Fatalf("print predicates = %+v, want one Display obligation", print.Preds)
 	}
-	write := ck.Operations["IO.write"]
-	if write == nil || write.Native == nil || write.Native.Name != "IO.write" {
-		t.Fatalf("IO.write does not reference its declared native: %+v", write)
+	if ck.IO == nil || len(ck.IO.Ops) != 0 {
+		t.Fatal("IO must be an operation-free ambient effect")
+	}
+	if ck.Operations["IO.write"] != nil || ck.Natives["IO.writeHandle"] == nil {
+		t.Fatal("handle writes must use ordinary native functions")
 	}
 }
 
@@ -296,7 +298,7 @@ func TestNegative(t *testing.T) {
 }
 
 func TestEffectRows(t *testing.T) {
-	src := "effect Console\n    write : String -> ()\n\nsay text = write text"
+	src := "effect Console\n    emit : String -> ()\n\nsay text = emit text"
 	ck, infos, errs := check(t, src)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -307,21 +309,21 @@ func TestEffectRows(t *testing.T) {
 	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "String ->{Console} ()" {
 		t.Fatalf("say type = %s, want String ->{Console} ()", got)
 	}
-	_, _, errs = check(t, "effect Console\n    write : String -> ()\n\nsay : String ->{Console | e} ()\nsay text = write text")
+	_, _, errs = check(t, "effect Console\n    emit : String -> ()\n\nsay : String ->{Console | e} ()\nsay text = emit text")
 	if len(errs) > 0 {
 		t.Fatalf("open effect annotation: %v", errs)
 	}
 
-	_, _, errs = check(t, "effect Console\n    write : String -> ()\n\nx = write \"hello\"")
+	_, _, errs = check(t, "effect Console\n    emit : String -> ()\n\nx = emit \"hello\"")
 	if len(errs) == 0 || errs[0].(checkErr).title != "UNHANDLED EFFECT" {
 		t.Fatalf("top-level operation call: want UNHANDLED EFFECT, got %v", errs)
 	}
 
-	_, _, errs = check(t, "effect Console\n    write : String -> ()\n\nsay : String -> ()\nsay text = write text")
+	_, _, errs = check(t, "effect Console\n    emit : String -> ()\n\nsay : String -> ()\nsay text = emit text")
 	if len(errs) == 0 || errs[0].(checkErr).title != "EFFECT MISMATCH" {
 		t.Fatalf("pure annotation: want EFFECT MISMATCH, got %v", errs)
 	}
-	_, _, errs = check(t, "effect Console\n    write : String -> ()\n\nsay : String ->{Console} String\nsay text = text")
+	_, _, errs = check(t, "effect Console\n    emit : String -> ()\n\nsay : String ->{Console} String\nsay text = text")
 	if len(errs) == 0 || errs[0].(checkErr).title != "EFFECT MISMATCH" {
 		t.Fatalf("overstated annotation: want EFFECT MISMATCH, got %v", errs)
 	}

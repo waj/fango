@@ -1,3 +1,4 @@
+import Process
 import Async
 import Bytes
 import Fail exposing (Fail)
@@ -17,7 +18,7 @@ attemptClient action = Fail.attempt action
 -- Forwards each request body to the upstream URL as it arrives, and answers
 -- with the upstream reply.
 main() =
-    case IO.args() of
+    case Process.args() of
         [raw, upstream] ->
             case String.toInt raw of
                 Just port ->
@@ -37,5 +38,5 @@ main() =
                                     Err error -> Http.Server.Response { status = 502, headers = [], body = BytesBody (Bytes.fromString (show error)) }
                             }
                     })
-                Nothing -> IO.exit 2
-        _ -> IO.exit 2
+                Nothing -> Process.exit 2
+        _ -> Process.exit 2

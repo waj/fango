@@ -6,7 +6,7 @@ import Result exposing (Result(..))
 
 main() =
     result = Fail.attempt ({ _ ->
-        source = File.withFile "input.txt" File.source
+        source = File.withFile "input.txt" IO.source
         Reader.over source ({ reader ->
             ignore (Reader.readUpTo reader 1)
             Nothing }) })

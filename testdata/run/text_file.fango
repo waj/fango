@@ -14,11 +14,11 @@ readContents text = Fail.attempt {
 }
 
 main() =
-    print (case Fail.attempt { File.withOutput "text.txt" { file -> Writer.over (File.sink file) 4 { bytes -> TextWriter.over bytes { text -> TextWriter.write text "é😀\r\ntail" } } } } of
+    print (case Fail.attempt { File.withOutput "text.txt" { file -> Writer.over (IO.sink file) 4 { bytes -> TextWriter.over bytes { text -> TextWriter.write text "é😀\r\ntail" } } } } of
             Err _ -> False
             Ok _ -> True
     )
-    print (case Fail.attempt { File.withFile "text.txt" { file -> Reader.over (File.source file) { bytes -> TextReader.over bytes { text -> readContents text } } } } of
+    print (case Fail.attempt { File.withFile "text.txt" { file -> Reader.over (IO.source file) { bytes -> TextReader.over bytes { text -> readContents text } } } } of
             Err _ -> False
             Ok outcome -> outcome == Ok (TextReader.Found "é😀", 8, "tail")
     )

@@ -3,9 +3,10 @@ module Sorted exposing (run)
 -- About the block as a whole.
 
 import Basics exposing (..) -- trailing stays with Basics
-import Dict
 -- About IO specifically.
-import IO exposing (IO, print, readLine)
+import Console exposing (print, readLine)
+import Dict
+import IO exposing (IO)
 import Json as J
 
 run = 1

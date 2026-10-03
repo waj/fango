@@ -9,8 +9,8 @@ box = native
 read : Box a ->{IO} a
 read = native
 
-write : Box a -> a ->{IO} ()
-write = native
+store : Box a -> a ->{IO} ()
+store = native
 
 type Record = { number : Int, text : String }
 type Tree = Leaf Int | Branch Tree Tree deriving (Show)
@@ -30,5 +30,5 @@ main() =
     print (read tree)
     read unit
     print ((read function) 9)
-    write integer 43
+    store integer 43
     print (read integer)

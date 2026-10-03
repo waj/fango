@@ -49,9 +49,9 @@ fileBody path =
     length = fromResult (File.size path)
     SizedBody length { output -> File.withFile path { file -> copyFile file output } }
 
-copyFile : File.Handle -> Writer {IO, Fail IO.Error | e} ->{IO, Fail IO.Error | e} ()
+copyFile : IO.Handle -> Writer {IO, Fail IO.Error | e} ->{IO, Fail IO.Error | e} ()
 copyFile file output =
-    case File.readBytes file 65536 of
+    case IO.readBytes file 65536 of
         Just bytes ->
             Writer.write output bytes
             copyFile file output

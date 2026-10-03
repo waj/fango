@@ -1,0 +1,6 @@
+effect Marker a
+
+identity : a -> a
+identity x = x
+
+effect Last

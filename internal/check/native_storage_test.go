@@ -8,7 +8,7 @@ import (
 )
 
 func TestNativeStorageTypeContracts(t *testing.T) {
-	const cell = `module StorageFixture exposing (Box, box, read, write)
+	const cell = `module StorageFixture exposing (Box, box, read, store)
 import Runtime.Native
 {-# resource #-}
 type Box a = Box Runtime.Native.Any
@@ -16,14 +16,14 @@ box : a ->{IO} Box a
 box = native
 read : Box a ->{IO} a
 read = native
-write : Box a -> a ->{IO} ()
-write = native
+store : Box a -> a ->{IO} ()
+store = native
 `
 	const sidecar = `package native
 type cell struct { value any }
 func Box(value any) any { return &cell{value} }
 func Read(handle any) any { return handle.(*cell).value }
-func Write(handle, value any) { handle.(*cell).value = value }
+func Store(handle, value any) { handle.(*cell).value = value }
 `
 	for _, tc := range []struct{ name, body, want string }{
 		{"different indices", `main() =
@@ -40,7 +40,7 @@ main() = ()
 		{"wrong write", `main() =
     x : StorageFixture.Box Int
     x = StorageFixture.box 1
-    StorageFixture.write x "wrong"
+    StorageFixture.store x "wrong"
 `, "TYPE MISMATCH"},
 		{"borrowed initial payload", `freeze : (() -> Int) -> (() -> Int)
 freeze action = action
@@ -49,7 +49,7 @@ bad() = handle StorageFixture.box (freeze { _ -> State.get() }) with current = 0
     State.put next -> resume () with next
 main() = ()
 `, "HANDLER BINDING EFFECTS"},
-		{"borrowed stored payload", `save cell value = StorageFixture.write cell value
+		{"borrowed stored payload", `save cell value = StorageFixture.store cell value
 main() =
     target : StorageFixture.Box (() -> Int)
     target = StorageFixture.box { _ -> 0 }

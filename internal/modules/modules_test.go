@@ -67,7 +67,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module)
 	}
-	if strings.Join(got, ",") != "Basics,Meta,Derive,List,Maybe,IO,IO,Prelude,B,A,Z,Main" {
+	if strings.Join(got, ",") != "Basics,Meta,Derive,List,Maybe,Bytes,Failure,Result,Fail,Runtime.Native,IO,IO,Console,Console,Prelude,B,A,Z,Main" {
 		t.Fatalf("order %v", got)
 	}
 	if r.Entry != "Main.main" {
@@ -80,7 +80,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, unit := range r.Units {
 		units = append(units, unit.Name+":"+strings.Join(unit.Imports, "+"))
 	}
-	if strings.Join(units, ",") != "Basics:,Meta:Basics,Derive:Basics+Meta,List:Basics,Maybe:Basics,IO:Basics+List+Maybe,B:,A:B,Z:,Main:Z+A" {
+	if strings.Join(units, ",") != "Basics:,Meta:Basics,Derive:Basics+Meta,List:Basics,Maybe:Basics,Bytes:Basics+List+Maybe,Failure:Basics+List+Maybe,Result:Basics,Fail:Basics+Failure+List+Result,Runtime.Native:,IO:Basics+Bytes+Fail+Maybe+Result+Runtime.Native,Console:Basics+Fail+IO+Maybe,B:,A:B,Z:,Main:Z+A" {
 		t.Fatalf("units %v", units)
 	}
 	if !r.Units[len(r.Units)-1].Entry {
@@ -104,7 +104,7 @@ func TestPreludeFollowsBundledImports(t *testing.T) {
 	if len(errs) > 0 {
 		t.Fatalf("Prelude: %v", errs)
 	}
-	wantOwners := []string{"Basics", "Derive", "IO", "List", "Maybe", "Meta", "Prelude", "Regex", "Result", "Runtime.Native", "Tuple"}
+	wantOwners := []string{"Basics", "Bytes", "Console", "Derive", "Fail", "Failure", "IO", "List", "Maybe", "Meta", "Prelude", "Regex", "Result", "Runtime.Native", "Tuple"}
 	var gotOwners []string
 	for owner := range p.Owners {
 		gotOwners = append(gotOwners, owner)
@@ -179,11 +179,11 @@ func TestBundledModules(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module+":"+m.Path)
 	}
-	want := "Basics:<stdlib>/Basics.fango,Meta:<stdlib>/Meta.fango,Derive:<stdlib>/Derive.fango,List:<stdlib>/List.fango,Maybe:<stdlib>/Maybe.fango,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,Prelude:<stdlib>/Prelude.fango,Range:<stdlib>/Range.fango,Main:Main.fango"
+	want := "Basics:<stdlib>/Basics.fango,Meta:<stdlib>/Meta.fango,Derive:<stdlib>/Derive.fango,List:<stdlib>/List.fango,Maybe:<stdlib>/Maybe.fango,Bytes:<stdlib>/Bytes.fango,Failure:<stdlib>/Failure.fango,Range:<stdlib>/Range.fango,Result:<stdlib>/Result.fango,Fail:<stdlib>/Fail.fango,Runtime.Native:<stdlib>/Runtime/Native.fango,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,Console:<stdlib>/Console.fango,Console:<stdlib>/Console.native.go,Prelude:<stdlib>/Prelude.fango,Main:Main.fango"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("manifest = %v, want %s", got, want)
 	}
-	if f := r.Fixity.Lookup("+"); f.Prec != 6 || f.Assoc != ast.AssocLeft || len(r.Natives) != 1 {
+	if f := r.Fixity.Lookup("+"); f.Prec != 6 || f.Assoc != ast.AssocLeft || len(r.Natives) != 2 {
 		t.Fatalf("declared native metadata: fixity of (+)=%v %d natives=%v", f.Assoc, f.Prec, r.Natives)
 	}
 }
@@ -202,6 +202,7 @@ func TestBundledPureNativeSidecars(t *testing.T) {
 	want := []string{
 		"Char:<stdlib>/Char.native.go",
 		"IO:<stdlib>/IO.native.go",
+		"Console:<stdlib>/Console.native.go",
 		"Random:<stdlib>/Random.native.go",
 		"String:<stdlib>/String.native.go",
 		"Encoding:<stdlib>/Encoding.native.go",

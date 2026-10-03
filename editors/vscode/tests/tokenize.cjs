@@ -16,6 +16,15 @@ async function main() {
     loadGrammar: async () => textmate.parseRawGrammar(fs.readFileSync(grammarPath, "utf8"), grammarPath),
   });
   const grammar = await registry.loadGrammar("source.fango");
+  // Operation-free declarations end on this line, including at EOF.
+  for (const sample of ["effect IO", "effect Marker a"]) {
+    const line = grammar.tokenizeLine(sample);
+    const scopes = index => line.tokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+    assert(scopes(0).includes("keyword.other.effect.fango"));
+    assert(scopes(sample.indexOf(" ") + 1).includes("entity.name.type.effect.fango"));
+    const next = grammar.tokenizeLine("value = 1", line.ruleStack);
+    assert(!next.tokens.some(t => t.scopes.includes("entity.name.type.effect.fango")));
+  }
   const sample = 'test "name" { value -> value |> finish }';
   const tokens = grammar.tokenizeLine(sample).tokens;
   const scopeAt = index => tokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;

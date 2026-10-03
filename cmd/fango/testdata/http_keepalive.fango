@@ -1,3 +1,4 @@
+import Process
 import Bytes
 import Fail exposing (Fail)
 import Http.Client as Client
@@ -18,7 +19,7 @@ peek path =
     }
 
 main() =
-    case IO.args() of
+    case Process.args() of
         [base] ->
             print (Fail.attempt {
                     Client.run {
@@ -27,4 +28,4 @@ main() =
                         }
                     }
             })
-        _ -> IO.exit 2
+        _ -> Process.exit 2

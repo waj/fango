@@ -12,6 +12,10 @@ returning a lambda may instead perform on its outer arrow. Function values
 execute only through application. Native value annotations retain their rows
 although their scalar sidecar ABI has no hidden evidence parameter.
 
+Effects may have no operations; IO uses this form as an ambient marker for
+ordinary native calls. Empty declarations retain nominal identity, row inclusion,
+and parameter checking without operation evidence slots.
+
 Rows contain distinct applied effect labels and an optional tail. Two fully
 resolved applications of one nominal effect may coexist. Occurrences whose
 arguments still contain type variables overlap until inference resolves them;

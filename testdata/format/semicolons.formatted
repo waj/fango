@@ -1,7 +1,7 @@
 module Semicolons exposing (run)
 
 import Basics exposing (..)
-import IO exposing (print)
+import Console exposing (print)
 
 compact = { a b -> print a; b + 1 }
 locals x = y = x + 1; print y; y * 2

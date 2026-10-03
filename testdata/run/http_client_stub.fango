@@ -18,7 +18,7 @@ compressed : String -> Bytes
 compressed text =
     (_, bytes) = Writer.collecting { w ->
         case GZip.encoding (BytesBody (Bytes.fromString text)) of
-            StreamBody write -> write w
+            StreamBody emit -> emit w
             _ -> ()
     }
     bytes

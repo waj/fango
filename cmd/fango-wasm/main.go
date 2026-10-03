@@ -57,6 +57,7 @@ func run(entry string, stdin io.Reader, stdout, stderr io.Writer) int {
 	env := eval.NewEnv()
 	env.DefineProg(prog)
 	ioctx := eval.NewIOContext(stdin, stdout)
+	ioctx.ErrorWriter = stderr
 	ctx := context.Background()
 	_, err := eval.ForceIO(ctx, "main", env, ioctx)
 	var exitErr *natives.ExitError

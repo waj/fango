@@ -73,7 +73,7 @@ func TestProxy(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		dec, enc := gob.NewDecoder(server), gob.NewEncoder(server)
-		want := []string{"host_has_input", "host_read_line", "host_write", "host_args", "host_dir", "host_exit"}
+		want := []string{"host_has_input", "host_read_line", "host_read_bytes", "host_write", "host_write_error", "host_args", "host_dir", "host_exit"}
 		for _, kind := range want {
 			var request nativewire.Message
 			if err := dec.Decode(&request); err != nil {
@@ -90,6 +90,17 @@ func TestProxy(t *testing.T) {
 				response.Bool = true
 			case "host_read_line":
 				response.Data = []byte("line\n")
+			case "host_read_bytes":
+				if request.Code != 3 {
+					done <- errors.New("unexpected byte count")
+					return
+				}
+				response.Data = []byte{255, 0, 65}
+			case "host_write_error":
+				if string(request.Data) != "err" {
+					done <- errors.New("unexpected stderr")
+					return
+				}
 			case "host_write":
 				if string(request.Data) != "out" {
 					done <- errors.New("unexpected output")
@@ -113,7 +124,13 @@ func TestProxy(t *testing.T) {
 	if line, err := p.ReadInputLine(); string(line) != "line\n" || err != nil {
 		t.Fatalf("ReadInputLine = %q, %v", line, err)
 	}
+	if data, err := p.ReadInputBytes(3); string(data) != "\xff\x00A" || err != nil {
+		t.Fatalf("ReadInputBytes = %q, %v", data, err)
+	}
 	if err := p.WriteOutput([]byte("out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.WriteError([]byte("err")); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(p.Arguments(), ","); got != "one,two" {

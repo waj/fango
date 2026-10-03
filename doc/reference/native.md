@@ -56,12 +56,14 @@ sees the underlying value (`int64` here, or `any` for `Runtime.Native.Any`); the
 and rebuilds the constructor on the way out, in both backends. Keep the
 constructor out of the module's exposing list and derive no `Show` or `Eq`,
 and callers hold an opaque handle they can neither forge nor inspect — the
-bundled `File.Handle`, `Net.Listener`, and `Net.Connection` use this with
+bundled `IO.Handle`, `Net.Listener`, and `Net.Connection` use this with
 `Runtime.Native.Any`, with `{-# resource #-}` adding their scoped capability contract.
+The bundled File acquisition API additionally uses the canonical IO.Handle
+wrapper owned by IO. User sidecars still require their own wrappers.
 The indexed storage forms below additionally admit opaque typed payloads.
 Other direct functions, ADTs, records, polymorphic variables, class constraints,
 Go type parameters, and multiple results are `NATIVE ABI` errors. A Go `error` result is likewise
-rejected in user sidecars (`FALLIBLE NATIVE NOT ALLOWED`); the bundled `File`
+rejected in user sidecars (`FALLIBLE NATIVE NOT ALLOWED`); the bundled `IO`, `File`,
 and `Net` modules use their declared `IO.Error` and `Net.Error` results.
 Effect rows on native value types
 are preserved for checking and may contain `IO` or user-declared effects; the
@@ -126,14 +128,17 @@ operation.
 ## FangoHost
 
 Every materialized sidecar package receives the reserved process-global
-`FangoHost`. Its `HasInput`, `ReadInputLine`, `WriteOutput`, `Arguments`,
-`WorkingDirectory`, `Exit`, and `ExecutionContext` methods expose the surrounding
-Fango process.
+`FangoHost`. Its `HasInput`, `ReadInputLine`, `ReadInputBytes`, `WriteOutput`,
+`WriteError`, `Arguments`, `WorkingDirectory`, `Exit`, and `ExecutionContext`
+methods expose the surrounding Fango process.
 Compiled programs install the system host; the interpreter worker installs a
 proxy to the active interpreter session. Native function signatures never gain
 a hidden context argument. Sidecars may use `FangoHost` only during a native
 call and must not replace it or retain it for asynchronous work. Host input
-buffer access and individual output writes are serialized. In the interpreter
+buffer access and individual output writes are serialized. Line and byte input
+share one buffer, including the REPL input pump. IOContext.ErrorWriter routes
+interpreter stderr and defaults to os.Stderr when absent; REPL options and
+WASM entry points pass their explicit error writer. In the interpreter
 worker, concurrent host calls keep each request paired with its own reply.
 
 `ExecutionContext` returns the current evaluation's cancellation context; the

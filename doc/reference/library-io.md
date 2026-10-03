@@ -1,55 +1,60 @@
-# IO, files, and sockets
+# IO, console, process, files, and sockets
 
-Console and process IO, structured IO.Error values, and scoped File APIs.
-
-[Reference index](../reference.md). Sources: [IO](../../stdlib/IO.fango), [File](../../stdlib/File.fango).
+[Reference index](../reference.md). Sources: [IO](../../stdlib/IO.fango),
+[Console](../../stdlib/Console.fango), [Process](../../stdlib/Process.fango),
+[File](../../stdlib/File.fango), and [Net](../../stdlib/Net.fango).
 
 ## IO
 
-`IO` exposes console IO, process arguments, files, and explicit process exit:
+`IO` is the ambient, operation-free effect for external IO. The module owns
+an opaque `Handle` shared by open files and standard streams. `stdin`, `stdout`,
+and `stderr` are process-owned handles, also available unqualified through
+Prelude. Standard handles resolve the active interpreter or REPL session on
+every operation; they do not refer to the native worker's own streams.
 
 ```fango
-import IO
+import Fail exposing (attempt)
+import Result exposing (Result(..))
 
 main() =
-    IO.write "same line"
-    print " then newline"
+    case attempt { IO.write stderr "a diagnostic\n" } of
+        Ok () -> ()
+        Err error -> print (IO.describeError error)
 ```
 
-`IO.write : String ->{IO} ()` writes the string exactly as provided without a
-trailing newline. It is a native operation; the prelude imports `IO`, so
-`IO.write` is reachable without an import of your own, while reaching it
-unqualified takes one. `print : Display a => a ->{IO} ()` (see
-[Standard classes](classes.md#standard-classes)) and `readLine` are
-unqualified already, from the prelude. `IO` also exposes these legacy
-operations, kept for existing programs; new code reads and writes files
-through the `File` module below, which reports failures as values:
+Handle operations have these types:
 
 ```fango
-args : () ->{IO} List String
-readFile : String ->{IO} Maybe String
-writeFile : String -> String ->{IO} ()
-exit : Int ->{IO} ()
+readLine : Handle ->{IO, Fail Error} Maybe Line
+readBytes : Handle -> Int ->{IO, Fail Error} Maybe Bytes
+write : Handle -> String ->{IO, Fail Error} ()
+writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
+source : Handle -> Bytes.Source {IO, Fail Error}
+sink : Handle -> Bytes.Sink {IO, Fail Error}
 ```
 
-`args()` returns the program arguments after the source path (and optional
-`--`) when launched with `fango run`, using the ordinary `List` type. Import
-`List exposing (List(..))` to pattern-match its constructors unqualified.
-Relative file paths are resolved from
-the running program's current working directory. `readFile` returns `Nothing`
-when the path does not exist and `Just contents` otherwise; malformed UTF-8
-bytes in a file are replaced with U+FFFD. Other read errors fail the program.
-`writeFile path contents` creates or replaces the file, and `exit status`
-terminates with that status.
+`readLine` returns `Nothing` at clean end of input and otherwise a nominal
+`Line = { text : String, ending : String }`. The exact terminator is `"\n"`,
+`"\r\n"`, or `""` for an unterminated final line. Malformed UTF-8 is replaced
+with U+FFFD. Pure `lineText` and `lineEnding` helpers split raw lines the same way.
 
-`IO` also exposes the nominal record
-`type Line = { text : String, ending : String }`;
-`readLine : () ->{IO} Maybe IO.Line`
-returns `Nothing` at clean end of input and otherwise preserves the line
-terminator separately as `"\n"`, `"\r\n"`, or `""` for an unterminated final
-line. Malformed UTF-8 input sequences are replaced with U+FFFD. The pure
-helpers `lineText : String -> String` and `lineEnding : String -> String`
-split a raw line the same way, so other line sources can produce a `Line`.
+`readBytes handle count` returns `Nothing` at EOF and otherwise up to `count`
+bytes, capped at 64 KiB per read. A non-positive count returns an empty `Bytes`
+while input remains, and `Nothing` at EOF. Line and byte reads share the same
+input buffer and may interleave. Byte reads preserve arbitrary binary data.
+
+`write` writes the string exactly as given; `writeBytes` writes all supplied
+bytes. Neither adds buffering or a newline. Complete reads and output writes
+are serialized per handle or standard endpoint. `source` and `sink` adapt handles to
+the [buffered reader and writer](library-readers.md) interfaces without taking
+ownership or closing them.
+
+`stdin` is readable; `stdout` and `stderr` are writable. Using the wrong direction
+raises `Fail Error` with kind `Other` and path `stdin`, `stdout`, or `stderr`.
+Other standard-stream errors use the same endpoint names. File errors retain
+the caller's supplied path. Handles have no public constructor, `Show`, or `Eq`.
+There is no public close operation. Standard handles have process lifetime;
+file handles remain valid only until their owning File scope closes.
 
 Structured failures are values of `IO.Error`:
 
@@ -62,29 +67,55 @@ type Error = { kind : Kind, path : String, message : String } deriving (Eq, Show
 describeError : Error -> String
 ```
 
-`kind` classifies what went wrong and `path` is the path the program supplied.
-For `NotFound`, `PermissionDenied`, `AlreadyExists`, `IsDirectory`, and
-`NotDirectory`, `message` is respectively `no such file or directory`,
-`permission denied`, `file exists`, `is a directory`, or `not a directory`.
-Those messages, and `describeError`'s output for them, are the same on every
-platform. An `Other` failure instead preserves the underlying system message
-for diagnostics; programs should use `kind`, rather than matching that text,
-for portable behavior. The legacy `readFile` and `writeFile` above do not
-produce these values; the `File` module does.
+`kind` classifies what went wrong. Known kinds have stable messages:
+`no such file or directory`, `permission denied`, `file exists`, `is a directory`,
+and `not a directory`, respectively. `Other` preserves the underlying system
+message. Match `kind` for portable behavior. `describeError` renders
+`path: reason`, using stable text for known kinds.
+
+## Console
+
+Console supplies IO-only conveniences, available unqualified through Prelude:
+
+```fango
+print : Display a => a ->{IO} ()
+write : String ->{IO} ()
+readLine : () ->{IO} Maybe IO.Line
+```
+
+`write` writes to stdout; `print` writes `display value` followed by `"\n"`.
+`readLine()` reads from stdin with the handle operation's line contract.
+These functions catch `Fail IO.Error` and panic with `IO.describeError` on
+failure. Use IO handle operations when failures should be handled as values.
+
+## Process
+
+Import Process explicitly for process arguments and exit:
+
+```fango
+args : () ->{IO} List String
+exit : Int ->{IO} ()
+```
+
+`args()` returns the program arguments after the source path and optional
+`--` when launched with `fango run`. `exit status` terminates with that status.
+In the interpreter it reports program exit without terminating the hosting
+compiler or REPL. Process is not imported by Prelude.
 
 ## File
 
-`File` reads, writes, and lists files with structured failures, and treats an
-open file as a scoped resource:
+File acquires scoped `IO.Handle` values and supplies whole-file and directory
+operations. Relative paths resolve from the running program's working directory.
 
 ```fango
 import Fail exposing (Fail, attempt)
 import File
 import IO exposing (Error)
+import Result exposing (Result(..))
 
-countLines : File.Handle -> Int ->{IO, Fail Error} Int
+countLines : IO.Handle -> Int ->{IO, Fail Error} Int
 countLines file count =
-    case File.readLine file of
+    case IO.readLine file of
         Nothing -> count
         Just _ -> countLines file (count + 1)
 
@@ -94,18 +125,10 @@ main() =
         Err error -> print (IO.describeError error)
 ```
 
-Its public types are
-
 ```fango
-withFile : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
-withOutput : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
-withAppend : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
-readLine : File.Handle ->{IO, Fail IO.Error} Maybe IO.Line
-readBytes : File.Handle -> Int ->{IO, Fail IO.Error} Maybe Bytes
-source : File.Handle -> Bytes.Source {IO, Fail IO.Error}
-write : File.Handle -> String ->{IO, Fail IO.Error} ()
-writeBytes : File.Handle -> Bytes ->{IO, Fail IO.Error} ()
-sink : File.Handle -> Bytes.Sink {IO, Fail IO.Error}
+withFile : String -> (IO.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+withOutput : String -> (IO.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+withAppend : String -> (IO.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
 read : String ->{IO} Result IO.Error String
 writeAll : String -> String ->{IO} Result IO.Error ()
 listDirectory : String ->{IO} Result IO.Error (List String)
@@ -113,43 +136,22 @@ isDirectory : String ->{IO} Result IO.Error Bool
 size : String ->{IO} Result IO.Error Int
 ```
 
-`withFile path action` opens `path` for reading and runs `action` on the handle;
-`withOutput` creates or truncates the file first, and `withAppend` opens it
-for appending, creating it if needed. Each is a [cleanup scope](resources.md): the
-file is closed exactly once when `action` finishes, whether it returned, failed,
-or exited to an outer handler. A failed open raises `Fail IO.Error` before
-anything is acquired; a failed close after a successful body is the scope's
-failure, and after a failed body it is recorded alongside the body's failure.
-`readLine` has the console `readLine`'s contract — `Nothing` at end of file,
-otherwise the text and its exact terminator — and `write` writes a string as
-given. `readBytes file count` answers `Nothing` at end of file and otherwise up
-to `count` bytes, which may be fewer; a non-positive count answers an empty
-`Bytes` while input remains, and `Nothing` at end of file. It shares the handle's buffered reader with
-`readLine`, so counted reads and line reads interleave on one handle, and it is
-the only read that can carry a byte no `String` holds. `writeBytes` writes a
-`Bytes` as given. All four raise `Fail IO.Error` on a system failure, so a body
-that only reads and writes needs no `case` of its own; `attempt` around the
-scope collects the failure.
+`withFile` opens a readable handle. `withOutput` creates or truncates a file
+and opens a writable handle. `withAppend` opens a writable handle for append,
+creating the file if needed. Each is a [cleanup scope](resources.md): it closes
+the file exactly once on normal return or language abort. A failed open raises
+before acquiring anything. A failed close after a successful body becomes the
+scope's failure; after a failed body it is recorded alongside the primary failure.
+Closing interrupts a blocked file read without waiting for its read lock.
+Returning a handle or adapter does not extend its lifetime: subsequent operations
+report a closed-resource error. Named callbacks may perform fewer effects than
+the wrapper permits.
 
-A handle serializes complete read operations, including access to its buffer.
-Concurrent readers consume successive input; there is no separate public
-peek/read window. Closing does not wait for a blocked read's lock: it closes
-the underlying file, which may interrupt that read. Later operations report a
-closed-resource error.
-
-`source` and `sink` adapt an open file to the leaves a
-[buffered reader and writer](library-readers.md) are built over, so a file and
-a memory buffer drive the same parsing code. Both capture the handle. Calls after the owning scope closes report
-a closed-resource error; closing belongs to the scope. A pull answers whatever the file had, which may be short. `read` and `writeAll` handle a whole file without a
-handle and answer a `Result` instead. `listDirectory` names a directory's
-entries in sorted order, `isDirectory` answers whether a path names one, and
-`size` gives a file's size in bytes; a missing path is an `Err` with kind
+`read` and `writeAll` operate on a whole file without a handle and return
+`Result`. Reads replace malformed UTF-8 with U+FFFD; writes create or replace
+the file. `listDirectory` returns sorted entry names, `isDirectory` checks the
+path's kind, and `size` returns bytes. Missing paths return `Err` with kind
 `NotFound` for each.
-
-`File.Handle` is abstract, with no accessible constructor, `Show`, or `Eq`.
-A `with*` scope owns its lifetime. Returning a handle does not extend that
-lifetime; [resource validity](resources.md) is checked at runtime.
-Named callbacks may perform fewer effects than the wrapper permits.
 
 ## Net
 

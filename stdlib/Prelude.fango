@@ -11,6 +11,7 @@ import Basics exposing
     , display, ignore, show
     , (*), (+), (++), (-), (/), (/=), (<), (<=), (<|), (==), (>), (>=), (|>)
     )
-import IO exposing (IO, print, readLine)
+import Console exposing (print, readLine, write)
+import IO exposing (IO, stderr, stdin, stdout)
 import List exposing (List)
 import Maybe exposing (Maybe(..))

@@ -2,7 +2,7 @@
 -- constructor, so the order their callbacks run in is exactly what that
 -- rewrite could have changed. map and filter visit left to right; foldr visits
 -- right to left, because it folds the rest of the list before combining.
-import IO exposing (write)
+import Console exposing (write)
 import List
 
 noisyDouble : Int ->{IO} Int

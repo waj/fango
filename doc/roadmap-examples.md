@@ -8,7 +8,7 @@ tests live in [CLI tests](../cmd/fango/e2e_test.go).
 ## Data structures, files, and OS APIs
 
 - **Conway's Game of Life:** choose a grid representation (Array, Dict, or nested
-  lists), add required floored division/time/sleep support, and animate with IO.write.
+  lists), add required floored division/time/sleep support, and animate with Console.write.
 - **Markov-chain generator:** Dict of List values, seeded Random, and large-input
   performance coverage against Go.
 

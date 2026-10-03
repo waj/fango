@@ -1,5 +1,5 @@
 -- The prelude's imports are ordinary imports, so the modules it names are
 -- reachable qualified without an import line of our own.
 main() =
-    IO.write (show (Basics.modBy 3 10))
-    IO.write "\n"
+    Console.write (show (Basics.modBy 3 10))
+    Console.write "\n"

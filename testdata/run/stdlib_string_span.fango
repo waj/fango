@@ -5,7 +5,7 @@ import String
 beforeSpace char = char /= ' '
 
 trace char =
-    IO.write (String.fromChar char)
+    Console.write (String.fromChar char)
     char /= '!'
 
 main() =

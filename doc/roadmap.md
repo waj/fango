@@ -82,8 +82,6 @@ handler behavior.
 Add APIs when programs need them, preferably in Fango; use bundled natives only
 for otherwise unavailable semantics or measured performance needs.
 
-- New file operations belong in File. Deprecating legacy IO.readFile/writeFile/exit
-  and migrating examples waits for a deprecation mechanism.
 - Dict filter/union/intersect/partition and Ord; floored division to
   pair with modBy; Tuple mapFirst/mapSecond and Triple accessors await consumers.
 - Unicode normalization, grapheme segmentation, and Unicode-aware word/case APIs

@@ -1,3 +1,4 @@
+import Process
 import Bytes
 import Fail exposing (Fail)
 import Http exposing (Body(..))
@@ -44,7 +45,7 @@ attemptClient : (() ->{Fail Client.Error | e} a) ->{e} Result Client.Error a
 attemptClient action = Fail.attempt action
 
 main() =
-    case IO.args() of
+    case Process.args() of
         [base, file] ->
             print (attemptIO { attemptClient { Client.run { Client.configure { c -> { c | baseUrl = Url.parse base } } { requests file } } } })
-        _ -> IO.exit 2
+        _ -> Process.exit 2

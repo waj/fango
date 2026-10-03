@@ -1,12 +1,12 @@
 import IO
 import Range
 
-mark value = if value < 2 then IO.write "a" else IO.write "b"
+mark value = if value < 2 then Console.write "a" else Console.write "b"
 
 main() =
     Range.each mark 0 2
-    IO.write "|"
+    Console.write "|"
     Range.each mark 0.0 2.0
-    IO.write "|"
-    Range.each ({ _ -> IO.write "bad" }) 3 2
+    Console.write "|"
+    Range.each ({ _ -> Console.write "bad" }) 3 2
     print "done"

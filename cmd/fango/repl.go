@@ -25,6 +25,7 @@ func cmdRepl(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	var opts repl.Options
+	opts.ErrorWriter = stderr
 	if len(args) == 1 {
 		opts.Root = args[0]
 	}

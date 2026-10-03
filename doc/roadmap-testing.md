@@ -45,8 +45,7 @@ These were settled when the design was drawn up and are not open:
 Use [callback inclusion](reference/effects.md#row-inclusion-and-callback-compatibility),
 [row-kinded ADTs](reference/functions.md#row-kinded-parameters), and
 [blanket instances](reference/classes.md#instance-heads-and-blanket-instances).
-Adding bundled Expect/Test reserves those module names. Reports use stdout because
-there is no stderr API; IO.exit supplies status. Existing differential fixtures
+Adding bundled Expect/Test reserves those module names. Reports use stdout; Process.exit supplies status. Existing differential fixtures
 can pin output and failure status without a new harness.
 
 ## Modules
@@ -156,7 +155,7 @@ onFail : String -> (() ->{Expect | e} a) ->{Expect | e} a
 ## Runner and report
 
 `run : Test e ->{IO | e} ()` walks the tree, installs an `Expect` handler
-around each body, prints a report, and calls `IO.exit 1` unless the run both
+around each body, prints a report, and calls `Process.exit 1` unless the run both
 passed and was complete. Output is ASCII and goes to stdout. Following
 elm-test, only failures are printed in full, followed by a summary:
 

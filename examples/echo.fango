@@ -19,6 +19,7 @@ import IO
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Net
+import Process
 import Reader exposing (Read(..), Reader)
 import Result exposing (Result(..))
 import String
@@ -77,13 +78,13 @@ run : Int ->{IO, Fail Net.Error} ()
 run port = Net.withListener port (runListener port)
 
 main() =
-    case portFrom IO.args() of
+    case portFrom Process.args() of
         Nothing ->
             print "Usage: echo [PORT]"
-            IO.exit 2
+            Process.exit 2
         Just port ->
             case attempt { run port } of
                 Ok _ -> ()
                 Err error ->
                     print ("echo: " ++ error.message)
-                    IO.exit 1
+                    Process.exit 1

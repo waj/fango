@@ -25,7 +25,7 @@ The bundled library is experimental and versioned with the compiler.
 | Bytes | [Byte sequences](reference/library-bytes.md) |
 | Reader, Writer, Bytes.Source, Bytes.Sink | [Buffered readers and writers](reference/library-readers.md) |
 | Encoding, Text.Reader, Text.Writer, Text.Builder | [Encodings and text I/O](reference/library-text-io.md) |
-| IO, File, Net | [Console, process, files, sockets, and structured errors](reference/library-io.md) |
+| IO, Console, Process, File, Net | [Handles, console, process, files, sockets, and structured errors](reference/library-io.md) |
 | Url | [URLs](reference/library-url.md) |
 | Http, Http.Wire, Http.Server, Http.Server.Route, Http.GZip | [HTTP/1.1 server and middleware](reference/library-http.md) |
 | Http.Client | [HTTP/1.1 client](reference/library-http-client.md) |

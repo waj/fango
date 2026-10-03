@@ -123,6 +123,13 @@ func fixtureProgram(prog *core.Prog, preludeOwners map[string]bool) *core.Prog {
 	result := *prog
 	result.Defs = nil
 	result.ADTs = nil
+	result.Effects = nil
+	for _, effect := range prog.Effects {
+		at := strings.LastIndexByte(effect.Name, '.')
+		if at < 0 || !preludeOwners[effect.Name[:at]] {
+			result.Effects = append(result.Effects, effect)
+		}
+	}
 	for _, d := range prog.Defs {
 		if !preludeOwners[d.Owner] {
 			result.Defs = append(result.Defs, d)

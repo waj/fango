@@ -1,0 +1,4 @@
+(module
+  (effect Marker (params a))
+  (def identity (params x) (ann (-> a a)) (var x))
+  (effect Last))

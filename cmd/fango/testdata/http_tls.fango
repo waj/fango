@@ -1,3 +1,4 @@
+import Process
 import Fail exposing (Fail)
 import Http.Client as Client
 import IO
@@ -19,9 +20,9 @@ fetchWith caFile target =
     outcome (Fail.attempt { Client.run { Client.configure { config -> { config | caFile = caFile } } { Client.getText target } } })
 
 main() =
-    case IO.args() of
+    case Process.args() of
         [target, caFile, otherHost] ->
             print (fetchWith (Just caFile) target)
             print (fetchWith Nothing target)
             print (fetchWith (Just caFile) otherHost)
-        _ -> IO.exit 2
+        _ -> Process.exit 2

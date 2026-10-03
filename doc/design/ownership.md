@@ -8,7 +8,11 @@
 Bracket cleanup is deterministic for normal returns and language aborts. Native
 resource operations validate the handle's current state, including use after
 close. The compiler does not prove that a resource, wrapper, or closure cannot
-outlive the scope that acquired it. Sidecars own resource validity checks.
+outlive the scope that acquired it. Sidecars own resource validity checks. File scopes own IO.Handle file lifetimes;
+standard IO handles have process lifetime and cannot be closed. Shared runtime
+handle operations validate direction and state before use, and serialize file
+reads and writes. Standard endpoint operations borrow the active host, which
+owns synchronization and shared input buffering.
 
 The `resource` marker retains nominal native-storage restrictions; it is not a
 lifetime proof. Sealed indexed native storage cannot be rewrapped at a different

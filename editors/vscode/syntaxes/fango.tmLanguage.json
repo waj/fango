@@ -180,7 +180,7 @@
       ]
     },
     "effect_decl": {
-      "match": "^(effect)\\s+([A-Z][A-Za-z0-9_]*)",
+      "match": "^(effect)[\\t ]+([A-Z][A-Za-z0-9_]*)(?=[\\t ]|$)",
       "captures": {
         "1": { "name": "keyword.other.effect.fango" },
         "2": { "name": "entity.name.type.effect.fango" }

@@ -9,12 +9,12 @@ import Result exposing (Result(..))
 -- and reports a structured failure; the listing at the end shows which
 -- outputs the failing copies left behind.
 
-copyLines : File.Handle -> File.Handle -> Int ->{IO, Fail Error} Int
+copyLines : IO.Handle -> IO.Handle -> Int ->{IO, Fail Error} Int
 copyLines input output count =
-    case File.readLine input of
+    case IO.readLine input of
         Nothing -> count
         Just line ->
-            File.write output (line.text ++ line.ending)
+            IO.write output (line.text ++ line.ending)
             copyLines input output (count + 1)
 
 copy : String -> String ->{IO} Result Error Int

@@ -11,7 +11,7 @@ import (
 // "Go backend and runtime"): a single-constructor, single-boundary-value type
 // declared in the sidecar's own module, erased to its field at the Go call;
 // the bundled Bytes, in bundled sidecars only, crossing as an ordinary []byte;
-// and a bundled File or Net error result produced from a Go `(T, error)`.
+// and a bundled IO, File, or Net error result produced from a Go `(T, error)`.
 // Module validation
 // checks the Go signatures against the spelling of these shapes before name
 // resolution; this file resolves the same shapes semantically and records the
@@ -67,7 +67,8 @@ func (ck *Checker) resolveNativeBoundary(n *types.NativeInfo, sp source.Span) []
 			}
 		}
 	}()
-	// A wrapper must be declared in the native's own module. Canonical symbols
+	// Wrappers normally belong to the native's own module; bundled File also
+	// acquires and closes canonical IO.Handle values. Canonical symbols
 	// carry that module as their prefix — none for a headerless entry — so the
 	// native's own symbol, not its sidecar link name, is the locality key.
 	module := symbolModule(n.Name)
@@ -122,7 +123,7 @@ func (ck *Checker) resolveNativeBoundary(n *types.NativeInfo, sp source.Span) []
 }
 
 // boundaryWrapper answers the constructor a type is erased through at the
-// boundary, or nil for anything that is not a local one-field wrapper.
+// boundary, or nil for anything outside the local or shared IO handle boundary.
 func (ck *Checker) boundaryWrapper(t types.Type, module string) *types.CtorInfo {
 	con, ok := t.(*types.TCon)
 	if !ok {
@@ -132,7 +133,7 @@ func (ck *Checker) boundaryWrapper(t types.Type, module string) *types.CtorInfo 
 	if adt == nil || adt.IsRecord() || len(con.Args) != len(adt.Params) || len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 {
 		return nil
 	}
-	if symbolModule(adt.Con.Name) != module || !ck.isBoundaryValue(adt.Ctors[0].Fields[0]) {
+	if (symbolModule(adt.Con.Name) != module && !(module == "File" && adt.Con.Name == "IO.Handle")) || !ck.isBoundaryValue(adt.Ctors[0].Fields[0]) {
 		return nil
 	}
 	return adt.Ctors[0]
@@ -184,15 +185,15 @@ func (ck *Checker) isResultType(t types.Type) bool {
 	return adt != nil && adt.Con.Name == resultTypeName
 }
 
-// fallibleShape checks a bundled File or Net error result and gathers the
+// fallibleShape checks a bundled IO, File, or Net error result and gathers the
 // constructors the backends build. Module validation already rejects the Go
 // signature elsewhere; this is the resolved-type backstop.
 func (ck *Checker) fallibleShape(t types.Type, n *types.NativeInfo, sp source.Span) (*types.FallibleShape, []diag.Error) {
 	bad := func(format string, args ...any) (*types.FallibleShape, []diag.Error) {
 		return nil, []diag.Error{diag.Errorf(sp, "NATIVE DECLARATION", format, args...)}
 	}
-	if n.Effect != nil || n.Module != "File" && n.Module != "Net" {
-		return bad("Only value natives of the bundled `File` and `Net` modules may declare a fallible native result.")
+	if n.Effect != nil || n.Module != "IO" && n.Module != "File" && n.Module != "Net" {
+		return bad("Only value natives of the bundled `IO`, `File`, and `Net` modules may declare a fallible native result.")
 	}
 	errorName, kindName, locationName, classifier, kindNames := ioErrorName, ioKindName, "path", "io", ioKindCtors
 	if n.Module == "Net" {

@@ -29,7 +29,8 @@ type argument, and any other effect is an `UNHANDLED EFFECT` before
 elaboration. The observed expression evaluates to one tagged String, value or
 failure, because only simple values return from the native worker.
 
-Print is ordinary Display-constrained Fango over display and IO.write. Tooling
+Print is ordinary Display-constrained Console code over display and
+IO.write stdout, catching typed IO failures at the convenience boundary. Tooling
 evaluates an observed expression once. The REPL echoes a result through available
 Show evidence, the representation, so a String result is quoted; a program whose
 entry is a value prints it through Display evidence, as `print` would. Without

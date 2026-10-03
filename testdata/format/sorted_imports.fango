@@ -4,7 +4,8 @@ module Sorted exposing (run)
 
 import Json as J
 -- About IO specifically.
-import IO exposing (print, IO, readLine)
+import Console exposing (readLine, print)
+import IO exposing (IO)
 import Basics exposing (..) -- trailing stays with Basics
 import Dict
 

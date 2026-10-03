@@ -126,7 +126,7 @@ writePending pending =
             case builder of
                 EmptyBuilder -> writePending remaining
                 Chunk value ->
-                    IO.write value
+                    Console.write value
                     writePending remaining
                 Join left right -> writePending [left, right | remaining]
 

@@ -4,16 +4,16 @@ type Pair = { first : Int, second : Int }
 
 mark : String -> Int ->{IO} Int
 mark label value =
-    IO.write label
+    Console.write label
     value
 
 make : () ->{IO} Pair
 make() =
-    IO.write "r"
+    Console.write "r"
     Pair { first = 0, second = 0 }
 
 main() =
     literal = Pair { second = mark "b" 2, first = mark "a" 1 }
-    IO.write "|"
+    Console.write "|"
     updated = { make() | second = mark "y" 4, first = mark "x" 3 }
     print (literal.first + updated.second)

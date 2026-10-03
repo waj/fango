@@ -1,13 +1,13 @@
 effect Console
-    write : String -> ()
+    emit : String -> ()
 
 program : () ->{Console} ()
-program() = write "handled"
+program() = emit "handled"
 
 collect : (() ->{Console} ()) ->{IO} ()
 collect action =
     handle action() on
-        write text ->
+        emit text ->
             print text
             resume ()
 

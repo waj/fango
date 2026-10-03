@@ -29,10 +29,10 @@ reportTyped result =
     case result of
         Err error ->
             print error.message
-            IO.exit 1
+            Process.exit 1
         Ok orders ->
             total = List.foldl summarize (Totals { records = 0, ids = 0, cents = 0, units = 0, text_bytes = 0 }) orders
-            IO.write (show total.records ++ " " ++ show total.ids ++ " " ++ show total.cents ++ " " ++ show total.units ++ " " ++ show total.text_bytes ++ "\n")
+            Console.write (show total.records ++ " " ++ show total.ids ++ " " ++ show total.cents ++ " " ++ show total.units ++ " " ++ show total.text_bytes ++ "\n")
 
 runTask : String -> TextReader.Reader e ->{IO.IO | e} ()
 runTask kind reader =
@@ -48,20 +48,20 @@ runTask kind reader =
             case result of
                 Err error ->
                     print error.message
-                    IO.exit 1
-                Ok total -> IO.write (show total.count ++ " " ++ show total.strings ++ " " ++ show total.numbers ++ " " ++ show total.trues ++ " " ++ show total.nulls ++ "\n")
+                    Process.exit 1
+                Ok total -> Console.write (show total.count ++ " " ++ show total.strings ++ " " ++ show total.numbers ++ " " ++ show total.trues ++ " " ++ show total.nulls ++ "\n")
         "scalars" ->
             (count, codes, bytes) = scanScalars reader 0 0 0
             Probe.finish()
-            IO.write (show count ++ " " ++ show codes ++ " " ++ show bytes ++ "\n")
-        _ -> IO.exit 1
+            Console.write (show count ++ " " ++ show codes ++ " " ++ show bytes ++ "\n")
+        _ -> Process.exit 1
 
 main() =
     result = Fail.attempt {
-        case IO.args() of
+        case Process.args() of
             [kind, source, path] ->
                 case source of
-                    "file" -> File.withFile path { file -> Reader.over (File.source file) { reader -> TextReader.over reader { text -> runTask kind text } } }
+                    "file" -> File.withFile path { file -> Reader.over (IO.source file) { reader -> TextReader.over reader { text -> runTask kind text } } }
                     _ ->
                         text = Fail.fromResult (File.read path)
                         if kind == "encoding" then
@@ -69,17 +69,17 @@ main() =
                             Probe.begin()
                             (count, codes, size) = scanEncoding bytes 0 0 0
                             Probe.finish()
-                            IO.write (show count ++ " " ++ show codes ++ " " ++ show size ++ "\n")
+                            Console.write (show count ++ " " ++ show codes ++ " " ++ show size ++ "\n")
                         else case source of
                             "bytes" -> Reader.withBytes (Bytes.fromString text) { reader -> TextReader.over reader { textReader -> runTask kind textReader } }
                             "text" -> TextReader.withString text { reader -> runTask kind reader }
-                            _ -> IO.exit 1
-            _ -> IO.exit 1
+                            _ -> Process.exit 1
+            _ -> Process.exit 1
     }
     case result of
         Err error ->
             print (IO.describeError error)
-            IO.exit 1
+            Process.exit 1
         Ok _ -> ()
 `
 

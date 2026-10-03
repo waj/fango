@@ -27,7 +27,7 @@ import IO
 import Result exposing (Result(..))
 
 main() =
-    case Fail.attemptReport ({ _ -> File.withOutput "output.txt" ({ file -> File.write file "data" }) }) of
+    case Fail.attemptReport ({ _ -> File.withOutput "output.txt" ({ file -> IO.write file "data" }) }) of
         Err report ->
             print (IO.describeError report.primary)
             List.each ({ failure ->
@@ -41,19 +41,25 @@ main() =
 	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	inject := func(content []byte) []byte {
+	inject := func(module string, content []byte) []byte {
 		t.Helper()
 		text := string(content)
-		for before, after := range map[string]string{
-			"h.file.WriteString(text)": "func() (int, error) { return 0, &fs.PathError{Op: \"write\", Path: h.path, Err: errors.New(\"injected write failure\")} }()",
-			"h.file.Close()":           "func() error { if err := h.file.Close(); err != nil { return err }; return &fs.PathError{Op: \"close\", Path: h.path, Err: errors.New(\"injected close failure\")} }()",
-		} {
-			if strings.Count(text, before) != 1 {
-				t.Fatalf("File injection point %q changed", before)
-			}
-			text = strings.Replace(text, before, after, 1)
+		var before, after string
+		switch module {
+		case "IO":
+			text = strings.Replace(text, "import \"strings\"", "import (\"strings\"; \"errors\"; \"io/fs\")", 1)
+			before = "return FangoWriteIOHandleBytes(FangoHost, value, []byte(text))"
+			after = "if text == \"data\" { return &fs.PathError{Op: \"write\", Path: \"output.txt\", Err: errors.New(\"injected write failure\")} }; return FangoWriteIOHandleBytes(FangoHost, value, []byte(text))"
+		case "File":
+			before = "return FangoCloseIOHandle(value)"
+			after = "if err := FangoCloseIOHandle(value); err != nil { return err }; return &fs.PathError{Op: \"close\", Path: \"output.txt\", Err: errors.New(\"injected close failure\")}"
+		default:
+			return content
 		}
-		return []byte(text)
+		if strings.Count(text, before) != 1 {
+			t.Fatalf("%s injection point %q changed", module, before)
+		}
+		return []byte(strings.Replace(text, before, after, 1))
 	}
 	var diagnostics bytes.Buffer
 	p, _, _, _, sources, ok := compileFileGraph(path, &diagnostics)
@@ -63,9 +69,7 @@ main() =
 	var workerSources []nativehost.Source
 	for _, source := range sources {
 		content := source.Content
-		if source.Module == "File" {
-			content = inject(content)
-		}
+		content = inject(source.Module, content)
 		workerSources = append(workerSources, nativehost.Source{Module: source.Module, Content: content})
 	}
 	executor, err := nativehost.New(workerSources)
@@ -90,8 +94,10 @@ main() =
 	}
 	files := emittedProject(t, path)
 	for i := range files {
-		if files[i].Path == "native/File/native.go" {
-			files[i].Data = inject(files[i].Data)
+		for _, module := range []string{"IO", "File"} {
+			if files[i].Path == "native/"+module+"/native.go" {
+				files[i].Data = inject(module, files[i].Data)
+			}
 		}
 	}
 	dir := t.TempDir()

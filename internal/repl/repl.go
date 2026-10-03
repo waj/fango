@@ -40,6 +40,8 @@ import (
 
 // Options configures a session.
 type Options struct {
+	// ErrorWriter routes program stderr; nil uses os.Stderr.
+	ErrorWriter io.Writer
 	// Root is the source root a prompt `import Foo.Bar` resolves beneath as
 	// `Foo/Bar.fango`, the way an entry file's directory is in a build.
 	// Empty means the working directory.
@@ -165,11 +167,13 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	ck.MonoValues = true
 	env := eval.NewEnv()
 	env.DefineProg(&core.Prog{ADTs: ck.ADTOrder, Defs: preludeDefs, Natives: ck.Natives})
+	ioctx := eval.NewIOContext(strings.NewReader(""), out)
+	ioctx.ErrorWriter = opts.ErrorWriter
 	return &Session{
 		ck:         ck,
 		env:        env,
 		out:        out,
-		ioctx:      eval.NewIOContext(strings.NewReader(""), out),
+		ioctx:      ioctx,
 		graph:      graph,
 		prompt:     graph.NewPrompt(),
 		modules:    installer,
@@ -255,7 +259,7 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 	input := newLinePump(source, interrupts)
 	defer input.Close()
 	s.interrupts = interrupts
-	s.ioctx = &eval.IOContext{Reader: reader, Input: input, Writer: out, Natives: s.ioctx.Natives}
+	s.ioctx = &eval.IOContext{Reader: reader, Input: input, Writer: out, ErrorWriter: s.ioctx.ErrorWriter, Natives: s.ioctx.Natives}
 	var buf strings.Builder
 	flush := func() {
 		if buf.Len() > 0 {
@@ -479,6 +483,13 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	if len(errs) > 0 {
 		diag.Render(s.out, errs)
 		return inputDone
+	}
+	// A valid empty effect header may still grow operation signatures at the
+	// prompt. Buffer it until a blank line, a new top-level input, or EOF.
+	if !force && len(m.Decls) == 1 {
+		if effect, ok := m.Decls[0].(*ast.EffectDecl); ok && len(effect.Ops) == 0 {
+			return needMoreInput
+		}
 	}
 	if len(m.Imports) > 0 {
 		return s.importInput(m)

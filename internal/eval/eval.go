@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -119,10 +120,13 @@ type IOContext struct {
 	Input interface {
 		HasInput() (bool, error)
 		ReadInputLine() ([]byte, error)
+		ReadInputBytes(int64) ([]byte, error)
 	}
 	Writer io.Writer
-	Args   []string
-	Dir    string
+	// ErrorWriter defaults to os.Stderr when absent, independently of stdout.
+	ErrorWriter io.Writer
+	Args        []string
+	Dir         string
 	// Natives selects a sidecar caller for this evaluator. Nil uses the shared
 	// bundled caller lazily.
 	Natives NativeCaller
@@ -229,11 +233,29 @@ func (c *IOContext) ReadInputLine() ([]byte, error) {
 	return c.Reader.ReadBytes('\n')
 }
 
+func (c *IOContext) ReadInputBytes(count int64) ([]byte, error) {
+	c.inputMu.Lock()
+	defer c.inputMu.Unlock()
+	if c.Input != nil {
+		return c.Input.ReadInputBytes(count)
+	}
+	return fangort.ReadIOBytes(c.Reader, count)
+}
+
 func (c *IOContext) WriteOutput(data []byte) error {
 	c.outputMu.Lock()
 	defer c.outputMu.Unlock()
-	_, err := c.Writer.Write(data)
-	return err
+	return fangort.WriteIOBytes(c.Writer, data)
+}
+
+func (c *IOContext) WriteError(data []byte) error {
+	c.outputMu.Lock()
+	defer c.outputMu.Unlock()
+	w := c.ErrorWriter
+	if w == nil {
+		w = os.Stderr
+	}
+	return fangort.WriteIOBytes(w, data)
 }
 
 func (c *IOContext) Write(data []byte) (int, error) {

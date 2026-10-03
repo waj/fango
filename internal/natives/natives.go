@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
@@ -33,7 +31,7 @@ type Runtime struct {
 	Expand func(*meta.Code) ast.Expr
 }
 
-// ExitError is how the interpreter represents IO.exit without terminating
+// ExitError is how the interpreter represents Process.exit without terminating
 // the compiler or test process that hosts it. A compiled program calls
 // os.Exit through fangort and therefore has the same observable status.
 type ExitError = fangort.ExitError
@@ -136,92 +134,49 @@ var Table = func() map[string]Spec {
 	t["IO.lineEnding"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return lineEnding(args[0].(string)), nil
 	}}
-	t["IO.hasInput"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
-		if rt.Host != nil {
-			ok, err := rt.Host.HasInput()
-			if err != nil {
-				panic(err)
-			}
-			return ok, nil
-		}
-		_, err := rt.Reader.Peek(1)
-		if err == io.EOF {
-			return false, nil
-		}
-		if err != nil {
-			panic(err)
-		}
-		return true, nil
+	t["IO.standardHandle"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return fangort.StandardIOHandle(args[0].(int64)), nil
 	}}
-	t["IO.readRawLine"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
-		if rt.Host != nil {
-			line, err := rt.Host.ReadInputLine()
-			if err != nil && err != io.EOF {
-				panic(err)
-			}
-			return string([]rune(string(line))), nil
-		}
-		line, err := rt.Reader.ReadString('\n')
-		if err != nil && err != io.EOF {
-			panic(err)
-		}
-		return string([]rune(line)), nil
+	t["IO.handleHasInput"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		value, err := fangort.IOHandleHasInput(rt.Host, args[0])
+		return ioAnswer(value, err)
 	}}
-	t["IO.write"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		if _, err := io.WriteString(rt.Writer, args[0].(string)); err != nil {
-			panic(err)
-		}
-		return struct{}{}, nil
+	t["IO.readHandleLine"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		value, err := fangort.ReadIOHandleLine(rt.Host, args[0])
+		return ioAnswer(value, err)
 	}}
-	t["IO.argCount"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
+	t["IO.readHandleBytes"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
+		value, err := fangort.ReadIOHandleBytes(rt.Host, args[0], args[1].(int64))
+		return ioAnswer(value, err)
+	}}
+	t["IO.writeHandle"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
+		return ioAnswer(struct{}{}, fangort.WriteIOHandleBytes(rt.Host, args[0], []byte(args[1].(string))))
+	}}
+	t["IO.writeHandleBytes"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
+		return ioAnswer(struct{}{}, fangort.WriteIOHandleBytes(rt.Host, args[0], args[1].([]byte)))
+	}}
+	t["Console.panic"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		panic(args[0].(string))
+	}}
+	t["Process.argCount"] = Spec{Arity: 1, Eval: func(rt *Runtime, _ []any) (any, error) {
 		return int64(len(rt.Args)), nil
 	}}
-	t["IO.argAt"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+	t["Process.argAt"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
 		index := args[0].(int64)
 		if index < 0 || index >= int64(len(rt.Args)) {
 			panic(fmt.Sprintf("argument index %d is out of range", index))
 		}
 		return rt.Args[index], nil
 	}}
-	nativePath := func(rt *Runtime, path string) string {
-		if filepath.IsAbs(path) {
-			return path
-		}
-		return filepath.Join(rt.Dir, path)
-	}
-	t["IO.pathExists"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		_, err := os.Stat(nativePath(rt, args[0].(string)))
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		if err != nil {
-			panic(err)
-		}
-		return true, nil
-	}}
-	t["IO.readFileText"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		data, err := os.ReadFile(nativePath(rt, args[0].(string)))
-		if err != nil {
-			panic(err)
-		}
-		return strings.ToValidUTF8(string(data), "\uFFFD"), nil
-	}}
-	t["IO.writeFile"] = Spec{Arity: 2, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		if err := os.WriteFile(nativePath(rt, args[0].(string)), []byte(args[1].(string)), 0o644); err != nil {
-			panic(err)
-		}
-		return struct{}{}, nil
-	}}
-	t["IO.exit"] = Spec{Arity: 1, Effect: true, Eval: func(_ *Runtime, args []any) (any, error) {
+	t["Process.exit"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return nil, &ExitError{Code: int(args[0].(int64))}
 	}}
 	t["Random.entropySeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
 		return stdlib.EntropySeed(), nil
 	}}
-	// The File module's natives exist only in the sidecar worker: they touch
-	// the file system and return Go errors the compiler turns into IO.Error,
-	// which this in-process table cannot represent. Their entries record the
-	// arity bundled-native validation checks and refuse to run here.
+	// File acquisition and directory natives run only in the sidecar worker.
+	// Their entries record the arity bundled-native validation checks and
+	// refuse to run here. Host-only IO and Process calls can run in-process.
 	for name, arity := range fileNatives {
 		t[name] = Spec{Arity: arity, Eval: func(_ *Runtime, _ []any) (any, error) {
 			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
@@ -239,7 +194,11 @@ var Table = func() map[string]Spec {
 	for name, spec := range t {
 		_, file := fileNatives[name]
 		_, network := netNatives[name]
-		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network
+		ambient := strings.HasPrefix(name, "Process.") || strings.HasPrefix(name, "Console.") || strings.HasPrefix(name, "IO.")
+		if name == "IO.lineText" || name == "IO.lineEnding" || name == "IO.standardHandle" {
+			ambient = false
+		}
+		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network && !ambient
 		t[name] = spec
 	}
 	return t
@@ -248,11 +207,9 @@ var Table = func() map[string]Spec {
 // fileNatives lists the bundled File sidecar's natives with their arities.
 var fileNatives = map[string]int{
 	"File.openRead": 1, "File.openWrite": 1, "File.openAppend": 1, "File.closeHandle": 1,
-	"File.handleHasInput": 1, "File.readHandleLine": 1, "File.writeHandle": 2,
-	"File.readHandleBytes": 2, "File.writeHandleBytes": 2,
 	"File.readFileResult": 1, "File.writeFileResult": 2,
 	"File.openDirectory": 1, "File.readDirectoryEntry": 1, "File.closeDirectory": 1,
-	"File.isDirectoryPath": 1,
+	"File.isDirectoryPath": 1, "File.fileSize": 1,
 }
 
 var netNatives = map[string]int{
@@ -262,3 +219,11 @@ var netNatives = map[string]int{
 }
 
 func Lookup(name string) (Spec, bool) { spec, ok := Table[name]; return spec, ok }
+
+// IO uses the same classified outcome as sidecar calls in the worker.
+func ioAnswer(value any, err error) (any, error) {
+	if err != nil {
+		return fangort.ClassifyIOError(err), nil
+	}
+	return value, nil
+}

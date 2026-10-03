@@ -1,9 +1,12 @@
 {-# no-prelude #-}
-module IO exposing (Error(..), IO, Kind(..), Line(..), args, describeError, exit, lineEnding, lineText, print, readFile, readLine, write, writeFile)
+module IO exposing (Error(..), Handle, IO, Kind(..), Line(..), describeError, lineEnding, lineText, readBytes, readLine, sink, source, stderr, stdin, stdout, write, writeBytes)
 
 import Basics exposing (..)
-import List exposing (List)
+import Bytes exposing (Bytes, Sink(..), Source(..))
+import Fail exposing (Fail, fromResult)
 import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Runtime.Native
 
 type Line = { text : String, ending : String } deriving (Eq, Show)
 
@@ -30,15 +33,22 @@ describeError error =
         Other -> error.path ++ ": " ++ error.message
 
 effect IO
-    hasInput : () -> Bool = native
-    readRawLine : () -> String = native
-    write : String -> () = native
-    argCount : () -> Int = native
-    argAt : Int -> String = native
-    pathExists : String -> Bool = native
-    readFileText : String -> String = native
-    writeFile : String -> String -> () = native
-    exit : Int -> () = native
+
+-- Files and standard streams share one opaque handle representation.
+{-# resource #-}
+type Handle = Handle Runtime.Native.Any
+
+standardHandle : Int -> Handle
+standardHandle = native
+
+stdin : Handle
+stdin = standardHandle 0
+
+stdout : Handle
+stdout = standardHandle 1
+
+stderr : Handle
+stderr = standardHandle 2
 
 lineText : String -> String
 lineText = native
@@ -46,26 +56,58 @@ lineText = native
 lineEnding : String -> String
 lineEnding = native
 
-readLine : () ->{IO} Maybe Line
-readLine() =
-    case hasInput() of
-        False -> Nothing
-        True ->
-            raw = readRawLine()
-            Just (Line { text = lineText raw, ending = lineEnding raw })
+handleHasInput : Handle ->{IO} Result Error Bool
+handleHasInput = native
 
-print : Display a => a ->{IO} ()
-print value = write (display value ++ "\n")
+readHandleLine : Handle ->{IO} Result Error String
+readHandleLine = native
 
-argsFrom : Int -> Int ->{IO} List String
-argsFrom index count =
-    if index >= count then
-        []
+readHandleBytes : Handle -> Int ->{IO} Result Error Bytes
+readHandleBytes = native
+
+writeHandle : Handle -> String ->{IO} Result Error ()
+writeHandle = native
+
+writeHandleBytes : Handle -> Bytes ->{IO} Result Error ()
+writeHandleBytes = native
+
+-- readLine has the console readLine's contract: Nothing at end of file,
+-- otherwise the line and its exact terminator.
+readLine : Handle ->{IO, Fail Error} Maybe Line
+readLine file =
+    raw = fromResult (readHandleLine file)
+    if raw == "" then Nothing else Just ({ text = lineText raw, ending = lineEnding raw })
+
+write : Handle -> String ->{IO, Fail Error} ()
+write file text = fromResult (writeHandle file text)
+
+-- readBytes answers Nothing at end of file and otherwise up to count bytes,
+-- which may be fewer than asked for; it shares the handle's buffered reader
+-- with readLine, so the two interleave. This is already the shape a
+-- Bytes.Source needs.
+readBytes : Handle -> Int ->{IO, Fail Error} Maybe Bytes
+readBytes file count =
+    if count <= 0 then
+        if fromResult (handleHasInput file) then Just Bytes.empty else Nothing
     else
-        [argAt index | argsFrom (index + 1) count]
+        data = fromResult (readHandleBytes file count)
+        if Bytes.length data == 0 then Nothing else Just data
 
-args : () ->{IO} List String
-args() = argsFrom 0 argCount()
+writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
+writeBytes file data = fromResult (writeHandleBytes file data)
 
-readFile : String ->{IO} Maybe String
-readFile path = if pathExists path then Just (readFileText path) else Nothing
+-- chunk is how much one pull asks for. A pull answers what is there, so a
+-- smaller read is ordinary and the number only bounds the ask. It matches
+-- the natives' largest single read, so a buffered reader over a large file
+-- refills, and copies its unconsumed tail, as rarely as possible.
+chunk : Int
+chunk = 65536
+
+-- source and sink adapt an open file to the leaves a Reader and a Writer are
+-- built over. Each captures the handle and checks its validity on use.
+-- Neither closes it: closing belongs to the scope.
+source : Handle -> Source {IO, Fail Error}
+source file = Source { pull = { readBytes file chunk } }
+
+sink : Handle -> Sink {IO, Fail Error}
+sink file = Sink { write = { data -> writeBytes file data } }

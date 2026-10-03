@@ -3,7 +3,6 @@ package eval
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -38,17 +37,8 @@ func boolTy() *types.TCon   { return &types.TCon{Unique: 3, Name: "Bool"} }
 func unitTy() *types.TCon   { return &types.TCon{Unique: 4, Name: "()"} }
 
 func writeExpr(text string) core.Expr {
-	eff := &types.EffectInfo{Unique: 5, Name: "IO"}
-	native := &types.NativeInfo{Name: "IO.write", Module: "IO", Arity: 1, Effect: eff}
-	op := &types.EffectOp{Owner: eff, Name: "write", Arity: 1, ParamTypes: []types.Type{stringTy()}, ResultType: unitTy(), Native: native}
-	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{&core.StringLit{Val: text, Ty: stringTy()}}, Ty: unitTy()}
-}
-
-func ioReadExpr(name string, result types.Type) core.Expr {
-	eff := &types.EffectInfo{Unique: 5, Name: "IO"}
-	native := &types.NativeInfo{Name: "IO." + name, Module: "IO", Arity: 1, Effect: eff}
-	op := &types.EffectOp{Owner: eff, Name: name, Arity: 1, ParamTypes: []types.Type{unitTy()}, ResultType: result, Native: native}
-	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{&core.UnitLit{Ty: unitTy()}}, Ty: result}
+	handle := &core.NativeCall{Name: "IO.standardHandle", Module: "IO", Ty: unitTy(), Args: []core.Expr{&core.IntLit{Val: 1, Ty: intTy()}}}
+	return &core.NativeCall{Name: "IO.writeHandle", Module: "IO", Ty: unitTy(), Args: []core.Expr{handle, &core.StringLit{Val: text, Ty: stringTy()}}}
 }
 
 func run(t *testing.T, e core.Expr) Value {
@@ -220,28 +210,22 @@ func TestPrintWritesThroughFangort(t *testing.T) {
 func TestEvalIOReadLine(t *testing.T) {
 	ioctx := NewIOContext(strings.NewReader("hello\r\nlast"), io.Discard)
 	for _, want := range []string{"hello\r\n", "last"} {
-		has, err := EvalIO(context.Background(), ioReadExpr("hasInput", boolTy()), NewEnv(), ioctx)
-		if err != nil || has != true {
-			t.Fatalf("hasInput = %v, %v; want true, nil", has, err)
+		has, err := ioctx.HasInput()
+		if err != nil || !has {
+			t.Fatalf("hasInput = %v, %v", has, err)
 		}
-		got, err := EvalIO(context.Background(), ioReadExpr("readRawLine", stringTy()), NewEnv(), ioctx)
-		if err != nil || got != want {
-			t.Fatalf("readRawLine = %q, %v; want %q, nil", got, err, want)
+		got, err := ioctx.ReadInputLine()
+		if err != nil && err != io.EOF || string(got) != want {
+			t.Fatalf("readLine = %q, %v", got, err)
 		}
 	}
-	got, err := EvalIO(context.Background(), ioReadExpr("hasInput", boolTy()), NewEnv(), ioctx)
-	if err != nil || got != false {
-		t.Fatalf("hasInput at EOF = %v, %v; want false, nil", got, err)
+	if got, err := ioctx.HasInput(); err != nil || got {
+		t.Fatalf("hasInput at EOF = %v, %v", got, err)
 	}
 	wantErr := io.ErrUnexpectedEOF
-	func() {
-		defer func() {
-			if got := fmt.Sprint(recover()); !strings.Contains(got, wantErr.Error()) {
-				t.Fatalf("readLine panic = %q, want %q", got, wantErr)
-			}
-		}()
-		_, _ = EvalIO(context.Background(), ioReadExpr("hasInput", boolTy()), NewEnv(), NewIOContext(failingReader{wantErr}, io.Discard))
-	}()
+	if _, err := NewIOContext(failingReader{wantErr}, io.Discard).HasInput(); err != wantErr {
+		t.Fatalf("read failure = %v", err)
+	}
 }
 
 type failingReader struct{ err error }

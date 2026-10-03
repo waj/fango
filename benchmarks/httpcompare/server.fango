@@ -1,3 +1,4 @@
+import Process
 import Async
 import Bytes
 import Http exposing (Body(..))
@@ -13,7 +14,7 @@ respond _ = Http.Server.Response
     }
 
 main() =
-    case IO.args() of
+    case Process.args() of
         [raw] ->
             case String.toInt raw of
                 Just port ->
@@ -21,5 +22,5 @@ main() =
                             stop = Async.channel 1
                             Http.Server.serve (Http.Server.defaultConfig port) stop respond
                     })
-                Nothing -> IO.exit 2
-        _ -> IO.exit 2
+                Nothing -> Process.exit 2
+        _ -> Process.exit 2

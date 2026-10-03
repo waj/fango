@@ -8,7 +8,7 @@ main() =
     result = Fail.attempt ({ _ ->
         wrapped = File.withFile "input.txt" ({ file -> Just file })
         case wrapped of
-            Just file -> File.readLine file
+            Just file -> IO.readLine file
             Nothing -> Nothing })
     print (case result of
         Err _ -> True

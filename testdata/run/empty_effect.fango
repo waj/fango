@@ -1,0 +1,12 @@
+effect Marker a
+
+tag : Int ->{IO} Int
+tag = native
+
+marked : Int ->{Marker String} Int
+marked = native
+
+applyMarked : (Int ->{Marker String} Int) -> Int ->{Marker String} Int
+applyMarked action value = action value
+
+main() = print (tag 42)

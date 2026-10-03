@@ -801,10 +801,11 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl, opDecls map[strin
 	}
 	used := map[string]bool{}
 	boundary := nativeBoundary{
-		wrappers:      localWrapperTypes(n.mod.Decls),
-		localTypes:    localTypeNames(n.mod.Decls),
-		fallibleError: bundledFallibleError(n),
-		bytesAllowed:  n.bundled,
+		wrappers:        localWrapperTypes(n.mod.Decls),
+		localTypes:      localTypeNames(n.mod.Decls),
+		fallibleError:   bundledFallibleError(n),
+		bytesAllowed:    n.bundled,
+		ioHandleAllowed: n.bundled && n.name == "File",
 	}
 	for name, d := range decls {
 		goName := exportNativeName(name)
@@ -833,15 +834,17 @@ func exportNativeName(name string) string {
 
 // nativeBoundary is what module validation knows about a sidecar's boundary
 // before name resolution: the module's own single-boundary-value wrappers, and
-// whether it may declare fallible results. Recognition is by spelling, which
+// whether it may declare fallible results or the bundled shared IO.Handle.
+// Recognition is by spelling, which
 // is safe here because a wrapper must be declared in this very file and the
 // fallible shape is admitted only in the module the compiler controls; type
 // checking re-establishes both shapes on resolved types.
 type nativeBoundary struct {
-	wrappers      map[string]string // local wrapper type name -> Go scalar type
-	localTypes    map[string]bool   // every type name this module declares
-	fallibleError string
-	bytesAllowed  bool
+	wrappers        map[string]string // local wrapper type name -> Go scalar type
+	localTypes      map[string]bool   // every type name this module declares
+	fallibleError   string
+	bytesAllowed    bool
+	ioHandleAllowed bool
 }
 
 // localTypeNames answers every type name the module declares, so a spelling
@@ -879,7 +882,7 @@ func bundledFallibleError(n *node) string {
 		return ""
 	}
 	switch n.name {
-	case "File":
+	case "IO", "File":
 		return "IO.Error"
 	case "Net":
 		return "Net.Error"
@@ -940,7 +943,7 @@ func (b nativeBoundary) validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl
 		allowedName := b.fallibleError
 		unqualifiedAllowed := errorName == "Error" && allowedName != ""
 		if allowedName == "" || fromOp || !unqualifiedAllowed && errorName != allowedName {
-			errs = append(errs, diag.Errorf(d.Native.Sp, "FALLIBLE NATIVE NOT ALLOWED", "Only value natives of the bundled `File` and `Net` modules may declare their module's supported error result; return a boundary value and build the `Result` in Fango."))
+			errs = append(errs, diag.Errorf(d.Native.Sp, "FALLIBLE NATIVE NOT ALLOWED", "Only value natives of the bundled `IO`, `File`, and `Net` modules may declare their module's supported error result; return a boundary value and build the `Result` in Fango."))
 			return errs
 		}
 		results := resultTypeNames(fn.Type.Results)
@@ -987,6 +990,9 @@ func isUnitType(t ast.TypeExpr) bool {
 // nativeGoType is the Go type a Fango boundary type crosses as: a scalar's
 // own Go type, or the field type of one of this module's wrapper types.
 func (b nativeBoundary) nativeGoType(t ast.TypeExpr) string {
+	if n, ok := t.(*ast.TName); ok && b.ioHandleAllowed && n.Name == "IO.Handle" {
+		return "any"
+	}
 	if n, ok := t.(*ast.TName); ok && (strings.HasSuffix(n.Name, ".Registration") || n.Name == "Registration") && !b.localTypes[n.Name] {
 		return "any" // Resolved checking verifies the scoped request protocol.
 	}

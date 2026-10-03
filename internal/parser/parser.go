@@ -715,13 +715,8 @@ func (p *parser) parseEffectDecl() ast.Decl {
 		params = append(params, ast.Param{Name: t.Text, Sp: t.Span})
 	}
 	first := p.peek()
-	if first.Kind == token.EOF {
-		p.errorAt(nameT.Span, TitleUnexpectedEOF, "This effect declaration needs at least one operation signature.")
-		return nil
-	}
-	if first.Pos().Col <= 1 {
-		p.errorAt(first.Span, "SYNTAX PROBLEM", "Effect operations must be indented below the effect name.")
-		return nil
+	if first.Kind == token.EOF || first.Pos().Col <= 1 {
+		return &ast.EffectDecl{Name: nameT.Text, NameSpan: nameT.Span, Params: params}
 	}
 	col := first.Pos().Col
 	p.lay.push(ctxBlock, col)

@@ -141,3 +141,23 @@ func (p *linePump) HasInput() (bool, error) {
 }
 
 func (p *linePump) ReadInputLine() ([]byte, error) { return p.next(lineRequest{program: true}) }
+
+// Byte reads borrow the same line pump as prompt and program line reads.
+// Keep the unread suffix (and its terminal error) for the next consumer.
+func (p *linePump) ReadInputBytes(count int64) ([]byte, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+	if count > 65536 {
+		count = 65536
+	}
+	data, err := p.next(lineRequest{program: true})
+	if int64(len(data)) > count {
+		p.pending = &inputLine{data: data[count:], err: err}
+		return data[:count:count], nil
+	}
+	if len(data) > 0 && err == io.EOF {
+		err = nil
+	}
+	return data, err
+}

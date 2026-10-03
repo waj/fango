@@ -1,5 +1,5 @@
 effect Console
-    write : String -> ()
+    emit : String -> ()
 
 say : String -> ()
-say text = write text
+say text = emit text

@@ -85,7 +85,8 @@ import Basics exposing
     ( Num, Eq, Ord, Show, show
     , (+), (-), (*), (/), (==), (/=), (<), (>), (<=), (>=), (++)
     )
-import IO exposing (IO, print, readLine)
+import Console exposing (print, readLine, write)
+import IO exposing (IO, stderr, stdin, stdout)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
 ```

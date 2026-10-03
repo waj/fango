@@ -18,7 +18,9 @@ func (e *ExitError) Error() string { return fmt.Sprintf("program exited with sta
 type SessionHost interface {
 	HasInput() (bool, error)
 	ReadInputLine() ([]byte, error)
+	ReadInputBytes(int64) ([]byte, error)
 	WriteOutput([]byte) error
+	WriteError([]byte) error
 	Arguments() []string
 	WorkingDirectory() string
 }
@@ -35,6 +37,13 @@ type systemNativeHost struct {
 	in       *bufio.Reader
 	inputMu  sync.Mutex
 	outputMu sync.Mutex
+	errorMu  sync.Mutex
+}
+
+func (h *systemNativeHost) ReadInputBytes(count int64) ([]byte, error) {
+	h.inputMu.Lock()
+	defer h.inputMu.Unlock()
+	return ReadIOBytes(h.in, count)
 }
 
 func (h *systemNativeHost) HasInput() (bool, error) {
@@ -60,8 +69,13 @@ func (h *systemNativeHost) ReadInputLine() ([]byte, error) {
 func (h *systemNativeHost) WriteOutput(b []byte) error {
 	h.outputMu.Lock()
 	defer h.outputMu.Unlock()
-	_, err := os.Stdout.Write(b)
-	return err
+	return WriteIOBytes(os.Stdout, b)
+}
+
+func (h *systemNativeHost) WriteError(b []byte) error {
+	h.errorMu.Lock()
+	defer h.errorMu.Unlock()
+	return WriteIOBytes(os.Stderr, b)
 }
 
 func (*systemNativeHost) Arguments() []string { return os.Args[1:] }

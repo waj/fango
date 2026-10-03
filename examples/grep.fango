@@ -21,6 +21,7 @@ import Fail exposing (Fail, attempt)
 import File
 import IO exposing (Error, describeError)
 import List exposing (foldl)
+import Process
 import Result exposing (Result(..))
 import String
 
@@ -30,9 +31,9 @@ type Outcome = { matched : Bool, failed : Bool }
 
 -- searchLines scans one open file, printing matches as it goes and answering
 -- whether any line matched.
-searchLines : String -> String -> File.Handle -> Int -> Bool ->{IO, Fail Error} Bool
+searchLines : String -> String -> IO.Handle -> Int -> Bool ->{IO, Fail Error} Bool
 searchLines pattern label file lineNumber found =
-    case File.readLine file of
+    case IO.readLine file of
         Nothing -> found
         Just line ->
             if String.contains pattern line.text then
@@ -81,15 +82,15 @@ parseOptions args =
         [] -> Nothing
 
 main() =
-    case parseOptions IO.args() of
+    case parseOptions Process.args() of
         Nothing ->
             print "Usage: grep [-r] PATTERN PATH..."
-            IO.exit 2
+            Process.exit 2
         Just options ->
             outcome = foldl (searchPath options) { matched = False, failed = False } options.paths
             if outcome.failed then
-                IO.exit 2
+                Process.exit 2
             else if outcome.matched then
                 ()
             else
-                IO.exit 1
+                Process.exit 1

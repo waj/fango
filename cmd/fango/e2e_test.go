@@ -9,7 +9,6 @@ import (
 	"go/format"
 	goparser "go/parser"
 	gotoken "go/token"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -397,10 +396,8 @@ func TestTodoExample(t *testing.T) {
 		{"list"},
 	}
 
-	prog, _, ok := compileFile(path, io.Discard)
-	if !ok {
-		t.Fatal("compile failed")
-	}
+	prog, executor := compileWithWorker(t, path)
+
 	interpDir := t.TempDir()
 	var interpreted bytes.Buffer
 	func() {
@@ -410,7 +407,7 @@ func TestTodoExample(t *testing.T) {
 			env := eval.NewEnv()
 			env.DefineProg(prog)
 			ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
-			ioctx.Args, ioctx.Dir = args, interpDir
+			ioctx.Args, ioctx.Dir, ioctx.Natives = args, interpDir, executor
 			if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil {
 				t.Fatalf("interpreter %v: %v", args, err)
 			}
@@ -444,10 +441,7 @@ func TestTodoExample(t *testing.T) {
 func TestTodoExampleFailures(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "todo.fango")
-	prog, _, ok := compileFile(path, io.Discard)
-	if !ok {
-		t.Fatal("compile failed")
-	}
+	prog, executor := compileWithWorker(t, path)
 
 	type failure struct {
 		name       string
@@ -474,7 +468,7 @@ func TestTodoExampleFailures(t *testing.T) {
 			env.DefineProg(prog)
 			var output bytes.Buffer
 			ioctx := eval.NewIOContext(strings.NewReader(""), &output)
-			ioctx.Args, ioctx.Dir = tc.args, dir
+			ioctx.Args, ioctx.Dir, ioctx.Natives = tc.args, dir, executor
 			err := withInterpreter(func() error {
 				_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
 				return err
@@ -943,11 +937,11 @@ func TestGeneratedGoMaterializesNativeUnitOnlyInValueContext(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "mandelbrot.fango")
 	src := string(entryFile(t, emittedProject(t, path)))
-	if strings.Contains(src, "n_IO.Write(\" \")\n\t\t\treturn fangort.UnitValue") {
-		t.Fatalf("statement-position IO.write unnecessarily materialized Unit:\n%s", src)
+	if strings.Contains(src, "m_Console.V_Console_dot_write(\" \")\n\t\t\treturn fangort.UnitValue") {
+		t.Fatalf("statement-position Console.write unnecessarily materialized Unit:\n%s", src)
 	}
-	if !strings.Contains(src, "n_IO.Write(\" \")") {
-		t.Fatalf("statement-position IO.write was not emitted directly:\n%s", src)
+	if !strings.Contains(src, "m_Console.V_Console_dot_write(\" \")") {
+		t.Fatalf("statement-position Console.write was not emitted directly:\n%s", src)
 	}
 }
 
@@ -1034,15 +1028,12 @@ func TestCsvExample(t *testing.T) {
 		return dir
 	}
 
-	prog, _, ok := compileFile(path, io.Discard)
-	if !ok {
-		t.Fatal("compile failed")
-	}
+	prog, executor := compileWithWorker(t, path)
 	env := eval.NewEnv()
 	env.DefineProg(prog)
 	var interpreted bytes.Buffer
 	ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
-	ioctx.Args, ioctx.Dir = []string{"expenses.csv"}, seed(t)
+	ioctx.Args, ioctx.Dir, ioctx.Natives = []string{"expenses.csv"}, seed(t), executor
 	err = withInterpreter(func() error {
 		_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
 		return err
@@ -1075,10 +1066,7 @@ func TestCsvExample(t *testing.T) {
 func TestCsvExampleFailures(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "csv.fango")
-	prog, _, ok := compileFile(path, io.Discard)
-	if !ok {
-		t.Fatal("compile failed")
-	}
+	prog, executor := compileWithWorker(t, path)
 
 	cases := []struct {
 		name       string
@@ -1088,7 +1076,7 @@ func TestCsvExampleFailures(t *testing.T) {
 	}{
 		{"usage", nil, 1, "usage: csv FILE\n"},
 		{"too many arguments", []string{"a", "b"}, 1, "usage: csv FILE\n"},
-		{"missing file", []string{"nope.csv"}, 1, "cannot read nope.csv\n"},
+		{"missing file", []string{"nope.csv"}, 1, "nope.csv: no such file or directory\n"},
 	}
 
 	for _, tc := range cases {
@@ -1097,7 +1085,7 @@ func TestCsvExampleFailures(t *testing.T) {
 			env.DefineProg(prog)
 			var output bytes.Buffer
 			ioctx := eval.NewIOContext(strings.NewReader(""), &output)
-			ioctx.Args, ioctx.Dir = tc.args, t.TempDir()
+			ioctx.Args, ioctx.Dir, ioctx.Natives = tc.args, t.TempDir(), executor
 			err := withInterpreter(func() error {
 				_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
 				return err

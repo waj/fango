@@ -8,7 +8,7 @@ main() =
     result = Fail.attempt ({ _ ->
         stored = State.run Nothing ({ _ -> File.withFile "input.txt" ({ file -> State.put (Just file) }) })
         case stored.state of
-            Just file -> File.readLine file
+            Just file -> IO.readLine file
             Nothing -> Nothing })
     print (case result of
         Err _ -> True

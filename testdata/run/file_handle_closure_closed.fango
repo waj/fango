@@ -6,7 +6,7 @@ import Result exposing (Result(..))
 
 main() =
     result = Fail.attempt ({ _ ->
-        read = File.withFile "input.txt" ({ file -> { _ -> File.readLine file } })
+        read = File.withFile "input.txt" ({ file -> { _ -> IO.readLine file } })
         read() })
     print (case result of
         Err _ -> True

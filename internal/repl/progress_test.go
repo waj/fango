@@ -127,7 +127,7 @@ func TestInteractiveCachedImportObserver(t *testing.T) {
 
 func TestEditorImportProgressLeavesCleanTail(t *testing.T) {
 	ed, out := runScripted(t, typed("import Dict"), typed("ask() ="),
-		typed(`    IO.write "Name? "`), typed("    readLine ()"), typed(""), typed("ask()"), typed("Ada"))
+		typed(`    Console.write "Name? "`), typed("    readLine ()"), typed(""), typed("ask()"), typed("Ada"))
 	if !strings.Contains(out, "\r\x1b[2Kloaded Dict") || len(ed.tails) != 1 || ed.tails[0] != "Name? " {
 		t.Fatalf("import progress disturbed program read: output %q, tails %q", out, ed.tails)
 	}

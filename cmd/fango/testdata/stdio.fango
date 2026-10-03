@@ -1,0 +1,42 @@
+import Bytes
+import Fail exposing (Fail, attempt)
+import Process
+import Result exposing (Result(..))
+
+line : Maybe IO.Line -> String
+line value =
+    case value of
+        Nothing -> "EOF"
+        Just found -> found.text ++ ":" ++ show found.ending
+
+bytes : Maybe Bytes.Bytes -> List Int
+bytes value =
+    case value of
+        Nothing -> []
+        Just found -> Bytes.toList found
+
+exercise : () ->{IO, Fail IO.Error} ()
+exercise() =
+    print (bytes (IO.readBytes stdin 1))
+    print (line (IO.readLine stdin))
+    print (bytes (IO.readBytes stdin 1))
+    print (line (IO.readLine stdin))
+    print (IO.readBytes stdin 0 == Just Bytes.empty)
+    print (line (IO.readLine stdin))
+    print (IO.readBytes stdin 0 == Nothing)
+    IO.write stdout "out\n"
+    IO.write stderr "err\n"
+    IO.writeBytes stderr (Bytes.fromList [255, 0, 65])
+
+main() =
+    case attempt exercise of
+        Ok () -> ()
+        Err error -> print (IO.describeError error)
+    case attempt { IO.readLine stdout } of
+        Ok _ -> print "unexpected readable stdout"
+        Err error -> print (error.path ++ ":" ++ show error.kind)
+    case attempt { IO.write stdin "bad" } of
+        Ok () -> print "unexpected writable stdin"
+        Err error -> print (error.path ++ ":" ++ show error.kind)
+    print (Process.args())
+    Process.exit 0

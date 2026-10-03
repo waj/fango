@@ -56,6 +56,10 @@ be retried after the file is fixed.
 
 ## Declarations and redefinition
 
+An effect header opens continuation input so indented operations can follow.
+A blank line, a new top-level input, or EOF submits an operation-free effect.
+
+
 A prompt declaration may redefine a name the prompt itself declared, but not
 one an import or the prelude exposes: that is the `UNQUALIFIED COLLISION` it
 would be in a module. Qualified access to the exposed name stays available.

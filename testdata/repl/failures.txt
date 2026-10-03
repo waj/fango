@@ -1,7 +1,5 @@
 Fango 0.1 — :help for commands
-> loaded Failure
-loaded Fail
-> loaded State
+> > loaded State
 > Unhandled Error: "plain" : String
 > Opaque : Opaque
 > Unhandled Error: <value : Opaque> : Opaque

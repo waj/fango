@@ -74,18 +74,32 @@ func unwrapBoundary(key string, n *types.NativeInfo, args, wire []Value) error {
 // as a sidecar call: wrapper arguments arrive as their field and a wrapper
 // result is rebuilt around the native's answer.
 func (in *interp) tableCall(spec natives.Spec, n *types.NativeInfo, name string, args []Value) (Value, error) {
-	if n == nil || (len(n.ParamWrappers) == 0 && n.ResultWrapper == nil) {
-		return spec.Eval(in.nativeRuntime(), args)
-	}
-	wire := append([]Value(nil), args...)
-	if err := unwrapBoundary(name, n, args, wire); err != nil {
-		return nil, err
+	wire := args
+	if n != nil {
+		if len(n.ParamWrappers) > 0 {
+			wire = append([]Value(nil), args...)
+		}
+		if err := unwrapBoundary(name, n, args, wire); err != nil {
+			return nil, err
+		}
 	}
 	v, err := spec.Eval(in.nativeRuntime(), wire)
-	if err != nil || n.ResultWrapper == nil {
+	if err != nil || n == nil {
 		return v, err
 	}
-	return &CtorVal{Ctor: n.ResultWrapper, Fields: []Value{v}}, nil
+	if failure, ok := v.(fangort.IOFailure); ok {
+		if n.Fallible == nil {
+			return nil, fmt.Errorf("eval: native %s returned an undeclared failure", name)
+		}
+		return failureValue(n.Fallible, failure), nil
+	}
+	if n.ResultWrapper != nil {
+		v = &CtorVal{Ctor: n.ResultWrapper, Fields: []Value{v}}
+	}
+	if n.Fallible != nil {
+		return &CtorVal{Ctor: n.Fallible.Ok, Fields: []Value{v}}, nil
+	}
+	return v, nil
 }
 
 // failureValue builds `Err (IO.Error { kind, path, message })` from a

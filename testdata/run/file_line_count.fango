@@ -1,3 +1,4 @@
+import Process
 import Fail exposing (Fail, attempt)
 import File
 import IO exposing (Error, describeError)
@@ -9,9 +10,9 @@ import Result exposing (Result(..))
 -- status says whether every file was counted, the way a command-line tool
 -- would report it.
 
-countLines : File.Handle -> Int ->{IO, Fail Error} Int
+countLines : IO.Handle -> Int ->{IO, Fail Error} Int
 countLines file count =
-    case File.readLine file of
+    case IO.readLine file of
         Nothing -> count
         Just _ -> countLines file (count + 1)
 
@@ -26,5 +27,5 @@ countFile path ok =
             False
 
 main() =
-    ok = foldl countFile True (IO.args())
-    if ok then () else IO.exit 2
+    ok = foldl countFile True (Process.args())
+    if ok then () else Process.exit 2

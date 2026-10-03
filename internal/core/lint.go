@@ -323,25 +323,6 @@ func (l *linter) numeric(t types.Type) bool {
 	return u == l.b.Int.Unique || u == l.b.Float.Unique
 }
 
-// printable mirrors elaborate.checkPrintable at the type level.
-func (l *linter) printable(t types.Type) bool {
-	switch l.unique(t) {
-	case l.b.Int.Unique, l.b.Float.Unique, l.b.String.Unique, l.b.Char.Unique, l.b.Bool.Unique:
-		return true
-	}
-	if con, ok := t.(*types.TCon); ok {
-		if _, isADT := l.adts[con.Unique]; isADT {
-			for _, a := range con.Args {
-				if !l.printable(a) {
-					return false
-				}
-			}
-			return true
-		}
-	}
-	return false
-}
-
 func (l *linter) expr(e Expr, where string) {
 	l.typ(e.Type(), where)
 	switch e := e.(type) {
@@ -658,15 +639,9 @@ func (l *linter) expr(e Expr, where string) {
 				}
 			}
 			wantArgs, wantResult := l.operationTypes(e.Op, e.Effect, e.LocalTypes...)
-			isPrint := types.SurfaceName(e.Op.Owner.Name) == "IO" && types.SurfaceName(e.Op.Name) == "print"
 			for i, a := range e.Args {
-				if !isPrint && i < len(wantArgs) && !EqualValueRepresentation(a.Type(), wantArgs[i]) {
+				if i < len(wantArgs) && !EqualValueRepresentation(a.Type(), wantArgs[i]) {
 					l.errorf("%s: Perform `%s` arg %d typed %s, want %s", where, e.Op.Name, i+1, types.Show(a.Type()), types.Show(wantArgs[i]))
-				}
-			}
-			if isPrint {
-				if len(e.Args) == 1 && !l.printable(e.Args[0].Type()) {
-					l.errorf("%s: IO.print argument typed %s, not printable", where, types.Show(e.Args[0].Type()))
 				}
 			}
 			if wantResult != nil && !EqualValueRepresentation(e.Ty, wantResult) {

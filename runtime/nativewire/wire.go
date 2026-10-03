@@ -31,6 +31,8 @@ type Message struct {
 	// Failure is a fallible native's classified error. It is deliberately
 	// separate from Error (an infrastructure fault) and Panic (a native
 	// panic): it is an ordinary language value, not a failure of the worker.
+	// Host IO replies also preserve the classification here, alongside Error,
+	// so the proxy can reconstruct portable error identity before relabeling.
 	Failure *Failure
 }
 

@@ -138,7 +138,7 @@ help() =
     print "Commands: :help, :quit"
 
 loop env =
-    IO.write "calc> "
+    Console.write "calc> "
     case readLine() of
         Nothing -> ()
         Just line ->

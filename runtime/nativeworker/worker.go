@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/signal"
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/execcodec"
@@ -98,6 +100,24 @@ func responseError(m nativewire.Message) error {
 	if m.Error == io.EOF.Error() {
 		return io.EOF
 	}
+	if f := m.Failure; f != nil {
+		var err error
+		switch f.Kind {
+		case fangort.IOErrorNotFound:
+			err = fs.ErrNotExist
+		case fangort.IOErrorPermissionDenied:
+			err = fs.ErrPermission
+		case fangort.IOErrorAlreadyExists:
+			err = fs.ErrExist
+		case fangort.IOErrorIsDirectory:
+			err = syscall.EISDIR
+		case fangort.IOErrorNotDirectory:
+			err = syscall.ENOTDIR
+		default:
+			err = errors.New(f.Message)
+		}
+		return err
+	}
 	return errors.New(m.Error)
 }
 
@@ -111,8 +131,23 @@ func (p *proxy) ReadInputLine() ([]byte, error) {
 	return m.Data, responseError(m)
 }
 
+func (p *proxy) ReadInputBytes(count int64) ([]byte, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+	if count > 65536 {
+		count = 65536
+	}
+	m := p.request(nativewire.Message{Kind: "host_read_bytes", Code: int(count)})
+	return m.Data, responseError(m)
+}
+
 func (p *proxy) WriteOutput(data []byte) error {
 	return responseError(p.request(nativewire.Message{Kind: "host_write", Data: data}))
+}
+
+func (p *proxy) WriteError(data []byte) error {
+	return responseError(p.request(nativewire.Message{Kind: "host_write_error", Data: data}))
 }
 
 func (p *proxy) Arguments() []string {

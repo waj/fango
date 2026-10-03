@@ -1,28 +1,16 @@
 {-# no-prelude #-}
-module File exposing (Handle, isDirectory, listDirectory, read, readBytes, readLine, sink, size, source, withAppend, withFile, withOutput, write, writeAll, writeBytes)
+module File exposing (isDirectory, listDirectory, read, size, withAppend, withFile, withOutput, writeAll)
 
 import Basics exposing (..)
-import Bytes exposing (Bytes, Sink(..), Source(..))
-import Fail exposing (Fail, attempt, fail, fromResult)
-import IO exposing (Error, IO, Line(..))
+import Fail exposing (Fail, attempt, fromResult)
+import IO exposing (Error, IO)
 import List exposing (List)
-import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
 import Runtime.Native
 import Runtime.Scope
 
-{- Files as scoped resources.
-
-A `Handle` is an open file. Its constructor is private and it derives neither
-Show nor Eq, so a program can neither build, inspect, nor compare one; the
-only way to obtain a handle is inside a `with*` scope, and the compiler treats
-the representation as opaque. Calls after the scope closes fail at runtime.
-
-Both `Handle` and `Directory` wrap an opaque Go value. The compiler erases the
-wrapper to `any` at the Go boundary and nowhere else. -}
-
-{-# resource #-}
-type Handle = Handle Runtime.Native.Any
+-- File scopes acquire IO.Handle values and close them after the body.
+-- Calls through IO after the scope closes fail at runtime.
 
 {-# resource #-}
 type Directory = Directory Runtime.Native.Any
@@ -31,32 +19,17 @@ type Directory = Directory Runtime.Native.Any
 -- classifies into `IO.Error` at the boundary. None is exposed; the scoped API
 -- below is the only way to reach them.
 
-openRead : String ->{IO} Result Error Handle
+openRead : String ->{IO} Result Error IO.Handle
 openRead = native
 
-openWrite : String ->{IO} Result Error Handle
+openWrite : String ->{IO} Result Error IO.Handle
 openWrite = native
 
-openAppend : String ->{IO} Result Error Handle
+openAppend : String ->{IO} Result Error IO.Handle
 openAppend = native
 
-closeHandle : Handle ->{IO} Result Error ()
+closeHandle : IO.Handle ->{IO} Result Error ()
 closeHandle = native
-
-handleHasInput : Handle ->{IO} Result Error Bool
-handleHasInput = native
-
-readHandleLine : Handle ->{IO} Result Error String
-readHandleLine = native
-
-readHandleBytes : Handle -> Int ->{IO} Result Error Bytes
-readHandleBytes = native
-
-writeHandle : Handle -> String ->{IO} Result Error ()
-writeHandle = native
-
-writeHandleBytes : Handle -> Bytes ->{IO} Result Error ()
-writeHandleBytes = native
 
 readFileResult : String ->{IO} Result Error String
 readFileResult = native
@@ -84,64 +57,23 @@ fileSize = native
 -- after a successful body is the scope's failure and after a failed body it
 -- is recorded alongside the body's (see Scope).
 
-close : Handle ->{IO, Fail Error} ()
+close : IO.Handle ->{IO, Fail Error} ()
 close file = fromResult (closeHandle file)
 
-withOpened : (String ->{IO} Result Error Handle) -> String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withOpened : (String ->{IO} Result Error IO.Handle) -> String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withOpened open path action = Runtime.Scope.bracket { fromResult (open path) } close action
 
 -- withFile opens path for reading and runs action on the handle.
-withFile : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withFile : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withFile path action = withOpened openRead path action
 
 -- withOutput creates or truncates path and runs action on the handle.
-withOutput : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withOutput : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withOutput path action = withOpened openWrite path action
 
 -- withAppend opens path for appending, creating it if needed.
-withAppend : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withAppend : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withAppend path action = withOpened openAppend path action
-
--- readLine has the console readLine's contract: Nothing at end of file,
--- otherwise the line and its exact terminator.
-readLine : Handle ->{IO, Fail Error} Maybe Line
-readLine file =
-    raw = fromResult (readHandleLine file)
-    if raw == "" then Nothing else Just ({ text = IO.lineText raw, ending = IO.lineEnding raw })
-
-write : Handle -> String ->{IO, Fail Error} ()
-write file text = fromResult (writeHandle file text)
-
--- readBytes answers Nothing at end of file and otherwise up to count bytes,
--- which may be fewer than asked for; it shares the handle's buffered reader
--- with readLine, so the two interleave. This is already the shape a
--- Bytes.Source needs.
-readBytes : Handle -> Int ->{IO, Fail Error} Maybe Bytes
-readBytes file count =
-    if count <= 0 then
-        if fromResult (handleHasInput file) then Just Bytes.empty else Nothing
-    else
-        data = fromResult (readHandleBytes file count)
-        if Bytes.length data == 0 then Nothing else Just data
-
-writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
-writeBytes file data = fromResult (writeHandleBytes file data)
-
--- chunk is how much one pull asks for. A pull answers what is there, so a
--- smaller read is ordinary and the number only bounds the ask. It matches
--- the natives' largest single read, so a buffered reader over a large file
--- refills, and copies its unconsumed tail, as rarely as possible.
-chunk : Int
-chunk = 65536
-
--- source and sink adapt an open file to the leaves a Reader and a Writer are
--- built over. Each captures the handle and checks its validity on use.
--- Neither closes it: closing belongs to the scope.
-source : Handle -> Source {IO, Fail Error}
-source file = Source { pull = { readBytes file chunk } }
-
-sink : Handle -> Sink {IO, Fail Error}
-sink file = Sink { write = { data -> writeBytes file data } }
 
 -- Whole-file operations need no handle and report failure as a Result.
 

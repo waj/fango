@@ -18,9 +18,12 @@
 
 import Basics exposing (quotientBy, remainderBy)
 import Dict
+import File
 import IO
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
+import Process
+import Result exposing (Result(..))
 import String
 
 type Summary = { count : Int, cents : Int }
@@ -149,19 +152,19 @@ dropHeader lines =
 
 run : String ->{IO} ()
 run path =
-    case IO.readFile path of
-        Nothing ->
-            print ("cannot read " ++ path)
-            IO.exit 1
-        Just contents ->
+    case File.read path of
+        Err error ->
+            print (IO.describeError error)
+            Process.exit 1
+        Ok contents ->
             printReport (addRows 2 (dropHeader (String.split "\n" contents)) emptyReport)
 
 usage : () ->{IO} ()
 usage() =
     print "usage: csv FILE"
-    IO.exit 1
+    Process.exit 1
 
 main() =
-    case IO.args() of
+    case Process.args() of
         [path] -> run path
         _ -> usage()

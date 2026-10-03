@@ -1,0 +1,25 @@
+{-# no-prelude #-}
+module Process exposing (args, exit)
+
+import Basics exposing (..)
+import IO exposing (IO)
+import List exposing (List)
+
+argCount : () ->{IO} Int
+argCount = native
+
+argAt : Int ->{IO} String
+argAt = native
+
+exit : Int ->{IO} ()
+exit = native
+
+argsFrom : Int -> Int ->{IO} List String
+argsFrom index count =
+    if index >= count then
+        []
+    else
+        [argAt index | argsFrom (index + 1) count]
+
+args : () ->{IO} List String
+args() = argsFrom 0 argCount()

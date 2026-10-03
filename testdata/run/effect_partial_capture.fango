@@ -1,11 +1,11 @@
 effect Console
-    write : String -> ()
+    emit : String -> ()
 
 send f = f "hello"
-program _ = send write
+program _ = send emit
 
 main =
     handle program () on
-        write text ->
+        emit text ->
             print text
             resume ()

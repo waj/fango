@@ -6,7 +6,9 @@
 --
 -- State is compact JSON in todo.json in the current working directory.
 
+import File
 import Json exposing (Decode, Encode(..))
+import Process
 import Result exposing (Result(..))
 import String
 
@@ -17,9 +19,15 @@ storagePath = "todo.json"
 
 load : () ->{IO} Maybe (List Todo)
 load() =
-    case IO.readFile storagePath of
-        Nothing -> Just []
-        Just text ->
+    case File.read storagePath of
+        Err error ->
+            case error.kind of
+                IO.NotFound -> Just []
+                _ ->
+                    print (IO.describeError error)
+                    Process.exit 1
+                    Nothing
+        Ok text ->
             parsed : Result Json.Error (List Todo)
             parsed = Json.parse @(List Todo) text
             case parsed of
@@ -29,8 +37,13 @@ load() =
 save : List Todo ->{IO} ()
 save todos =
     case Json.stringify todos of
-        Ok text -> IO.writeFile storagePath text
-        Err _ -> IO.exit 1
+        Ok text ->
+            case File.writeAll storagePath text of
+                Ok () -> ()
+                Err error ->
+                    print (IO.describeError error)
+                    Process.exit 1
+        Err _ -> Process.exit 1
 
 append : List Todo -> Todo -> List Todo
 append todos todo =
@@ -68,12 +81,12 @@ printTodos index todos =
 storageFailure : () ->{IO} ()
 storageFailure() =
     print "Invalid todo.json."
-    IO.exit 1
+    Process.exit 1
 
 usage : () ->{IO} ()
 usage() =
     print "Usage: todo add TEXT | todo list | todo done NUMBER"
-    IO.exit 2
+    Process.exit 2
 
 addTodo : String ->{IO} ()
 addTodo text =
@@ -105,13 +118,13 @@ completeTodo raw =
                         case completeAt wanted 1 todos of
                             Nothing ->
                                 print ("No todo at index " ++ show wanted ++ ".")
-                                IO.exit 2
+                                Process.exit 2
                             Just updated ->
                                 save updated
                                 print ("Completed " ++ show wanted ++ ".")
 
 main() =
-    case IO.args() of
+    case Process.args() of
         ["add", text] -> addTodo text
         ["list"] -> listTodos()
         ["done", raw] -> completeTodo raw

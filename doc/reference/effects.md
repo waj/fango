@@ -165,7 +165,12 @@ stays elided.
 
 ## Effects and handlers
 
-Effects declare operations using an indented signature block:
+An effect may declare no operations, for example `effect IO`. Such a declaration
+ends at the next top-level declaration or EOF. An operation-free effect can
+appear in rows and mark native functions; it supplies no operations to handle.
+An effect may also have type parameters without operations.
+
+Effects with operations use an indented signature block:
 
 ```fango
 effect Ask

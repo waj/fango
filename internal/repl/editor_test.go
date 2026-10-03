@@ -81,7 +81,7 @@ func TestEditorPromptsAndHistory(t *testing.T) {
 func TestEditorProgramReadRepaintsPartialLine(t *testing.T) {
 	ed, out := runScripted(t,
 		typed("ask() ="),
-		typed(`    IO.write "Name? "`),
+		typed(`    Console.write "Name? "`),
 		typed("    readLine ()"),
 		typed(""),
 		typed("ask()"),

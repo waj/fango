@@ -6,6 +6,7 @@ import Http.Server
 import Http.Server.Route as Route
 import IO
 import List exposing (List)
+import Process
 import Reader
 import String
 import Writer
@@ -45,7 +46,7 @@ app : Http.Server.Request {Protocol | e} ->{Protocol | e} Http.Server.Response {
 app request = Http.GZip.wrap route request
 
 main() =
-    case IO.args() of
+    case Process.args() of
         [raw] ->
             case String.toInt raw of
                 Just port ->

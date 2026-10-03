@@ -1,5 +1,5 @@
 (core
-  (def doSomething (params _) () ->{IO} () (app/worker @[String] (var IO.print _dictionary_Display String -> String ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_537472696e67 _dictionary_Display String) (string "do" String) ()))
+  (def doSomething (params _) () ->{IO} () (app/worker @[String] (var Console.print _dictionary_Display String -> String ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_537472696e67 _dictionary_Display String) (string "do" String) ()))
   (def register (params action) (() ->{IO} ()) ->{IO} () (app/value (var action () ->{IO} ()) (unit ()) ()))
   (def main (params _) () ->{IO} () (app/worker (var register (() ->{IO} ()) ->{IO} ()) (lam _w0 () ->{IO} () (app/worker (var _lift1_saved () ->{IO} ()) (var _w0 ()) ())) ()))
   (def _lift1_saved (params _) () ->{IO} () (app/worker (var doSomething () ->{IO} ()) (unit ()) ())))

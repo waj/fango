@@ -1,3 +1,4 @@
+import Process
 import Fail
 import File
 import IO
@@ -33,19 +34,19 @@ summarize order total = Totals
     }
 
 main() =
-    case IO.args() of
+    case Process.args() of
         [path] ->
-            case Fail.attempt { File.withFile path { file -> Reader.over (File.source file) { reader -> Json.read @(List Order) reader } } } of
+            case Fail.attempt { File.withFile path { file -> Reader.over (IO.source file) { reader -> Json.read @(List Order) reader } } } of
                 Err error ->
                     print (IO.describeError error)
-                    IO.exit 1
+                    Process.exit 1
                 Ok result -> case result of
                     Err error ->
                         print error.message
-                        IO.exit 1
+                        Process.exit 1
                     Ok orders ->
                         total = List.foldl summarize (Totals { records = 0, ids = 0, cents = 0, units = 0, text_bytes = 0 }) orders
-                        IO.write (show total.records ++ " " ++ show total.ids ++ " " ++ show total.cents ++ " " ++ show total.units ++ " " ++ show total.text_bytes ++ "\n")
+                        Console.write (show total.records ++ " " ++ show total.ids ++ " " ++ show total.cents ++ " " ++ show total.units ++ " " ++ show total.text_bytes ++ "\n")
         _ ->
-            IO.write "usage: fango-json FILE\n"
-            IO.exit 1
+            Console.write "usage: fango-json FILE\n"
+            Process.exit 1
