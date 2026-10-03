@@ -71,6 +71,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRepl(args[1:], stdout, stderr)
 	case "clean":
 		return cmdClean(args[1:], stderr)
+	case "doc":
+		return cmdDoc(args[1:], stdout, stderr)
 	case "lsp":
 		// The server has no command-line options; stdout is reserved for LSP.
 		if len(args) != 1 {
@@ -97,6 +99,7 @@ func usage(w io.Writer) {
   fango fmt [-w] [-l] [file...]
   fango repl [dir]
   fango clean main.fango
+  fango doc --stdlib [--module name]... [--strict]
   fango lsp
 
 verbosity, on build, run, and check:

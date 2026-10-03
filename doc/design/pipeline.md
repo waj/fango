@@ -357,7 +357,8 @@ The editor diagnostic path rolls back a failed owner and checks other modules
 whose dependencies succeeded; dependents of a failed owner are skipped.
 
 The editor index records source spans from a successful resolved and checked
-graph. Canonical names identify module declarations; lexical binder spans
+graph. Hover documentation and signatures come from the shared
+[API documentation](#api-documentation) package. Canonical names identify module declarations; lexical binder spans
 identify locals. Inferred record uses identify a field by its nominal owner,
 since a field spelling alone does not select a schema. Type witnesses traverse
 their embedded type expressions even though their constructor is sugared.
@@ -375,6 +376,26 @@ its declaration path/span across file indexes, and drops duplicate locations.
 Before answering, the server checks the current token text and position at
 indexed ranges. Protocol positions are UTF-16 code units; source spans and
 compilation remain byte based.
+
+## API documentation
+
+`internal/apidoc` attaches leading comments to declarations and renders
+checked signatures for both hover and [`fango doc`](../reference/commands.md#api-documentation),
+so the two agree on what a comment documents. Hover prints schemes with
+generated variable names. The documentation extractor binds each declaration's
+own type, class, and effect parameters, and a scoped runner's callback row,
+through `types.Printer.Bind`; a bound row stays visible on an arrow where the
+printer would otherwise elide its only occurrence.
+
+`fango doc` checks a synthetic headerless entry that imports every bundled
+module. It is loaded with `LoadOptions.BundledOnly`, so no local source root is
+consulted, and with the object cache disabled, so nothing is written. The whole
+library is checked whatever `--module` selects, which keeps instance lists
+independent of the selection. Inventories come from each module's resolved
+`Interface`, never from source text: a name whose canonical owner is the module
+documents its own declaration, and any other is a re-export carrying the
+owner's ID. A type's displayed representation includes only the constructors
+or fields its exporter publishes.
 
 ## Elaboration boundary
 

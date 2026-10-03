@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/waj/fango/internal/apidoc"
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/infer"
@@ -114,15 +115,15 @@ func (i *index) declare(decl ast.Decl) {
 	case *ast.ValueDecl:
 		text := ""
 		if sch, ok := ck.Env.Lookup(d.Name); ok {
-			text = ast.Spelling(types.SurfaceName(d.Name)) + " : " + types.ShowScheme(sch)
+			text = apidoc.Signature(d.Name, sch, types.NewPrinter())
 		}
 		i.define(global("value", d.Name), d.NameSpan, text, d.Ann)
 	case *ast.TypeDecl:
-		i.define(global("type", d.Name), d.NameSpan, typeHead("type", d.Name, d.Params), nil, d.Attributes...)
+		i.define(global("type", d.Name), d.NameSpan, apidoc.Head("type", d.Name, d.Params), nil, d.Attributes...)
 		for _, c := range d.Ctors {
 			text := ""
 			if info := ck.Ctors[c.Name]; info != nil {
-				text = types.SurfaceName(c.Name) + " : " + types.Show(info.ValueType())
+				text = apidoc.Typed(c.Name, info.ValueType(), types.NewPrinter())
 			}
 			i.define(global("ctor", c.Name), c.NameSpan, text, nil, c.Attributes...)
 		}
@@ -134,26 +135,26 @@ func (i *index) declare(decl ast.Decl) {
 			text := ""
 			if adt != nil {
 				if _, field := adt.RecordField(f.Name); field != nil {
-					text = f.Name + " : " + types.Show(field.Type)
+					text = apidoc.Typed(f.Name, field.Type, types.NewPrinter())
 				}
 			}
 			i.define(global("field", d.Name+"."+f.Name), f.NameSpan, text, nil, f.Attributes...)
 		}
 	case *ast.EffectDecl:
-		i.define(global("type", d.Name), d.NameSpan, typeHead("effect", d.Name, d.Params), nil)
+		i.define(global("type", d.Name), d.NameSpan, apidoc.Head("effect", d.Name, d.Params), nil)
 		for _, op := range d.Ops {
 			text := ""
 			if info := ck.Operations[op.Name]; info != nil {
-				text = types.SurfaceName(op.Name) + " : " + types.ShowScheme(info.Scheme)
+				text = apidoc.Signature(op.Name, info.Scheme, types.NewPrinter())
 			}
 			i.define(global("value", op.Name), op.NameSpan, text, nil)
 		}
 	case *ast.ClassDecl:
-		i.define(global("type", d.Name), d.NameSpan, typeHead("class", d.Name, []ast.Param{d.Param}), nil)
+		i.define(global("type", d.Name), d.NameSpan, apidoc.Head("class", d.Name, []ast.Param{d.Param}), nil)
 		for _, method := range d.Methods {
 			text := ""
 			if sch, ok := ck.Env.Lookup(method.Name); ok {
-				text = types.SurfaceName(method.Name) + " : " + types.ShowScheme(sch)
+				text = apidoc.Signature(method.Name, sch, types.NewPrinter())
 			}
 			i.define(global("value", method.Name), method.NameSpan, text, nil)
 		}
@@ -161,19 +162,11 @@ func (i *index) declare(decl ast.Decl) {
 		for _, p := range patternBinders(d.Pattern) {
 			text := ""
 			if sch, ok := ck.Env.Lookup(p.Name); ok {
-				text = p.Name + " : " + types.ShowScheme(sch)
+				text = apidoc.Signature(p.Name, sch, types.NewPrinter())
 			}
 			i.define(global("value", p.Name), p.Sp, text, nil)
 		}
 	}
-}
-
-func typeHead(kind, name string, params []ast.Param) string {
-	text := kind + " " + types.SurfaceName(name)
-	for _, p := range params {
-		text += " " + p.Name
-	}
-	return text
 }
 
 func (i *index) module(m *ast.Module) {
@@ -551,66 +544,7 @@ func (i *index) expr(e ast.Expr, s scope) {
 }
 
 func (i *index) commentBefore(anchor source.Span, attributes ...ast.AttributeGroup) string {
-	if anchor.File == nil {
-		return ""
-	}
-	f := anchor.File
-	line := anchor.StartPos().Line - 1
-	comments := i.docs[f]
-	var chunks []string
-	for line > 0 {
-		// Skip only this declaration's leading tags, using parsed spans so
-		// nested brackets and comments inside multiline payloads stay opaque.
-		// Trailing field tags cannot bridge documentation from another field.
-		skipped := false
-		for _, group := range attributes {
-			if group.Sp.Start >= anchor.Start {
-				continue
-			}
-			start, end := group.Sp.StartPos().Line, group.Sp.EndPos().Line
-			if start <= line && line <= end {
-				line = start - 1
-				skipped = true
-				break
-			}
-		}
-		if skipped {
-			continue
-		}
-		trim := strings.TrimSpace(f.Line(line))
-		if strings.HasPrefix(trim, "{-#") && strings.HasSuffix(trim, "#-}") {
-			line--
-			continue
-		}
-		var found *token.Comment
-		for n := range comments {
-			if comments[n].Span.EndPos().Line == line {
-				found = &comments[n]
-				break
-			}
-		}
-		if found == nil {
-			break
-		}
-		start := found.Span.StartPos()
-		lineStart := found.Span.Start - start.Col + 1
-		if strings.TrimSpace(string(f.Content[lineStart:found.Span.Start])) != "" {
-			break
-		}
-		chunks = append(chunks, cleanComment(found.Text, found.Block))
-		line = found.Span.StartPos().Line - 1
-	}
-	for a, b := 0, len(chunks)-1; a < b; a, b = a+1, b-1 {
-		chunks[a], chunks[b] = chunks[b], chunks[a]
-	}
-	return strings.TrimSpace(strings.Join(chunks, "\n"))
-}
-
-func cleanComment(s string, block bool) string {
-	if block {
-		return strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "{-"), "-}"))
-	}
-	return strings.TrimSpace(strings.TrimPrefix(s, "--"))
+	return apidoc.Leading(i.docs[anchor.File], anchor, attributes...)
 }
 
 func itoa(n int) string {

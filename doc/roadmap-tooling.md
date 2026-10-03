@@ -52,6 +52,21 @@ without cascaded errors from missing declarations. Other possible features are
 inferred types on arbitrary expressions, document symbols, completion, and
 semantic tokens. Non-VS Code client configuration can be documented when tested.
 
+## API documentation
+
+[`fango doc`](reference/commands.md#api-documentation) is implemented for the
+bundled library, and Maybe and Result are fully documented in source.
+
+- Document the remaining bundled modules, then replace the library reference
+  topics with links to the generated reference once the website renders it.
+- Once a module passes `--strict`, hold it there in CI so coverage cannot
+  regress; the gate could take the list of migrated modules.
+- Decide how to document a user's own modules: which modules a local source
+  root publishes, and how paths are reported outside the repository.
+- Doc examples are checked by the test suite only for documented modules it
+  names; a general runner over every fenced example would make the convention
+  a contract.
+
 ## REPL hardening
 
 Fresh-session artifact reuse and atomic installation of prompt imports are

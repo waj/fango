@@ -227,6 +227,24 @@ func StdlibNatives() ([]string, error) {
 	return stdlibFiles(func(name string) bool { return strings.HasSuffix(name, ".native.go") })
 }
 
+// StdlibSources lists the standard library's Fango sources by path relative
+// to stdlib/, including nested modules. Hidden directories, such as a build
+// directory the editor left beside a library file, are not part of the
+// library.
+func StdlibSources() ([]string, error) {
+	return stdlibFiles(func(name string) bool {
+		if !strings.HasSuffix(name, ".fango") {
+			return false
+		}
+		for _, part := range strings.Split(name, "/") {
+			if strings.HasPrefix(part, ".") {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func stdlibFiles(keep func(string) bool) ([]string, error) {
 	t, err := lookup("stdlib")
 	if err != nil {

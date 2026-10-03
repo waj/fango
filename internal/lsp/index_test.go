@@ -497,3 +497,31 @@ main = "ok"
 		}
 	}
 }
+
+// Hover reads library documentation through the same attachment as
+// `fango doc`, keeping the indentation inside fenced examples.
+func TestHoverLibraryDocumentation(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "Main.fango")
+	if err := os.WriteFile(entry, []byte("import Result exposing (Result(..))\n\nmain = Result.withDefault 0 (Ok (Maybe.withDefault 1 Nothing))\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, errs, internal := (&check.Session{DisableObjectCache: true}).Compile(entry)
+	if internal != nil || len(errs) > 0 {
+		t.Fatalf("check: %v %v", internal, errs)
+	}
+	idx := newIndex(root, result)
+	maybe := idx.symbols["value:Maybe.withDefault"]
+	if maybe.typeText != "withDefault : a -> Maybe a -> a" || !strings.Contains(maybe.docs, "```fango\nMaybe.withDefault 0 (Just 3) == 3\n") {
+		t.Fatalf("Maybe.withDefault hover = %#v", maybe)
+	}
+	if docs := idx.symbols["value:Result.andThen"].docs; !strings.Contains(docs, "positive n = if n > 0") {
+		t.Fatalf("Result.andThen docs = %q", docs)
+	}
+	if docs := idx.symbols["ctor:Maybe.Just"].docs; docs != "A present value." {
+		t.Fatalf("Just docs = %q", docs)
+	}
+	if text := idx.symbols["value:Basics.=="].typeText; text != "(==) : Eq a => a -> a -> Bool" {
+		t.Fatalf("(==) hover = %q", text)
+	}
+}

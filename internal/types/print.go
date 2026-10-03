@@ -21,11 +21,39 @@ type Printer struct {
 	general int
 	row     int
 	rows    map[int]int
+	// bound holds the variables given a name by Bind, and the names they
+	// took, which generated names then avoid.
+	bound map[int]bool
+	taken map[string]bool
+	// TypeName spells a type constructor's canonical name. Nil uses its
+	// surface name.
+	TypeName func(canonical string) string
+}
+
+func (p *Printer) typeName(name string) string {
+	if p.TypeName != nil {
+		return p.TypeName(name)
+	}
+	return SurfaceName(name)
 }
 
 func NewPrinter() *Printer {
 	return &Printer{names: map[int]string{}}
 }
+
+// Bind displays v as name, as a declaration's own parameter is written. A
+// bound row variable is always shown, even on an arrow that is its only
+// occurrence, because the declaration that binds it gives it meaning.
+func (p *Printer) Bind(v *TVar, name string) {
+	if p.bound == nil {
+		p.bound, p.taken = map[int]bool{}, map[string]bool{}
+	}
+	p.names[v.ID] = name
+	p.bound[v.ID] = true
+	p.taken[name] = true
+}
+
+func (p *Printer) shownRow(v *TVar) bool { return p.rows[v.ID] > 1 || p.bound[v.ID] }
 
 func (p *Printer) Type(t Type) string {
 	p.rows = map[int]int{}
@@ -39,7 +67,7 @@ func (p *Printer) render(t Type) string {
 		return p.varName(t)
 	case *TCon:
 		if len(t.Args) == 0 {
-			return SurfaceName(t.Name)
+			return p.typeName(t.Name)
 		}
 		if n := tupleArity(t.Name); n == len(t.Args) {
 			parts := make([]string, n)
@@ -48,7 +76,7 @@ func (p *Printer) render(t Type) string {
 			}
 			return "(" + strings.Join(parts, ", ") + ")"
 		}
-		parts := []string{SurfaceName(t.Name)}
+		parts := []string{p.typeName(t.Name)}
 		for _, a := range t.Args {
 			parts = append(parts, p.atom(a))
 		}
@@ -56,7 +84,7 @@ func (p *Printer) render(t Type) string {
 	case *TFun:
 		arrow := "->"
 		showEff := len(t.Eff.Labels) > 0
-		if v, ok := t.Eff.Tail.(*TVar); ok && p.rows[v.ID] > 1 {
+		if v, ok := t.Eff.Tail.(*TVar); ok && p.shownRow(v) {
 			showEff = true
 		}
 		if showEff {
@@ -68,7 +96,7 @@ func (p *Printer) render(t Type) string {
 				}
 			}
 			inside := strings.Join(parts, ", ")
-			if v, ok := t.Eff.Tail.(*TVar); ok && p.rows[v.ID] > 1 {
+			if v, ok := t.Eff.Tail.(*TVar); ok && p.shownRow(v) {
 				if inside != "" {
 					inside += " | "
 				}
@@ -165,17 +193,19 @@ func (p *Printer) varName(v *TVar) string {
 		return n
 	}
 	var n string
-	switch v.Kind {
-	case RowVar:
-		p.row++
-		if p.row == 1 {
-			n = "e"
-		} else {
-			n = fmt.Sprintf("e%d", p.row)
+	for n == "" || p.taken[n] {
+		switch v.Kind {
+		case RowVar:
+			p.row++
+			if p.row == 1 {
+				n = "e"
+			} else {
+				n = fmt.Sprintf("e%d", p.row)
+			}
+		default:
+			n = string(rune('a' + p.general%26))
+			p.general++
 		}
-	default:
-		n = string(rune('a' + p.general%26))
-		p.general++
 	}
 	p.names[v.ID] = n
 	return n

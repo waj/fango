@@ -31,7 +31,8 @@ structural evidence summaries.
 ## Compiler pipeline
 
 [Pipeline and resolution](design/pipeline.md) — parsing, fixity, module graph,
-Prelude, canonical names, incremental loading, and editor analysis.
+Prelude, canonical names, incremental loading, editor analysis, and
+[API documentation](design/pipeline.md#api-documentation).
 
 ## Type inference
 

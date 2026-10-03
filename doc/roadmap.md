@@ -160,8 +160,9 @@ reload, declaration generations, private-scope access, and history.
 
 ## Developer tooling: formatter and editor support
 
-[Tooling](roadmap-tooling.md) owns remaining comment anchors/layout assertions
-and language-server follow-up work. [Formatter behavior](reference/commands.md#formatting)
+[Tooling](roadmap-tooling.md) owns remaining comment anchors/layout assertions,
+language-server follow-up work, and the
+[API documentation](roadmap-tooling.md#api-documentation) migration. [Formatter behavior](reference/commands.md#formatting)
 and [editor support](reference/commands.md#language-server-and-editor-support) are implemented.
 
 ## Test framework

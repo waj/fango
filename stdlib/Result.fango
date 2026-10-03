@@ -1,18 +1,102 @@
 {-# no-prelude #-}
+-- Computations that succeed with a value or fail with an error.
+--
+-- A `Result error value` is either `Ok` with a value or `Err` with an error.
+-- It makes a failure an ordinary value that callers inspect, transform, or
+-- chain. `Fail.attempt` turns a computation that performs `Fail` into a
+-- `Result`, and `Fail.fromResult` turns one back.
+--
+-- The transforms here are effect-polymorphic: a callback may perform effects,
+-- which the call then performs, and only when the callback runs.
 module Result exposing (Result(..), andThen, map, mapError, withDefault)
 
 import Basics exposing (..)
 
-type Result error value = Err error | Ok value deriving (Eq, Ord, Show)
+-- The outcome of a computation that can fail. Values compare and display by
+-- constructor, with every `Err` ordered before every `Ok`.
+--
+-- ```fango
+-- import Result exposing (Result(..))
+-- import String
+--
+-- parsePort : String -> Result String Int
+-- parsePort text =
+--     case String.toInt text of
+--         Just port -> Ok port
+--         Nothing -> Err ("not a port: " ++ text)
+--
+-- parsePort "8080" == Ok 8080
+-- parsePort "http" == Err "not a port: http"
+-- parsePort "http" < parsePort "0"
+-- ```
+type Result error value
+    -- A failure, carrying its error.
+    = Err error
+    -- A success, carrying its value.
+    | Ok value
+    deriving (Eq, Ord, Show)
 
+-- Transforms the value of an `Ok` and passes an `Err` through unchanged.
+-- The transformation runs only for an `Ok`.
+--
+-- ```fango
+-- import Result exposing (Result(..))
+--
+-- ok : Result String Int
+-- ok = Ok 3
+--
+-- failed : Result String Int
+-- failed = Err "no"
+--
+-- Result.map { n -> n * 2 } ok == Ok 6
+-- Result.map { n -> n * 2 } failed == Err "no"
+-- ```
 map transform (Err error) = Err error
 map transform (Ok value) = Ok (transform value)
 
+-- Transforms the error of an `Err` and passes an `Ok` through unchanged.
+-- The transformation runs only for an `Err`.
+--
+-- ```fango
+-- import Result exposing (Result(..))
+-- import String
+--
+-- ok : Result String Int
+-- ok = Ok 1
+--
+-- failed : Result String Int
+-- failed = Err "four"
+--
+-- Result.mapError String.length ok == Ok 1
+-- Result.mapError String.length failed == Err 4
+-- ```
 mapError transform (Err error) = Err (transform error)
 mapError transform (Ok value) = Ok value
 
+-- Chains a computation that can itself fail. For an `Ok`, the result is the
+-- callback's result; an `Err` is returned unchanged without running it.
+--
+-- ```fango
+-- import Result exposing (Result(..))
+--
+-- positive : Int -> Result String Int
+-- positive n = if n > 0 then Ok n else Err "not positive"
+--
+-- Result.andThen positive (Ok 2) == Ok 2
+-- Result.andThen positive (Ok 0) == Err "not positive"
+-- Result.andThen positive (Err "no") == Err "no"
+-- ```
 andThen transform (Err error) = Err error
 andThen transform (Ok value) = transform value
 
+-- The value of an `Ok`, or `fallback` for an `Err`, whose error is
+-- discarded.
+--
+-- ```fango
+-- import Result exposing (Result(..))
+--
+-- Result.withDefault 0 (Ok 3) == 3
+-- Result.withDefault 0 (Err "no") == 0
+-- ```
 withDefault fallback (Err _) = fallback
 withDefault _ (Ok value) = value

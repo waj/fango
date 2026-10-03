@@ -135,6 +135,22 @@ func (BundledProvider) Source(module string) (string, []byte, error) {
 	b, err := libroot.ReadStdlib(rel)
 	return "<stdlib>/" + rel, b, err
 }
+
+// BundledModules names every standard-library module, sorted, whether or
+// not the prelude reaches it.
+func BundledModules() ([]string, error) {
+	paths, err := libroot.StdlibSources()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(paths))
+	for _, path := range paths {
+		names = append(names, strings.ReplaceAll(strings.TrimSuffix(path, ".fango"), "/", "."))
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 func (BundledProvider) Native(module string) (string, []byte, error) {
 	rel := strings.ReplaceAll(module, ".", "/") + ".native.go"
 	b, err := libroot.ReadStdlib(rel)
@@ -285,6 +301,10 @@ type LoadOptions struct {
 	// AllowBundledEntry lets editor analysis open a file at its actual bundled
 	// stdlib path without treating its module name as a local collision.
 	AllowBundledEntry bool
+	// BundledOnly resolves every import from the bundled library, never
+	// from the source root. Documentation generation uses it with a
+	// synthetic headerless entry that imports library modules.
+	BundledOnly bool
 }
 
 // LoadWithOptions loads a batch graph with optional test instrumentation.
@@ -342,7 +362,7 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 			}
 		}
 	}
-	if bundledEntry {
+	if bundledEntry || options.BundledOnly {
 		g.local = nil
 	}
 	wantEntry := strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))

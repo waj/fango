@@ -6,7 +6,7 @@ unfinished work. Use `rg -n '^#{1,3} ' doc/reference` to list topic headings.
 
 ## Setup and commands
 
-[Setup and commands](reference/commands.md) — Setup, check, build, run, clean, fmt, and generated Go projects.
+[Setup and commands](reference/commands.md) — Setup, check, build, run, clean, fmt, [API documentation](reference/commands.md#api-documentation), and generated Go projects.
 
 ## Modules, imports, and source layout
 

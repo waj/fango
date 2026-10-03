@@ -37,6 +37,7 @@ fango check [verbosity] main.fango
 fango fmt [-w] [-l] [file...]
 fango repl [dir]
 fango clean main.fango
+fango doc --stdlib [--module name]... [--strict]
 ```
 
 Flags precede the source path, because everything after it belongs to the
@@ -52,7 +53,8 @@ artifacts of the directory the source file is in — every program there, not
 only that one — along with that directory's fallback compilation cache and the
 legacy per-entry fallback namespace when present.
 `repl` starts an interactive session whose source root is `dir`, or the
-working directory; see [REPL](repl.md).
+working directory; see [REPL](repl.md). `doc` writes the
+[API reference](#api-documentation) of the bundled library as JSON.
 
 Compilation results are cached per module under `.fango/cache/v1/` beside the
 entry file. Each module keeps one checked result there, and one record of what
@@ -324,7 +326,8 @@ across local modules and the bundled library, including types in
 [type witnesses](library-json.md#type-witnesses) and names in attribute
 expressions and their quoted code. Hover shows a named symbol's type where one
 is available. A contiguous group of `--` or `{- … -}` comments immediately above
-a declaration appears below its type; declaration pragmas and leading attribute
+a declaration appears below its type as Markdown, with the delimiters stripped
+as [documentation comments](#documentation-comments) are; declaration pragmas and leading attribute
 tags may sit between the comments and declaration or annotation. Multiline tag
 contents do not become hover documentation. A blank line ends the group.
 Bundled library files can also be opened directly for navigation and hover.
@@ -345,6 +348,105 @@ same text.
 Workspace references refresh after open-buffer edits and watched file changes.
 Diagnostics always describe the current buffer. The server uses full-document
 sync and UTF-16 protocol positions.
+
+## API documentation
+
+`fango doc --stdlib` writes the bundled library's public API as JSON to
+standard output, for tools such as the website to render. `--stdlib` is
+required; no other source can be documented yet. Each `--module name`
+selects one module by its exact name, and may be repeated; without one, every
+bundled module is documented, including those the prelude never reaches.
+
+Every bundled module is checked, but nothing is run beyond the compile-time
+evaluation checking already does (attributes, splices, and derivers), and
+nothing is built or written. An unknown module or an invalid argument exits
+with status 2; a checking failure exits with 1. Diagnostics go to standard error and
+standard output receives only the JSON document, on success.
+
+`--strict` also requires documentation for each selected module and each
+public declaration it owns, including constructors, record fields, class
+methods, and effect operations. It reports every gap on standard error as
+`path:line: id has no documentation`, writes no JSON, and exits with 1.
+Re-exports and instances need no comment of their own. Without `--strict`,
+undocumented entries carry an empty `documentation`.
+
+### Documentation comments
+
+Documentation is the Markdown in ordinary comments directly above a
+declaration, with the [hover](#language-server-and-editor-support) attachment
+rules: a contiguous group of `--` or `{- … -}` comments, each alone on its
+lines, that a blank line ends. Declaration pragmas and the declaration's own
+leading attribute tags may sit between the comments and the declaration. A
+function's comment goes above its annotation, or above its first equation when
+it has none. A module's goes immediately above its `module` line, after any
+initial pragmas.
+
+A comment line loses its `--` and one following space; a block comment's
+later lines lose the indentation they share. Any further indentation is kept,
+so fenced code and nested lists survive. A constructor or record field is
+documented by a comment above it only when it begins its own line, after at
+most a leading `=`, `|`, `,` or `{`; one written on its type's line shares
+that line and has no comment of its own:
+
+```fango
+-- A value that may be absent.
+type Maybe a
+    -- No value.
+    = Nothing
+    -- A present value.
+    | Just a
+```
+
+Examples in [Maybe](../../stdlib/Maybe.fango) and
+[Result](../../stdlib/Result.fango) are fenced `fango` blocks. Each line not
+binding a name is a `Bool` expression that holds, and a block brings its own
+imports. The test suite runs them under both backends.
+
+### Output
+
+```json
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "name": "Maybe",
+      "documentation": "Optional values. …",
+      "source": { "path": "stdlib/Maybe.fango", "line": 11 },
+      "declarations": [
+        {
+          "id": "constructor:Maybe.Just",
+          "name": "Just",
+          "kind": "constructor",
+          "signature": "Just : a -> Maybe a",
+          "documentation": "A present value.",
+          "source": { "path": "stdlib/Maybe.fango", "line": 27 },
+          "parentId": "type:Maybe.Maybe"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Modules are sorted by name and each module's declarations by `id`. Output
+depends only on the library sources: there are no timestamps or absolute
+paths. `source.path` is relative to the repository, with forward slashes, and
+`source.line` is the 1-based line that declares the name — an annotation's when
+there is one.
+
+| Field | Contents |
+| --- | --- |
+| `kind` | `value`, `type`, `constructor`, `field`, `class`, `method`, `effect`, or `operation` |
+| `id` | `<kind>:<module>.<name>`; fields, methods, and operations add their parent, as in `method:Basics.Eq.==` and `operation:Fail.Fail.fail`. Operators use their bare spelling. |
+| `name` | The declared name; operators are parenthesized |
+| `signature` | Checked, not copied from source: inferred for unannotated functions, with constraints and effect rows. Types read `type Dict k v`, adding `= …` with their constructors or fields only when those are exported. Classes and effects read `class Eq a` and `effect Fail error`. Abort operations start with `abort`; scoped runners start with their `{-# scoped s #-}` line |
+| `parentId` | A member's type, class, or effect, when the module exports it |
+| `targetId` | On a re-export: the owner's declaration, whose signature, documentation, and source it repeats |
+| `fixity` | An operator's declared fixity, such as `infixl 0` |
+| `instances` | On a type or class: its checked instance heads across the library, derived ones included, as in `Ord a => Ord (Maybe a)`. A class names a type by module when another type shares its name |
+
+Optional fields are omitted when absent. Private declarations, unexported
+members, and the representation of an opaque type never appear.
 
 ## Generated Go projects
 

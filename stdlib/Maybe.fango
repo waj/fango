@@ -1,10 +1,39 @@
 {-# no-prelude #-}
+-- Optional values.
+--
+-- A `Maybe a` holds either one value of type `a` or none. Use it where a
+-- value may legitimately be absent, such as a lookup that finds nothing,
+-- rather than a sentinel value that callers could mistake for a real one.
+--
+-- The prelude exposes the type and both constructors unqualified, and
+-- `Maybe.withDefault` qualified; `import Maybe exposing (withDefault)` brings
+-- the function into scope unqualified.
 module Maybe exposing (Maybe(..), withDefault)
 
 import Basics exposing (..)
 
-type Maybe a = Nothing | Just a deriving (Eq, Ord, Show)
+-- A value of type `a` that may be absent. Values compare and display by
+-- constructor, with `Nothing` ordered before every `Just`.
+--
+-- ```fango
+-- Just 3 == Just 3
+-- Nothing < Just 0
+-- show (Just "a") == "Just \"a\""
+-- ```
+type Maybe a
+    -- No value.
+    = Nothing
+    -- A present value.
+    | Just a
+    deriving (Eq, Ord, Show)
 
+-- The contained value, or `fallback` when there is none. The fallback is an
+-- ordinary argument, so it is evaluated before the call either way.
+--
+-- ```fango
+-- Maybe.withDefault 0 (Just 3) == 3
+-- Maybe.withDefault 0 Nothing == 0
+-- ```
 withDefault : a -> Maybe a -> a
 withDefault fallback Nothing = fallback
 withDefault _ (Just value) = value
