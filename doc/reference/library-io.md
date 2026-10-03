@@ -110,6 +110,7 @@ read : String ->{IO} Result IO.Error String
 writeAll : String -> String ->{IO} Result IO.Error ()
 listDirectory : String ->{IO} Result IO.Error (List String)
 isDirectory : String ->{IO} Result IO.Error Bool
+size : String ->{IO} Result IO.Error Int
 ```
 
 `withFile path use` opens `path` for reading and runs `use` on the handle;
@@ -141,8 +142,9 @@ closed-resource error.
 a memory buffer drive the same parsing code. Both capture the handle. Calls after the owning scope closes report
 a closed-resource error; closing belongs to the scope. A pull answers whatever the file had, which may be short. `read` and `writeAll` handle a whole file without a
 handle and answer a `Result` instead. `listDirectory` names a directory's
-entries in sorted order, and `isDirectory` answers whether a path names one;
-a missing path is an `Err` with kind `NotFound` for both.
+entries in sorted order, `isDirectory` answers whether a path names one, and
+`size` gives a file's size in bytes; a missing path is an `Err` with kind
+`NotFound` for each.
 
 `File.Handle` is abstract, with no accessible constructor, `Show`, or `Eq`.
 A `with*` scope owns its lifetime. Returning a handle does not extend that
@@ -167,6 +169,20 @@ sink : Net.Connection -> Bytes.Sink {IO, Fail Net.Error}
 `source` blocks until bytes arrive or the peer reaches end of stream, then
 answers at most 8192 bytes per pull. `sink` writes the complete supplied block.
 Neither adapter closes the connection; the surrounding scope owns cleanup.
+
+Libraries that manage a connection's lifetime themselves, such as the
+[HTTP client](library-http-client.md), use the unscoped operations:
+
+```fango
+dialTimeout : String -> Int -> Int ->{IO} Result Net.Error Net.Connection
+readConnectionBytes : Net.Connection -> Int ->{IO} Result Net.Error Bytes
+writeConnectionBytes : Net.Connection -> Bytes ->{IO} Result Net.Error ()
+closeConnection : Net.Connection ->{IO} Result Net.Error ()
+```
+
+`dialTimeout host port millis` gives up after `millis` milliseconds; 0 leaves
+the limit to the system. `readConnectionBytes` answers up to the requested
+count, and an empty `Bytes` at end of stream.
 
 `Net.Error` is `{ kind : Net.Kind, address : String, message : String }`.
 The portable kinds are `ConnectionRefused`, `ConnectionReset`, `AddressInUse`,

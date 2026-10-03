@@ -99,9 +99,9 @@ for otherwise unavailable semantics or measured performance needs.
 implemented over [buffered readers and writers](reference/library-readers.md),
 [Net](reference/library-io.md#net), and [Async](reference/library-async.md).
 [HTTP follow-up work](roadmap-io.md) tracks transport acceptance coverage and
-future protocol variants. The [HTTP client proposal](roadmap-http-client.md)
-covers the client API, URLs, streaming bodies, compression, mocking,
-client-side TLS, and the server changes they share.
+future protocol variants. The [plain HTTP client](reference/library-http-client.md)
+is implemented; the [HTTP client roadmap](roadmap-http-client.md) covers
+compression, TLS, redirects, connection reuse, and mocking.
 
 ## Addressing a specific handler
 

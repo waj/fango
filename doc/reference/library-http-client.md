@@ -1,0 +1,161 @@
+# HTTP/1.1 client
+
+Sending requests over plain HTTP/1.1, streaming bodies in both directions, and
+answering requests without sockets in tests.
+
+[Reference index](../reference.md). Source: [Http.Client](../../stdlib/Http/Client.fango).
+The client shares [bodies, headers, and protocol errors](library-http.md) with
+the server and takes [URLs](library-url.md). The bundled API is experimental.
+
+## Running requests
+
+Code that makes requests performs the `Http` effect and `Fail Client.Error`,
+and needs no `IO`. `run` connects them to sockets where the program starts
+them:
+
+```fango
+import Http.Client as Client
+
+main() =
+    print (Client.attempt { Client.run Client.defaultConfig {
+        Client.attemptUnexpected { Client.getText "http://example.com/" }
+    } })
+```
+
+```fango
+run : Config -> (() ->{Http, Fail Error | e} a) ->{IO, Fail Error | e} a
+configure : (Config -> Config) -> (() ->{Http | e} a) ->{Http | e} a
+stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http, Fail Error | e} a) ->{Fail Error | e} a
+```
+
+`configure adjust action` runs `action` with `adjust` applied to the
+configuration in effect. Overrides nest and apply under every transport,
+`stub` included. A per-request timeout is a `configure` around that request.
+
+`stub respond action` answers each request without sockets: `respond` receives
+the request's bytes exactly as the client wrote them and returns the bytes of a
+response, or an `Error` to fail the request with. It may use the caller's
+effects, for example to record requests. Under `stub`, requests run one at a
+time and the configuration starts from `defaultConfig`.
+
+Each request uses a new connection and sends `Connection: close`. Only `http`
+URLs are supported; `https` fails with `InvalidUrl`. Redirects are not followed
+and responses are not decompressed.
+
+## Configuration
+
+```fango
+type Config =
+    { baseUrl : Maybe Url
+    , headers : List Header
+    , userAgent : String
+    , connectTimeoutMs : Int
+    , readTimeoutMs : Int
+    , writeTimeoutMs : Int
+    , maxHeaderBytes : Int
+    , maxBodyBytes : Int
+    }
+```
+
+`defaultConfig` has no base URL and no headers, the user agent `fango`, a 10 s
+connect timeout, 30 s read and write timeouts, a 64 KiB header limit, and a
+10 MiB body limit.
+
+A request URL without a scheme is resolved against `baseUrl` with
+[`Url.resolve`](library-url.md#resolution). Without a base URL it fails with
+`InvalidUrl`, as does a URL carrying user information, an unsupported scheme,
+or a missing host. Credentials belong in a header (`withBearer`).
+
+Headers come from three sources, each replacing same-named headers (compared
+ignoring ASCII case) from the ones before it: `User-Agent` from `userAgent`,
+then `Config.headers`, then the request's own. The client writes `Host`,
+`Content-Length`, `Transfer-Encoding`, and `Connection` itself; setting one in
+the configuration or a request fails with `Protocol (InvalidMessage …)`.
+
+The read and write timeouts bound each wait for the socket, not the whole
+request. `maxHeaderBytes` limits the status line and the header block.
+`maxBodyBytes` limits a body the client reads into memory.
+
+## Requests and responses
+
+```fango
+type Request e  = { method : String, url : Url, headers : List Header, body : Body e }
+type Response e = { url : Url, status : Int, headers : List Header, body : Reader e }
+type Reply      = { url : Url, status : Int, headers : List Header, body : Bytes }
+
+{-# scoped s #-}
+send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
+fetch : Request {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
+
+url : String ->{Fail Error} Url
+get : Url -> Request e
+post : Url -> Body e -> Request e
+withHeader : String -> String -> Request e -> Request e
+withBearer : String -> Request e -> Request e
+```
+
+`send request use` writes the request and streams the response body to `use`,
+which may read it only while it runs: the reader cannot escape the callback, so
+it is never read after the connection closes. A value that does not depend on
+the reader, such as decoded JSON, can leave. `fetch` reads the whole body, up
+to `maxBodyBytes`, beyond which it fails with `Protocol BodyTooLarge`. Both
+return any status. `url` parses a string, failing with `InvalidUrl`.
+
+A request body is a [`Body`](library-http.md#messages-and-bodies). Its row
+includes `Http` and `Fail Error` because it runs between the client's writes;
+it may also use any other effect of the caller, such as a database cursor or a
+file, so a large payload is produced while it is sent. `Empty` sends no framing
+headers for GET, HEAD, OPTIONS, TRACE, and DELETE, and `Content-Length: 0`
+otherwise. A body that fails partway leaves the request truncated, closes the
+connection, and its failure reaches the caller of `send` unchanged.
+[`Http.fileBody`](library-http.md#messages-and-bodies) streams a file as a
+sized body, and [`Json.withWriter`](library-json.md#text-adapters-and-custom-encoders)
+with `Json.array` streams generated JSON.
+
+The response is framed as follows. A response to HEAD, and a 204 or 304, has
+no body. Any other is framed by Content-Length, by chunked encoding, or by the
+connection closing. Interim 1xx responses are skipped; `101 Switching
+Protocols` fails with `Unsupported`. A body that ends early fails with
+`Malformed` when the reader reaches the gap. HTTP/1.0 status lines are
+accepted. `withResponse` parses a response from any reader, the way
+[`withRequest`](library-http.md#parsing-and-framing) parses a request.
+
+## Helpers
+
+```fango
+getText : String ->{Http, Fail Error, Fail Unexpected} String
+getBytes : String ->{Http, Fail Error, Fail Unexpected} Bytes
+getJson : Decode a => Type a -> String ->{Http, Fail Error, Fail Unexpected} a
+postJson : (Encode b, Decode a) => Type a -> String -> b ->{Http, Fail Error, Fail Unexpected} a
+expectSuccess : Reply ->{Fail Unexpected} Reply
+```
+
+The helpers take a URL string and expect a 2xx status. `getText` decodes the
+body as UTF-8, replacing invalid sequences. `getJson` and `postJson` set
+`Accept: application/json` unless the request has it and decode the response
+while it streams, within `maxBodyBytes`; `postJson` streams the encoded value
+as a chunked body with `Content-Type: application/json`. `expectSuccess`
+applies the same status rule to a `fetch` result.
+
+## Errors
+
+```fango
+type Error      = InvalidUrl String | Transport Net.Error | Timeout | Protocol Http.Error
+type Unexpected = BadStatus Reply | BadBody Json.Error
+
+attempt : (() ->{Fail Error | e} a) ->{e} Result Error a
+attemptUnexpected : (() ->{Fail Unexpected | e} a) ->{e} Result Unexpected a
+```
+
+`Error` is what can go wrong with any request: a URL the client cannot use, a
+[`Net.Error`](library-io.md#net) from connecting, reading, or writing, an
+expired timeout (never a `Transport` of kind `TimedOut`), or a
+[protocol error](library-http.md#errors) in the request or response.
+`Unexpected` is raised only by the helpers: `BadStatus` carries the whole reply,
+body included, since an error response's body often explains it, and `BadBody`
+carries the JSON decoding error.
+
+Code using the helpers performs both `Fail Error` and `Fail Unexpected`. A
+handler must say which it takes, so `attempt` and `attemptUnexpected` name
+theirs in their callback type; see
+[effect rows](effects.md#row-inclusion-and-callback-compatibility).

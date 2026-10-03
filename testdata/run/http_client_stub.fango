@@ -1,0 +1,70 @@
+import Bytes exposing (Bytes)
+import Fail exposing (Fail)
+import Http exposing (Body(..))
+import Http.Client as Client
+import IO exposing (IO)
+import Result exposing (Result(..))
+import Url
+import Writer
+
+-- Prints each request as written and answers with `wire`.
+answer : String -> Bytes ->{IO} Result Client.Error Bytes
+answer wire request =
+    print (Bytes.toStringLossy request)
+    Ok (Bytes.fromString wire)
+
+reply : Client.Reply -> String
+reply r = show r.status ++ " " ++ show r.headers ++ " " ++ Bytes.toStringLossy r.body
+
+main() =
+    -- Content-Length, chunked, and close-delimited bodies; an interim response.
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello") {
+        reply (Client.fetch (Client.get (Client.url "http://example.com/a?b=1")))
+    } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n") {
+        reply (Client.fetch (Client.get (Client.url "http://example.com:8080/")))
+    } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.0 200 OK\r\n\r\nuntil close") {
+        reply (Client.fetch (Client.get (Client.url "http://[::1]/")))
+    } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n") {
+        reply (Client.fetch { (Client.get (Client.url "http://example.com/")) | method = "HEAD" })
+    } })
+    -- Request bodies, headers, and configuration.
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 204 No Content\r\n\r\n") {
+        Client.configure { c -> { c | baseUrl = Url.parse "http://api.example.com/v1/", headers = [Http.Header { name = "X-Team", value = "core" }] } } {
+            request = Client.post (Client.url "items") (StreamBody { w ->
+                Writer.writeString w "a"
+                Writer.writeString w "b"
+            })
+            reply (Client.fetch (Client.withBearer "token" request))
+        }
+    } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok") {
+        reply (Client.fetch (Client.post (Client.url "http://example.com/upload") (SizedBody 3 { w -> Writer.writeString w "xyz" })))
+    } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"id\": 7}    ") {
+        Client.attemptUnexpected { Client.postJson @Int "http://example.com/n" ["a", "b"] }
+    } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n[1,2]\n") {
+        Client.attemptUnexpected { Client.getJson @(List Int) "http://example.com/n" }
+    } })
+    -- Failures.
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n123456") {
+        Client.configure { c -> { c | maxBodyBytes = 4 } } { Client.fetch (Client.get (Client.url "http://example.com/big")) }
+    } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\n\r\ngone") {
+        Client.attemptUnexpected { Client.getText "http://example.com/missing" }
+    } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nnope!") {
+        Client.attemptUnexpected { Client.getJson @Int "http://example.com/n" }
+    } })
+    print (Client.attempt { Client.stub { _ -> Err Client.Timeout } { Client.attemptUnexpected { Client.getText "http://example.com/" } } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 2OO OK\r\n\r\n") { Client.attemptUnexpected { Client.getText "http://example.com/" } } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nshort") { Client.attemptUnexpected { Client.getText "http://example.com/" } } })
+    print (Client.attempt { Client.stub (answer "") { Client.attemptUnexpected { Client.getText "relative" } } })
+    print (Client.attempt { Client.stub (answer "") { Client.attemptUnexpected { Client.getText "http://user:pw@example.com/" } } })
+    print (Client.attempt { Client.stub (answer "") { Client.attemptUnexpected { Client.getText "ftp://example.com/" } } })
+    print (Client.attempt { Client.stub (answer "") {
+        Client.fetch (Client.withHeader "Content-Length" "3" (Client.get (Client.url "http://example.com/")))
+    } })

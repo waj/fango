@@ -1,0 +1,113 @@
+GET /a?b=1 HTTP/1.1
+Host: example.com
+User-Agent: fango
+Connection: close
+
+
+Ok "200 [Header { name = \"Content-Length\", value = \"5\" }] hello"
+GET / HTTP/1.1
+Host: example.com:8080
+User-Agent: fango
+Connection: close
+
+
+Ok "200 [Header { name = \"Transfer-Encoding\", value = \"chunked\" }] abcde"
+GET / HTTP/1.1
+Host: [::1]
+User-Agent: fango
+Connection: close
+
+
+Ok "200 [] until close"
+HEAD / HTTP/1.1
+Host: example.com
+User-Agent: fango
+Connection: close
+
+
+Ok "200 [Header { name = \"Content-Length\", value = \"5\" }] "
+POST /v1/items HTTP/1.1
+Host: api.example.com
+User-Agent: fango
+X-Team: core
+Authorization: Bearer token
+Connection: close
+Transfer-Encoding: chunked
+
+2
+ab
+0
+
+
+Ok "204 [] "
+POST /upload HTTP/1.1
+Host: example.com
+User-Agent: fango
+Connection: close
+Content-Length: 3
+
+xyz
+Ok "200 [Header { name = \"Content-Length\", value = \"2\" }] ok"
+POST /n HTTP/1.1
+Host: example.com
+User-Agent: fango
+Accept: application/json
+Content-Type: application/json
+Connection: close
+Transfer-Encoding: chunked
+
+9
+["a","b"]
+0
+
+
+Ok (Err (BadBody (Error { message = "Expected JSON number", offset = 0, line = 1, column = 1, path = "" })))
+GET /n HTTP/1.1
+Host: example.com
+User-Agent: fango
+Accept: application/json
+Connection: close
+
+
+Ok (Ok [1, 2])
+GET /big HTTP/1.1
+Host: example.com
+User-Agent: fango
+Connection: close
+
+
+Err (Protocol BodyTooLarge)
+GET /missing HTTP/1.1
+Host: example.com
+User-Agent: fango
+Connection: close
+
+
+Ok (Err (BadStatus (Reply { url = Url { scheme = Just "http", userinfo = Nothing, host = Just "example.com", port = Nothing, path = "/missing", query = Nothing, fragment = Nothing }, status = 404, headers = [Header { name = "Content-Length", value = "4" }], body = "gone" })))
+GET /n HTTP/1.1
+Host: example.com
+User-Agent: fango
+Accept: application/json
+Connection: close
+
+
+Ok (Err (BadBody (Error { message = "Invalid JSON literal", offset = 1, line = 1, column = 2, path = "" })))
+Err Timeout
+GET / HTTP/1.1
+Host: example.com
+User-Agent: fango
+Connection: close
+
+
+Err (Protocol (Malformed "invalid status code"))
+GET / HTTP/1.1
+Host: example.com
+User-Agent: fango
+Connection: close
+
+
+Err (Protocol (Malformed "incomplete body"))
+Err (InvalidUrl "relative")
+Err (InvalidUrl "credentials belong in a header, not the URL")
+Err (InvalidUrl "ftp://example.com/")
+Err (Protocol (InvalidMessage "the client manages the Content-Length header"))

@@ -1,8 +1,11 @@
 {-# no-prelude #-}
-module Http exposing (Body(..), Error(..), Header(..), Protocol(..), Version(..), abortBody, equalAscii, getHeader, getHeaders, hasHeader, removeHeader, setHeader)
+module Http exposing (Body(..), Error(..), Header(..), Protocol(..), Version(..), abortBody, equalAscii, fileBody, getHeader, getHeaders, hasHeader, removeHeader, setHeader)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes)
+import Fail exposing (Fail, fromResult)
+import File
+import IO exposing (IO)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Writer exposing (Writer)
@@ -37,6 +40,22 @@ type Body e
 -- connection is closed, so the peer cannot mistake it for a complete one.
 abortBody : String ->{Protocol} a
 abortBody reason = invalid (BodyAborted reason)
+
+-- A sized body that streams the file at `path`. The size is read now and the
+-- file is opened only while the body is written; a file that changed size in
+-- between fails the length check.
+fileBody : String ->{IO, Fail IO.Error} Body {IO, Fail IO.Error | e}
+fileBody path =
+    length = fromResult (File.size path)
+    SizedBody length { output -> File.withFile path { file -> copyFile file output } }
+
+copyFile : File.Handle -> Writer {IO, Fail IO.Error | e} ->{IO, Fail IO.Error | e} ()
+copyFile file output =
+    case File.readBytes file 65536 of
+        Just bytes ->
+            Writer.write output bytes
+            copyFile file output
+        Nothing -> ()
 
 asciiLower : Int -> Int
 asciiLower code = if code >= 65 && code <= 90 then code + 32 else code

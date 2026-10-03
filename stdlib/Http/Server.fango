@@ -98,7 +98,7 @@ checkResponse response =
 
 writeChecked : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} ()
 writeChecked method output response =
-    Wire.writeCheckedMessage output ("HTTP/1.1 " ++ show response.status ++ " ") response.headers response.body
+    Wire.writeCheckedMessage { error -> invalid error } output ("HTTP/1.1 " ++ show response.status ++ " ") response.headers response.body
         (framedStatus response.status) (method /= "HEAD")
 
 writeResponse : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} ()

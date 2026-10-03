@@ -1,5 +1,5 @@
 ok "HTTP/1.1 200 \r\nContent-Length: 5\r\n\r\nabcde"
-InvalidMessage "body exceeds its declared length" "HTTP/1.1 200 \r\nContent-Length: 3\r\n\r\nab"
+InvalidMessage "body exceeds its declared length" "HTTP/1.1 200 \r\nContent-Length: 3\r\n\r\n"
 InvalidMessage "body is shorter than its declared length" "HTTP/1.1 200 \r\nContent-Length: 3\r\n\r\nab"
 ok "HTTP/1.1 200 \r\nContent-Length: 3\r\n\r\n"
 InvalidMessage "message cannot carry a body" ""

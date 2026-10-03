@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Http.Wire exposing (Framing(..), allToken, checkMessage, decodeField, emptyBody, framing, headerLines, withBody, writeCheckedMessage, writeMessage)
+module Http.Wire exposing (Framing(..), allToken, checkMessage, decodeField, emptyBody, framing, headerLines, responseFraming, withBody, writeCheckedMessage, writeMessage)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Source(..))
@@ -15,7 +15,7 @@ import Writer exposing (Writer(..))
 {- HTTP/1.1 framing shared by both directions: header blocks, body framing,
 and message serialization. Start lines belong to the direction. -}
 
-type Framing = NoBody | Fixed Int | Chunked
+type Framing = NoBody | Fixed Int | Chunked | UntilClose
 type ChunkState = { remaining : Int, done : Bool, total : Int }
 type ChunkCell e = { read : () ->{e} ChunkState, write : ChunkState ->{e} () }
 
@@ -116,12 +116,20 @@ decimalBytes bytes index =
             Just code -> if code >= 48 && code <= 57 then decimalBytes bytes (index + 1) else False
             Nothing -> False
 
+-- A request without framing headers has no body.
 framing : List Header -> Int ->{Protocol} Framing
-framing headers maxBody =
+framing headers maxBody = framingOr NoBody headers maxBody
+
+-- A response without framing headers lasts until the connection closes.
+responseFraming : List Header -> Int ->{Protocol} Framing
+responseFraming headers maxBody = framingOr UntilClose headers maxBody
+
+framingOr : Framing -> List Header -> Int ->{Protocol} Framing
+framingOr unframed headers maxBody =
     lengths = getHeaders "content-length" headers
     transfers = getHeaders "transfer-encoding" headers
     case (lengths, transfers) of
-        ([], []) -> NoBody
+        ([], []) -> unframed
         ([raw], []) ->
             if decimalBytes (Bytes.fromString raw) 0 == False then invalid (Malformed "invalid Content-Length")
             else
@@ -243,6 +251,9 @@ withBody bodyFraming input bodyLimit headersLimit use =
             }
             (value, remaining == 0)
         Chunked -> withChunked input bodyLimit headersLimit use
+        UntilClose ->
+            value = use input
+            (value, Reader.atEnd input)
 
 validHeader : Header ->{Protocol} ()
 validHeader header =
@@ -262,12 +273,11 @@ hexSize size =
     if size < 16 then hexDigit size
     else hexSize (quotientBy 16 size) ++ hexDigit (modBy 16 size)
 
+-- One write per chunk, so an unbuffered writer sends it whole.
 writeChunk : Writer e -> Bytes ->{e} ()
 writeChunk output bytes =
     if Bytes.length bytes > 0 then
-        Writer.writeString output (hexSize (Bytes.length bytes) ++ "\r\n")
-        Writer.write output bytes
-        Writer.writeString output "\r\n"
+        Writer.write output (Bytes.concat [Bytes.fromString (hexSize (Bytes.length bytes) ++ "\r\n"), bytes, Bytes.fromString "\r\n"])
     else ()
 
 -- Collects writes into chunks of `chunkWindow` bytes; a flush frames what is
@@ -286,26 +296,32 @@ chunked output body =
     writeChunk output (batchTake batch)
     Writer.writeString output "0\r\n\r\n"
 
--- Passes writes through and checks them against the declared length.
-sized : Int -> Writer {Protocol | e} -> (Writer {Protocol | e} ->{Protocol | e} ()) ->{Protocol | e} ()
-sized length output body =
-    batch = newBatch 0
+writeSome : Writer e -> Bytes ->{e} ()
+writeSome output bytes = if Bytes.length bytes > 0 then Writer.write output bytes else ()
+
+-- Collects writes like `chunked` and checks them against the declared length.
+sized : (Error ->{e} ()) -> Int -> Writer e -> (Writer e ->{e} ()) ->{e} ()
+sized reject length output body =
+    batch = newBatch chunkWindow
     body (Writer
         { emit = { bytes ->
-            if batchTotal batch + Bytes.length bytes > length then invalid (InvalidMessage "body exceeds its declared length")
-            else Writer.write output (batchPush batch bytes)
+            if batchTotal batch + Bytes.length bytes > length then reject (InvalidMessage "body exceeds its declared length")
+            else writeSome output (batchPush batch bytes)
           }
-        , flush = output.flush
+        , flush = {
+            writeSome output (batchTake batch)
+            output.flush()
+          }
         }
     )
-    if batchTotal batch < length then invalid (InvalidMessage "body is shorter than its declared length") else ()
+    writeSome output (batchTake batch)
+    if batchTotal batch < length then reject (InvalidMessage "body is shorter than its declared length") else ()
 
-writeHeaders : Writer e -> List Header ->{e} ()
-writeHeaders output headers =
-    List.each { header -> Writer.writeString output (header.name ++ ": " ++ header.value ++ "\r\n") } headers
+headerText : List Header -> String
+headerText headers = String.concat (List.map { header -> header.name ++ ": " ++ header.value ++ "\r\n" } headers)
 
 -- Rejects a message before any of it is written. An unframed message (204,
--- 304) carries no framing headers and no body.
+-- 304, or a request without a body) carries no framing headers and no body.
 checkMessage : List Header -> Body e -> Bool ->{Protocol} ()
 checkMessage headers body framed =
     List.each validHeader headers
@@ -322,27 +338,28 @@ checkMessage headers body framed =
 writeMessage : Writer {Protocol | e} -> String -> List Header -> Body {Protocol | e} -> Bool -> Bool ->{Protocol | e} ()
 writeMessage output startLine headers body framed sendBody =
     checkMessage headers body framed
-    writeCheckedMessage output startLine headers body framed sendBody
+    writeCheckedMessage { error -> invalid error } output startLine headers body framed sendBody
 
--- Writes a message that passed `checkMessage`, after its start line.
--- `sendBody` False writes only the head, as for HEAD.
-writeCheckedMessage : Writer {Protocol | e} -> String -> List Header -> Body {Protocol | e} -> Bool -> Bool ->{Protocol | e} ()
-writeCheckedMessage output startLine headers body framed sendBody =
-    Writer.writeString output (startLine ++ "\r\n")
-    writeHeaders output headers
+-- Writes a message that passed `checkMessage`, after its start line. The head
+-- goes out in one write, together with a byte body. `sendBody` False writes
+-- only the head, as for HEAD. A sized body of the wrong length is passed to
+-- `reject`, which must not return.
+writeCheckedMessage : (Error ->{e} ()) -> Writer e -> String -> List Header -> Body e -> Bool -> Bool ->{e} ()
+writeCheckedMessage reject output startLine headers body framed sendBody =
+    head = startLine ++ "\r\n" ++ headerText headers
     case body of
         Empty ->
-            if framed then Writer.writeString output "Content-Length: 0\r\n" else ()
-            Writer.writeString output "\r\n"
+            Writer.writeString output (head ++ (if framed then "Content-Length: 0\r\n\r\n" else "\r\n"))
         BytesBody bytes ->
-            if framed then Writer.writeString output ("Content-Length: " ++ show (Bytes.length bytes) ++ "\r\n") else ()
-            Writer.writeString output "\r\n"
-            if sendBody && framed then Writer.write output bytes else ()
+            length = if framed then "Content-Length: " ++ show (Bytes.length bytes) ++ "\r\n\r\n" else "\r\n"
+            if sendBody && framed then Writer.write output (Bytes.append (Bytes.fromString (head ++ length)) bytes)
+            else Writer.writeString output (head ++ length)
         StreamBody stream ->
-            if sendBody then Writer.writeString output "Transfer-Encoding: chunked\r\n" else ()
-            Writer.writeString output "\r\n"
-            if sendBody then chunked output stream else ()
+            if sendBody then
+                Writer.writeString output (head ++ "Transfer-Encoding: chunked\r\n\r\n")
+                chunked output stream
+            else Writer.writeString output (head ++ "\r\n")
         SizedBody length stream ->
-            Writer.writeString output ("Content-Length: " ++ show length ++ "\r\n\r\n")
-            if sendBody then sized length output stream else ()
+            Writer.writeString output (head ++ "Content-Length: " ++ show length ++ "\r\n\r\n")
+            if sendBody then sized reject length output stream else ()
     output.flush()

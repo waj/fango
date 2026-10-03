@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Net exposing (Connection, Error(..), Kind(..), Listener, accept, acceptAsync, listenerStopped, setReadDeadline, setWriteDeadline, sink, sinkAsync, source, sourceAsync, stopListener, withClient, withListener)
+module Net exposing (Connection, Error(..), Kind(..), Listener, accept, acceptAsync, closeConnection, dialTimeout, listenerStopped, readConnectionBytes, setReadDeadline, setWriteDeadline, sink, sinkAsync, source, sourceAsync, stopListener, withClient, withListener, writeConnectionBytes)
 
 import Async
 import Basics exposing (..)
@@ -44,6 +44,10 @@ acceptConnectionAsync = native
 
 dial : String -> Int ->{IO} Result Error Connection
 dial = native
+
+-- Connects within `millis` milliseconds; 0 leaves the limit to the system.
+dialTimeout : String -> Int -> Int ->{IO} Result Error Connection
+dialTimeout = native
 
 closeConnection : Connection ->{IO} Result Error ()
 closeConnection = native

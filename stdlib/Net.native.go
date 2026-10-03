@@ -94,6 +94,17 @@ func Dial(host string, port int64) (any, error) {
 	return &connection{value: c, reader: bufio.NewReader(c)}, nil
 }
 
+// DialTimeout connects like Dial but gives up after millis; zero waits as long
+// as the system does.
+func DialTimeout(host string, port int64, millis int64) (any, error) {
+	dialer := net.Dialer{Timeout: time.Duration(millis) * time.Millisecond}
+	c, err := dialer.Dial("tcp", net.JoinHostPort(host, strconv.FormatInt(port, 10)))
+	if err != nil {
+		return nil, err
+	}
+	return &connection{value: c, reader: bufio.NewReader(c)}, nil
+}
+
 func CloseConnection(value any) error {
 	c, ok := value.(*connection)
 	if !ok || c == nil {

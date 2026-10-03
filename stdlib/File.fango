@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module File exposing (Handle, isDirectory, listDirectory, read, readBytes, readLine, sink, source, withAppend, withFile, withOutput, write, writeAll, writeBytes)
+module File exposing (Handle, isDirectory, listDirectory, read, readBytes, readLine, sink, size, source, withAppend, withFile, withOutput, write, writeAll, writeBytes)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Sink(..), Source(..))
@@ -76,6 +76,9 @@ closeDirectory = native
 isDirectoryPath : String ->{IO} Result Error Bool
 isDirectoryPath = native
 
+fileSize : String ->{IO} Result Error Int
+fileSize = native
+
 -- Scopes. Opening raises the failure before anything is acquired, so a failed
 -- open releases nothing; closing raises after the body, so a failed close
 -- after a successful body is the scope's failure and after a failed body it
@@ -150,6 +153,10 @@ writeAll path text = writeFileResult path text
 
 isDirectory : String ->{IO} Result Error Bool
 isDirectory path = isDirectoryPath path
+
+-- The size in bytes of the file at `path`.
+size : String ->{IO} Result Error Int
+size path = fileSize path
 
 collectEntries : Directory -> List String ->{IO, Fail Error} List String
 collectEntries directory found =

@@ -85,6 +85,19 @@ unrelated source/sink effects propagate.
 A handwritten instance writes raw JSON text with `Json.emit` or delegates to
 `encodeValue` for its parts. `Json.withWriter writer { ... }` and
 `Json.withTextWriter` install the `Emit` handler over a byte or text writer.
+Their action may also perform the writer's own effects, so a document can be
+written while its content is read from a cursor or a socket:
+
+```fango
+withWriter : Writer e -> (() ->{Emit, Fail Error | e} a) ->{e} Result Error a
+array : Encode a => Stream state a {Emit, Fail Error | e} ->{Emit, Fail Error | e} ()
+object : List (String, () ->{Emit, Fail Error | e} ()) ->{Emit, Fail Error | e} ()
+```
+
+`Json.array items` emits a JSON array of the stream's elements, stepping the
+stream as it writes. `Json.object fields` emits an object whose field values are
+emitted in order when reached, so an array field can stream before a later
+field is computed. Neither holds the document in memory.
 
 ## Value tree
 

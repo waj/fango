@@ -1,0 +1,46 @@
+import Bytes
+import Fail exposing (Fail)
+import Http exposing (Body(..))
+import Http.Client as Client
+import IO
+import Json
+import List
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Stream
+import Url
+import Writer
+
+numbers : Stream.Stream Int Int e
+numbers = Stream.unfold 0 { n -> if n < 200000 then Just (n, n + 1) else Nothing }
+
+-- Requests against the server named by the first argument, a base URL.
+-- The second argument names a file to upload.
+requests : String ->{Client.Http, Fail Client.Error, IO, Fail IO.Error} ()
+requests file =
+    print (Client.attemptUnexpected { Client.getText "/text" })
+    print (Client.attemptUnexpected { Client.getJson @(List Int) "/json" })
+    print (case Client.attemptUnexpected { Client.getText "/missing" } of
+            Err (Client.BadStatus reply) -> "status " ++ show reply.status ++ " " ++ Bytes.toStringLossy reply.body
+            _ -> "unexpected"
+    )
+    generated = StreamBody { w ->
+        case Json.withWriter w { Json.array numbers } of
+            Ok _ -> ()
+            Err problem -> Fail.fail (Client.Protocol (Http.InvalidMessage problem.message))
+    }
+    print (Bytes.toStringLossy (Client.fetch (Client.post (Client.url "/count") generated)).body)
+    print (Bytes.toStringLossy (Client.fetch (Client.post (Client.url "/file") (Http.fileBody file))).body)
+    print (Client.attempt { Client.configure { c -> { c | readTimeoutMs = 200 } } { Client.fetch (Client.get (Client.url "/slow")) } }
+            |> Result.map { _ -> "" }
+    )
+
+attemptIO : (() ->{Fail IO.Error | e} a) ->{e} Result IO.Error a
+attemptIO action = Fail.attempt action
+
+main() =
+    case IO.args() of
+        [base, file] ->
+            config = { Client.defaultConfig | baseUrl = Url.parse base }
+            print (attemptIO { Client.attempt { Client.run config { requests file } } })
+        _ -> IO.exit 2

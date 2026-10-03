@@ -253,6 +253,14 @@ func CloseDirectory(value any) error {
 	return nil
 }
 
+func FileSize(path string) (int64, error) {
+	info, err := os.Stat(filePath(path))
+	if err != nil {
+		return 0, relabel(err, path)
+	}
+	return info.Size(), nil
+}
+
 func IsDirectoryPath(path string) (bool, error) {
 	info, err := os.Stat(filePath(path))
 	if err != nil {

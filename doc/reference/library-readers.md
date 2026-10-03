@@ -159,12 +159,14 @@ over : Sink e -> Int -> (Writer s ->{s} a) ->{e} a
 collecting : (Writer s ->{s} a) ->{e} (a, Bytes)
 write : Writer e -> Bytes ->{e} ()
 writeString : Writer e -> String ->{e} ()
+copy : Reader e -> Writer e ->{e} ()
 ```
 
 `emit chunk` accepts bytes for eventual writing and `flush()` pushes everything
 accepted so far; both are operation names, so neither is also a module
 function, and a caller writes `writer.flush()`. `write` and `writeString` are
-`emit` with a `Bytes` and with a `String`'s UTF-8 bytes.
+`emit` with a `Bytes` and with a `String`'s UTF-8 bytes. `copy reader writer`
+writes everything left in the reader, chunk by chunk.
 
 `over sink size use` writes whenever the buffer reaches `size`, and once more
 when `use` returns normally. An emit is never split, so a single chunk larger

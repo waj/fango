@@ -1,0 +1,433 @@
+{-# no-prelude #-}
+module Http.Client exposing
+    ( Config(..), Connection, Error(..), Http, Reply(..), Request(..)
+    , Response(..), Unexpected(..)
+    , attempt, attemptUnexpected, configure, defaultConfig, expectSuccess, fetch
+    , get, getBytes, getJson, getText, post, postJson, run, send, stub, url
+    , withBearer, withHeader, withResponse
+    )
+
+import Basics exposing (..)
+import Bytes exposing (Bytes, Source(..))
+import Fail exposing (Fail, fromResult)
+import Http exposing (Body(..), Header(..), Protocol(..))
+import Http.Wire as Wire exposing (Framing(..))
+import IO exposing (IO)
+import Json exposing (Decode, Encode)
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Net
+import Reader exposing (Reader(..))
+import Result exposing (Result(..))
+import Runtime.Scope
+import String
+import Url exposing (Url)
+import Writer exposing (Writer(..))
+
+{- An HTTP/1.1 client. Requests run through the `Http` effect, a byte
+transport that `run` connects to sockets; framing, header policy, and URL
+resolution run in the caller's code under every transport. -}
+
+-- What can go wrong with a request, however the caller reads the response.
+type Error
+    = InvalidUrl String
+    | Transport Net.Error
+    | Timeout
+    | Protocol Http.Error
+    deriving (Eq, Show)
+
+type Request e =
+    { method : String
+    , url : Url
+    , headers : List Header
+    , body : Body e
+    }
+
+-- A response whose body streams inside `send`'s callback.
+type Response e =
+    { url : Url
+    , status : Int
+    , headers : List Header
+    , body : Reader e
+    }
+
+-- A response with its body read into memory.
+type Reply =
+    { url : Url
+    , status : Int
+    , headers : List Header
+    , body : Bytes
+    }
+    deriving (Eq, Show)
+
+-- A response that does not meet a helper's expectation.
+type Unexpected = BadStatus Reply | BadBody Json.Error deriving (Eq, Show)
+
+type Config =
+    { baseUrl : Maybe Url
+    , headers : List Header
+    , userAgent : String
+    , connectTimeoutMs : Int
+    , readTimeoutMs : Int
+    , writeTimeoutMs : Int
+    , maxHeaderBytes : Int
+    , maxBodyBytes : Int
+    }
+
+defaultConfig : Config
+defaultConfig = Config
+    { baseUrl = Nothing
+    , headers = []
+    , userAgent = "fango"
+    , connectTimeoutMs = 10000
+    , readTimeoutMs = 30000
+    , writeTimeoutMs = 30000
+    , maxHeaderBytes = 65536
+    , maxBodyBytes = 10485760
+    }
+
+type Endpoint = { secure : Bool, host : String, port : Int, connectTimeoutMs : Int }
+
+-- A transport's handle on one connection.
+type Connection = Socket Net.Connection | Memory Int
+
+effect Http
+    connect : Endpoint -> Result Error Connection
+    transmit : Connection -> Bytes -> Int -> Result Error ()
+    receive : Connection -> Int -> Int -> Result Error (Maybe Bytes)
+    release : Connection -> Result Error ()
+    currentConfig : () -> Config
+
+-- Running
+
+netError : Net.Error -> Error
+netError error = if error.kind == Net.TimedOut then Timeout else Transport error
+
+fromNet : Result Net.Error a -> Result Error a
+fromNet result =
+    case result of
+        Ok value -> Ok value
+        Err error -> Err (netError error)
+
+foreign : Result Error a
+foreign = Err (Protocol (Http.InvalidMessage "connection belongs to another transport"))
+
+dial : Endpoint ->{IO} Result Error Connection
+dial endpoint =
+    if endpoint.secure then Err (InvalidUrl "https is not supported yet")
+    else
+        case Net.dialTimeout endpoint.host endpoint.port endpoint.connectTimeoutMs of
+            Ok connection -> Ok (Socket connection)
+            Err error -> Err (netError error)
+
+socketWrite : Connection -> Bytes -> Int ->{IO} Result Error ()
+socketWrite connection bytes timeout =
+    case connection of
+        Socket socket ->
+            case fromNet (Net.setWriteDeadline socket timeout) of
+                Ok _ -> fromNet (Net.writeConnectionBytes socket bytes)
+                Err error -> Err error
+        Memory _ -> foreign
+
+socketRead : Connection -> Int -> Int ->{IO} Result Error (Maybe Bytes)
+socketRead connection most timeout =
+    case connection of
+        Socket socket ->
+            case fromNet (Net.setReadDeadline socket timeout) of
+                Err error -> Err error
+                Ok _ ->
+                    case fromNet (Net.readConnectionBytes socket most) of
+                        Ok bytes -> Ok (if Bytes.length bytes == 0 then Nothing else Just bytes)
+                        Err error -> Err error
+        Memory _ -> foreign
+
+socketClose : Connection ->{IO} Result Error ()
+socketClose connection =
+    case connection of
+        Socket socket -> fromNet (Net.closeConnection socket)
+        Memory _ -> foreign
+
+-- Runs requests over TCP with `config` as the global configuration.
+run : Config -> (() ->{Http, Fail Error | e} a) ->{IO, Fail Error | e} a
+run config action =
+    handle action() of
+        connect endpoint -> resume (dial endpoint)
+        transmit connection bytes timeout -> resume (socketWrite connection bytes timeout)
+        receive connection most timeout -> resume (socketRead connection most timeout)
+        release connection -> resume (socketClose connection)
+        currentConfig () -> resume config
+
+-- Runs `action` with the configuration adjusted. Overrides nest.
+configure : (Config -> Config) -> (() ->{Http | e} a) ->{Http | e} a
+configure adjust action =
+    handle action() of
+        connect endpoint -> resume (connect endpoint)
+        transmit connection bytes timeout -> resume (transmit connection bytes timeout)
+        receive connection most timeout -> resume (receive connection most timeout)
+        release connection -> resume (release connection)
+        currentConfig () -> resume (adjust currentConfig())
+
+type Exchange = { request : Bytes, response : Maybe Bytes }
+
+-- Answers each request from `respond`, given the request's bytes as written,
+-- without sockets. `respond` may use the caller's effects, for example to
+-- record requests. Requests run one at a time.
+stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http, Fail Error | e} a) ->{Fail Error | e} a
+stub respond action =
+    handle action() with exchange = Exchange { request = Bytes.empty, response = Nothing } of
+        connect _ -> resume (Ok (Memory 0)) with Exchange { request = Bytes.empty, response = Nothing }
+        transmit _ bytes _ ->
+            resume (Ok ()) with { exchange | request = Bytes.append exchange.request bytes }
+        receive _ _ _ ->
+            case exchange.response of
+                Just _ -> resume (Ok Nothing) with exchange
+                Nothing ->
+                    case respond exchange.request of
+                        Ok bytes -> resume (Ok (if Bytes.length bytes == 0 then Nothing else Just bytes)) with { exchange | response = Just bytes }
+                        Err error -> resume (Err error) with exchange
+        release _ -> resume (Ok ()) with exchange
+        currentConfig () -> resume defaultConfig with exchange
+
+-- Preparing requests
+
+failWith : Error ->{Fail Error} a
+failWith error = Fail.fail error
+
+-- Header names the client writes itself.
+managed : List String
+managed = ["host", "content-length", "transfer-encoding", "connection"]
+
+checkHeaders : List Header ->{Fail Error} ()
+checkHeaders headers =
+    List.each { header ->
+        if List.foldl { name found -> found || Http.equalAscii name header.name } False managed then
+            failWith (Protocol (Http.InvalidMessage ("the client manages the " ++ header.name ++ " header")))
+        else ()
+    } headers
+
+-- Headers from `extra` replace same-named ones from `base`.
+overlay : List Header -> List Header -> List Header
+overlay base extra =
+    kept = List.filter { header -> List.foldl { other found -> found && Http.equalAscii other.name header.name == False } True extra } base
+    List.foldr { header rest -> [header | rest] } extra kept
+
+absolute : Config -> Url ->{Fail Error} Url
+absolute config target =
+    case target.scheme of
+        Just _ -> target
+        Nothing ->
+            case config.baseUrl of
+                Just base -> Url.resolve base target
+                Nothing -> failWith (InvalidUrl (Url.toString target))
+
+endpointOf : Config -> Url ->{Fail Error} Endpoint
+endpointOf config target =
+    secure = case target.scheme of
+        Just "http" -> False
+        Just "https" -> True
+        _ -> failWith (InvalidUrl (Url.toString target))
+    if target.userinfo /= Nothing then failWith (InvalidUrl "credentials belong in a header, not the URL")
+    else
+        case target.host of
+            Nothing -> failWith (InvalidUrl (Url.toString target))
+            Just host ->
+                if host == "" then failWith (InvalidUrl (Url.toString target))
+                else
+                    port = case target.port of
+                        Just number -> number
+                        Nothing -> if secure then 443 else 80
+                    Endpoint { secure = secure, host = host, port = port, connectTimeoutMs = config.connectTimeoutMs }
+
+hostHeader : Endpoint -> String
+hostHeader endpoint =
+    host = if String.contains ":" endpoint.host then "[" ++ endpoint.host ++ "]" else endpoint.host
+    defaultPort = if endpoint.secure then 443 else 80
+    if endpoint.port == defaultPort then host else host ++ ":" ++ show endpoint.port
+
+-- A request without a body carries no framing headers unless its method
+-- usually has one.
+framedRequest : String -> Body e -> Bool
+framedRequest method body =
+    case body of
+        Empty -> List.foldl { other found -> found && other /= method } True ["GET", "HEAD", "OPTIONS", "TRACE", "DELETE"]
+        _ -> True
+
+protocol : (() ->{Protocol, Fail Error | e} a) ->{Fail Error | e} a
+protocol action =
+    handle action() of
+        Http.invalid error -> failWith (Protocol error)
+
+-- Reading responses
+
+statusCode : Bytes -> Maybe Int
+statusCode bytes =
+    if Bytes.length bytes /= 3 then Nothing
+    else
+        case String.toInt (Bytes.toStringLossy bytes) of
+            Just code -> if code >= 100 then Just code else Nothing
+            Nothing -> Nothing
+
+statusLine : Bytes ->{Protocol} Int
+statusLine line =
+    http11 = Bytes.startsWith (Bytes.fromString "HTTP/1.1 ") line
+    http10 = Bytes.startsWith (Bytes.fromString "HTTP/1.0 ") line
+    if http11 == False && http10 == False then invalid (Http.Malformed "invalid status line")
+    else
+        afterCode = Bytes.slice 12 13 line
+        if Bytes.length line > 12 && afterCode /= Bytes.fromString " " then invalid (Http.Malformed "invalid status line")
+        else
+            case statusCode (Bytes.slice 9 12 line) of
+                Just code -> code
+                Nothing -> invalid (Http.Malformed "invalid status code")
+
+-- Reads a status line and headers, skipping interim 1xx responses.
+readHead : Reader e -> Int ->{Protocol | e} (Int, List Header)
+readHead input limit =
+    case Reader.readUntil input (Bytes.fromString "\r\n") limit of
+        Reader.Found line ->
+            code = statusLine line
+            headers = Wire.headerLines input limit []
+            if code == 101 then invalid (Http.Unsupported "protocol upgrade")
+            else if code < 200 then readHead input limit
+            else (code, headers)
+        Reader.Ended _ -> invalid (Http.Malformed "incomplete status line")
+        Reader.Overflowed -> invalid Http.LineTooLong
+
+-- Parses a response from `input` and scopes its body to `use`. A response to
+-- HEAD, and a 204 or 304, has no body; any other is framed by Content-Length,
+-- chunked encoding, or the connection closing.
+{-# scoped s #-}
+withResponse : Url -> Bool -> Int -> Int -> Reader e -> (Response s ->{s} a) ->{Protocol | e} a
+withResponse target headRequest headerLimit bodyLimit input use =
+    (status, headers) = readHead input headerLimit
+    bodyFraming =
+        if headRequest || status == 204 || status == 304 then NoBody
+        else Wire.responseFraming headers bodyLimit
+    (value, _) = Wire.withBody bodyFraming input bodyLimit headerLimit { body ->
+        use (Response { url = target, status = status, headers = headers, body = body })
+    }
+    value
+
+-- Sending
+
+largest : Int
+largest = 9223372036854775807
+
+-- Sends `request` and streams the response to `use`, which may read the body
+-- only while it runs. Any status is a normal response.
+{-# scoped s #-}
+send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
+send request use =
+    config = currentConfig()
+    target = absolute config request.url
+    endpoint = endpointOf config target
+    checkHeaders config.headers
+    checkHeaders request.headers
+    headers = overlay (overlay [Header { name = "User-Agent", value = config.userAgent }] config.headers) request.headers
+    wireHeaders = [Header { name = "Host", value = hostHeader endpoint } | List.foldr { header rest -> [header | rest] } [Header { name = "Connection", value = "close" }] headers]
+    if Wire.allToken (Bytes.fromString request.method) 0 == False then failWith (Protocol (Http.InvalidMessage "invalid method")) else ()
+    framed = framedRequest request.method request.body
+    protocol { Wire.checkMessage wireHeaders request.body framed }
+    Runtime.Scope.bracket { fromResult (connect endpoint) } { connection -> ignore (release connection) } { connection ->
+        output = Writer
+            { emit = { bytes -> fromResult (transmit connection bytes config.writeTimeoutMs) }
+            , flush = { () }
+            }
+        Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (request.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
+            wireHeaders request.body framed True
+        Reader.over (Source { pull = { fromResult (receive connection 65536 config.readTimeoutMs) } }) { input ->
+            protocol { withResponse target (request.method == "HEAD") config.maxHeaderBytes largest input use }
+        }
+    }
+
+collect : Reader {Fail Error | e} -> Int -> List Bytes -> Int ->{Fail Error | e} Bytes
+collect reader limit parts size =
+    chunk = Reader.readUpTo reader 65536
+    if Bytes.length chunk == 0 then Bytes.concat (List.reverse parts)
+    else if size + Bytes.length chunk > limit then failWith (Protocol Http.BodyTooLarge)
+    else collect reader limit [chunk | parts] (size + Bytes.length chunk)
+
+-- Sends `request` and reads the whole body, up to `maxBodyBytes`.
+fetch : Request {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
+fetch request =
+    limit = currentConfig().maxBodyBytes
+    send request { response ->
+        body = collect response.body limit [] 0
+        Reply { url = response.url, status = response.status, headers = response.headers, body = body }
+    }
+
+-- Requests and helpers
+
+url : String ->{Fail Error} Url
+url raw =
+    case Url.parse raw of
+        Just parsed -> parsed
+        Nothing -> failWith (InvalidUrl raw)
+
+get : Url -> Request e
+get target = Request { method = "GET", url = target, headers = [], body = Empty }
+
+post : Url -> Body e -> Request e
+post target body = Request { method = "POST", url = target, headers = [], body = body }
+
+withHeader : String -> String -> Request e -> Request e
+withHeader name value request = { request | headers = Http.setHeader name value request.headers }
+
+withBearer : String -> Request e -> Request e
+withBearer token request = withHeader "Authorization" ("Bearer " ++ token) request
+
+-- Fails with `BadStatus` unless the status is 2xx.
+expectSuccess : Reply ->{Fail Unexpected} Reply
+expectSuccess reply =
+    if reply.status >= 200 && reply.status < 300 then reply else Fail.fail (BadStatus reply)
+
+attempt : (() ->{Fail Error | e} a) ->{e} Result Error a
+attempt action = Fail.attempt action
+
+attemptUnexpected : (() ->{Fail Unexpected | e} a) ->{e} Result Unexpected a
+attemptUnexpected action = Fail.attempt action
+
+successful : Reply ->{Fail Unexpected} Bytes
+successful reply = (expectSuccess reply).body
+
+getBytes : String ->{Http, Fail Error, Fail Unexpected} Bytes
+getBytes raw = successful (fetch (get (url raw)))
+
+getText : String ->{Http, Fail Error, Fail Unexpected} String
+getText raw = Bytes.toStringLossy (getBytes raw)
+
+withDefaultHeader : String -> String -> Request e -> Request e
+withDefaultHeader name value request =
+    if Http.hasHeader name request.headers then request else withHeader name value request
+
+-- Decodes a 2xx JSON response as it streams. Another status fails with its
+-- buffered reply.
+decodeReply : Decode a => Type a -> Int -> Response {Fail Error, Fail Unexpected | s} ->{Fail Error, Fail Unexpected | s} a
+decodeReply witness limit response =
+    if response.status >= 200 && response.status < 300 then
+        (decoded, left, _) = Reader.limitedRemaining response.body limit { body -> Json.read witness body }
+        case decoded of
+            Ok value -> value
+            Err problem ->
+                if left == 0 && Reader.atEnd response.body == False then failWith (Protocol Http.BodyTooLarge)
+                else Fail.fail (BadBody problem)
+    else
+        body = collect response.body limit [] 0
+        Fail.fail (BadStatus (Reply { url = response.url, status = response.status, headers = response.headers, body = body }))
+
+getJson : Decode a => Type a -> String ->{Http, Fail Error, Fail Unexpected} a
+getJson witness raw =
+    limit = currentConfig().maxBodyBytes
+    request = withDefaultHeader "Accept" "application/json" (get (url raw))
+    send request { response -> decodeReply witness limit response }
+
+postJson : (Encode b, Decode a) => Type a -> String -> b ->{Http, Fail Error, Fail Unexpected} a
+postJson witness raw value =
+    limit = currentConfig().maxBodyBytes
+    body = StreamBody { output ->
+        case Json.write output value of
+            Ok _ -> ()
+            Err problem -> failWith (Protocol (Http.InvalidMessage problem.message))
+    }
+    request = withDefaultHeader "Accept" "application/json" (withDefaultHeader "Content-Type" "application/json" (post (url raw) body))
+    send request { response -> decodeReply witness limit response }

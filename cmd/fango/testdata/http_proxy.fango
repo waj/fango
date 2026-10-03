@@ -1,0 +1,36 @@
+import Async
+import Bytes
+import Fail exposing (Fail)
+import Http exposing (Body(..))
+import Http.Client as Client
+import Http.Server
+import IO
+import Result exposing (Result(..))
+import String
+import Url
+import Writer
+
+-- Forwards each request body to the upstream URL as it arrives, and answers
+-- with the upstream reply.
+main() =
+    case IO.args() of
+        [raw, upstream] ->
+            case String.toInt raw of
+                Just port ->
+                    config = { Client.defaultConfig | baseUrl = Url.parse upstream }
+                    print (Async.run {
+                            stop = Async.channel 1
+                            Http.Server.serve (Http.Server.defaultConfig port) stop { request ->
+                                outcome = Client.attempt {
+                                    Client.run config {
+                                        forwarded = StreamBody { w -> Writer.copy request.body w }
+                                        Client.fetch (Client.post (Client.url request.target) forwarded)
+                                    }
+                                }
+                                case outcome of
+                                    Ok reply -> Http.Server.Response { status = reply.status, headers = [], body = BytesBody reply.body }
+                                    Err error -> Http.Server.Response { status = 502, headers = [], body = BytesBody (Bytes.fromString (show error)) }
+                            }
+                    })
+                Nothing -> IO.exit 2
+        _ -> IO.exit 2

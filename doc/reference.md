@@ -27,6 +27,7 @@ The bundled library is experimental and versioned with the compiler.
 | IO, File, Net | [Console, process, files, sockets, and structured errors](reference/library-io.md) |
 | Url | [URLs](reference/library-url.md) |
 | Http, Http.Wire, Http.Server, Http.Server.Route, Http.GZip | [HTTP/1.1 server and middleware](reference/library-http.md) |
+| Http.Client | [HTTP/1.1 client](reference/library-http-client.md) |
 | Fail, Failure, State, Random, Runtime.Local | [Effect APIs](reference/library-effects.md) |
 | Runtime.Scope | [Cleanup scopes](reference/resources.md) |
 | Async | [Tasks, handlers, cancellation, and channels](reference/library-async.md) |

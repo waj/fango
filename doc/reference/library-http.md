@@ -51,6 +51,16 @@ A body that fails partway leaves the message truncated: the final chunk is
 never written and a sized body is never padded. `Http.abortBody reason` stops a
 body on purpose by raising `BodyAborted`.
 
+`Http.fileBody path` returns a `SizedBody` that streams the file at `path`, for
+a response or a [client request](library-http-client.md):
+
+```fango
+fileBody : String ->{IO, Fail IO.Error} Body {IO, Fail IO.Error | e}
+```
+
+It reads the file's size when called and opens the file only while the body is
+written. A file that changed size in between fails the length check.
+
 ## Errors
 
 `Http.Error` is a plain union:

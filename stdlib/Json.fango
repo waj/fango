@@ -2,8 +2,8 @@
 module Json exposing
     ( Decode, Emit(..), Encode(..), Error(..), FieldOption(..), Number
     , Value(..)
-    , number, numberText, parse, parseBytes, read, readText, stringify
-    , withTextWriter, withWriter, write, writeText
+    , array, number, numberText, object, parse, parseBytes, read, readText
+    , stringify, withTextWriter, withWriter, write, writeText
     )
 
 import Basics exposing (..)
@@ -17,6 +17,7 @@ import Maybe exposing (Maybe(..))
 import Meta exposing (Bound(..), BoundField(..), Code, Items(..), Lift(..), Shape(..), TypeInfo(..))
 import Reader exposing (Reader)
 import Result exposing (Result(..))
+import Stream exposing (Stream)
 import String
 import Text.Reader as TextReader
 import Text.Writer as TextWriter
@@ -66,10 +67,12 @@ readText _ reader =
             _ -> Pull.fail "Trailing JSON input"
     }
 
-withWriter : Writer e -> (() ->{Emit, Fail Error} a) ->{e} Result Error a
+-- The action may perform the writer's own effects between emits, so it can
+-- produce a document while it reads its source.
+withWriter : Writer e -> (() ->{Emit, Fail Error | e} a) ->{e} Result Error a
 withWriter writer action = TextWriter.borrow writer { text -> withTextWriter text action }
 
-withTextWriter : TextWriter.Writer e -> (() ->{Emit, Fail Error} a) ->{e} Result Error a
+withTextWriter : TextWriter.Writer e -> (() ->{Emit, Fail Error | e} a) ->{e} Result Error a
 withTextWriter writer action =
     Fail.attempt {
         handle action() of
@@ -190,6 +193,36 @@ emitObject entries first =
             emit ":"
             emitValue value
             emitObject rest False
+
+-- Emits a JSON array from a stream, one element at a time.
+array : Encode a => Stream state a {Emit, Fail Error | e} ->{Emit, Fail Error | e} ()
+array items =
+    emit "["
+    ignore (Stream.fold { item first ->
+            if first then () else emit ","
+            encodeValue item
+            False
+    } True items
+    )
+    emit "]"
+
+-- Emits a JSON object whose field values are emitted in order, when reached.
+object : List (String, () ->{Emit, Fail Error | e} ()) ->{Emit, Fail Error | e} ()
+object fields =
+    emit "{"
+    emitFields fields True
+    emit "}"
+
+emitFields : List (String, () ->{Emit, Fail Error | e} ()) -> Bool ->{Emit, Fail Error | e} ()
+emitFields fields first =
+    case fields of
+        [] -> ()
+        [(key, value) | rest] ->
+            if first then () else emit ","
+            emitString key
+            emit ":"
+            value()
+            emitFields rest False
 
 stringifyValue : Value -> Result Error String
 stringifyValue value = stringify value

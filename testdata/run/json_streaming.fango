@@ -1,0 +1,25 @@
+import Json
+import Maybe exposing (Maybe(..))
+import Stream
+import Writer
+
+effect Rows
+    nextRow : Int -> Maybe Int
+
+-- The document is written while rows are read, one at a time.
+main() =
+    (outcome, bytes) = Writer.collecting { w ->
+        handle Json.withWriter w {
+            rows = Stream.unfold 0 { i ->
+                case nextRow i of
+                    Just v -> Just (v, i + 1)
+                    Nothing -> Nothing
+            }
+            Json.object [("rows", { Json.array rows }), ("done", { Json.encodeValue True })]
+        } of
+            nextRow i ->
+                print ("row " ++ show i)
+                resume (if i < 3 then Just (i * 10) else Nothing)
+    }
+    print outcome
+    print bytes

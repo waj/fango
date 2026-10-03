@@ -1,9 +1,10 @@
 {-# no-prelude #-}
-module Writer exposing (Writer(..), collecting, over, write, writeString)
+module Writer exposing (Writer(..), collecting, copy, over, write, writeString)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Sink(..))
 import List exposing (List)
+import Reader exposing (Reader)
 import Runtime.Local
 
 type Writer e =
@@ -53,3 +54,7 @@ write writer text = writer.emit text
 
 writeString : Writer e -> String ->{e} ()
 writeString writer text = writer.emit (Bytes.fromString text)
+
+-- Writes everything left in `reader`, chunk by chunk.
+copy : Reader e -> Writer e ->{e} ()
+copy reader writer = Reader.forEachChunk reader (write writer)
