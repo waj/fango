@@ -18,6 +18,14 @@ invariants live in [design](design/formatter.md), command behavior in
    refusing to emit a line at or left of the innermost layout column. The
    self-check already catches the damage after the fact; this would catch it at
    its source and name the construct responsible.
+3. **Constructs that still fall back.** Making the corpus walk in the format
+   tests fail on `INTERNAL FORMATTER ERROR` instead of skipping shows ten
+   fixtures the printer cannot yet reproduce: `parse/{apps, operator_decls,
+   records_inferred, semicolon_blocks}`, `check/operators`,
+   `core/operators`, and `run/{err_meta_nested_quote,
+   module_function_groups, row_argument_closed, user_operators}`. Close
+   them, then make that walk strict so a new fallback cannot hide behind the
+   skip; `TestHandlerFixturesFormat` pins the handler fixtures meanwhile.
 
 Each piece ends with a reformat of the standard library and the examples, which
 the `ci` gate then holds.

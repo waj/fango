@@ -1,0 +1,18 @@
+-- Adjacent rows for one operation, and for `return`, form one group.
+type Choice = Yes | No
+
+effect Ask
+    ask : Choice -> Int
+    weigh : Choice -> Int -> Int
+
+main =
+    handle ask Yes on
+        ask Yes -> resume 1
+        -- A comment may sit between rows of a group.
+        ask No -> resume 0
+        weigh Yes n ->
+            resume (n * 10)
+        weigh No n -> resume n
+        -- And before the return group.
+        return 1 -> Yes
+        return _ -> No

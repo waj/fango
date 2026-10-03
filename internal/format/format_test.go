@@ -193,7 +193,10 @@ func corpus(t *testing.T) []string {
 			f := source.NewFile(filepath.Base(path), content)
 			if _, errs := Source(f); len(errs) > 0 {
 				// A fixture that does not parse is not a formatter failure:
-				// testdata deliberately holds malformed inputs.
+				// testdata deliberately holds malformed inputs. A file that
+				// parses but fails the formatter's own verification is a
+				// formatter gap; TestHandlerFixturesFormat pins the ones
+				// closed so far, and the tooling roadmap lists the rest.
 				return nil
 			}
 			paths = append(paths, path)
@@ -434,6 +437,23 @@ func TestScopedMarkerStaysWithDeclaration(t *testing.T) {
 		}
 		if strings.Count(string(out), "{-# scoped s #-}") != 1 {
 			t.Fatalf("marker lost or duplicated: %s", out)
+		}
+	}
+}
+
+// TestHandlerFixturesFormat pins that every handler fixture of the parser
+// formats structurally. The corpus walk skips files Source rejects, so a
+// printer that fell back to verbatim for a construct would otherwise go
+// unnoticed, as grouped handler clauses once did.
+func TestHandlerFixturesFormat(t *testing.T) {
+	for _, name := range []string{"handler_groups", "state_handler", "handle_blocks", "effects"} {
+		path := filepath.Join("..", "..", "testdata", "parse", name+".fango")
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, errs := Source(source.NewFile(filepath.Base(path), content)); len(errs) > 0 {
+			t.Errorf("%s: %s: %s", path, errs[0].Title, errs[0].Body)
 		}
 	}
 }

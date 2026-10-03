@@ -331,25 +331,41 @@ func (p *printer) renderHandle(h *ast.Handle, ind int) bool {
 
 	clauseInd := ind + Indent
 	for _, cl := range h.Clauses {
-		if !p.placeBefore(cl.OpSpan.Start, clauseInd) {
-			return false
+		rows := cl.Equations
+		if len(rows) == 0 {
+			rows = []ast.Equation{{Params: cl.Params, Body: cl.Body, NameSpan: cl.OpSpan}}
 		}
-		p.start(clauseInd)
-		p.emit(cl.Op)
-		if !p.renderPatternArgs(cl.Params, clauseInd) {
-			return false
-		}
-		if !p.renderArrow(cl.Body, clauseInd) {
+		if !p.renderClauseRows(cl.Op, rows, clauseInd) {
 			return false
 		}
 	}
 	if h.Return != nil {
-		p.start(clauseInd)
-		p.emit("return ")
-		if !p.renderPattern(h.Return.Param, clauseInd) {
+		rows := h.Return.Equations
+		if len(rows) == 0 {
+			rows = []ast.Equation{{Params: []ast.Pattern{h.Return.Param}, Body: h.Return.Body, NameSpan: h.Return.Sp}}
+		}
+		if !p.renderClauseRows("return", rows, clauseInd) {
 			return false
 		}
-		if !p.renderArrow(h.Return.Body, clauseInd) {
+	}
+	return true
+}
+
+// renderClauseRows writes the rows of one handler clause group, each as
+// `op patterns -> body` at the clause indentation. Adjacent rows for one
+// operation, or for `return`, are grouped by the parser into Equations; a
+// lone clause arrives as a single row.
+func (p *printer) renderClauseRows(op string, rows []ast.Equation, ind int) bool {
+	for _, row := range rows {
+		if !p.placeBefore(row.NameSpan.Start, ind) {
+			return false
+		}
+		p.start(ind)
+		p.emit(op)
+		if !p.renderPatternArgs(row.Params, ind) {
+			return false
+		}
+		if !p.renderArrow(row.Body, ind) {
 			return false
 		}
 	}
