@@ -47,7 +47,11 @@ order. Both call their callback once per element, from left to right.
 `length` counts elements and `reverse` returns the same elements in the
 opposite order.
 
-Construction with `Cons` and head/tail access are constant time. Tails are
+Source code builds and matches lists with bracket syntax: `[a, b]` and
+`[head | tail]` for [construction](types.md#lists) and for
+[patterns](types.md#pattern-matching). `Cons` and `Nil` are the underlying
+constructors; spelling them out is valid but discouraged. Construction and
+head/tail access are constant time. Tails are
 shared; values are immutable. `length` traverses the list. The
 [backend design](../design/backend.md#list-representation) explains storage.
 

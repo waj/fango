@@ -133,18 +133,20 @@ coroutine proposal does not settle those questions.
 ## Handlers for several effect applications
 
 Currently, a handler covers one application of one effect. A body performing both
-`Fail Error1` and `Fail Error2` needs two nested handlers, and each operation
-clause runs outside only its own activation. One handler covering several
-applications, including different effects, is wanted. The following proposal
-remains unimplemented and is retained for further consideration.
+`Fail Error1` and `Fail Error2` needs two nested handlers, and nested stateful
+handlers cannot share one cell. One handler covering several applications,
+including different effects, is wanted. The design below is settled; the
+[stages](#implementation-stages) track delivery.
 
 ### Operation signatures in one `on` block
 
-Keep handlers operation-oriented: one `on` block contains optional operation
-signatures followed by pattern clauses. Types appear after `:`, following the
-existing [signature/equation convention](reference/functions.md#function-equations),
-rather than in effect-type headers. Clauses retain `->`, since they are not
-ordinary function definitions:
+Handlers stay operation-oriented: one `on` block contains clause groups, and
+a group may be headed by an operation signature. The signature is the
+operation's own type as its effect declaration writes it, specialized to the
+application being handled. It follows the effect-block convention rather than
+the function-equation one: it describes the handled operation, not the clause
+below it, so its result is the operation's result while the clause returns the
+handler answer. Clauses retain `->`:
 
 ```fango
 load path =
@@ -162,32 +164,48 @@ load path =
         return config -> Ok config
 ```
 
-An annotation specializes the declared operation signature, not the handler
-answer or the effects performed by its clause. In `fail : ParseError -> a`,
-`a` remains the operation's caller-selected result; the abort clause returns
-the common handler answer instead. The resolved operation identity supplies
-its declaring effect, as in an effect declaration. Qualification remains
-available to distinguish operations with the same name.
+A signature may instantiate only the declaring effect's parameters, and must
+fix every one to a closed type. Operation-local variables stay variables and
+may use any name: in `fail : ParseError -> a`, `a` is `fail`'s caller-selected
+result. Fango has no scoped type variables, so a variable in a signature is
+always fresh; a polymorphic handler such as `State.run` keeps relying on
+inference, with one group per operation. The effect row is optional. When
+written, it must be exactly the declaring effect's closed row, as in
+`tick : () ->{Clock Simulation} ()`, which is how a parameter absent from the
+operation's inputs and result is selected. That row identifies the handled
+application; it never describes the clause body's residual effects. Effect
+names therefore appear only inside signatures. Qualification distinguishes
+operations with the same name.
 
-Signatures are optional when inference determines the application. A signature
-starts a new operation-pattern group; groups are identified by operation and
-fully applied effect, not just spelling. Each selected application must have
-every operation covered exhaustively and without redundant patterns, with
-only one group per operation/application pair. An unresolved application is
-an ambiguity, never a choice made by source order.
+### Grouping and identity
 
-Result-only parameters work too: `get : () -> Int` selects `State Int`.
-For an effect parameter absent from an operation's inputs and result, the
-candidate escape hatch is a full operation type, such as
-`tick : () ->{Clock Simulation} ()`. Effect names then still appear only
-inside signatures. This row identifies the handled operation application;
-it does not annotate the clause body's residual effects.
+A group is a maximal run of clauses for one operation. A signature line always
+ends the current run and heads the next one, so grouping is decided by the
+parser, before inference. Two groups for one operation are legal only when
+every one of them carries a signature and the applications they name are
+distinct; any other repeat is the existing duplicate-clause error. A group
+without a signature resolves its application by inference, as today; an
+application that inference cannot resolve is an ambiguity error, never a
+choice made by source order.
+
+Each selected application must have every operation of its effect covered
+exactly once, exhaustively and without redundant patterns. Different effects,
+and abort-only beside resumptive applications, may share one handler; each
+application keeps its own discipline. Selecting two applications of an
+effect with several operations needs a signature per operation and
+application; the common cases, several `Fail` applications or different
+effects sharing state, need few or none.
+
+The `:` token is free in clause heads, since neither patterns nor expressions
+carry annotations, so `op : Type` parses unambiguously. Blank lines between
+groups are optional; the formatter writes one before each signature that does
+not start the block.
 
 ### Shared handler context
 
-Generalize the existing `with snapshot = initial` to belong to the entire
-handler, rather than one effect application. Keep `with … on` on one line
-to distinguish handler state from [`with` items](reference/syntax.md#with-items):
+The existing `with snapshot = initial` belongs to the entire handler rather
+than one effect application. `with … on` stays on one line, distinguishing
+handler state from [`with` items](reference/syntax.md#with-items):
 
 ```fango
 effect Emit
@@ -205,7 +223,7 @@ collect action =
 
         emit message ->
             resume () with
-                { context | messages = message :: context.messages }
+                { context | messages = [message | context.messages] }
 
         return value ->
             { value = value, context = context }
@@ -217,46 +235,100 @@ immutable configuration and helpers without new context-declaration syntax.
 
 The initializer runs once before the subject. Operation clauses see immutable
 snapshots of the same cell, not separate per-application state; the subject
-does not see the snapshot binder. Resumptive clauses use `resume … with …`,
-preserving the existing evaluation and commit order. Abort clauses return the
-common handler answer directly, without resuming. A single optional `return`
-group sees the final context on normal completion; abort answers bypass it.
+does not see the snapshot binder. When `with` is present, every resumptive
+clause uses `resume … with …`, preserving the existing evaluation and commit
+order. Abort clauses see the snapshot and return the common handler answer
+directly, without resuming. A single optional `return` group, written once and
+anywhere in the block, sees the final context on normal completion; abort
+answers bypass it.
 
 All operation and return clauses run outside every application installed by
-the handler. Sharing context does not make sibling handlers implicitly
-callable: calls from clauses still use enclosing handlers. Shared state retains
+the handler. Sharing context does not make sibling applications callable from
+clauses: calls from clauses still use enclosing handlers. Shared state retains
 the existing [synchronization contract](reference/effects.md#stateful-handlers);
-concurrent read–modify–write operations are not made atomic.
+concurrent read–modify–write operations are not made atomic. A child task that
+inherits any resumptive application of the handler shares its cell; abort
+applications are still handled inside the child, as today.
 
-### Implementation questions
+### Runtime model
 
-- Settle operation-annotation checking, including omitted versus explicit
-  declaring-effect rows and operation-local polymorphism, without treating
-  signatures as ordinary clause-function types.
-- Represent one state cell shared by several activations in Core, inference,
-  lint, the interpreter, and the backend. Independent nested stateful handlers
-  are not equivalent. Task inheritance must publish the common cell whenever
-  an associated activation is inherited.
-- Preserve common-answer abort routing, normal-only return transformation,
-  outer evidence for every clause, and scoped activation-binding permissions.
-  Stateless lowering may use nested single-effect Core handlers with `return`
-  innermost and all clauses elaborated against the outer evidence; shared state
-  needs an explicit common-cell representation.
-- On implementation, update parser, formatter, reference, TextMate grammar,
-  and diagnostic/differential coverage together. These proposed examples are
-  not fixtures expected to compile today.
+One activation, with one scope identity and one optional cell, owns several
+effect labels. Lowering to nested single-label Core handlers is rejected: a
+clause of an inner handler would lexically sit inside its sibling's
+activation, which contradicts the lexical-evidence invariants that Core lint
+and capture checking enforce, and the shared cell would still need a
+cross-activation representation. Runtime evidence stays per label (records,
+origins, bindings, exit targets), sharing the activation's cell and identity.
+Inheritance publishes the cell through every resumptive label's origin; abort
+labels keep no rebuild path, preserving the runtime rejection.
 
-Rejected alternatives:
+### Implementation stages
+
+| Stage | Depends on |
+| --- | --- |
+| MH2 Formatter prints grouped handler clauses | — |
+| MH3 Operation signatures in `on` blocks, single application | MH2 |
+| MH4 Several applications in one handler, uniform discipline | MH3 |
+| MH5 Mixed discipline and task inheritance | MH4 |
+| MH6 Library adoption, REPL coverage, roadmap closure | MH5 |
+
+#### MH2 Formatter prints grouped handler clauses
+
+The formatter prints only the first row of a clause group or `return` group,
+so a handler with grouped equations falls back to verbatim and the grouped
+parse fixture is skipped by the idempotence test. Print every row, place
+comments before `return`, and cover the grouped fixture in format tests.
+
+#### MH3 Operation signatures in `on` blocks, single application
+
+Parse `op : Type` lines, attach each to the group it heads, print them with a
+blank line before non-leading signatures, and tokenize them in the TextMate
+grammar. The checker matches a signature against the operation's declared
+type, rejecting shapes that disagree, rows naming another effect, signatures
+that instantiate an operation-local variable, and signatures that leave an
+effect parameter open. A signature on the only group of an operation pins the
+handled application. Update parser, formatter, grammar, and checker goldens
+together with the reference.
+
+#### MH4 Several applications in one handler, uniform discipline
+
+Core `Handle` carries several effect instances with one scope and one cell;
+each clause names its instance. Lint checks clause ownership, coverage, and
+duplicates per instance. The checker builds one application per group,
+requires signatures on repeated operations, and reports unresolved
+applications as ambiguities. The interpreter installs one activation record
+under several keys; the Go backend emits per-label records sharing the cell
+and one exit target per abort label. Covers several `Fail` applications,
+several `State` applications, and different resumptive effects sharing state.
+
+#### MH5 Mixed discipline and task inheritance
+
+Allow abort-only and resumptive applications in one handler. The backend
+merges the resumptive and abort emitters: the body runs as an outcome closure
+whenever an abort label exists, abort clauses read the cell snapshot, and
+resumptive origins share the cell for task inheritance while abort origins
+stay uninheritable. Add async fixtures and a race-checked backend test.
+
+#### MH6 Library adoption, REPL coverage, roadmap closure
+
+Rewrite `Json.withTextWriter` and `Json.Pull.withTextReader` as single
+handlers with unchanged behavior, add a REPL transcript, promote the remaining
+contract into the reference and design pages, and remove this section.
+
+### Rejected alternatives
 
 - `on Effect Args` headers, or bare effect-type lines under `on`: these put
-  type applications in expression syntax outside signatures.
+  type applications in expression syntax outside signatures, and need one
+  header per application even for single-operation effects.
 - Grouping clauses by the type their constructor patterns name, as in
-  `fail Error1 -> …` beside `fail Error2 -> …`. It cannot group operations
-  whose parameters do not mention the effect argument, such as
-  `get : () -> s`, and it leaves variable-only clauses ambiguous.
+  `fail Error1 -> …` beside `fail Error2 -> …`, or letting inference split
+  an unsigned run. It cannot group operations whose parameters do not mention
+  the effect argument, such as `get : () -> s`, it leaves variable-only
+  clauses ambiguous, and it makes group membership depend on solving order.
 - A catch-all clause across applications. A row cannot name "every other
   `Fail`", and limiting it to applications named elsewhere in the handler
   would surprise readers.
+- Nested single-label lowering with a shared cell; see the runtime model.
 
 ## Explicit capture and borrowing annotations
 

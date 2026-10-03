@@ -111,8 +111,9 @@ instance APIs remain in the [effects roadmap](roadmap-effects.md#handler-instanc
 
 ## Handlers for several effect applications
 
-One handler covering several applications of an effect, such as `Fail Error1`
-and `Fail Error2`, has a [tentative syntax and open decisions](roadmap-effects.md#handlers-for-several-effect-applications).
+One handler covering several applications, such as `Fail Error1` and
+`Fail Error2` or `State Int` and `Emit` over one cell, has a
+[settled design and staged delivery](roadmap-effects.md#handlers-for-several-effect-applications).
 
 ## List representation
 

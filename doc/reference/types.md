@@ -130,7 +130,9 @@ time however many lists already share it. All elements have one type and
 the tail must be a list of that type. A trailing comma is not accepted, and
 `|` requires at least one element on its left and one tail expression on its
 right. Bracket syntax selects the bundled constructors directly and needs no
-import. `List` is also exposed by Prelude; naming `Nil` or `Cons` requires
+import, and it is the preferred spelling in source: `Cons` and `Nil` are the
+underlying constructors, valid but discouraged. There is no infix cons
+operator. `List` is also exposed by Prelude; naming `Nil` or `Cons` requires
 an import.
 
 ## Tuples

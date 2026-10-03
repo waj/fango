@@ -19,7 +19,7 @@ The bundled library is experimental and versioned with the compiler.
 
 | API | Reference |
 | --- | --- |
-| List, Range, Maybe, Tuple, Dict, Result | [Collections](reference/library-collections.md) |
+| List (literal and pattern syntax: [Lists](reference/types.md#lists)), Range, Maybe, Tuple, Dict, Result | [Collections](reference/library-collections.md) |
 | String, Char, Basics integer helpers | [Text and numeric helpers](reference/library-text.md) |
 | Regex | [Regular expressions](reference/library-regex.md) |
 | Bytes | [Byte sequences](reference/library-bytes.md) |
