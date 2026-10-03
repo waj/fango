@@ -1170,22 +1170,26 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		el.popScope(pushed)
 		ret = &core.ReturnClause{Param: name, Body: retBody}
 	}
-	// An activation uses its clauses' transport, independently of its caller.
-	// Every application it handles shares that transport, its scope identity,
-	// and its state cell; each has its own evidence key.
-	var control types.Control
-	for _, clause := range clauses {
-		control = types.JoinControl(control, core.ExprControl(clause.Body))
-	}
+	// An activation's evidence uses its clauses' transport, independently of
+	// its caller. Every application it handles shares its scope identity and
+	// its state cell, but each instance carries the transport of its own
+	// clauses: an abort application is Exit, a resumptive one whatever its
+	// clauses perform.
 	anyAbort := false
 	for _, label := range info.Effects {
 		anyAbort = anyAbort || label.Abort
 	}
-	if anyAbort {
-		control = types.Control{Transport: types.Exit}
-	}
 	insts := make([]core.EffectInstance, len(info.Effects))
 	for i, label := range info.Effects {
+		var control types.Control
+		for _, clause := range clauses {
+			if clause.Effect == i {
+				control = types.JoinControl(control, core.ExprControl(clause.Body))
+			}
+		}
+		if label.Abort {
+			control = types.Control{Transport: types.Exit}
+		}
 		inst := core.EffectInstance{Unique: label.Unique, Name: label.Name, Captures: types.ScopeCapture(info.Scope), Control: control}
 		for _, a := range label.Args {
 			inst.Args = append(inst.Args, el.zonkDefault(a))

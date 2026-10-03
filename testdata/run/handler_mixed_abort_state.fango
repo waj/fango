@@ -1,0 +1,23 @@
+import Result exposing (Result(..))
+import State exposing (State, get, put)
+
+effect Fail error
+    abort fail : error -> value
+
+-- A resumptive application and an abort-only one share a cell. The abort
+-- clause sees the snapshot at the abort and bypasses `return`; normal
+-- completion runs `return` with the final state.
+guarded action =
+    handle action() with cell = 0 on
+        get () -> resume cell with cell
+        put n -> resume () with n
+
+        fail : String -> a
+        fail message -> Err (message ++ " at " ++ show cell)
+
+        return value -> Ok (value, cell)
+
+main() =
+    print (guarded { put 3; put (get() + 4); get() * 2 })
+    print (guarded { put 3; if get() > 2 then fail "too big" else get() })
+    print (guarded { if True then fail "early" else 0 })

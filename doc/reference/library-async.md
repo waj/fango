@@ -49,7 +49,10 @@ Individual snapshots and commits publish complete values; handlers own any
 locking needed for atomic compound operations. Concurrent read-modify-write
 operations may lose updates. Install a handler inside the child when independent
 state is wanted. A parent's handler return clause does not transform child
-results.
+results. When one handler covers
+[several applications](effects.md#several-applications-in-one-handler), a
+child inherits its resumptive applications and the one cell they share; its
+abort applications still have to be handled inside the child.
 
 Other abort effects must be handled inside the child. A directly known
 unsupported abort or local scoped permission is rejected with `ASYNC BOUNDARY`.

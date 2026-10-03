@@ -1,0 +1,33 @@
+import Result exposing (Result(..))
+
+effect Emit
+    emit : String -> ()
+
+effect Fail error
+    abort fail : error -> value
+
+-- A stateless mixed handler: `emit` resumes after printing through the
+-- enclosing IO, `fail` aborts with the common answer.
+logged : (() ->{Emit, Fail String, IO | e} a) ->{IO | e} Result String a
+logged action =
+    handle action() on
+        emit text -> print ("log: " ++ text); resume ()
+        fail : String -> a
+        fail message -> Err message
+        return value -> Ok value
+
+-- A clause never reaches a sibling application: this `emit` clause's `fail`
+-- goes to the caller's `Fail String` handler, not to the `Fail Int` beside it.
+escalating : (() ->{Emit, Fail Int | e} a) ->{Fail String | e} Result String a
+escalating action =
+    handle action() on
+        emit text -> if text == "boom" then fail ("escalated " ++ text) else resume ()
+        fail : Int -> a
+        fail code -> Err ("code " ++ show code)
+        return value -> Ok value
+
+main() =
+    print (logged { emit "one"; emit "two"; 3 })
+    print (logged { emit "one"; if True then fail "stop" else 0 })
+    print (logged { escalating { emit "fine"; if True then fail 7 else 0 } })
+    print (logged { escalating { emit "boom"; 1 } })

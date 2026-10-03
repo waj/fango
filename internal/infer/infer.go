@@ -2057,16 +2057,9 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	}
 	labels := make([]types.EffLabel, len(apps))
 	names := make([]string, len(apps))
-	anyAbort, anyResumptive := false, false
 	for i, a := range apps {
 		labels[i] = a.label
 		names[i] = types.SurfaceName(a.label.Name)
-		anyAbort = anyAbort || a.label.Abort
-		anyResumptive = anyResumptive || !a.label.Abort
-	}
-	if anyAbort && anyResumptive {
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "MIXED HANDLER DISCIPLINE",
-			"This handler combines abort-only and resumptive effect applications, which is not supported yet.\nHandle them in nested handlers for now."))
 	}
 	info := &HandlerInfo{Effects: labels, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: scoped, Result: result, StateType: stateTy,
 		Permission: NewHandlerPermission(g.ck.Sup, "handler "+strings.Join(names, " "))}

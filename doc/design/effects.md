@@ -66,6 +66,12 @@ instance, and the Go backend emits one record, one origin, and, for aborts, one
 exit target per instance. The entries of one activation share its frame, its
 outer evidence, and its state cell, and an exit is accepted by the activation
 that owns the entry it names. Clauses are found by instance and operation.
+Each instance carries the transport of its own clauses, so a resumptive
+application beside an abort keeps a Direct record when its clauses are
+Direct, while the activation's body runs as an Outcome closure whenever any
+application aborts. Only resumptive instances get a rebuild path and a share
+hook; publishing any of them publishes the shared cell, and an abort instance
+remains uninheritable by tasks.
 
 A parameterized handler owns one mutable cell. Its initializer runs once before
 evidence installation. Clauses see immutable snapshots; the body does not. A

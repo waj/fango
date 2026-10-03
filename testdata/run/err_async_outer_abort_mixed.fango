@@ -1,0 +1,14 @@
+import Async
+import Result exposing (Result(..))
+
+effect Counter
+    next : () -> Int
+
+effect Stop
+    abort stop : () -> value
+
+-- A task may inherit the counter of a mixed handler, but not its abort.
+main() =
+    handle ignore (Async.run ({ _ -> Async.spawn ({ _ -> ignore next(); stop() }) })) with count = 0 on
+        next () -> resume count with count + 1
+        stop () -> ()

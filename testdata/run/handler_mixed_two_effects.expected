@@ -1,0 +1,7 @@
+log: one
+log: two
+Ok 3
+log: one
+Err "stop"
+Ok (Err "code 7")
+Err "escalated boom"

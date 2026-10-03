@@ -296,12 +296,13 @@ load action =
 
 Each application is covered independently: every operation of its effect
 needs a group, exhaustive and non-redundant. Each abort unwinds to the clause
-of its own application; the `return` group is shared. The applications must
-share a discipline: combining abort-only and resumptive applications in one
-handler is a `MIXED HANDLER DISCIPLINE` error until that stage lands. Inside
-the subject every handled application is in scope, so an operation whose type
-does not say which application it means is an `AMBIGUOUS EFFECT`; a typed
-helper names the one intended.
+of its own application; the `return` group is shared. Abort-only and
+resumptive applications may share one handler, each keeping its own
+discipline: resumptive clauses end in `resume`, abort clauses return the
+common answer and bypass `return`. Inside the subject every handled
+application is in scope, so an operation whose type does not say which
+application it means is an `AMBIGUOUS EFFECT`; a typed helper names the one
+intended.
 
 ## Operation signatures
 
@@ -367,7 +368,8 @@ only after both finish successfully. The `return` clause sees the final state.
 The cell belongs to the whole handler. When one handler covers
 [several applications](#several-applications-in-one-handler), every clause
 sees snapshots of the same cell and every commit updates it, so `State Int`
-and an `Emit` effect can share one context:
+and an `Emit` effect can share one context. An abort clause beside them sees
+the snapshot taken when its abort unwinds and commits nothing:
 
 ```fango
 collect action =

@@ -298,8 +298,6 @@ together with the reference.
 #### MH4 Several applications in one handler, uniform discipline
 
 DONE. See [several applications](reference/effects.md#several-applications-in-one-handler).
-Until MH5, combining abort-only and resumptive applications reports
-`MIXED HANDLER DISCIPLINE`.
 
 Core `Handle` carries several effect instances with one scope and one cell;
 each clause names its instance. Lint checks clause ownership, coverage, and
@@ -311,6 +309,9 @@ and one exit target per abort label. Covers several `Fail` applications,
 several `State` applications, and different resumptive effects sharing state.
 
 #### MH5 Mixed discipline and task inheritance
+
+DONE. See [several applications](reference/effects.md#several-applications-in-one-handler)
+and [handler inheritance](reference/library-async.md#handler-inheritance-and-aborts).
 
 Allow abort-only and resumptive applications in one handler. The backend
 merges the resumptive and abort emitters: the body runs as an outcome closure

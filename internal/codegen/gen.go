@@ -1697,40 +1697,18 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	if e.HandlesAbort() {
 		return g.abortHandleExpr(e)
 	}
-	evidenceMode := e.Effects[0].Control.Resolve(g.control)
 	stateCell := ""
 	var state *handlerState
 	if e.State != nil {
 		stateCell = fmt.Sprintf("t_state%d", g.tmp)
 		g.tmp++
-		g.usesFangort = true
-		state = &handlerState{
-			cell:  stateCell,
-			name:  e.State.Name,
-			read:  func() goast.Expr { return callExpr(selector(stateCell, "Snapshot")) },
-			write: func(next goast.Expr) goast.Stmt { return exprStmt(callExpr(selector(stateCell, "Store"), next)) },
-		}
+		state = g.cellState(stateCell, e.State.Name)
 	}
 	// One record per application, all over the same state cell. A record's
 	// clauses are the ones serving its application.
 	decls := make([]goast.Stmt, 0, 2*len(e.Effects))
-	for label, inst := range e.Effects {
-		st, record := g.forkableHandlerEvidence(e, label, evidenceMode, state)
-		name := fmt.Sprintf("ev%d", g.tmp)
-		g.tmp++
-		decls = append(decls, varDeclStmt(name, st, record), assignBlank(ident(name)))
-		evidenceValue := ident(name)
-		if operations := g.fixedOperations[activationLabel{e, label}]; len(operations) != 0 {
-			if g.knownOperations == nil {
-				g.knownOperations = map[goast.Expr]map[string]*goast.FuncLit{}
-			}
-			g.knownOperations[evidenceValue] = operations
-		}
-		if evidenceMode == types.Direct {
-			g.recordDirectActivation(name, e, label)
-		}
-		g.evidence[inst.Key()] = append(g.evidence[inst.Key()], evidenceValue)
-		g.evidenceModes[inst.Key()] = append(g.evidenceModes[inst.Key()], evidenceMode)
+	for label := range e.Effects {
+		decls = append(decls, g.resumptiveRecord(e, label, state)...)
 	}
 	body := g.expr(e.Body, 0)
 	for _, inst := range e.Effects {
@@ -1897,29 +1875,106 @@ func (g *gen) bracketExpr(e *core.Bracket) goast.Expr {
 // abortHandleExpr installs only a unique target token. Performing an abort
 // constructs an ExitRequest; the clause is invoked here, after the handled
 // body has unwound and the handler's evidence has been removed.
+// cellState describes a handler's state cell held in a fangort.HandlerState,
+// which clauses read by snapshot and resumes commit to.
+func (g *gen) cellState(cell, name string) *handlerState {
+	g.usesFangort = true
+	return &handlerState{
+		cell:  cell,
+		name:  name,
+		read:  func() goast.Expr { return callExpr(selector(cell, "Snapshot")) },
+		write: func(next goast.Expr) goast.Stmt { return exprStmt(callExpr(selector(cell, "Store"), next)) },
+	}
+}
+
+// resumptiveRecord declares the evidence record of one resumptive application
+// of a handler, in the transport its own clauses need, and installs it as the
+// lexical evidence for the handler's body. The caller pops it.
+func (g *gen) resumptiveRecord(e *core.Handle, label int, state *handlerState) []goast.Stmt {
+	inst := e.Effects[label]
+	mode := inst.Control.Resolve(g.control)
+	st, record := g.forkableHandlerEvidence(e, label, mode, state)
+	name := fmt.Sprintf("ev%d", g.tmp)
+	g.tmp++
+	evidenceValue := ident(name)
+	if operations := g.fixedOperations[activationLabel{e, label}]; len(operations) != 0 {
+		if g.knownOperations == nil {
+			g.knownOperations = map[goast.Expr]map[string]*goast.FuncLit{}
+		}
+		g.knownOperations[evidenceValue] = operations
+	}
+	if mode == types.Direct {
+		g.recordDirectActivation(name, e, label)
+	}
+	g.evidence[inst.Key()] = append(g.evidence[inst.Key()], evidenceValue)
+	g.evidenceModes[inst.Key()] = append(g.evidenceModes[inst.Key()], mode)
+	return []goast.Stmt{varDeclStmt(name, st, record), assignBlank(evidenceValue)}
+}
+
+// labelAborts reports whether the clauses serving one application of a
+// handler are abort clauses.
+func labelAborts(e *core.Handle, label int) bool {
+	for _, c := range e.Clauses {
+		if c.Effect == label {
+			return c.Op != nil && c.Op.Abort
+		}
+	}
+	return false
+}
+
+// abortHandleExpr emits an activation with at least one abort application.
+// Its body runs as an Outcome closure so exits reach the dispatch below. A
+// resumptive application beside the aborts keeps an ordinary record in its
+// own transport; all applications share the state cell, which abort clauses
+// read by snapshot.
 func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 	g.usesFangort = true
 	overall := e.Control.Resolve(g.control)
-	// One exit target and one record per application: an exit names the
-	// application it aborts through, and the activation owns them all.
+	// One exit target and one record per abort application: an exit names
+	// the application it aborts through, and the activation owns them all.
 	targetNames := make([]string, len(e.Effects))
+	mixed := false
 	for i := range e.Effects {
-		targetNames[i] = fmt.Sprintf("t_target%d", g.tmp)
-		g.tmp++
+		if labelAborts(e, i) {
+			targetNames[i] = fmt.Sprintf("t_target%d", g.tmp)
+			g.tmp++
+		} else {
+			mixed = true
+		}
 	}
 	outcomeName := fmt.Sprintf("t_handle%d", g.tmp)
 	g.tmp++
 	stateCell := ""
+	var state *handlerState
 	if e.State != nil {
 		stateCell = fmt.Sprintf("t_state%d", g.tmp)
 		g.tmp++
+		if mixed {
+			state = g.cellState(stateCell, e.State.Name)
+		}
+	}
+	readState := func() goast.Expr {
+		if state != nil {
+			return state.read()
+		}
+		return ident(stateCell)
 	}
 
 	var stmts []goast.Stmt
 	if e.State != nil {
-		stmts = append(stmts, varDeclStmt(stateCell, g.goType(e.State.Ty), g.expr(e.State.Initial, 0)))
+		initial := g.expr(e.State.Initial, 0)
+		stateType := g.goType(e.State.Ty)
+		if mixed {
+			initial = callExpr(indexExpr(selector("fangort", "NewHandlerState"), []goast.Expr{stateType}), initial)
+			stateType = &goast.StarExpr{X: indexExpr(selector("fangort", "HandlerState"), []goast.Expr{stateType})}
+		}
+		stmts = append(stmts, varDeclStmt(stateCell, stateType, initial))
 	}
 	for i, inst := range e.Effects {
+		if targetNames[i] == "" {
+			stmts = append(stmts, g.resumptiveRecord(e, i, state)...)
+			continue
+		}
 		target := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitTarget"), Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Marker"), Value: intLit(1)},
 		}}}
@@ -1952,7 +2007,12 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 	}
 	exitTarget := &goast.SelectorExpr{X: exit, Sel: ident("Target")}
 	var targetMismatch goast.Expr
+	abortLabels := 0
 	for _, name := range targetNames {
+		if name == "" {
+			continue
+		}
+		abortLabels++
 		mismatch := &goast.BinaryExpr{X: exitTarget, Op: gotoken.NEQ, Y: ident(name)}
 		if targetMismatch == nil {
 			targetMismatch = mismatch
@@ -1962,8 +2022,11 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 	}
 	hasExitBody := []goast.Stmt{&goast.IfStmt{Cond: targetMismatch, Body: &goast.BlockStmt{List: foreignBody}}}
 	for _, clause := range e.Clauses {
+		if !clause.Op.Abort {
+			continue
+		}
 		var cond goast.Expr = &goast.BinaryExpr{X: &goast.SelectorExpr{X: exit, Sel: ident("Operation")}, Op: gotoken.EQL, Y: intLit(int64(clause.Op.Index))}
-		if len(e.Effects) > 1 {
+		if abortLabels > 1 {
 			cond = &goast.BinaryExpr{X: &goast.BinaryExpr{X: exitTarget, Op: gotoken.EQL, Y: ident(targetNames[clause.Effect])}, Op: gotoken.LAND, Y: cond}
 		}
 		var clauseStmts []goast.Stmt
@@ -1971,7 +2034,7 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 			clauseStmts = append(clauseStmts, varDeclStmt(mangleValue(clause.SuppressedParam), g.goType(clause.SuppressedType), callExpr(selector("fangort", "SnapshotSuppressed"), exit)), assignBlank(ident(mangleValue(clause.SuppressedParam))))
 		}
 		if e.State != nil {
-			clauseStmts = append(clauseStmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)), assignBlank(ident(mangleValue(e.State.Name))))
+			clauseStmts = append(clauseStmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), readState()), assignBlank(ident(mangleValue(e.State.Name))))
 		}
 		for i, p := range clause.Params {
 			if p == "_" || p == "()" {
@@ -2013,7 +2076,7 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 			stmts = append(stmts, g.keepUnused(e.Return.Body, p, e.Body.Type())...)
 		}
 		if e.State != nil {
-			stmts = append(stmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)))
+			stmts = append(stmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), readState()))
 			stmts = append(stmts, g.keepUnused(e.Return.Body, e.State.Name, e.State.Ty)...)
 		}
 		g.control, g.resultType = overall, e.Ty
