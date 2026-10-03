@@ -109,6 +109,11 @@ Scoped activation binding is implemented; see the
 [closure contract](reference/effects.md#closures-and-handler-effects). Further
 instance APIs remain in the [effects roadmap](roadmap-effects.md#handler-instances-open-questions).
 
+## Handlers for several effect applications
+
+One handler covering several applications of an effect, such as `Fail Error1`
+and `Fail Error2`, has a [tentative syntax and open decisions](roadmap-effects.md#handlers-for-several-effect-applications).
+
 ## List representation
 
 [Lists](roadmap-list.md) owns private bulk-allocation experiments and possible

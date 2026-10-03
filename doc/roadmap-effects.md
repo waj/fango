@@ -130,6 +130,63 @@ Handler clauses run outside their own activation and may use enclosing handlers.
 Further explicit instance APIs have no selected design. The historical
 coroutine proposal does not settle those questions.
 
+## Handlers for several effect applications
+
+A handler covers one application of one effect. A body performing both
+`Fail Error1` and `Fail Error2` needs two nested handlers, and each operation
+clause runs outside only its own activation. One handler covering several
+applications, including different effects, is wanted. Its syntax is
+tentative.
+
+Tentative surface: `on Effect Args` starts a group whose clauses are checked
+against that application, so `fail e` under `on Fail Error2` binds
+`e : Error2`. Several groups require a header on each; a plain `on` keeps
+today's single inferred application. `return` follows the last group at the
+`on` column and belongs to the whole handler:
+
+```fango
+load path =
+    handle
+        parse (readFile path)
+    on Fail ParseError
+        fail (ParseError line) -> Err ("bad syntax at line " ++ show line)
+    on Fail IoError
+        fail (IoError reason) -> Err ("cannot read: " ++ reason)
+    return config -> Ok config
+```
+
+Each group must handle every operation of its effect, exhaustively and
+without redundancy, and an application may head only one group. Every
+clause, including `return`, runs outside all of the handler's groups, so a
+clause for one group never reaches a sibling. Abort answers bypass `return`
+as they do today. Elaboration can produce nested single-effect Core handlers
+with `return` on the innermost and every clause elaborated against the
+evidence outside the group, leaving Core, the interpreter, and the backend
+largely unchanged.
+
+Open decisions:
+
+- **Types outside signatures.** A header is the only place a type would
+  appear in an expression that is not an annotation, which still reads oddly.
+- **Shared state.** Nested activations cannot share one cell, so the first
+  version would reject `with` alongside several groups. Shared state needs a
+  Core cell common to several activations, published to tasks with them. The
+  candidate spelling keeps the one-line `with … on` rule that separates handler
+  state from [`with` items](reference/syntax.md#with-items):
+  `with log = [] on Emit Warning`, then further `on` groups. The alternative is
+  a dedicated state keyword, which changes existing syntax.
+
+Rejected alternatives:
+
+- Grouping clauses by the type their constructor patterns name, as in
+  `fail Error1 -> …` beside `fail Error2 -> …`. It cannot group operations
+  whose parameters do not mention the effect argument, such as
+  `get : () -> s`, and it leaves variable-only clauses ambiguous.
+- Bare `Fail IoError` group lines indented under a single `on`.
+- A catch-all clause across applications. A row cannot name "every other
+  `Fail`", and limiting it to applications named elsewhere in the handler
+  would surprise readers.
+
 ## Explicit capture and borrowing annotations
 
 Written contracts should follow the working inferred contracts. They can
