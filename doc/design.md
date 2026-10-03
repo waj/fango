@@ -57,7 +57,7 @@ atomic reads, and text writer lifetimes.
 ## Go backend and runtime
 
 [Backend and native runtime](design/backend.md) — representations, List storage,
-module-owned output, tail loops, build caching, scalar sidecars, and native workers.
+module-owned output, tail loops, build caching, scalar sidecars, regex literal initialization, and native workers.
 
 [Structured Go lowering](design/lowering.md) — verified statements, callback contracts,
 selected invocation modes, and split Exit results.

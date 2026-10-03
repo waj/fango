@@ -104,7 +104,7 @@ func TestPreludeFollowsBundledImports(t *testing.T) {
 	if len(errs) > 0 {
 		t.Fatalf("Prelude: %v", errs)
 	}
-	wantOwners := []string{"Basics", "Derive", "IO", "List", "Maybe", "Meta", "Prelude", "Tuple"}
+	wantOwners := []string{"Basics", "Derive", "IO", "List", "Maybe", "Meta", "Prelude", "Regex", "Result", "Runtime.Native", "Tuple"}
 	var gotOwners []string
 	for owner := range p.Owners {
 		gotOwners = append(gotOwners, owner)

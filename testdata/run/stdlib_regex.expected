@@ -1,0 +1,20 @@
+True
+False
+True
+True
+True
+True
+
+(?P<word>é二)(x)?()
+("é二", 1, 3)
+é二
+[(Just "word", Just ("é二", 1, 3)), (Nothing, Nothing), (Nothing, Just ("", 3, 3))]
+Nothing
+[("é", 0, 1), ("é", 2, 3)]
+[0, 1, 2]
+hi! there!
+$1 $1
+["a", "b", "c"]
+a\+b\[0\]
+error parsing regexp: missing closing ]: `[`
+True

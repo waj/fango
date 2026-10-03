@@ -286,7 +286,7 @@ names from a prelude module. Prelude remains in the manifest: changing the
 default scope invalidates builds. Bundled modules opt out to avoid cycles.
 
 The REPL and focused checker tests load the same bundled dependency closure.
-Roots are Prelude and the syntax dependencies Meta, Derive, List, and Tuple;
+Roots are Prelude and the syntax dependencies Meta, Derive, List, Tuple, and Regex;
 rooting them exposes no names. The checker records that owner set so fixture
 projections omit the whole prelude without skipping its checking or linting.
 Only focused tests without a resolver bind exposed surface names directly.

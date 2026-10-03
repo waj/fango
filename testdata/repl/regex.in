@@ -1,0 +1,14 @@
+r = /abc/
+r
+import Regex
+Regex.matches r "abc"
+Regex.matches r "xyz"
+Regex.pattern /a\/b/
+Regex.find /é+/ "😀éé"
+Regex.compile "["
+bad = /[/
+Regex.matches r "abc"
+12.0/3.0/2.0
+12.0 /3.0
+$(`/abc/`)
+:quit

@@ -6,6 +6,7 @@ package infer
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -1531,6 +1532,17 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		ty = g.expr(app)
 	case *ast.FloatLit:
 		ty = g.ck.B.Float
+	case *ast.RegexLit:
+		if _, err := regexp.Compile(e.Value); err != nil {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "INVALID REGEX", "%s", err))
+		}
+		ctor := g.ck.Ctors["Regex.Regex"]
+		if !types.IsRegexLiteralConstructor(ctor) {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "INVALID BUNDLED REGEX", "Regex literals require the bundled opaque Regex wrapper over Runtime.Native.Any."))
+			ty = g.ck.B.String
+		} else {
+			ty = ctor.Result
+		}
 	case *ast.StringLit:
 		ty = g.ck.B.String
 	case *ast.CharLit:
@@ -2327,7 +2339,7 @@ func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *res
 				return failure
 			}
 		}
-	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.UnitLit,
+	case *ast.IntLit, *ast.FloatLit, *ast.RegexLit, *ast.StringLit, *ast.CharLit, *ast.UnitLit,
 		*ast.Var, *ast.Ctor, *ast.TypeOf, *ast.MetaValue:
 		// Leaves cannot contain a resume occurrence.
 	default:

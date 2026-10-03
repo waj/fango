@@ -1,0 +1,37 @@
+import Regex
+import Result exposing (Result(..))
+import String
+
+literal () = /(?P<word>é二)(x)?()/
+
+mapMaybe transform Nothing = Nothing
+mapMaybe transform (Just value) = Just (transform value)
+
+main =
+    print (Regex.matches /\d+/ "abc123")
+    print (Regex.matches /^\d+$/ "abc123")
+    print (Regex.matches /(?i)abc/ "ABC")
+    print (Regex.matches /a\/b/ "a/b")
+    print (Regex.matches /[\/]/ "/")
+    print (Regex.matches /\\/ "\\")
+    print (Regex.pattern //)
+    print (Regex.pattern (literal ()))
+    case Regex.find (literal ()) "😀é二!" of
+        Nothing -> print "missing"
+        Just found ->
+            print (found.text, found.start, found.end)
+            print (String.slice found.start found.end "😀é二!")
+            print (List.map { capture -> (capture.name, mapMaybe { span -> (span.text, span.start, span.end) } capture.value) } found.captures)
+    print (mapMaybe { found -> found.text } (Regex.find /x/ "abc"))
+    print (List.map { found -> (found.text, found.start, found.end) } (Regex.findAll /é/ "é😀é"))
+    print (List.map { found -> found.start } (Regex.findAll // "é😀"))
+    print (Regex.replaceAll /(?P<word>\w+)/ "${word}!" "hi there")
+    print (Regex.replaceAllLiteral /\w+/ "$1" "hi there")
+    print (Regex.split /,+/ "a,,b,c")
+    print (Regex.escape "a+b[0]")
+    case Regex.compile "[" of
+        Err error -> print (Regex.message error)
+        Ok _ -> print "bad compile"
+    case Regex.compile "(?i)abc" of
+        Err error -> print (Regex.message error)
+        Ok regex -> print (Regex.matches regex "ABC")

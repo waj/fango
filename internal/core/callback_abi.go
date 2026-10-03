@@ -44,7 +44,7 @@ func SaturatedCallback(stages []*App) bool {
 
 func callbackAtom(e Expr) bool {
 	switch e.(type) {
-	case *IntLit, *FloatLit, *StringLit, *CharLit, *BoolLit, *UnitLit, *VarRef:
+	case *IntLit, *FloatLit, *RegexLit, *StringLit, *CharLit, *BoolLit, *UnitLit, *VarRef:
 		return true
 	}
 	return false

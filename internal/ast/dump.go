@@ -355,6 +355,8 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(int %d)", e.Value)
 	case *FloatLit:
 		return fmt.Sprintf("(float %s)", strconv.FormatFloat(e.Value, 'g', -1, 64))
+	case *RegexLit:
+		return fmt.Sprintf("(regex %q)", e.Value)
 	case *StringLit:
 		return fmt.Sprintf("(string %q)", e.Value)
 	case *CharLit:

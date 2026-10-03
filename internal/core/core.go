@@ -139,6 +139,14 @@ type StringLit struct {
 	Ty  types.Type
 }
 
+// RegexLit is checked syntax, initialized once rather than at each evaluation.
+type RegexLit struct {
+	Pattern string
+	Ctor    *types.CtorInfo
+	Origin  source.Span
+	Ty      types.Type
+}
+
 type CharLit struct {
 	Val rune
 	Ty  types.Type
@@ -423,6 +431,7 @@ func (*SwitchLit) isTree()  {}
 
 func (*IntLit) isExpr()          {}
 func (*FloatLit) isExpr()        {}
+func (*RegexLit) isExpr()        {}
 func (*StringLit) isExpr()       {}
 func (*CharLit) isExpr()         {}
 func (*UnitLit) isExpr()         {}
@@ -448,6 +457,7 @@ func (*Case) isExpr()            {}
 
 func (e *IntLit) Type() types.Type          { return e.Ty }
 func (e *FloatLit) Type() types.Type        { return e.Ty }
+func (e *RegexLit) Type() types.Type        { return e.Ty }
 func (e *StringLit) Type() types.Type       { return e.Ty }
 func (e *CharLit) Type() types.Type         { return e.Ty }
 func (e *UnitLit) Type() types.Type         { return e.Ty }

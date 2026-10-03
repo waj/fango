@@ -513,6 +513,9 @@ const ListModule = "List"
 // TupleModule owns the Pair/Triple types and constructors used by `(a, b)`.
 const TupleModule = "Tuple"
 
+// RegexModule owns the opaque type introduced by regex literal syntax.
+const RegexModule = "Regex"
+
 // syntaxDependencies is the set of modules a file depends on through syntax
 // rather than an import: the Prelude it did not opt out of, and the owners of
 // the bracket, tuple, quote, and deriving forms it uses.
@@ -532,6 +535,9 @@ func syntaxDependencies(m *ast.Module, self string) []string {
 	}
 	if m.UsesTuples && self != TupleModule {
 		deps = addDep(deps, TupleModule)
+	}
+	if m.UsesRegex && self != RegexModule {
+		deps = addDep(deps, RegexModule)
 	}
 	return deps
 }

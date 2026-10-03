@@ -279,6 +279,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		}
 	}
 
+	decls = append(decls, g.regexDecls...)
 	decls = append(decls, g.descriptorDecls...)
 	decls = append(decls, g.callableDecls...)
 	// Imports come from emission (fangort for prints, math for float
@@ -326,6 +327,8 @@ type gen struct {
 	descriptorDecls []goast.Decl
 	callableNames   map[string]string
 	callableDecls   []goast.Decl
+	regexNames      map[string]string
+	regexDecls      []goast.Decl
 	rowPreparation  *rowPreparation
 	forwarders      map[string]*core.Lambda
 
@@ -1335,6 +1338,19 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return intLit(e.Val)
 	case *core.FloatLit:
 		return g.floatLit(e.Val)
+	case *core.RegexLit:
+		if g.regexNames == nil {
+			g.regexNames = map[string]string{}
+		}
+		name := g.regexNames[e.Pattern]
+		if name == "" {
+			name = fmt.Sprintf("t_regexLiteral%d", len(g.regexNames))
+			g.regexNames[e.Pattern] = name
+			g.usesFangort = true
+			value := g.ctorValue(e.Ctor, nil, callExpr(selector("fangort", "RegexLiteral"), stringLit(e.Pattern)))
+			g.regexDecls = append(g.regexDecls, varDecl(name, g.goType(e.Ty), value))
+		}
+		return ident(name)
 	case *core.StringLit:
 		return stringLit(e.Val)
 	case *core.CharLit:

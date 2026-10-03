@@ -149,7 +149,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		return out
 	}
 	switch e := e.(type) {
-	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit, *core.VarRef, *core.TypeOf:
+	case *core.IntLit, *core.FloatLit, *core.RegexLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit, *core.VarRef, *core.TypeOf:
 		return e, nil
 	case *core.ControlExit:
 		payload := make([]core.Expr, len(e.Payload))

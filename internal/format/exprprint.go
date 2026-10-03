@@ -27,6 +27,8 @@ func exprInline(e ast.Expr) (string, bool) {
 		return raw(e.Sp), !e.Raw
 	case *ast.FloatLit:
 		return raw(e.Sp), true
+	case *ast.RegexLit:
+		return e.Raw, true
 	case *ast.StringLit:
 		return raw(e.Sp), true
 	case *ast.CharLit:
@@ -171,7 +173,7 @@ func localBindInline(b ast.LocalBind) ([]string, bool) {
 // position, either because it is a single token or because it brackets itself.
 func atomic(e ast.Expr) bool {
 	switch e := e.(type) {
-	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.UnitLit,
+	case *ast.IntLit, *ast.FloatLit, *ast.RegexLit, *ast.StringLit, *ast.CharLit, *ast.UnitLit,
 		*ast.Var, *ast.RecordGet, *ast.Splice, *ast.Quote:
 		return true
 	case *ast.RecordLit:

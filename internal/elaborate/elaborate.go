@@ -804,6 +804,8 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 		return &core.IntLit{Val: e.Value, Ty: ty}
 	case *ast.FloatLit:
 		return &core.FloatLit{Val: e.Value, Ty: ty}
+	case *ast.RegexLit:
+		return &core.RegexLit{Pattern: e.Value, Ctor: el.ck.Ctors["Regex.Regex"], Origin: e.Sp, Ty: ty}
 	case *ast.StringLit:
 		return &core.StringLit{Val: e.Value, Ty: ty}
 	case *ast.CharLit:

@@ -55,6 +55,7 @@ var Table = func() map[string]Spec {
 	installMeta(t)
 	installScalarInstances(t)
 	installBytes(t)
+	installRegex(t)
 	// The two operator-named Basics natives. The registry key is the
 	// canonical symbol, so it wears the operator spelling.
 	t["Basics./"] = Spec{Arity: 2, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) {

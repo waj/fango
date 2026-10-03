@@ -11,6 +11,7 @@ const (
 	INT
 	FLOAT
 	STRING
+	REGEX
 	CHAR
 	LIDENT // lower-case identifier
 	UIDENT // upper-case identifier (constructors, types, module names)
@@ -88,7 +89,7 @@ const (
 
 var kindNames = map[Kind]string{
 	ATTRIBUTE: "ATTRIBUTE",
-	EOF:       "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING", CHAR: "CHAR",
+	EOF:       "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING", REGEX: "REGEX", CHAR: "CHAR",
 	LIDENT: "LIDENT", UIDENT: "UIDENT", PRAGMA: "PRAGMA",
 	OP:     "OP",
 	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", SEMICOLON: "SEMICOLON", DOT: "DOT", DOTDOT: "DOTDOT",

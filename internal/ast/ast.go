@@ -28,6 +28,13 @@ type StringLit struct {
 	Sp    source.Span
 }
 
+// RegexLit retains both the Go pattern and original delimiter spelling.
+type RegexLit struct {
+	Value string
+	Raw   string
+	Sp    source.Span
+}
+
 type CharLit struct {
 	Value rune
 	Sp    source.Span
@@ -499,6 +506,7 @@ func (p *PCtor) Span() source.Span {
 
 func (*IntLit) isExpr()       {}
 func (*FloatLit) isExpr()     {}
+func (*RegexLit) isExpr()     {}
 func (*StringLit) isExpr()    {}
 func (*CharLit) isExpr()      {}
 func (*UnitLit) isExpr()      {}
@@ -524,6 +532,7 @@ func (*MetaValue) isExpr()    {}
 
 func (e *IntLit) Span() source.Span       { return e.Sp }
 func (e *FloatLit) Span() source.Span     { return e.Sp }
+func (e *RegexLit) Span() source.Span     { return e.Sp }
 func (e *StringLit) Span() source.Span    { return e.Sp }
 func (e *CharLit) Span() source.Span      { return e.Sp }
 func (e *UnitLit) Span() source.Span      { return e.Sp }
@@ -753,6 +762,9 @@ type Module struct {
 	// UsesTuples records `(a, b)` syntax, in type, expression, or pattern
 	// position. The module loader adds Tuple the same way it adds List.
 	UsesTuples bool
+
+	// UsesRegex records literals, including those inside quotations.
+	UsesRegex bool
 
 	// NoPrelude records the `{-# no-prelude #-}` pragma: this module is
 	// resolved with no implicit imports at all, so every name it uses comes

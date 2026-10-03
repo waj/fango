@@ -31,7 +31,7 @@ func ExprControl(e Expr) types.Control {
 		return types.JoinControl(cs...)
 	}
 	switch e := e.(type) {
-	case *IntLit, *FloatLit, *StringLit, *CharLit, *UnitLit, *BoolLit,
+	case *IntLit, *FloatLit, *RegexLit, *StringLit, *CharLit, *UnitLit, *BoolLit,
 		*VarRef, *Lambda, *TypeOf:
 		return types.Control{}
 	case *ControlExit:

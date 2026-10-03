@@ -1,0 +1,117 @@
+{-# no-prelude #-}
+module Regex exposing (Capture(..), Error(..), Match(..), Regex, Span(..), compile, escape, find, findAll, matches, message, pattern, replaceAll, replaceAllLiteral, split)
+
+import Basics exposing (..)
+import List exposing (List)
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Runtime.Native
+
+type Regex = Regex Runtime.Native.Any
+
+type Error = InvalidPattern String deriving (Eq, Show)
+
+type Span = { text : String, start : Int, end : Int } deriving (Eq, Show)
+
+type Capture = { name : Maybe String, value : Maybe Span } deriving (Eq, Show)
+
+type Match = { text : String, start : Int, end : Int, captures : List Capture } deriving (Eq, Show)
+
+type Compilation = Compilation Runtime.Native.Any
+type MatchBatch = MatchBatch Runtime.Native.Any
+type SplitBatch = SplitBatch Runtime.Native.Any
+
+compileRaw : String -> Compilation
+compileRaw = native
+compileSucceeded : Compilation -> Bool
+compileSucceeded = native
+compiledRegex : Compilation -> Regex
+compiledRegex = native
+compileMessage : Compilation -> String
+compileMessage = native
+
+compile : String -> Result Error Regex
+compile source =
+    result = compileRaw source
+    if compileSucceeded result then Ok (compiledRegex result)
+    else Err (InvalidPattern (compileMessage result))
+
+message : Error -> String
+message (InvalidPattern reason) = reason
+
+pattern : Regex -> String
+pattern = native
+
+matches : Regex -> String -> Bool
+matches = native
+
+findRaw : Regex -> String -> MatchBatch
+findRaw = native
+findAllRaw : Regex -> String -> MatchBatch
+findAllRaw = native
+matchCount : MatchBatch -> Int
+matchCount = native
+captureCount : MatchBatch -> Int
+captureCount = native
+captureName : MatchBatch -> Int -> String
+captureName = native
+matchText : MatchBatch -> Int -> Int -> String
+matchText = native
+matchStart : MatchBatch -> Int -> Int -> Int
+matchStart = native
+matchEnd : MatchBatch -> Int -> Int -> Int
+matchEnd = native
+
+spanAt : MatchBatch -> Int -> Int -> Span
+spanAt batch index group =
+    { text = matchText batch index group, start = matchStart batch index group, end = matchEnd batch index group }
+
+capturesAt batch index group reverse =
+    if group > captureCount batch then List.reverse reverse
+    else
+        label = captureName batch group
+        capture = Capture
+            { name = if label == "" then Nothing else Just label
+            , value = if matchStart batch index group < 0 then Nothing else Just (spanAt batch index group)
+            }
+        capturesAt batch index (group + 1) [capture | reverse]
+
+matchAt : MatchBatch -> Int -> Match
+matchAt batch index =
+    whole = spanAt batch index 0
+    { text = whole.text, start = whole.start, end = whole.end, captures = capturesAt batch index 1 [] }
+
+find : Regex -> String -> Maybe Match
+find regex text =
+    batch = findRaw regex text
+    if matchCount batch == 0 then Nothing else Just (matchAt batch 0)
+
+allMatches batch index reverse =
+    if index >= matchCount batch then List.reverse reverse
+    else allMatches batch (index + 1) [matchAt batch index | reverse]
+
+findAll : Regex -> String -> List Match
+findAll regex text = allMatches (findAllRaw regex text) 0 []
+
+replaceAll : Regex -> String -> String -> String
+replaceAll = native
+
+replaceAllLiteral : Regex -> String -> String -> String
+replaceAllLiteral = native
+
+splitRaw : Regex -> String -> SplitBatch
+splitRaw = native
+splitCount : SplitBatch -> Int
+splitCount = native
+splitItem : SplitBatch -> Int -> String
+splitItem = native
+
+splitItems batch index reverse =
+    if index >= splitCount batch then List.reverse reverse
+    else splitItems batch (index + 1) [splitItem batch index | reverse]
+
+split : Regex -> String -> List String
+split regex text = splitItems (splitRaw regex text) 0 []
+
+escape : String -> String
+escape = native

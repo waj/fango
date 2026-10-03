@@ -129,8 +129,8 @@ func fixtureProgram(prog *core.Prog, preludeOwners map[string]bool) *core.Prog {
 		}
 	}
 	for _, a := range prog.ADTs {
-		owner, _, qualified := strings.Cut(a.Con.Name, ".")
-		if !qualified || !preludeOwners[owner] {
+		at := strings.LastIndexByte(a.Con.Name, '.')
+		if at < 0 || !preludeOwners[a.Con.Name[:at]] {
 			result.ADTs = append(result.ADTs, a)
 		}
 	}

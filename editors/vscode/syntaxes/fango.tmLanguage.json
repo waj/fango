@@ -185,7 +185,7 @@
       }
     },
     "operator_name": {
-      "match": "(\\()\\s*([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))",
+      "match": "(\\()\\s*(?!/[!#%&*+\\-/:<=>?@^|~]*/)([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))",
       "captures": {
         "1": { "name": "punctuation.section.parens.begin.fango" },
         "2": { "name": "entity.name.function.operator.fango" },
@@ -193,7 +193,7 @@
       }
     },
     "fixity_decl": {
-      "match": "^(infixl|infixr|infix)\\s+([0-9])\\s*(\\()\\s*([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))",
+      "match": "^(infixl|infixr|infix)\\s+([0-9])\\s*(\\()\\s*(?!/[!#%&*+\\-/:<=>?@^|~]*/)([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))",
       "captures": {
         "1": { "name": "keyword.other.fixity.fango" },
         "2": { "name": "constant.numeric.fango" },
@@ -203,7 +203,7 @@
       }
     },
     "operator_annotation": {
-      "begin": "^(\\s*)(\\()\\s*([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))\\s*(:)",
+      "begin": "^(\\s*)(\\()\\s*(?!/[!#%&*+\\-/:<=>?@^|~]*/)([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))\\s*(:)",
       "end": "$",
       "beginCaptures": {
         "2": { "name": "punctuation.section.parens.begin.fango" },
@@ -227,7 +227,7 @@
       ]
     },
     "operator_definition": {
-      "match": "^\\s*(\\()\\s*([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))(?=(?:[ \\t]+(?:\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]|\\{[^{}]*\\}|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:\\\\.|[^'\\\\])'|-?[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?|\\^?[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*))+[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~]))",
+      "match": "^\\s*(\\()\\s*(?!/[!#%&*+\\-/:<=>?@^|~]*/)([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))(?=(?:[ \\t]+(?:\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]|\\{[^{}]*\\}|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:\\\\.|[^'\\\\])'|-?[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?|\\^?[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*))+[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~]))",
       "captures": {
         "1": { "name": "punctuation.section.parens.begin.fango" },
         "2": { "name": "entity.name.function.operator.fango" },
@@ -329,6 +329,18 @@
         "1": { "name": "variable.other.definition.fango" }
       }
     },
+    "regex": {
+      "name": "string.regexp.fango",
+      "match": "(?<![^ \\t\\r\\n(\\[{,;`])(/)(?![ \\t\\r\\n])(?!(?:[!#%&*+\\-:<=>?@^|~]*\\)|[!#%&*+\\-:<=>?@^|~]+[ \\t\\r\\n]))(?:\\\\[^\\r\\n]|[^\\\\/\\r\\n])*(/)",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.string.begin.fango"
+        },
+        "2": {
+          "name": "punctuation.definition.string.end.fango"
+        }
+      }
+    },
     "expressions": {
       "patterns": [
         { "include": "#attributes" },
@@ -339,6 +351,7 @@
         },
         { "include": "#quote" },
         { "include": "#splice" },
+        { "include": "#regex" },
         { "include": "#native_expr" },
         { "include": "#string" },
         { "include": "#char" },

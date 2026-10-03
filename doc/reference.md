@@ -21,6 +21,7 @@ The bundled library is experimental and versioned with the compiler.
 | --- | --- |
 | List, Range, Maybe, Tuple, Dict, Result | [Collections](reference/library-collections.md) |
 | String, Char, Basics integer helpers | [Text and numeric helpers](reference/library-text.md) |
+| Regex | [Regular expressions](reference/library-regex.md) |
 | Bytes | [Byte sequences](reference/library-bytes.md) |
 | Reader, Writer, Bytes.Source, Bytes.Sink | [Buffered readers and writers](reference/library-readers.md) |
 | Encoding, Text.Reader, Text.Writer, Text.Builder | [Encodings and text I/O](reference/library-text-io.md) |

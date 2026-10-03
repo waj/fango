@@ -45,6 +45,7 @@ type parser struct {
 	usesStaging bool
 	usesLists   bool
 	usesTuples  bool
+	usesRegex   bool
 
 	// stopWith makes the contextual word `with` terminate only the subject
 	// of a handle expression. It remains an ordinary identifier elsewhere.
@@ -83,6 +84,7 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 	m.UsesStaging = p.usesStaging
 	m.UsesLists = p.usesLists
 	m.UsesTuples = p.usesTuples
+	m.UsesRegex = p.usesRegex
 	return m, p.errs
 }
 
@@ -1748,7 +1750,7 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.LQUOTE, token.DOLLARPAREN, token.ATTYPE:
+		case token.REGEX, token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.LQUOTE, token.DOLLARPAREN, token.ATTYPE:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
 				return nil
@@ -2342,6 +2344,10 @@ func (p *parser) parseAtom() ast.Expr {
 		p.next()
 		v, _ := strconv.ParseFloat(t.Text, 64) // range errors reported by the lexer
 		return &ast.FloatLit{Value: v, Sp: t.Span}
+	case token.REGEX:
+		p.next()
+		p.usesRegex = true
+		return &ast.RegexLit{Value: lexer.RegexPattern(t.Text), Raw: t.Text, Sp: t.Span}
 	case token.STRING:
 		p.next()
 		return &ast.StringLit{Value: lexer.Unescape(t.Text), Sp: t.Span}

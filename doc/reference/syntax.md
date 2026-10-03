@@ -224,3 +224,37 @@ parentheses.
 
 Operators are declared at the top level, in a class, or in an instance —
 never in a function body, where a fixity would have no home.
+
+## Regular expression literals
+
+`/pattern/` constructs an opaque [`Regex`](library-regex.md) value. A completed
+literal with an invalid Go regex reports `INVALID REGEX` during checking.
+
+An opening slash is recognized at the beginning of input, after ASCII
+whitespace, or immediately after `(`, `[`, `{`, `,`, `;`, or a quotation
+backtick. It must touch a non-whitespace pattern character, and an unescaped
+closing slash must exist on the same line. `//` is the empty pattern. If no
+closing slash exists, the lexer falls back to ordinary operators.
+
+```fango
+Regex.matches /abc/ text  -- a literal argument
+x/y/z                    -- division
+x / y / z                -- division
+x /y                     -- division: no closing slash
+```
+
+A slash immediately attached to the preceding value remains an operator.
+Parenthesized slash operator names without a second slash, such as `(/)` and
+`(/=)`, and slash-led operator runs without a second slash followed by whitespace
+remain operators.
+Otherwise a slash sequence satisfying the literal rule takes precedence over
+custom operators: `x /y/ z` contains a regex literal. Use spaces around division
+operators to make their meaning explicit.
+
+Regex backslashes are not string escapes. `\d`, `\n`, and `\\` reach the regex
+engine unchanged; `\/` represents a literal slash, including inside character
+classes. A slash after an even number of consecutive backslashes closes the
+literal, while one after an odd number is escaped. Patterns beginning with
+whitespace can spell it with `[ ]` or `\x20`. Flags use Go's inline syntax,
+such as `/(?i)abc/`, rather than a suffix after the closing slash. Literals are
+single-line expressions without interpolation and are not case patterns.

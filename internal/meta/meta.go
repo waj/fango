@@ -204,6 +204,9 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 	case *ast.FloatLit:
 		n := *e
 		return &n
+	case *ast.RegexLit:
+		n := *e
+		return &n
 	case *ast.StringLit:
 		n := *e
 		return &n
@@ -436,6 +439,8 @@ func FillSpans(e ast.Expr, sp source.Span) {
 	case *ast.IntLit:
 		fill(&e.Sp)
 	case *ast.FloatLit:
+		fill(&e.Sp)
+	case *ast.RegexLit:
 		fill(&e.Sp)
 	case *ast.StringLit:
 		fill(&e.Sp)

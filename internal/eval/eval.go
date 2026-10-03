@@ -469,6 +469,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return e.Val, nil
 	case *core.FloatLit:
 		return e.Val, nil
+	case *core.RegexLit:
+		return &CtorVal{Ctor: e.Ctor, Fields: []Value{fangort.RegexLiteral(e.Pattern)}}, nil
 	case *core.StringLit:
 		return e.Val, nil
 	case *core.CharLit:

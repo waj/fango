@@ -200,7 +200,7 @@ func simpleBody(e core.Expr) bool {
 	ok := true
 	core.Inspect(e, func(e core.Expr) {
 		switch e := e.(type) {
-		case *core.IntLit, *core.FloatLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit,
+		case *core.IntLit, *core.FloatLit, *core.RegexLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit,
 			*core.VarRef, *core.Neg, *core.NativeCall, *core.If, *core.Seq, *core.Case:
 		case *core.Let:
 			ok = ok && !e.Rec
@@ -476,7 +476,7 @@ func (c *copier) tree(t core.Tree, scope map[string]string) core.Tree {
 
 func atom(e core.Expr) bool {
 	switch e := e.(type) {
-	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit:
+	case *core.IntLit, *core.FloatLit, *core.RegexLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit:
 		return true
 	case *core.VarRef:
 		return e.Local

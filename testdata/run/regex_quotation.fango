@@ -1,0 +1,8 @@
+import Regex
+
+regex = $(`/\d+/`)
+valid = $(if Regex.matches /(?i)abc/ "ABC" then `True` else `False`)
+
+main =
+    print (Regex.matches regex "123")
+    print valid

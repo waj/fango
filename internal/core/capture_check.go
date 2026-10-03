@@ -202,7 +202,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		return r
 	}
 	switch e := e.(type) {
-	case *IntLit, *FloatLit, *StringLit, *CharLit, *UnitLit, *BoolLit, *TypeOf:
+	case *IntLit, *FloatLit, *RegexLit, *StringLit, *CharLit, *UnitLit, *BoolLit, *TypeOf:
 		return captureResult{}
 	case *VarRef:
 		var c types.CaptureSet

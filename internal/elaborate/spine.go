@@ -866,7 +866,7 @@ func (el *elab) ctorValue(info *types.CtorInfo, occTy types.Type) core.Expr {
 // literals and variable references skip ANF hoisting.
 func isAtom(e core.Expr) bool {
 	switch e.(type) {
-	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit, *core.VarRef:
+	case *core.IntLit, *core.FloatLit, *core.RegexLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit, *core.VarRef:
 		return true
 	default:
 		return false

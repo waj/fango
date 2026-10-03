@@ -409,3 +409,35 @@ The in-process native registry is limited to templates, compiler representations
 and explicitly stage-safe bundled behavior. File registry entries validate arity
 but refuse execution; actual file calls use the worker. Staging rejects user
 sidecars, residual effects, and process-observing natives.
+
+## Regex literals
+
+[Regex](../reference/library-regex.md) is an ordinary bundled nominal wrapper
+with one private `Runtime.Native.Any` field containing an immutable Go
+`*regexp.Regexp`. Its sidecar uses the existing scalar/opaque-wrapper ABI.
+Private compilation outcomes, match batches, and split batches stay on the Go
+heap; Fango builds the public Result, Maybe, List, and nominal record values.
+Match batches translate byte endpoints to Unicode scalar offsets with one
+input pass rather than rescanning a prefix for each capture.
+
+The lexer and parser retain a distinct regex AST leaf, including source
+spelling for the formatter and decoded pattern text for checking. Inference
+validates the pattern with Go's compiler and gives it the canonical bundled
+type. Elaboration produces a RegexLit Core leaf carrying its constructor,
+pattern, type, and source provenance. Core lint independently checks the type,
+constructor shape, and pattern. Syntax dependency discovery loads Regex without
+exposing API names, including for quotations and no-Prelude modules.
+
+Code generation emits one deterministic package global per distinct pattern
+in an owning module, wrapping `fangort.RegexLiteral` in the ordinary constructor.
+Workers reference those globals. The runtime helper shares a concurrent cache
+whose winning entry compiles under sync.Once, so identical patterns across
+modules share one initialized object. Interpreter and stage evaluation use the
+same helper when constructing their CtorVal. Compiled package initialization
+is eager; interpreter initialization occurs on first evaluation. Dynamic
+compilation bypasses this literal cache.
+
+Compiler objects and worker execution payloads encode the pattern and type
+metadata, never regexp objects. Quotations preserve regex AST leaves through
+copying, expansion, and source attribution. Go reachability owns the opaque
+values; they are not resources and need no cleanup or identity table.

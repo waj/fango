@@ -1,0 +1,19 @@
+Fango 0.1 — :help for commands
+> r : Regex
+> <value : Regex> : Regex
+> > True : Bool
+> False : Bool
+> "a/b" : String
+> Just (Match { text = "éé", start = 1, end = 3, captures = [] }) : Maybe Match
+> <value : Result Error Regex> : Result Error Regex
+> -- INVALID REGEX ---------------------------------------- <repl>
+
+error parsing regexp: missing closing ]: `[`
+
+1| bad = /[/
+         ^^^
+> True : Bool
+> 2 : Float
+> 4 : Float
+> <value : Regex> : Regex
+> 

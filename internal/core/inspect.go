@@ -92,7 +92,7 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 	case *Case:
 		walk(e.Scrut)
 		inspectTree(e.Tree, visit)
-	case *IntLit, *FloatLit, *StringLit, *CharLit, *BoolLit, *UnitLit,
+	case *IntLit, *FloatLit, *RegexLit, *StringLit, *CharLit, *BoolLit, *UnitLit,
 		*VarRef, *TypeOf:
 		// Leaves.
 	}

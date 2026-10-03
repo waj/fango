@@ -26,6 +26,19 @@ async function main() {
   assert(!scopeAt(sample.indexOf("|>")).includes("keyword.operator.pipe.fango"));
   assert(!scopeAt(sample.lastIndexOf("value")).includes("variable.parameter.fango"));
 
+  for (const [sample, count] of [
+    ['f /abc/ // /a\\/b/ /[\\/]/ /\\\\/ /(?i)abc/', 6],
+    ['x/y/z', 0], ['x / y / z', 0], ['x /y', 0],
+    ['(/), (/=)', 0], ['x /= y && z /= w', 0],
+    ['(/abc/) [/abc/,//]', 3], ['(//) (/^$/) (/=/)', 3], ['`/abc/`', 1],
+    ['f /--{-"}/ -- comment', 1],
+    ['f /abc', 0], ['f /*/', 1],
+  ]) {
+    const tokens = grammar.tokenizeLine(sample).tokens;
+    const beginnings = tokens.filter(t => t.scopes.includes('string.regexp.fango') && t.scopes.includes('punctuation.definition.string.begin.fango'));
+    assert.equal(beginnings.length, count, sample);
+  }
+
   const sequence = 'apply { a b -> print a; b + 1 }';
   const sequenceTokens = grammar.tokenizeLine(sequence).tokens;
   const separator = sequenceTokens.find(t => t.startIndex <= sequence.indexOf(";") && t.endIndex > sequence.indexOf(";"));

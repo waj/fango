@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/types"
@@ -362,6 +363,13 @@ func (l *linter) expr(e Expr, where string) {
 	case *FloatLit:
 		if l.unique(e.Ty) != l.b.Float.Unique {
 			l.errorf("%s: FloatLit typed %s", where, types.Show(e.Ty))
+		}
+	case *RegexLit:
+		if !types.IsRegexLiteralConstructor(e.Ctor) || l.unique(e.Ty) != e.Ctor.Result.Unique {
+			l.errorf("%s: invalid RegexLit type or constructor", where)
+		}
+		if _, err := regexp.Compile(e.Pattern); err != nil {
+			l.errorf("%s: invalid RegexLit: %s", where, err)
 		}
 	case *StringLit:
 		if l.unique(e.Ty) != l.b.String.Unique {

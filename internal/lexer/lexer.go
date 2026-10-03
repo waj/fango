@@ -74,6 +74,7 @@ func (l *lexer) run() {
 		start := l.pos
 		c := l.f.Content[l.pos]
 		switch {
+		case c == '/' && l.lexRegex(start):
 		case isDigit(c):
 			l.lexNumber(start)
 		case c == '"':
@@ -522,4 +523,58 @@ func DumpTokens(toks []token.Token) string {
 		}
 	}
 	return b.String()
+}
+
+// lexRegex reserves slash-delimited, single-line patterns at textual atom
+// boundaries. An incomplete candidate falls back to ordinary operator lexing.
+func (l *lexer) lexRegex(start int) bool {
+	if start > 0 && !strings.ContainsRune(" \t\r\n([{,;`", rune(l.f.Content[start-1])) {
+		return false
+	}
+	if start+1 >= len(l.f.Content) || strings.ContainsRune(" \t\r\n", rune(l.f.Content[start+1])) {
+		return false
+	}
+	// A parenthesized operator name such as (/) or (/=) must not
+	// consume a slash in another name or a string later on the line.
+	endOp := start + 1
+	for endOp < len(l.f.Content) && token.IsOpChar(l.f.Content[endOp]) {
+		endOp++
+	}
+	if !strings.ContainsRune(string(l.f.Content[start+1:endOp]), '/') &&
+		endOp < len(l.f.Content) && (l.f.Content[endOp] == ')' ||
+		(endOp > start+1 && strings.ContainsRune(" \t\r\n", rune(l.f.Content[endOp])))) {
+		return false
+	}
+	for at := start + 1; at < len(l.f.Content); at++ {
+		switch l.f.Content[at] {
+		case '\n', '\r':
+			return false
+		case '\\':
+			at++
+			if at >= len(l.f.Content) || l.f.Content[at] == '\n' || l.f.Content[at] == '\r' {
+				return false
+			}
+		case '/':
+			l.pos = at + 1
+			l.emit(token.REGEX, start, l.pos)
+			return true
+		}
+	}
+	return false
+}
+
+// RegexPattern removes delimiters and delimiter escapes only. All regular
+// expression escapes, including doubled backslashes, reach Go unchanged.
+func RegexPattern(text string) string {
+	var out strings.Builder
+	for at := 1; at < len(text)-1; at++ {
+		if text[at] == '\\' && at+1 < len(text)-1 {
+			at++
+			if text[at] != '/' {
+				out.WriteByte('\\')
+			}
+		}
+		out.WriteByte(text[at])
+	}
+	return out.String()
 }

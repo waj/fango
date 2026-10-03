@@ -73,7 +73,7 @@ func (g *gen) tailJumpStmts(d *core.Def, e *core.App) []goast.Stmt {
 // be skipped entirely.
 func pureAtom(e core.Expr) bool {
 	switch e.(type) {
-	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit, *core.VarRef:
+	case *core.IntLit, *core.FloatLit, *core.RegexLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit, *core.VarRef:
 		return true
 	default:
 		return false

@@ -220,7 +220,7 @@ func (r *resolver) expr(e ast.Expr) ast.Expr {
 		if e.NextState != nil {
 			e.NextState = r.expr(e.NextState)
 		}
-	case *ast.Var, *ast.Ctor, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
+	case *ast.Var, *ast.Ctor, *ast.IntLit, *ast.FloatLit, *ast.RegexLit, *ast.StringLit,
 		*ast.CharLit, *ast.UnitLit, *ast.TypeOf:
 		// Leaves, or heads whose arguments arrive as App wrappers.
 	default:

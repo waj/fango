@@ -373,7 +373,7 @@ func detectCycles(pending map[string]*node, names []string) []diag.Error {
 func (g *Graph) loadPrelude() (*PreludeResult, []diag.Error) {
 	pending := map[string]*node{}
 	var errs []diag.Error
-	for _, root := range []string{PreludeModule, MetaModule, DeriveModule, ListModule, TupleModule} {
+	for _, root := range []string{PreludeModule, MetaModule, DeriveModule, ListModule, TupleModule, RegexModule} {
 		errs = append(errs, g.load(pending, root, source.Span{})...)
 	}
 	if len(errs) > 0 {

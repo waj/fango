@@ -54,6 +54,10 @@ func (r rewriter) expr(e Expr) Expr {
 		n := *e
 		n.Ty = r.typ(e.Ty)
 		out = &n
+	case *RegexLit:
+		n := *e
+		n.Ty = r.typ(e.Ty)
+		out = &n
 	case *StringLit:
 		n := *e
 		n.Ty = r.typ(e.Ty)
