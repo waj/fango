@@ -2,12 +2,12 @@
 module Http.Server.Route exposing (Param(..), Route(..), dispatch, lookup, path)
 
 import Basics exposing (..)
-import Bytes
 import Http exposing (Body(..), Error(..), Header(..), Protocol(..))
 import Http.Server exposing (Request(..), Response(..))
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import String
+import Url
 
 type Param = { name : String, value : String } deriving (Eq, Show)
 type Route e =
@@ -52,33 +52,19 @@ joinSlash parts =
 path : String -> String
 path target = absolutePath (beforeQuery target)
 
-hexValue : Int -> Int
-hexValue code =
-    if code >= 48 && code <= 57 then code - 48
-    else if code >= 65 && code <= 70 then code - 55
-    else if code >= 97 && code <= 102 then code - 87
-    else -1
-
-decodeBytes : List Int -> List Int ->{Protocol} List Int
-decodeBytes bytes reversed =
-    case bytes of
-        [] -> List.reverse reversed
-        [37, hi, lo | rest] ->
-            first = hexValue hi
-            second = hexValue lo
-            decoded = first * 16 + second
-            if first < 0 || second < 0 || decoded == 47 || decoded == 92 then
-                invalid (Malformed "invalid path escape")
-            else decodeBytes rest [decoded | reversed]
-        [37 | _] -> invalid (Malformed "invalid path escape")
-        [byte | rest] -> decodeBytes rest [byte | reversed]
+-- An encoded `/` or `\` would change how the path splits, so it is rejected.
+encodedSeparator : String -> Bool
+encodedSeparator segment =
+    String.contains "%2F" segment || String.contains "%2f" segment
+        || String.contains "%5C" segment || String.contains "%5c" segment
 
 decodeSegment : String ->{Protocol} String
 decodeSegment segment =
-    decoded = Bytes.fromList (decodeBytes (Bytes.toList (Bytes.fromString segment)) [])
-    case Bytes.toString decoded of
-        Just text -> text
-        Nothing -> invalid (Malformed "path segment is not UTF-8")
+    if encodedSeparator segment then invalid (Malformed "invalid path escape")
+    else
+        case Url.percentDecode segment of
+            Just text -> text
+            Nothing -> invalid (Malformed "invalid path escape")
 
 segments : String ->{Protocol} List String
 segments raw = List.map decodeSegment (String.split "/" raw)

@@ -1,0 +1,67 @@
+import List exposing (List)
+import Maybe exposing (Maybe(..))
+import Url exposing (Component(..))
+
+-- RFC 3986 §5.4 against the base `http://a/b/c/d;p?q`.
+examples : List (String, String)
+examples =
+    [ ("g:h", "g:h"), ("g", "http://a/b/c/g"), ("./g", "http://a/b/c/g"), ("g/", "http://a/b/c/g/")
+    , ("/g", "http://a/g"), ("//g", "http://g"), ("?y", "http://a/b/c/d;p?y"), ("g?y", "http://a/b/c/g?y")
+    , ("#s", "http://a/b/c/d;p?q#s"), ("g#s", "http://a/b/c/g#s"), ("g?y#s", "http://a/b/c/g?y#s")
+    , (";x", "http://a/b/c/;x"), ("g;x", "http://a/b/c/g;x"), ("g;x?y#s", "http://a/b/c/g;x?y#s")
+    , ("", "http://a/b/c/d;p?q"), (".", "http://a/b/c/"), ("./", "http://a/b/c/"), ("..", "http://a/b/")
+    , ("../", "http://a/b/"), ("../g", "http://a/b/g"), ("../..", "http://a/"), ("../../", "http://a/")
+    , ("../../g", "http://a/g"), ("../../../g", "http://a/g"), ("../../../../g", "http://a/g")
+    , ("/./g", "http://a/g"), ("/../g", "http://a/g"), ("g.", "http://a/b/c/g."), (".g", "http://a/b/c/.g")
+    , ("g..", "http://a/b/c/g.."), ("..g", "http://a/b/c/..g"), ("./../g", "http://a/b/g")
+    , ("./g/.", "http://a/b/c/g/"), ("g/./h", "http://a/b/c/g/h"), ("g/../h", "http://a/b/c/h")
+    , ("g;x=1/./y", "http://a/b/c/g;x=1/y"), ("g;x=1/../y", "http://a/b/c/y")
+    , ("g?y/./x", "http://a/b/c/g?y/./x"), ("g?y/../x", "http://a/b/c/g?y/../x")
+    , ("g#s/./x", "http://a/b/c/g#s/./x"), ("g#s/../x", "http://a/b/c/g#s/../x"), ("http:g", "http:g")
+    ]
+
+resolved : String -> String
+resolved reference =
+    case (Url.parse "http://a/b/c/d;p?q", Url.parse reference) of
+        (Just base, Just ref) -> Url.toString (Url.resolve base ref)
+        _ -> "unparsed"
+
+mismatches : List (String, String) -> List String
+mismatches cases =
+    List.foldr { (reference, want) found ->
+        got = resolved reference
+        if got == want then found else [reference ++ " gave " ++ got | found]
+    } [] cases
+
+roundTrip : String -> String
+roundTrip raw =
+    case Url.parse raw of
+        Just url -> Url.toString url
+        Nothing -> "invalid: " ++ raw
+
+main() =
+    print (mismatches examples)
+    print (Url.parse "https://user:pw@[2001:DB8::1]:8443/p%20q?a=b#top")
+    List.each { raw -> print (roundTrip raw) }
+        [ "HTTP://Example.COM/A?B#C", "http://[::1]/", "mailto:a@b", "/relative/path?q", "?only", "#frag"
+        , "http://h:/p", "a b", "http://h:65536/", "http://h/%zz", "http://exa mple/", "1http://h", "x:y:z", "http://[::1"
+        , "http://exámple.com/", "//host"
+        ]
+    print (Url.percentEncode PathSegment "a b/c?d")
+    print (Url.percentEncode QueryPart "x=1&y+z é")
+    print (Url.percentEncode FragmentPart "a b/?#")
+    print (Url.percentDecode "caf%C3%A9%2F")
+    print (Url.percentDecode "%zz")
+    print (Url.percentDecode "%C3")
+    case Url.parse "http://h/search?q=a+b&empty&x=%41&&e=caf%C3%A9" of
+        Just url ->
+            print (Url.queryParams url)
+            print (Url.toString (Url.withQuery [("name", "Ada Lovelace"), ("tag", "a&b=c")] url))
+            print (Url.toString (Url.appendPath ["v1", "a/b", "c d"] url))
+            print (Url.requestTarget url)
+        Nothing -> print "unparsed"
+    case Url.parse "http://h" of
+        Just url ->
+            print (Url.requestTarget url)
+            print (Url.toString (Url.withQuery [("a", "1")] (Url.appendPath ["x"] url)))
+        Nothing -> print "unparsed"

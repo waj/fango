@@ -1,0 +1,30 @@
+[]
+Just (Url { scheme = Just "https", userinfo = Just "user:pw", host = Just "2001:db8::1", port = Just 8443, path = "/p%20q", query = Just "a=b", fragment = Just "top" })
+http://example.com/A?B#C
+http://[::1]/
+mailto:a@b
+/relative/path?q
+?only
+#frag
+http://h/p
+invalid: a b
+invalid: http://h:65536/
+invalid: http://h/%zz
+invalid: http://exa mple/
+invalid: 1http://h
+x:y:z
+invalid: http://[::1
+invalid: http://exámple.com/
+//host
+a%20b%2Fc%3Fd
+x%3D1%26y%2Bz%20%C3%A9
+a%20b/?%23
+Just "café/"
+Nothing
+Nothing
+[("q", "a b"), ("empty", ""), ("x", "A"), ("e", "café")]
+http://h/search?q=a+b&empty&x=%41&&e=caf%C3%A9&name=Ada%20Lovelace&tag=a%26b%3Dc
+http://h/search/v1/a%2Fb/c%20d?q=a+b&empty&x=%41&&e=caf%C3%A9
+/search?q=a+b&empty&x=%41&&e=caf%C3%A9
+/
+http://h/x?a=1

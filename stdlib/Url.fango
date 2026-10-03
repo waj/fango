@@ -1,0 +1,428 @@
+{-# no-prelude #-}
+module Url exposing (Component(..), Url(..), appendPath, parse, percentDecode, percentEncode, queryParams, requestTarget, resolve, toString, withQuery)
+
+import Basics exposing (..)
+import Bytes exposing (Bytes)
+import Char
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import String
+
+{- RFC 3986 URI references, absolute or relative.
+
+`path`, `query`, and `fragment` keep their encoded form, without the `?` or
+`#`. The scheme and a registered host name are lowercased; an IPv6 literal is
+stored without its brackets. Hosts must be ASCII. -}
+
+type Url =
+    { scheme : Maybe String
+    , userinfo : Maybe String
+    , host : Maybe String
+    , port : Maybe Int
+    , path : String
+    , query : Maybe String
+    , fragment : Maybe String
+    }
+    deriving (Eq, Show)
+
+-- The part of a URL a string is encoded for, which decides what stays literal.
+type Component = PathSegment | QueryPart | FragmentPart deriving (Eq, Show)
+
+mapMaybe : (a -> b) -> Maybe a -> Maybe b
+mapMaybe f value =
+    case value of
+        Just inner -> Just (f inner)
+        Nothing -> Nothing
+
+member : Int -> List Int -> Bool
+member code codes =
+    case codes of
+        [] -> False
+        [first | rest] -> first == code || member code rest
+
+join : String -> List String -> String
+join separator parts =
+    case parts of
+        [] -> ""
+        [part] -> part
+        [part | rest] -> part ++ separator ++ join separator rest
+
+byteOr : Bytes -> Int -> Int
+byteOr bytes index =
+    case Bytes.byteAt index bytes of
+        Just code -> code
+        Nothing -> -1
+
+text : Bytes -> String
+text bytes = Bytes.toStringLossy bytes
+
+alpha : Int -> Bool
+alpha code = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+
+digit : Int -> Bool
+digit code = code >= 48 && code <= 57
+
+hexValue : Int -> Int
+hexValue code =
+    if digit code then code - 48
+    else if code >= 65 && code <= 70 then code - 55
+    else if code >= 97 && code <= 102 then code - 87
+    else -1
+
+unreserved : Int -> Bool
+unreserved code = alpha code || digit code || code == 45 || code == 46 || code == 95 || code == 126
+
+subDelim : Int -> Bool
+subDelim code = code == 33 || code == 36 || (code >= 38 && code <= 44) || code == 59 || code == 61
+
+pchar : Int -> Bool
+pchar code = unreserved code || subDelim code || code == 58 || code == 64
+
+pathChar : Int -> Bool
+pathChar code = pchar code || code == 47
+
+queryChar : Int -> Bool
+queryChar code = pchar code || code == 47 || code == 63
+
+userChar : Int -> Bool
+userChar code = unreserved code || subDelim code || code == 58
+
+hostChar : Int -> Bool
+hostChar code = unreserved code || subDelim code
+
+ipv6Char : Int -> Bool
+ipv6Char code = hexValue code >= 0 || code == 58 || code == 46
+
+-- Every byte is allowed or starts a valid percent escape.
+validFrom : (Int -> Bool) -> Bytes -> Int -> Bool
+validFrom allowed bytes index =
+    if index >= Bytes.length bytes then True
+    else
+        code = byteOr bytes index
+        if code == 37 then
+            if hexValue (byteOr bytes (index + 1)) >= 0 && hexValue (byteOr bytes (index + 2)) >= 0 then validFrom allowed bytes (index + 3)
+            else False
+        else if allowed code then validFrom allowed bytes (index + 1)
+        else False
+
+valid : (Int -> Bool) -> Bytes -> Bool
+valid allowed bytes = validFrom allowed bytes 0
+
+allBytes : (Int -> Bool) -> Bytes -> Int -> Bool
+allBytes allowed bytes index =
+    if index >= Bytes.length bytes then True
+    else if allowed (byteOr bytes index) then allBytes allowed bytes (index + 1)
+    else False
+
+lower : Bytes -> Bytes
+lower bytes = Bytes.fromList (List.map { code -> if code >= 65 && code <= 90 then code + 32 else code } (Bytes.toList bytes))
+
+after : Int -> Bytes -> Bytes
+after index bytes = Bytes.slice index (Bytes.length bytes) bytes
+
+before : Int -> Bytes -> Bytes
+before index bytes = Bytes.slice 0 index bytes
+
+-- Splits at the first `separator`, dropping it.
+cut : Int -> Bytes -> (Bytes, Maybe Bytes)
+cut separator bytes =
+    case Bytes.indexOf (Bytes.fromList [separator]) bytes of
+        Nothing -> (bytes, Nothing)
+        Just at -> (before at bytes, Just (after (at + 1) bytes))
+
+-- The first index at or after `index` holding one of `stops`, or the length.
+scanTo : List Int -> Bytes -> Int -> Int
+scanTo stops bytes index =
+    if index >= Bytes.length bytes then index
+    else if member (byteOr bytes index) stops then index
+    else scanTo stops bytes (index + 1)
+
+lastIndexOf : Int -> Bytes -> Int -> Int
+lastIndexOf code bytes index =
+    if index < 0 then -1
+    else if byteOr bytes index == code then index
+    else lastIndexOf code bytes (index - 1)
+
+decimal : Bytes -> Maybe Int
+decimal bytes =
+    if Bytes.length bytes == 0 || Bytes.length bytes > 5 || allBytes digit bytes 0 == False then Nothing
+    else
+        case String.toInt (text bytes) of
+            Just value -> if value <= 65535 then Just value else Nothing
+            Nothing -> Nothing
+
+type Authority = { userinfo : Maybe String, host : String, port : Maybe Int } deriving (Eq)
+
+parsePort : Bytes -> Maybe (Maybe Int)
+parsePort raw =
+    if Bytes.length raw == 0 then Just Nothing
+    else
+        case decimal raw of
+            Just value -> Just (Just value)
+            Nothing -> Nothing
+
+parseHostPort : Bytes -> Maybe (String, Maybe Int)
+parseHostPort raw =
+    if byteOr raw 0 == 91 then
+        case Bytes.indexOf (Bytes.fromString "]") raw of
+            Nothing -> Nothing
+            Just close ->
+                literal = Bytes.slice 1 close raw
+                rest = after (close + 1) raw
+                validLiteral = Bytes.length literal > 0 && allBytes ipv6Char literal 0
+                    && Bytes.indexOf (Bytes.fromString ":") literal /= Nothing
+                if validLiteral == False then Nothing
+                else if Bytes.length rest == 0 then Just (text (lower literal), Nothing)
+                else if byteOr rest 0 == 58 then
+                    case parsePort (after 1 rest) of
+                        Just port -> Just (text (lower literal), port)
+                        Nothing -> Nothing
+                else Nothing
+    else
+        colon = lastIndexOf 58 raw (Bytes.length raw - 1)
+        (hostBytes, portBytes) = if colon < 0 then (raw, Nothing) else (before colon raw, Just (after (colon + 1) raw))
+        if valid hostChar hostBytes == False then Nothing
+        else
+            case portBytes of
+                Nothing -> Just (text (lower hostBytes), Nothing)
+                Just digits ->
+                    case parsePort digits of
+                        Just port -> Just (text (lower hostBytes), port)
+                        Nothing -> Nothing
+
+parseAuthority : Bytes -> Maybe Authority
+parseAuthority raw =
+    (userinfo, hostPort) =
+        case Bytes.indexOf (Bytes.fromString "@") raw of
+            Nothing -> (Nothing, raw)
+            Just at -> (Just (before at raw), after (at + 1) raw)
+    validUser =
+        case userinfo of
+            Nothing -> True
+            Just bytes -> valid userChar bytes
+    if validUser == False then Nothing
+    else
+        case parseHostPort hostPort of
+            Nothing -> Nothing
+            Just (host, port) -> Just (Authority { userinfo = mapMaybe text userinfo, host = host, port = port })
+
+validScheme : Bytes -> Bool
+validScheme bytes =
+    alpha (byteOr bytes 0) && allBytes { code -> alpha code || digit code || code == 43 || code == 45 || code == 46 } bytes 0
+
+-- Splits off a scheme when the first `:` comes before any `/`, `?`, or `#`.
+-- A relative reference whose first segment holds a `:` is not valid.
+splitScheme : Bytes -> Maybe (Maybe String, Bytes)
+splitScheme bytes =
+    stop = scanTo [58, 47, 63, 35] bytes 0
+    if byteOr bytes stop /= 58 then Just (Nothing, bytes)
+    else
+        candidate = before stop bytes
+        if validScheme candidate then Just (Just (text (lower candidate)), after (stop + 1) bytes)
+        else Nothing
+
+parseBytes : Bytes -> Maybe Url
+parseBytes input =
+    (beforeFragment, fragment) = cut 35 input
+    (hierarchy, query) = cut 63 beforeFragment
+    case splitScheme hierarchy of
+        Nothing -> Nothing
+        Just (scheme, rest) ->
+            hasAuthority = Bytes.startsWith (Bytes.fromString "//") rest
+            authorityEnd = if hasAuthority then scanTo [47] rest 2 else 0
+            authority = if hasAuthority then parseAuthority (Bytes.slice 2 authorityEnd rest) else Nothing
+            path = after authorityEnd rest
+            validParts = valid pathChar path
+                && Maybe.withDefault True (mapMaybe (valid queryChar) query)
+                && Maybe.withDefault True (mapMaybe (valid queryChar) fragment)
+            if validParts == False || (hasAuthority && authority == Nothing) then Nothing
+            else
+                Just (Url
+                    { scheme = scheme
+                    , userinfo = case authority of
+                        Just a -> a.userinfo
+                        Nothing -> Nothing
+                    , host = mapMaybe { a -> a.host } authority
+                    , port = case authority of
+                        Just a -> a.port
+                        Nothing -> Nothing
+                    , path = text path
+                    , query = mapMaybe text query
+                    , fragment = mapMaybe text fragment
+                    }
+                )
+
+-- Parses a URI reference. Fails on characters outside RFC 3986, malformed
+-- escapes, a non-ASCII or malformed host, or a port above 65535.
+parse : String -> Maybe Url
+parse raw = parseBytes (Bytes.fromString raw)
+
+hostText : String -> String
+hostText host = if String.contains ":" host then "[" ++ host ++ "]" else host
+
+-- Gives back what `parse` read, with scheme and host case normalized.
+toString : Url -> String
+toString url =
+    scheme = case url.scheme of
+        Just name -> name ++ ":"
+        Nothing -> ""
+    authority = case url.host of
+        Nothing -> ""
+        Just host ->
+            user = case url.userinfo of
+                Just info -> info ++ "@"
+                Nothing -> ""
+            port = case url.port of
+                Just number -> ":" ++ show number
+                Nothing -> ""
+            "//" ++ user ++ hostText host ++ port
+    query = case url.query of
+        Just part -> "?" ++ part
+        Nothing -> ""
+    fragment = case url.fragment of
+        Just part -> "#" ++ part
+        Nothing -> ""
+    scheme ++ authority ++ url.path ++ query ++ fragment
+
+-- The origin-form request target: the path, `/` when empty, and its query.
+requestTarget : Url -> String
+requestTarget url =
+    path = if url.path == "" then "/" else url.path
+    case url.query of
+        Just part -> path ++ "?" ++ part
+        Nothing -> path
+
+dropLastSegment : String -> String
+dropLastSegment output =
+    bytes = Bytes.fromString output
+    at = lastIndexOf 47 bytes (Bytes.length bytes - 1)
+    if at < 0 then "" else text (before at bytes)
+
+firstSegmentEnd : Bytes -> Int
+firstSegmentEnd bytes = scanTo [47] bytes 1
+
+-- RFC 3986 §5.2.4.
+removeDotsFrom : String -> String -> String
+removeDotsFrom input output =
+    if input == "" then output
+    else if String.startsWith "../" input then removeDotsFrom (String.slice 3 (String.length input) input) output
+    else if String.startsWith "./" input then removeDotsFrom (String.slice 2 (String.length input) input) output
+    else if String.startsWith "/./" input then removeDotsFrom (String.slice 2 (String.length input) input) output
+    else if input == "/." then removeDotsFrom "/" output
+    else if String.startsWith "/../" input then removeDotsFrom (String.slice 3 (String.length input) input) (dropLastSegment output)
+    else if input == "/.." then removeDotsFrom "/" (dropLastSegment output)
+    else if input == "." || input == ".." then output
+    else
+        bytes = Bytes.fromString input
+        end = if byteOr bytes 0 == 47 then firstSegmentEnd bytes else scanTo [47] bytes 0
+        removeDotsFrom (text (after end bytes)) (output ++ text (before end bytes))
+
+removeDots : String -> String
+removeDots path = removeDotsFrom path ""
+
+merge : Url -> String -> String
+merge base path =
+    if base.host /= Nothing && base.path == "" then "/" ++ path
+    else
+        bytes = Bytes.fromString base.path
+        at = lastIndexOf 47 bytes (Bytes.length bytes - 1)
+        if at < 0 then path else text (before (at + 1) bytes) ++ path
+
+-- Resolves a reference against a base URL, RFC 3986 §5.2.2.
+resolve : Url -> Url -> Url
+resolve base reference =
+    if reference.scheme /= Nothing then { reference | path = removeDots reference.path }
+    else if reference.host /= Nothing then { reference | scheme = base.scheme, path = removeDots reference.path }
+    else
+        (path, query) =
+            if reference.path == "" then
+                (base.path, if reference.query /= Nothing then reference.query else base.query)
+            else if String.startsWith "/" reference.path then (removeDots reference.path, reference.query)
+            else (removeDots (merge base reference.path), reference.query)
+        { base | path = path, query = query, fragment = reference.fragment }
+
+keeps : Component -> Int -> Bool
+keeps component code =
+    case component of
+        PathSegment -> unreserved code || subDelim code || code == 58 || code == 64
+        QueryPart -> unreserved code || code == 33 || code == 36 || (code >= 39 && code <= 42) || code == 44
+            || code == 47 || code == 58 || code == 59 || code == 63 || code == 64
+        FragmentPart -> queryChar code
+
+hexDigit : Int -> String
+hexDigit value = String.slice value (value + 1) "0123456789ABCDEF"
+
+encodeByte : Component -> Int -> String
+encodeByte component code =
+    if keeps component code then String.fromChar (Maybe.withDefault ' ' (Char.fromCode code))
+    else "%" ++ hexDigit (quotientBy 16 code) ++ hexDigit (modBy 16 code)
+
+-- Percent-encodes the UTF-8 bytes of `raw` that `component` does not keep.
+percentEncode : Component -> String -> String
+percentEncode component raw = String.concat (List.map (encodeByte component) (Bytes.toList (Bytes.fromString raw)))
+
+decodeBytes : List Int -> List Int -> Maybe (List Int)
+decodeBytes bytes reversed =
+    case bytes of
+        [] -> Just (List.reverse reversed)
+        [37, hi, lo | rest] ->
+            first = hexValue hi
+            second = hexValue lo
+            if first < 0 || second < 0 then Nothing else decodeBytes rest [first * 16 + second | reversed]
+        [37 | _] -> Nothing
+        [code | rest] -> decodeBytes rest [code | reversed]
+
+-- Decodes percent escapes. Fails on a malformed escape or invalid UTF-8.
+percentDecode : String -> Maybe String
+percentDecode raw =
+    case decodeBytes (Bytes.toList (Bytes.fromString raw)) [] of
+        Nothing -> Nothing
+        Just decoded -> Bytes.toString (Bytes.fromList decoded)
+
+-- Query text decodes `+` as a space, as HTML forms write it, and keeps a part
+-- that fails to decode as written.
+queryDecode : String -> String
+queryDecode raw =
+    spaced = join " " (String.split "+" raw)
+    Maybe.withDefault raw (percentDecode spaced)
+
+queryPair : String -> (String, String)
+queryPair part =
+    (key, value) = cut 61 (Bytes.fromString part)
+    (queryDecode (text key), queryDecode (Maybe.withDefault "" (mapMaybe text value)))
+
+-- The decoded `key=value` pairs of the query, in order. Empty parts are
+-- skipped and a part without `=` has an empty value.
+queryParams : Url -> List (String, String)
+queryParams url =
+    case url.query of
+        Nothing -> []
+        Just query -> List.map queryPair (List.filter { part -> part /= "" } (String.split "&" query))
+
+encodePair : (String, String) -> String
+encodePair (key, value) = percentEncode QueryPart key ++ "=" ++ percentEncode QueryPart value
+
+-- Appends encoded pairs to the query. Spaces become `%20`.
+withQuery : List (String, String) -> Url -> Url
+withQuery pairs url =
+    case pairs of
+        [] -> url
+        _ ->
+            added = join "&" (List.map encodePair pairs)
+            case url.query of
+                Just existing -> if existing == "" then { url | query = Just added } else { url | query = Just (existing ++ "&" ++ added) }
+                Nothing -> { url | query = Just added }
+
+withoutTrailingSlash : String -> String
+withoutTrailingSlash path =
+    size = String.length path
+    if size > 0 && String.slice (size - 1) size path == "/" then String.slice 0 (size - 1) path else path
+
+-- Appends segments to the path, encoding each one, `/` included.
+appendPath : List String -> Url -> Url
+appendPath segments url =
+    case segments of
+        [] -> url
+        _ ->
+            added = String.concat (List.map { segment -> "/" ++ percentEncode PathSegment segment } segments)
+            { url | path = withoutTrailingSlash url.path ++ added }

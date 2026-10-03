@@ -23,7 +23,7 @@ only what both directions share.
 
 | Module | Contents |
 | --- | --- |
-| `Url` | The `Url` type, parsing, printing, resolution, percent-encoding, and query helpers. See [URLs](#urls) |
+| `Url` | The `Url` type, parsing, printing, resolution, percent-encoding, and query helpers. See [the URL reference](reference/library-url.md) |
 | `Http` | `Header`, `Version`, `Body e` (renamed from `ResponseBody`, see [bodies](#request-and-response-bodies)), `Error`, the `Protocol` effect, `abortBody`, `fileBody`, and the header helpers (`getHeader`, `getHeaders`, `hasHeader`, `setHeader`, `removeHeader`, `equalAscii`) |
 | `Http.Wire` | Low-level framing pieces both directions use: header-block parsing, the chunked reader, the buffered chunked writer, the length-checked writer, field validation, and the choice between Content-Length and chunked framing |
 | `Http.GZip` | The gzip codec both directions use (a compressing body and a decompressing reader), content-coding negotiation, the server's response and request middleware, and the client's request compression. See [compression](#compression) |
@@ -140,65 +140,10 @@ so memory fixtures and a future mock can drive them.
 
 ## URLs
 
-A new top-level `Url` module. URLs aren't HTTP-specific, so the module isn't
-under `Http`.
-
-```fango
-type Url =
-    { scheme : Maybe String
-    , userinfo : Maybe String
-    , host : Maybe String
-    , port : Maybe Int
-    , path : String
-    , query : Maybe String
-    , fragment : Maybe String
-    }
-
-parse : String -> Maybe Url
-toString : Url -> String
-resolve : Url -> Url -> Url
-requestTarget : Url -> String
-
-percentEncode : Component -> String -> String
-percentDecode : String -> Maybe String
-
-withQuery : List (String, String) -> Url -> Url
-queryParams : Url -> List (String, String)
-appendPath : List String -> Url -> Url
-```
-
-- `parse` accepts an RFC 3986 URI reference, absolute or relative. A relative
-  reference has no scheme and possibly no host, and is representable because
-  `baseUrl` resolution and redirect `Location` headers need it.
-- The scheme and a registered host name are lowercased. An IPv6 literal is
-  stored without its brackets, which is the form `Net.dial` needs; `toString`
-  adds them back. Hosts must be ASCII: internationalized names (IDNA) are out
-  of scope, and a non-ASCII host fails to parse. A port must be 0–65535.
-- `path`, `query`, and `fragment` keep their encoded form exactly as written,
-  without the `?` or `#`. Then `toString (parse s)` gives back `s` for any
-  valid input, so a signed URL survives a round trip. `query = Just ""`
-  (a bare `?`) and `query = Nothing` stay distinct.
-- `resolve base reference` implements RFC 3986 §5.2, dot-segment removal
-  included. It serves both `baseUrl` and redirects.
-- `requestTarget` gives the origin-form target the client sends: the path
-  (`/` when empty) followed by `?query` when present. The fragment is never
-  sent.
-- `percentEncode` takes the component being encoded, which decides the
-  allowed character set: a path segment, a query key or value, or a fragment.
-  `percentDecode` returns `Nothing` for a malformed escape or invalid UTF-8.
-- `withQuery` appends encoded pairs to any existing query. It encodes spaces
-  as `%20`, which every server accepts. `queryParams` decodes the query and
-  also reads `+` as a space, because HTML forms produce it.
-- `appendPath` encodes each segment, `/` included, and joins it to the path.
-
-The client rejects a URL with `userinfo` (`InvalidUrl`), so credentials can't
-end up in URLs, logs, or redirect chains. Callers use `withBearer` or an
-`Authorization` header instead. Only `http` and, after HC4, `https` are
-accepted schemes.
-
-`Http.Server.Route` keeps its stricter decoding rules (no encoded `/` or `\`
-in a segment) on top of `Url.percentDecode`, and its own percent-decoding is
-removed. `Route.path` can use `Url.parse` for absolute-form targets.
+The [`Url` module](reference/library-url.md) is implemented. The client rejects
+a URL with `userinfo` (`InvalidUrl`), so credentials can't end up in URLs,
+logs, or redirect chains; callers use `withBearer` or an `Authorization` header
+instead. Only `http` and, after HC4, `https` are accepted schemes.
 
 ## The `Http` effect
 
@@ -655,7 +600,7 @@ follow allocation order, not that order.
 | --- | --- |
 | HC1 Module split | — (DONE) |
 | HC8 Runner-handled effects in scoped callbacks | HC1 (DONE) |
-| HC6 URL | — |
+| HC6 URL | — (DONE) |
 | HC2 Client core over plain HTTP | HC1, HC6 |
 | HC7 GZip | HC2 |
 | HC4 TLS | HC2 |
@@ -674,14 +619,7 @@ DONE. See [scoped callbacks](reference/functions.md#scoped-callbacks) and the
 
 ### HC6 URL
 
-This milestone covers:
-
-- the `Url` module from [URLs](#urls), with fixtures for parsing, round trips,
-  the RFC 3986 §5.4 resolution examples, IPv6 literals, and percent-encoding
-  each component;
-- `Http.Server.Route` decoding through `Url.percentDecode`, keeping its
-  rejection of encoded slashes;
-- a reference page for `Url`.
+DONE. See the [URL reference](reference/library-url.md).
 
 ### HC2 Client core over plain HTTP
 

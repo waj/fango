@@ -117,8 +117,10 @@ parameter route with streaming GZip and accepts a port argument.
 `Http.Server.Route.dispatch routes fallback request` checks routes in order. A route
 has `method`, `pattern`, and `handler : List Param -> Request e ->{e} Response e`.
 Path segments named `:name` capture one decoded segment. `path` removes the
-query and extracts the path from an absolute-form target. Percent decoding
-rejects malformed escapes, invalid UTF-8, and encoded slashes or backslashes.
+query and extracts the path from an absolute-form target. Segments are decoded
+with [`Url.percentDecode`](library-url.md#encoding-and-queries), so malformed
+escapes and invalid UTF-8 are rejected; encoded slashes and backslashes are
+rejected as well.
 A path matching another method produces 405 with `Allow`; otherwise the fallback
 runs. `Http.Server.Route.lookup` finds a captured parameter.
 
