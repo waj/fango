@@ -1,15 +1,39 @@
 {-# no-prelude #-}
+-- Conversions between characters and their code points.
+--
+-- A `Char` is one Unicode scalar value, written `'x'`. Neither conversion
+-- normalizes characters or interprets an encoding; `Encoding` converts
+-- between text and bytes.
 module Char exposing (fromCode, toCode)
 
 import Basics exposing (..)
 import Maybe exposing (Maybe(..))
 
+-- The character's Unicode code point.
+--
+-- ```fango
+-- import Char
+--
+-- Char.toCode 'A' == 65
+-- Char.toCode '二' == 20108
+-- ```
 toCode : Char -> Int
 toCode = native
 
 scalar : Int -> Char
 scalar = native
 
+-- The character with this code point, or `Nothing` when it is not a Unicode
+-- scalar value: below zero, above U+10FFFF, or a surrogate (U+D800 to
+-- U+DFFF).
+--
+-- ```fango
+-- import Char
+--
+-- Char.fromCode 97 == Just 'a'
+-- Char.fromCode 55296 == Nothing
+-- Char.fromCode 1114112 == Nothing
+-- ```
 fromCode : Int -> Maybe Char
 fromCode code =
     if code < 0 || code > 1114111 || (code >= 55296 && code <= 57343) then Nothing

@@ -1,4 +1,10 @@
 {-# no-prelude #-}
+-- The conventional failure effect.
+--
+-- A computation that can fail performs `Fail error`; `attempt` runs it and
+-- turns its outcome into a `Result`. The module is not part of the prelude, so
+-- a module that declares its own `Fail` keeps compiling; import
+-- `Fail exposing (Fail, attempt, fail)` to use it.
 module Fail exposing (Fail, Report(..), attempt, attemptReport, fail, fromResult)
 
 import Basics exposing (..)
@@ -6,29 +12,73 @@ import Failure
 import List exposing (List)
 import Result exposing (Result(..))
 
-{- The conventional failure effect.
-
-`fail` never resumes: it unwinds to the nearest `attempt`, which turns the
-handled computation into a `Result`. The module is deliberately not part of the
-prelude, so a module that declares its own `Fail` keeps compiling. -}
-
+-- Failure with an `error`. Nested `attempt`s handle only the failures raised
+-- inside them.
 effect Fail error
+    -- Fails with `error`. It never returns: it unwinds to the nearest
+    -- enclosing `attempt`, which answers `Err error`.
     abort fail : error -> value
 
-type Report error = { primary : error, suppressed : List Failure.Failure }
+-- A failure together with the failures that cleanup raised after it.
+type Report error =
+    {
+      -- The typed failure that ended the computation.
+      primary : error
+      -- Failures raised later by cleanup while the computation unwound,
+      -- as detached snapshots that `Failure` inspects.
+    , suppressed : List Failure.Failure
+    }
 
--- Capture typed primary failure and detached secondary cleanup failures.
+-- Like `attempt`, but an `Err` also reports the secondary failures that
+-- cleanup raised while the computation unwound.
+--
+-- ```fango
+-- import Fail exposing (Fail, fail)
+-- import Result
+--
+-- checked : Int ->{Fail String} Int
+-- checked n = if n > 0 then n else fail "not positive"
+--
+-- Result.mapError { report -> report.primary } (Fail.attemptReport { checked 0 }) == Err "not positive"
+-- ```
 attemptReport : (() ->{Fail error | e} value) ->{e} Result (Report error) value
 attemptReport = native
 
--- attempt runs an action that may fail, capturing the failure as `Err`.
+-- Runs `action`, answering `Ok` with its value, or `Err` with the error it
+-- failed with. Other effects pass through.
+--
+-- ```fango
+-- import Fail exposing (Fail, fail)
+-- import Result exposing (Result(..))
+--
+-- checked : Int ->{Fail String} Int
+-- checked n = if n > 0 then n else fail "not positive"
+--
+-- Fail.attempt { checked 2 } == Ok 2
+-- Fail.attempt { checked 0 } == Err "not positive"
+-- ```
 attempt : (() ->{Fail error | e} value) ->{e} Result error value
 attempt action =
     handle action() on
         fail error -> Err error
         return value -> Ok value
 
--- fromResult raises an `Err` as a failure and unwraps an `Ok`.
+-- The value of an `Ok`, failing with the error of an `Err`. It joins a
+-- `Result`-returning call to a failing computation.
+--
+-- ```fango
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- parsed : Result String Int
+-- parsed = Ok 1
+--
+-- rejected : Result String Int
+-- rejected = Err "bad"
+--
+-- Fail.attempt { Fail.fromResult parsed + 1 } == Ok 2
+-- Fail.attempt { Fail.fromResult rejected + 1 } == Err "bad"
+-- ```
 fromResult : Result error value ->{Fail error} value
 fromResult result =
     case result of

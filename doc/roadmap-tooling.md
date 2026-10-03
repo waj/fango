@@ -55,17 +55,22 @@ semantic tokens. Non-VS Code client configuration can be documented when tested.
 ## API documentation
 
 [`fango doc`](reference/commands.md#api-documentation) is implemented for the
-bundled library, and Maybe and Result are fully documented in source.
+bundled library. Basics, Bytes, Char, Dict, Fail, Failure, Iterator, List,
+Maybe, Range, Result, State, Stream, String, and Tuple are documented in
+source; `documentedModules` in the [doc command tests](../cmd/fango/doc_test.go)
+holds them complete under `--strict` and runs their examples under both
+backends. A module joins that list when it reaches no gaps.
 
-- Document the remaining bundled modules, then replace the library reference
-  topics with links to the generated reference once the website renders it.
-- Once a module passes `--strict`, hold it there in CI so coverage cannot
-  regress; the gate could take the list of migrated modules.
+- Document the remaining bundled modules: the IO layer (IO, Console,
+  Process, File, Net, Reader, Writer, Encoding, Text), HTTP, Json, Url,
+  Regex, Async, Random, Runtime, Meta, Derive, and Prelude. Then replace the
+  library reference topics with links to the generated reference once the
+  website renders it.
 - Decide how to document a user's own modules: which modules a local source
   root publishes, and how paths are reported outside the repository.
-- Doc examples are checked by the test suite only for documented modules it
-  names; a general runner over every fenced example would make the convention
-  a contract.
+- Many IO, network, and task operations have no natural `Bool` assertion.
+  Decide whether such examples stay prose, or whether the example runner
+  gains a form that only checks a block compiles.
 
 ## REPL hardening
 

@@ -1,14 +1,43 @@
 {-# no-prelude #-}
+-- A state effect and its runner.
+--
+-- A computation performing `State s` reads and replaces one value of type
+-- `s`; `run` gives it an initial value and returns the final one with the
+-- result. `Runtime.Local` offers scoped local cells instead.
 module State exposing (State(..), StateResult(..), run)
 
 import Basics exposing (..)
 
+-- Access to one value of type `s`. Each `run` has its own cell, so nested
+-- runs, even of the same `State s`, are independent.
 effect State s
+    -- The current state.
     get : () -> s
+    -- Replaces the state with `next`.
     put : s -> ()
 
-type StateResult s a = { value : a, state : s } deriving (Show)
+-- What `run` returns: the action's value and the state it left.
+type StateResult s a =
+    {
+      -- The action's result.
+      value : a
+      -- The state when the action finished.
+    , state : s
+    }
+    deriving (Show)
 
+-- Runs `action` with a fresh state cell holding `initial`, which is
+-- evaluated once, and returns its value with the final state. Other effects
+-- pass through.
+--
+-- ```fango
+-- import State
+--
+-- result = State.run 10 { State.put (State.get () * 2) }
+--
+-- result.state == 20
+-- result.value == ()
+-- ```
 run : s -> (() ->{State s | e} a) ->{e} StateResult s a
 run initial action =
     handle action() with current = initial on

@@ -1,24 +1,41 @@
 {-# no-prelude #-}
+-- Inspecting detached failures.
+--
+-- `Fail.attemptReport` reports the failures that cleanup raised while a
+-- computation unwound as `Failure` snapshots. A snapshot names the effect
+-- operation that failed and keeps its arguments, but exposes no handler or
+-- resumption. Snapshots that retain a resource cannot outlive it.
 module Failure exposing (Failure, argument, argumentCount, effectName, operationName, suppressed)
 
 import Basics exposing (..)
 import List exposing (List)
 import Maybe exposing (Maybe)
 
--- Detached failure data. The compiler supplies the opaque representation.
+-- A detached snapshot of one failure: the aborting operation and its
+-- arguments, with any failures suppressed beneath it.
 type Failure = Failure
 
+-- The name of the effect whose operation failed, such as `Fail`.
 effectName : Failure -> String
 effectName = native
 
+-- The name of the operation that failed, such as `fail`.
 operationName : Failure -> String
 operationName = native
 
+-- How many arguments the failing operation was given.
 argumentCount : Failure -> Int
 argumentCount = native
 
+-- The failures suppressed beneath this one, which keep their own.
 suppressed : Failure -> List Failure
 suppressed = native
 
+-- The argument at a zero-based index, when it has the requested type,
+-- including all its type arguments. A wrong type, an index out of range, and
+-- a type containing functions or resources answer `Nothing`. An ordinary
+-- immutable type is inspectable without exposing its constructors:
+-- annotating `payload : Maybe IO.Error` and binding
+-- `payload = Failure.argument 0 failure` reads an IO error.
 argument : Int -> Failure -> Maybe a
 argument = native

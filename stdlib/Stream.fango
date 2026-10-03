@@ -1,4 +1,13 @@
 {-# no-prelude #-}
+-- Reusable descriptions of a sequence.
+--
+-- A stream is an initial state and a step function, nothing more: building
+-- or transforming one runs nothing, and each traversal (`fold`, `forEach`,
+-- `toList`) starts again from the initial state. A step's effects happen on
+-- every traversal, and a stream over a mutable source such as a `Reader`
+-- shares that source's position rather than rewinding it. Resources are
+-- acquired and released by the scope that consumes the stream; stopping
+-- early runs no hidden cleanup.
 module Stream exposing (Stream(..), filter, fold, forEach, fromList, map, take, toList, unfold, withCursor, zip)
 
 import Basics exposing (..)
@@ -6,13 +15,42 @@ import Iterator exposing (Iterator)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
 
--- A reusable traversal description. Each step returns its next state explicitly.
--- Resource acquisition and cleanup belong to the scope consuming the stream.
-type Stream state a e = { initial : state, step : state ->{e} Maybe (a, state) }
+-- A sequence of `a` produced from a `state`, whose steps perform `e`.
+type Stream state a e =
+    {
+      -- Where every traversal starts.
+      initial : state
+      -- The next element and the state after it, or `Nothing` at the end.
+    , step : state ->{e} Maybe (a, state)
+    }
 
+-- The stream that starts at `initial` and advances with `step`.
+--
+-- ```fango
+-- import Stream
+--
+-- naturals = Stream.unfold 0 { n -> Just (n, n + 1) }
+--
+-- Stream.toList (Stream.take 3 naturals) == [0, 1, 2]
+-- ```
 unfold : state -> (state ->{e} Maybe (a, state)) -> Stream state a e
 unfold initial step = { initial = initial, step = step }
 
+-- Passes `consumer` an iterator at the stream's start, for code that needs
+-- to advance by hand.
+--
+-- ```fango
+-- import Iterator exposing (Iterator)
+-- import Stream
+--
+-- peek : Iterator (List Int) Int {} -> Maybe Int
+-- peek cursor =
+--     case Iterator.next cursor of
+--         Just (value, _) -> Just value
+--         Nothing -> Nothing
+--
+-- Stream.withCursor (Stream.fromList [7, 8]) peek == Just 7
+-- ```
 withCursor : Stream state a e -> (Iterator state a e ->{e} result) ->{e} result
 withCursor source consumer = consumer (Iterator.start source.initial source.step)
 
@@ -20,6 +58,13 @@ listStep values = case values of
     [] -> Nothing
     [value | rest] -> Just (value, rest)
 
+-- The elements of a list, in order. Its state is the rest of the list.
+--
+-- ```fango
+-- import Stream
+--
+-- Stream.toList (Stream.fromList [1, 2, 3]) == [1, 2, 3]
+-- ```
 fromList : List a -> Stream (List a) a e
 fromList values = unfold values listStep
 
@@ -27,6 +72,14 @@ mapStep action step state = case step state of
     Nothing -> Nothing
     Just (value, next) -> Just (action value, next)
 
+-- The stream of `action` applied to each element. `action` runs during
+-- traversal, once per element reached.
+--
+-- ```fango
+-- import Stream
+--
+-- Stream.toList (Stream.map { n -> n * 2 } (Stream.fromList [1, 2, 3])) == [2, 4, 6]
+-- ```
 map : (a ->{e} b) -> Stream state a e -> Stream state b e
 map action source = unfold source.initial (mapStep action source.step)
 
@@ -36,6 +89,14 @@ filterStep predicate step state = case step state of
         if predicate value then Just (value, next)
         else filterStep predicate step next
 
+-- The elements for which `predicate` answers `True`. Each step advances past
+-- rejected elements to the next accepted one.
+--
+-- ```fango
+-- import Stream
+--
+-- Stream.toList (Stream.filter { n -> n > 1 } (Stream.fromList [3, 1, 2])) == [3, 2]
+-- ```
 filter : (a ->{e} Bool) -> Stream state a e -> Stream state a e
 filter predicate source = unfold source.initial (filterStep predicate source.step)
 
@@ -45,6 +106,15 @@ takeStep step (remaining, state) =
         Nothing -> Nothing
         Just (value, next) -> Just (value, (remaining - 1, next))
 
+-- At most the first `count` elements. With `count` zero or less, the source
+-- is never stepped.
+--
+-- ```fango
+-- import Stream
+--
+-- Stream.toList (Stream.take 2 (Stream.fromList [1, 2, 3])) == [1, 2]
+-- Stream.toList (Stream.take 5 (Stream.fromList [1])) == [1]
+-- ```
 take : Int -> Stream state a e -> Stream (Int, state) a e
 take count source = unfold (count, source.initial) (takeStep source.step)
 
@@ -52,12 +122,38 @@ foldStep combine step accumulator state = case step state of
     Nothing -> accumulator
     Just (value, next) -> foldStep combine step (combine value accumulator) next
 
+-- Traverses the stream from its start, combining each element with the
+-- result so far, beginning at `initial`.
+--
+-- ```fango
+-- import Stream
+--
+-- Stream.fold { n total -> total + n } 0 (Stream.fromList [1, 2, 3]) == 6
+-- ```
 fold : (a -> b ->{e} b) -> b -> Stream state a e ->{e} b
 fold combine initial source = foldStep combine source.step initial source.initial
 
+-- Traverses the stream from its start, calling `action` on each element for
+-- its effects.
+--
+-- ```fango
+-- import State
+-- import Stream
+--
+-- total = State.run 0 { Stream.forEach { n -> State.put (State.get () + n) } (Stream.fromList [1, 2, 3]) }
+--
+-- total.state == 6
+-- ```
 forEach : (a ->{e} ()) -> Stream state a e ->{e} ()
 forEach action source = fold { value _ -> action value } () source
 
+-- Traverses the stream from its start and collects its elements in order.
+--
+-- ```fango
+-- import Stream
+--
+-- Stream.toList (Stream.fromList ["a", "b"]) == ["a", "b"]
+-- ```
 toList : Stream state a e ->{e} List a
 toList source = List.reverse (fold { value values -> [value | values] } [] source)
 
@@ -67,5 +163,14 @@ zipStep left right (leftState, rightState) = case left leftState of
         Nothing -> Nothing
         Just (b, rightNext) -> Just ((a, b), (leftNext, rightNext))
 
+-- Pairs the elements of two streams, stepping the left one before the right,
+-- and ends when either does. When the right one ends first, one unmatched
+-- left element may already have been stepped.
+--
+-- ```fango
+-- import Stream
+--
+-- Stream.toList (Stream.zip (Stream.fromList [1, 2, 3]) (Stream.fromList ["a", "b"])) == [(1, "a"), (2, "b")]
+-- ```
 zip : Stream left a e -> Stream right b e -> Stream (left, right) (a, b) e
 zip left right = unfold (left.initial, right.initial) (zipStep left.step right.step)

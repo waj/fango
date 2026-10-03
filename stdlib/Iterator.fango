@@ -1,15 +1,43 @@
 {-# no-prelude #-}
+-- Immutable cursors over a step function.
+--
+-- An iterator is a position in a sequence produced by a step function: each
+-- step either ends the sequence or yields an element and the next state.
+-- `Stream.withCursor` starts one from a stream.
 module Iterator exposing (Iterator, next, start)
 
 import Basics exposing (..)
 import Maybe exposing (Maybe(..))
 
--- An immutable position. Advancing returns a new position; aliases retain theirs.
+-- An immutable position in a sequence of `a`, whose steps perform `e`.
+-- Advancing returns a new position; the old one, and any alias of it, keeps
+-- its own.
 type Iterator state a e = { state : state, step : state ->{e} Maybe (a, state) }
 
+-- An iterator at `state`, advanced by `step`, which returns `Nothing` when
+-- the sequence ends or `Just (element, nextState)`. Nothing runs until the
+-- first `next`.
+--
+-- ```fango
+-- import Iterator exposing (Iterator)
+--
+-- countdown : Int -> Maybe (Int, Int)
+-- countdown n = if n > 0 then Just (n, n - 1) else Nothing
+--
+-- drain : Iterator Int Int {} -> List Int
+-- drain cursor =
+--     case Iterator.next cursor of
+--         Nothing -> []
+--         Just (value, rest) -> [value | drain rest]
+--
+-- drain (Iterator.start 3 countdown) == [3, 2, 1]
+-- ```
 start : state -> (state ->{e} Maybe (a, state)) -> Iterator state a e
 start state step = { state = state, step = step }
 
+-- The next element and the iterator after it, or `Nothing` at the end. The
+-- caller advances by using the returned iterator; calling `next` again on the
+-- same one repeats the same step, effects included.
 next : Iterator state a e ->{e} Maybe (a, Iterator state a e)
 next cursor = case cursor.step cursor.state of
     Nothing -> Nothing

@@ -1,9 +1,35 @@
 {-# no-prelude #-}
+-- Immutable lists and their basic traversals.
+--
+-- The prelude imports the `List` type, so annotations need no import, and
+-- grants qualified access, as in `List.map`; `import List exposing (map)`
+-- brings a function into scope unqualified. Lists are written with
+-- brackets, which need no import at all.
 module List exposing (List(..), each, filter, foldl, foldr, length, map, range, reverse)
 
 import Basics exposing (..)
 
-type List a = Nil | Cons a (List a) deriving (Eq, Ord)
+-- An immutable sequence of values of type `a`. Source code builds and matches
+-- lists with brackets: `[]`, `[1, 2, 3]`, and `[head | tail]` for the list
+-- with `head` in front of `tail`. Adding to the front and taking the head or
+-- tail are constant time, and tails are shared rather than copied.
+--
+-- Lists compare element by element, a proper prefix ordered first, and
+-- display in bracket syntax.
+--
+-- ```fango
+-- [1 | [2, 3]] == [1, 2, 3]
+-- [1, 2] < [1, 3]
+-- [1] < [1, 0]
+-- show [1, 2, 3] == "[1, 2, 3]"
+-- ```
+type List a
+    -- The empty list, written `[]`.
+    = Nil
+    -- An element in front of a list, written `[head | tail]`. Prefer the
+    -- bracket syntax to spelling the constructor out.
+    | Cons a (List a)
+    deriving (Eq, Ord)
 
 showItems : Show a => List a -> String
 showItems values =
@@ -15,9 +41,29 @@ showItems values =
 instance Show a => Show (List a)
     show values = "[" ++ showItems values
 
+-- The values from `start` through `end`, counting up by one, or `[]` when
+-- `start` is greater than `end`. It works at both `Int` and `Float`; the
+-- bounds must be finite, since construction is not guaranteed to end for
+-- `NaN` or an infinity. `Range.each` visits the same values without building
+-- a list.
+--
+-- ```fango
+-- List.range 1 4 == [1, 2, 3, 4]
+-- List.range 3 1 == []
+-- List.range 0.5 2.0 == [0.5, 1.5]
+-- ```
 range start end =
     if start > end then [] else [start | range (start + 1) end]
 
+-- Calls `action` on every element, first to last, for its effects.
+--
+-- ```fango
+-- import State
+--
+-- total = State.run 0 { List.each { n -> State.put (State.get () + n) } [1, 2, 3] }
+--
+-- total.state == 6
+-- ```
 each : (a ->{e} ()) -> List a ->{e} ()
 each action values =
     case values of
@@ -26,6 +72,13 @@ each action values =
             action value
             each action rest
 
+-- Combines the elements into one value, first to last: `combine` receives
+-- each element and the result so far, starting from `result`.
+--
+-- ```fango
+-- List.foldl { n total -> total + n } 0 [1, 2, 3] == 6
+-- List.foldl { n acc -> [n | acc] } [] [1, 2, 3] == [3, 2, 1]
+-- ```
 foldl : (a -> b ->{e} b) -> b -> List a ->{e} b
 foldl combine result values =
     case values of
@@ -39,6 +92,11 @@ reverseHelp values acc =
         [] -> acc
         [value | rest] -> reverseHelp rest [value | acc]
 
+-- The same elements in the opposite order.
+--
+-- ```fango
+-- List.reverse [1, 2, 3] == [3, 2, 1]
+-- ```
 reverse : List a -> List a
 reverse values = reverseHelp values []
 
@@ -48,6 +106,12 @@ lengthHelp values total =
         [] -> total
         [_ | rest] -> lengthHelp rest (total + 1)
 
+-- The number of elements. It traverses the whole list.
+--
+-- ```fango
+-- List.length [1, 2, 3] == 3
+-- List.length [] == 0
+-- ```
 length : List a -> Int
 length values = lengthHelp values 0
 
@@ -62,6 +126,11 @@ mapHelp fn values acc =
         [] -> acc
         [value | rest] -> mapHelp fn rest [fn value | acc]
 
+-- Applies `fn` to every element, first to last, keeping their order.
+--
+-- ```fango
+-- List.map { n -> n * 10 } [1, 2, 3] == [10, 20, 30]
+-- ```
 map : (a ->{e} b) -> List a ->{e} List b
 map fn values = reverse (mapHelp fn values [])
 
@@ -75,11 +144,23 @@ filterHelp keep values acc =
             else
                 filterHelp keep rest acc
 
+-- The elements for which `keep` answers `True`, in their original order.
+-- `keep` runs once per element, first to last.
+--
+-- ```fango
+-- List.filter { n -> n > 1 } [3, 1, 2] == [3, 2]
+-- ```
 filter : (a ->{e} Bool) -> List a ->{e} List a
 filter keep values = reverse (filterHelp keep values [])
 
--- foldr visits from the right, which is exactly foldl over the reversed list;
--- the callback still sees elements last-to-first, so its effects keep their
--- order.
+-- Combines the elements into one value, last to first: `combine` receives
+-- each element and the result of combining the elements after it. It runs
+-- in constant stack, and the callback's effects happen in that same
+-- last-to-first order.
+--
+-- ```fango
+-- List.foldr { n acc -> [n | acc] } [] [1, 2, 3] == [1, 2, 3]
+-- List.foldr { s acc -> s ++ acc } "" ["a", "b", "c"] == "abc"
+-- ```
 foldr : (a -> b ->{e} b) -> b -> List a ->{e} b
 foldr combine initial values = foldl combine initial (reverse values)

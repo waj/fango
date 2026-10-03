@@ -1,8 +1,26 @@
 {-# no-prelude #-}
+-- Numeric ranges traversed without building a list.
+--
+-- `List.range` builds the values of a range as a list; `Range.each` visits
+-- them one at a time instead.
 module Range exposing (each)
 
 import Basics exposing (..)
 
+-- Calls `action` with every value from `start` through `end` inclusive,
+-- counting up by one, in ascending order. It does nothing when `start` is
+-- greater than `end`. The callback's effects are the call's, and it works at
+-- both `Int` and `Float`; the bounds must be finite, since traversal is not
+-- guaranteed to end for `NaN` or an infinity.
+--
+-- ```fango
+-- import Range
+-- import State
+--
+-- total = State.run 0 { Range.each { n -> State.put (State.get () + n) } 1 4 }
+--
+-- total.state == 10
+-- ```
 each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()
 each action start end =
     case start > end of

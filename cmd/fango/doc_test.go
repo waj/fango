@@ -194,21 +194,34 @@ func TestDocWholeLibrary(t *testing.T) {
 	}
 }
 
+// documentedModules have been migrated to source documentation. Each stays
+// complete under --strict, and its examples keep holding.
+var documentedModules = []string{"Basics", "Bytes", "Char", "Dict", "Fail", "Failure", "Iterator", "List", "Maybe", "Range", "Result", "State", "Stream", "String", "Tuple"}
+
+func moduleArgs(names []string) []string {
+	args := []string{"--stdlib"}
+	for _, name := range names {
+		args = append(args, "--module", name)
+	}
+	return args
+}
+
 func TestDocStrict(t *testing.T) {
 	t.Parallel()
-	stdout, stderr, code := runDoc(t, "--stdlib", "--strict", "--module", "Maybe", "--module", "Result")
+	stdout, stderr, code := runDoc(t, append(moduleArgs(documentedModules), "--strict")...)
 	if code != 0 || stderr != "" {
-		t.Fatalf("documented modules: code %d, stderr %q", code, stderr)
+		t.Fatalf("documented modules: code %d, stderr:\n%s", code, stderr)
 	}
 	decodeDoc(t, stdout)
 
-	stdout, stderr, code = runDoc(t, "--stdlib", "--strict", "--module", "Tuple")
+	// Meta is not migrated yet.
+	stdout, stderr, code = runDoc(t, "--stdlib", "--strict", "--module", "Meta")
 	if code != 1 || stdout != "" {
 		t.Fatalf("code %d, stdout %q; want 1 and no JSON", code, stdout)
 	}
 	for _, want := range []string{
-		"stdlib/Tuple.fango:2: module:Tuple has no documentation",
-		"stdlib/Tuple.fango:13: constructor:Tuple.Pair has no documentation",
+		"stdlib/Meta.fango:2: module:Meta has no documentation",
+		"stdlib/Meta.fango:29: type:Meta.Code has no documentation",
 		"missing documentation comment(s)",
 	} {
 		if !strings.Contains(stderr, want) {
@@ -216,9 +229,9 @@ func TestDocStrict(t *testing.T) {
 		}
 	}
 	// Without --strict the same module is emitted with empty documentation.
-	stdout, stderr, code = runDoc(t, "--stdlib", "--module", "Tuple")
+	stdout, stderr, code = runDoc(t, "--stdlib", "--module", "Meta")
 	if code != 0 || stderr != "" || decodeDoc(t, stdout).Modules[0].Documentation != "" {
-		t.Fatalf("lenient Tuple: code %d, stderr %q", code, stderr)
+		t.Fatalf("lenient Meta: code %d, stderr %q", code, stderr)
 	}
 }
 
@@ -226,7 +239,7 @@ func TestDocStrict(t *testing.T) {
 // its own function under both backends, and every assertion line holds.
 func TestDocExamplesHold(t *testing.T) {
 	t.Parallel()
-	stdout, stderr, code := runDoc(t, "--stdlib", "--module", "Maybe", "--module", "Result")
+	stdout, stderr, code := runDoc(t, moduleArgs(documentedModules)...)
 	if code != 0 {
 		t.Fatalf("doc: %s", stderr)
 	}
@@ -295,16 +308,41 @@ func exampleProgram(texts []string) (program, expected string, assertions int) {
 		}
 	}
 	var b strings.Builder
-	var names []string
-	for line := range imports {
-		names = append(names, line)
-	}
-	slices.Sort(names)
-	for _, line := range names {
-		b.WriteString(line + "\n")
-	}
+	b.WriteString(mergeImports(imports))
 	b.WriteString("\n" + strings.Join(functions, "\n") + "\nmain = [" + strings.Join(calls, ", ") + "]\n")
 	return b.String(), "[" + strings.Join(results, ", ") + "]\n", assertions
+}
+
+// mergeImports combines the blocks' imports into one per module, exposing
+// everything any block exposed from it.
+func mergeImports(lines map[string]bool) string {
+	exposed := map[string][]string{}
+	for line := range lines {
+		module, items, _ := strings.Cut(strings.TrimPrefix(line, "import "), " exposing ")
+		module = strings.TrimSpace(module)
+		exposed[module] = append(exposed[module], nil...)
+		items = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(items), "("), ")")
+		for _, item := range strings.Split(items, ",") {
+			if item = strings.TrimSpace(item); item != "" && !slices.Contains(exposed[module], item) {
+				exposed[module] = append(exposed[module], item)
+			}
+		}
+	}
+	var modules []string
+	for module := range exposed {
+		modules = append(modules, module)
+	}
+	slices.Sort(modules)
+	var b strings.Builder
+	for _, module := range modules {
+		b.WriteString("import " + module)
+		if items := exposed[module]; len(items) > 0 {
+			slices.Sort(items)
+			b.WriteString(" exposing (" + strings.Join(items, ", ") + ")")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func fencedBlocks(text string) []string {

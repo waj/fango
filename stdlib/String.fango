@@ -1,16 +1,44 @@
 {-# no-prelude #-}
+-- Operations on text.
+--
+-- A `String` is always valid UTF-8 and is not normalized; a `Char` is one
+-- Unicode scalar value. Lengths and indices count scalars unless a name says
+-- bytes. Whitespace-aware operations (`words`, `trim`) recognize ASCII
+-- whitespace only: space, tab, line feed, carriage return, vertical tab, and
+-- form feed.
 module String exposing (Uncons(..), byteLength, concat, contains, fromChar, fromList, length, padLeft, padRight, slice, span, split, startsWith, toFloat, toInt, trim, uncons, words)
 
 import Basics exposing (..)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
 
-type Uncons = { first : Char, rest : String }
+-- A nonempty string split after its first character, as `uncons` answers.
+type Uncons =
+    {
+      -- The first character.
+      first : Char
+      -- Everything after it.
+    , rest : String
+    }
 
--- length counts Unicode scalar values.
+-- The number of Unicode scalar values.
+--
+-- ```fango
+-- import String
+--
+-- String.length "naïve" == 5
+-- String.length "" == 0
+-- ```
 length : String -> Int
 length = native
 
+-- The number of bytes in the text's UTF-8 encoding.
+--
+-- ```fango
+-- import String
+--
+-- String.byteLength "naïve" == 6
+-- ```
 byteLength : String -> Int
 byteLength = native
 
@@ -22,7 +50,17 @@ byteAt = native
 byteSlice : Int -> Int -> String -> String
 byteSlice = native
 
--- slice uses clamped half-open Unicode-scalar indices.
+-- The characters from index `start` up to but not including `end`, counted
+-- in scalars from zero. Indices are clamped to the text, and the result is
+-- `""` when `end` is not greater than `start`.
+--
+-- ```fango
+-- import String
+--
+-- String.slice 1 3 "abcd" == "bc"
+-- String.slice 2 10 "abcd" == "cd"
+-- String.slice 3 1 "abcd" == ""
+-- ```
 slice : Int -> Int -> String -> String
 slice = native
 
@@ -32,15 +70,52 @@ firstChar = native
 restString : String -> String
 restString = native
 
+-- The one-character string.
+--
+-- ```fango
+-- import String
+--
+-- String.fromChar 'a' == "a"
+-- ```
 fromChar : Char -> String
 fromChar = native
 
+-- The characters joined in list order.
+--
+-- ```fango
+-- import String
+--
+-- String.fromList ['a', 'b'] == "ab"
+-- String.fromList [] == ""
+-- ```
 fromList : List Char -> String
 fromList = native "fangort.StringFromList($1)"
 
+-- The strings joined in list order.
+--
+-- ```fango
+-- import String
+--
+-- String.concat ["ab", "", "c"] == "abc"
+-- String.concat [] == ""
+-- ```
 concat : List String -> String
 concat = native "fangort.StringConcat($1)"
 
+-- The first character and the rest of the text, or `Nothing` for `""`.
+--
+-- ```fango
+-- import String
+--
+-- firstOf : String -> Maybe Char
+-- firstOf text =
+--     case String.uncons text of
+--         Just parts -> Just parts.first
+--         Nothing -> Nothing
+--
+-- firstOf "ab" == Just 'a'
+-- firstOf "" == Nothing
+-- ```
 uncons : String -> Maybe Uncons
 uncons text =
     if text == "" then
@@ -59,9 +134,27 @@ spanHelp keep original rest =
             else
                 (byteSlice 0 (byteLength original - byteLength rest) original, rest)
 
+-- The longest prefix whose characters all satisfy `keep`, and the rest.
+-- `keep` runs on each character from the start, including the first one it
+-- rejects, and then stops; on `""` it never runs.
+--
+-- ```fango
+-- import String
+--
+-- String.span { c -> c /= ' ' } "hello world" == ("hello", " world")
+-- String.span { c -> c /= ' ' } "" == ("", "")
+-- ```
 span : (Char ->{e} Bool) -> String ->{e} (String, String)
 span keep text = spanHelp keep text text
 
+-- Whether `text` begins with `prefix`.
+--
+-- ```fango
+-- import String
+--
+-- String.startsWith "ab" "abc"
+-- String.startsWith "" "abc"
+-- ```
 startsWith : String -> String -> Bool
 startsWith prefix text = slice 0 (length prefix) text == prefix
 
@@ -104,7 +197,15 @@ wordsHelp text index size result =
     else
         wordsHelp text end size [byteSlice start end text | result]
 
--- words splits on ASCII whitespace while preserving every non-whitespace byte.
+-- The runs of non-whitespace text, in order. Whitespace between, before,
+-- and after them is dropped.
+--
+-- ```fango
+-- import String
+--
+-- String.words "  one two\tthree\n" == ["one", "two", "three"]
+-- String.words "  " == []
+-- ```
 words : String -> List String
 words text = wordsHelp text 0 (byteLength text) []
 
@@ -133,9 +234,18 @@ toIntHelp text index size negative acc =
             else
                 toIntHelp text (index + 1) size negative next
 
--- toInt parses an optional +/- sign followed by base-10 digits. Anything
--- else, an empty digit sequence, or a value outside Int's 64-bit range is
--- Nothing.
+-- The integer the whole text spells: an optional `+` or `-` sign followed by
+-- base-10 digits. Any other character, an empty digit sequence, and a value
+-- outside the signed 64-bit range answer `Nothing`.
+--
+-- ```fango
+-- import String
+--
+-- String.toInt "007" == Just 7
+-- String.toInt "-42" == Just (-42)
+-- String.toInt "4 2" == Nothing
+-- String.toInt "9223372036854775808" == Nothing
+-- ```
 toInt : String -> Maybe Int
 toInt text =
     size = byteLength text
@@ -155,6 +265,19 @@ toInt text =
 toFloatNative : String -> Float
 toFloatNative = native
 
+-- The number the whole text spells: an optional sign, decimal digits, an
+-- optional fraction with digits on both sides of `.`, and an optional
+-- decimal exponent. Whitespace, `NaN`, infinities, hexadecimal, `.5`, and
+-- `1.` answer `Nothing`, as do values that overflow, or that are nonzero and
+-- underflow to zero.
+--
+-- ```fango
+-- import String
+--
+-- String.toFloat "2.5e3" == Just 2500.0
+-- String.toFloat "-0.25" == Just (-0.25)
+-- String.toFloat ".5" == Nothing
+-- ```
 toFloat : String -> Maybe Float
 toFloat text =
     value = toFloatNative text
@@ -179,9 +302,17 @@ splitHelp separator sepSize text start index size result =
     else
         splitHelp separator sepSize text start (index + 1) size result
 
--- split cuts text at every occurrence of separator, so n occurrences give
--- n + 1 pieces and adjacent separators give empty ones. Splitting on the
--- empty separator yields the whole text unchanged.
+-- The pieces of `text` between occurrences of `separator`, so n occurrences
+-- give n + 1 pieces and adjacent separators give empty ones. An empty
+-- separator yields the whole text as one piece.
+--
+-- ```fango
+-- import String
+--
+-- String.split "," "a,,b" == ["a", "", "b"]
+-- String.split "," "" == [""]
+-- String.split "" "ab" == ["ab"]
+-- ```
 split : String -> String -> List String
 split separator text =
     sepSize = byteLength separator
@@ -200,8 +331,15 @@ containsFrom needle needleSize text index size =
     else
         containsFrom needle needleSize text (index + 1) size
 
--- contains tests whether needle occurs anywhere in text. The empty needle is
--- found in every string, at index zero.
+-- Whether `needle` occurs anywhere in `text`. The empty needle occurs in
+-- every string.
+--
+-- ```fango
+-- import String
+--
+-- String.contains "lo w" "hello world"
+-- String.contains "" ""
+-- ```
 contains : String -> String -> Bool
 contains needle text = containsFrom needle (byteLength needle) text 0 (byteLength text)
 
@@ -216,8 +354,14 @@ scanSpaceBack text index limit =
     else
         index
 
--- trim removes leading and trailing bytes from the same ASCII whitespace set
--- words splits on. An all-whitespace string trims to "".
+-- The text without leading and trailing whitespace.
+--
+-- ```fango
+-- import String
+--
+-- String.trim "  a b \n" == "a b"
+-- String.trim " \t " == ""
+-- ```
 trim : String -> String
 trim text =
     size = byteLength text
@@ -232,11 +376,26 @@ repeatHelp filler count tail =
     else
         repeatHelp filler (count - 1) (filler ++ tail)
 
--- padLeft and padRight measure width in Unicode scalars, like length, and
--- return a string that is already wide enough unchanged.
+-- The text widened to `width` characters by adding `filler` in front. Text
+-- already that wide is returned unchanged, never truncated.
+--
+-- ```fango
+-- import String
+--
+-- String.padLeft 3 '0' "7" == "007"
+-- String.padLeft 1 '0' "42" == "42"
+-- ```
 padLeft : Int -> Char -> String -> String
 padLeft width filler text = repeatHelp (fromChar filler) (width - length text) text
 
+-- The text widened to `width` characters by adding `filler` after it. Text
+-- already that wide is returned unchanged, never truncated.
+--
+-- ```fango
+-- import String
+--
+-- String.padRight 3 '.' "ab" == "ab."
+-- ```
 padRight : Int -> Char -> String -> String
 padRight width filler text =
     padding = repeatHelp (fromChar filler) (width - length text) ""

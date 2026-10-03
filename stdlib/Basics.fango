@@ -1,39 +1,101 @@
 {-# no-prelude #-}
+-- The standard classes, operators, and arithmetic helpers.
+--
+-- The prelude exposes the classes, `Type`, the operators, `show`,
+-- `display`, and `ignore`. The other methods are reached qualified, as in
+-- `Basics.negate`, and the integer helpers `modBy`, `remainderBy`, and
+-- `quotientBy` need `import Basics exposing (modBy, quotientBy, remainderBy)`.
+--
+-- The standard classes are independent of each other: in particular, `Ord`
+-- does not imply `Eq`.
 module Basics exposing (Display(..), Eq(..), Num(..), Ord(..), Show(..), Type, ignore, modBy, quotientBy, remainderBy, (++), (/), (/=), (<|), (|>))
 
--- A runtime witness of a type argument. `@T` is its only public constructor.
+-- A runtime witness of a type argument, which directs a call whose result
+-- type nothing else determines, as `Json.parse @Person text` does. The
+-- witness expression `@T` is its only public constructor.
 type Type a = Type
 
+-- Numbers: `Int` and `Float`. An integer literal is a number of any `Num`
+-- type, defaulting to `Int` when nothing else decides; a decimal literal is
+-- a `Float`.
+--
+-- ```fango
+-- 1 + 2 * 3 == 7
+-- 7 - 10 == -3
+-- 1.5 * 2.0 == 3.0
+-- ```
 class Num a
+    -- The number equal to an `Int`.
     fromInt : Int -> a
+    -- Addition.
     (+) : a -> a -> a
+    -- Subtraction.
     (-) : a -> a -> a
+    -- Multiplication.
     (*) : a -> a -> a
+    -- The number with the opposite sign.
     negate : a -> a
 
+-- Equality. Every standard scalar type has it, and derived instances
+-- compare constructors and then their fields, left to right.
 class Eq a
+    -- Whether two values are equal.
     (==) : a -> a -> Bool
 
+-- Ordering. `Int`, `Float`, `String`, and `Char` have it; derived instances
+-- order by constructor, in declaration order, and then by fields, left to
+-- right. Strings order by Unicode scalar values.
+--
+-- ```fango
+-- 2 < 3
+-- "apple" < "banana"
+-- 'a' <= 'a'
+-- ```
 class Ord a
+    -- Whether the first value is less than the second.
     (<) : a -> a -> Bool
+    -- Whether the first value is greater than the second.
     (>) : a -> a -> Bool
+    -- Whether the first value is less than or equal to the second.
     (<=) : a -> a -> Bool
+    -- Whether the first value is greater than or equal to the second.
     (>=) : a -> a -> Bool
 
 -- A value's representation: source-like text that reads back as the value,
 -- so strings are quoted. `showArg` is the representation in constructor-
 -- argument position, parenthesized where juxtaposition would misread it.
+--
+-- ```fango
+-- show "a" == "\"a\""
+-- show (Just 3) == "Just 3"
+-- Basics.showArg (Just 3) == "(Just 3)"
+-- ```
 class Show a
+    -- The representation of a value.
     show : a -> String
+    -- The representation in constructor-argument position. It defaults to
+    -- `show`.
     showArg : a -> String
     showArg value = show value
 
 -- Text for output. It differs from the representation only where a type
 -- deliberately renders as itself, as String and Char do; everything else
 -- displays its representation.
+--
+-- ```fango
+-- display "a" == "a"
+-- display 'x' == "x"
+-- display (Just "a") == "Just \"a\""
+-- ```
 class Display a
+    -- The text of a value for output.
     display : a -> String
 
+-- Joins two strings.
+--
+-- ```fango
+-- "ab" ++ "cd" == "abcd"
+-- ```
 (++) : String -> String -> String
 (++) = native "$1 + $2"
 
@@ -233,9 +295,19 @@ instance Display String
 instance Display Char
     display x = charShow x
 
+-- Whether two values differ: the negation of `(==)`.
+--
+-- ```fango
+-- 1 /= 2
+-- ```
 (/=) : Eq a => a -> a -> Bool
 (/=) x y = if x == y then False else True
 
+-- Floating-point division. Integers divide with `quotientBy`.
+--
+-- ```fango
+-- 7.0 / 2.0 == 3.5
+-- ```
 (/) : Float -> Float -> Float
 (/) = native "$1 / $2"
 
@@ -253,21 +325,43 @@ infix 4 (>)
 infix 4 (<=)
 infix 4 (>=)
 
--- Truncated remainder (Go's %): the result has the dividend's sign.
--- A zero divisor crashes the program.
+-- The remainder of dividing `x` by `divisor`, truncated: it has the
+-- dividend's sign and pairs with `quotientBy`. A zero divisor crashes the
+-- program.
+--
+-- ```fango
+-- import Basics exposing (modBy, quotientBy, remainderBy)
+--
+-- remainderBy 3 7 == 1
+-- remainderBy 3 (-4) == -1
+-- ```
 remainderBy : Int -> Int -> Int
 remainderBy = native "$2 % $1"
 
--- Floored modulus: the result has the modulus's sign.
--- A zero modulus crashes the program.
+-- `x` modulo `modulus`, floored: the result has the modulus's sign. A zero
+-- modulus crashes the program.
+--
+-- ```fango
+-- import Basics exposing (modBy, quotientBy, remainderBy)
+--
+-- modBy 3 (-4) == 2
+-- modBy (-3) 4 == -2
+-- ```
 modBy : Int -> Int -> Int
 modBy modulus x =
     r = remainderBy modulus x
     if r == 0 then r else if (r < 0) == (modulus < 0) then r else r + modulus
 
--- Truncated division (Go's /): the quotient rounds toward zero, pairing with
--- remainderBy, so quotientBy d x * d + remainderBy d x recovers x.
--- A zero divisor crashes the program.
+-- `x` divided by `divisor`, rounded toward zero, so
+-- `quotientBy d x * d + remainderBy d x` is `x`. A zero divisor crashes the
+-- program.
+--
+-- ```fango
+-- import Basics exposing (modBy, quotientBy, remainderBy)
+--
+-- quotientBy 3 7 == 2
+-- quotientBy 3 (-7) == -2
+-- ```
 quotientBy : Int -> Int -> Int
 quotientBy = native "$2 / $1"
 
@@ -275,13 +369,30 @@ quotientBy = native "$2 / $1"
 -- Unit, and a binding needs a name it would never read, so `ignore (f x)` is
 -- how a caller says it wants the effects and not the result. The argument is
 -- evaluated before the call, as every argument is.
+--
+-- ```fango
+-- ignore 42 == ()
+-- ```
 ignore : a -> ()
 ignore _ = ()
 
--- Strict application, with the callback effects on the final arrow.
+-- Passes a value to a function: `x |> f` is `f x`. It binds loosest and
+-- associates left, so a pipeline reads in the order it runs. `fn`'s effects
+-- are the call's.
+--
+-- ```fango
+-- ([1, 2, 3] |> List.map { n -> n * 2 } |> List.length) == 3
+-- ```
 (|>) : a -> (a ->{e} b) ->{e} b
 (|>) value fn = fn value
 
+-- Applies a function to a value: `f <| x` is `f x`. It binds loosest and
+-- associates right, which saves parentheses around a last argument. `fn`'s
+-- effects are the call's.
+--
+-- ```fango
+-- (List.length <| List.range 1 4) == 4
+-- ```
 (<|) : (a ->{e} b) -> a ->{e} b
 (<|) fn value = fn value
 

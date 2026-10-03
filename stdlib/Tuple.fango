@@ -1,18 +1,35 @@
 {-# no-prelude #-}
+-- Pairs and triples, and their accessors.
+--
+-- `(a, b)` and `(a, b, c)` are surface syntax for `Pair` and `Triple`, in
+-- type, expression, and pattern position alike, so a file that only uses
+-- tuple syntax needs no import; naming `Tuple`, `Pair`, or `Triple` does.
+-- Tuples compare component by component, left to right, and display the way
+-- they are written: `(1, "one")`.
+--
+-- Arity stops at three. Past three, a record with named fields reads better
+-- than positional ones.
 module Tuple exposing (Pair(..), Triple(..), first, second, swap)
 
 import Basics exposing (..)
 
--- `(a, b)` and `(a, b, c)` are surface syntax for these types, in type,
--- expression, and pattern position alike. The parser writes the constructor
--- directly, so a file using tuple syntax needs no import.
+-- Two values, written `(a, b)`.
 --
--- Arity stops at three. Each one is a separate nominal type here rather than a
--- compiler limit, so raising the cap is four more lines; past three, a record
--- with named fields reads better than positional ones.
-type Pair a b = Pair a b deriving (Eq, Ord)
+-- ```fango
+-- (1, "one") == (1, "one")
+-- (1, "z") < (2, "a")
+-- show (1, 'x') == "(1, 'x')"
+-- ```
+type Pair a b
+    -- The pair of its components; `Pair a b` is `(a, b)`.
+    = Pair a b
+    deriving (Eq, Ord)
 
-type Triple a b c = Triple a b c deriving (Eq, Ord)
+-- Three values, written `(a, b, c)`.
+type Triple a b c
+    -- The triple of its components; `Triple a b c` is `(a, b, c)`.
+    = Triple a b c
+    deriving (Eq, Ord)
 
 -- Show is handwritten so a tuple displays the way it is written, `(1, 2)`,
 -- rather than the derived structural form `Pair 1 2`. List does the same for
@@ -27,16 +44,37 @@ instance (Show a, Show b, Show c) => Show (Triple a b c)
         case triple of
             Triple a b c -> "(" ++ show a ++ ", " ++ show b ++ ", " ++ show c ++ ")"
 
+-- The first component of a pair.
+--
+-- ```fango
+-- import Tuple
+--
+-- Tuple.first (1, "one") == 1
+-- ```
 first : Pair a b -> a
 first pair =
     case pair of
         Pair a _ -> a
 
+-- The second component of a pair.
+--
+-- ```fango
+-- import Tuple
+--
+-- Tuple.second (1, "one") == "one"
+-- ```
 second : Pair a b -> b
 second pair =
     case pair of
         Pair _ b -> b
 
+-- The pair with its components exchanged.
+--
+-- ```fango
+-- import Tuple
+--
+-- Tuple.swap (1, "one") == ("one", 1)
+-- ```
 swap : Pair a b -> Pair b a
 swap pair =
     case pair of

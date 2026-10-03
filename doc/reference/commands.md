@@ -397,10 +397,10 @@ type Maybe a
     | Just a
 ```
 
-Examples in [Maybe](../../stdlib/Maybe.fango) and
-[Result](../../stdlib/Result.fango) are fenced `fango` blocks. Each line not
-binding a name is a `Bool` expression that holds, and a block brings its own
-imports. The test suite runs them under both backends.
+Library examples, as in [Maybe](../../stdlib/Maybe.fango), are fenced
+`fango` blocks. A block brings its own imports, may bind helper names, and
+every other top-level line is a `Bool` expression that holds. The test suite
+runs the examples of every documented library module under both backends.
 
 ### Output
 

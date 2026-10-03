@@ -1,4 +1,11 @@
 {-# no-prelude #-}
+-- Immutable byte sequences.
+--
+-- `String` is valid UTF-8 by contract, so a response body, an image, or a
+-- framed record has no `String` to live in; `Bytes` holds any bytes, and
+-- indexes and slices by byte rather than by character. It also declares
+-- `Source` and `Sink`, the leaves that buffered readers and writers are
+-- built on.
 module Bytes exposing (Bytes, Sink(..), Source(..), append, byteAt, concat, empty, fromList, fromString, indexOf, indexOfFrom, length, slice, startsWith, toList, toString, toStringLossy)
 
 import Basics exposing (..)
@@ -17,11 +24,36 @@ constructor is the empty sequence and stays private; everything else is built
 from `fromString`, `fromList`, and the combinators below. Nothing writes to a
 value's storage after it is built, which is what lets `slice` share it. -}
 
+-- An immutable sequence of bytes. Values come from `empty`, `fromString`,
+-- `fromList`, and the operations here; nothing ever writes into one after it
+-- is built, so slices share storage safely.
+--
+-- Bytes compare lexicographically by unsigned value, a prefix ordering before
+-- what extends it. `show` gives a quoted form in which printable ASCII passes
+-- through, `\\`, `\"`, `\n`, `\t`, and `\r` are escapes, and every other byte
+-- is `\xNN` in uppercase hex. It is a display form: there is no `Bytes`
+-- literal.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.fromString "ab" < Bytes.fromString "abc"
+-- Bytes.fromList [255] > Bytes.fromList [1, 2]
+-- show (Bytes.fromList [104, 105, 10, 200]) == "\"hi\\n\\xC8\""
+-- ```
 type Bytes = Bytes
 
+-- The empty sequence.
 empty : Bytes
 empty = Bytes
 
+-- The number of bytes.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.length (Bytes.fromString "naïve") == 6
+-- ```
 length : Bytes -> Int
 length = native "fangort.BytesLength($1)"
 
@@ -29,19 +61,52 @@ length = native "fangort.BytesLength($1)"
 byteAtRaw : Int -> Bytes -> Int
 byteAtRaw = native "fangort.BytesByteAt($1, $2)"
 
+-- The byte at a zero-based index, as an `Int` from 0 to 255, or `Nothing`
+-- when the index is out of range.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.byteAt 0 (Bytes.fromString "A") == Just 65
+-- Bytes.byteAt 1 (Bytes.fromString "A") == Nothing
+-- ```
 byteAt : Int -> Bytes -> Maybe Int
 byteAt index bytes =
     code = byteAtRaw index bytes
     if code < 0 then Nothing else Just code
 
--- slice clamps half-open byte indices and shares storage.
+-- The bytes from index `start` up to but not including `end`. Indices are
+-- clamped to the sequence, and the result is empty when `end` is not greater
+-- than `start`. A slice shares the storage it was cut from, so it costs the
+-- same however large the original is.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.slice 1 3 (Bytes.fromString "abcd") == Bytes.fromString "bc"
+-- Bytes.slice (-5) 2 (Bytes.fromString "abcd") == Bytes.fromString "ab"
+-- Bytes.slice 3 1 (Bytes.fromString "abcd") == Bytes.empty
+-- ```
 slice : Int -> Int -> Bytes -> Bytes
 slice = native "fangort.BytesSlice($1, $2, $3)"
 
+-- The first sequence followed by the second.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.append (Bytes.fromString "ab") (Bytes.fromString "c") == Bytes.fromString "abc"
+-- ```
 append : Bytes -> Bytes -> Bytes
 append = native "fangort.BytesAppend($1, $2)"
 
--- concat sizes the result once, so joining a list allocates once.
+-- The sequences joined in list order, allocated once for the whole result.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.concat [Bytes.fromString "a", Bytes.empty, Bytes.fromString "bc"] == Bytes.fromString "abc"
+-- ```
 concat : List Bytes -> Bytes
 concat = native "fangort.BytesConcat($1)"
 
@@ -55,28 +120,73 @@ indexOfFromRaw = native "fangort.BytesIndexOfFrom($1, $2, $3)"
 found : Int -> Maybe Int
 found at = if at < 0 then Nothing else Just at
 
--- indexOf answers the first index at which needle occurs in bytes. The scan
--- runs inside the native, so searching a block never crosses the boundary
--- once per byte.
+-- The scan runs inside the native, so searching a block never crosses the
+-- boundary once per byte.
+
+-- The first index at which `needle` occurs, or `Nothing`. The empty needle
+-- occurs at index 0 of every sequence.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.indexOf (Bytes.fromString "c") (Bytes.fromString "abcabc") == Just 2
+-- Bytes.indexOf (Bytes.fromString "x") (Bytes.fromString "abc") == Nothing
+-- Bytes.indexOf Bytes.empty Bytes.empty == Just 0
+-- ```
 indexOf : Bytes -> Bytes -> Maybe Int
 indexOf needle bytes = found (indexOfRaw needle bytes)
 
--- indexOfFrom resumes the scan at a clamped start, which keeps a repeated
--- search over a growing window linear in the window.
+-- `indexOf` beginning at a clamped index `start`. Resuming where an earlier
+-- search stopped keeps repeated searches over a growing buffer linear in its
+-- size.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.indexOfFrom 3 (Bytes.fromString "c") (Bytes.fromString "abcabc") == Just 5
+-- ```
 indexOfFrom : Int -> Bytes -> Bytes -> Maybe Int
 indexOfFrom start needle bytes = found (indexOfFromRaw start needle bytes)
 
+-- Whether `bytes` begins with `prefix`. The empty prefix begins everything.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.startsWith (Bytes.fromString "ab") (Bytes.fromString "abc")
+-- ```
 startsWith : Bytes -> Bytes -> Bool
 startsWith = native "fangort.BytesStartsWith($1, $2)"
 
--- fromList truncates each element to its low eight bits. It is for fixtures
--- and binary framing, not for bulk data.
+-- The bytes of a list of integers, each truncated to its low eight bits. It
+-- is meant for fixtures and binary framing rather than bulk data, since a
+-- `List Int` takes eight bytes per byte.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.toList (Bytes.fromList [256, -1, 65]) == [0, 255, 65]
+-- ```
 fromList : List Int -> Bytes
 fromList = native "fangort.BytesFromList($1)"
 
+-- The bytes as integers from 0 to 255, in order.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.toList (Bytes.fromString "hi") == [104, 105]
+-- ```
 toList : Bytes -> List Int
 toList = native "fangort.BytesToList($1)"
 
+-- The UTF-8 encoding of the text.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.toList (Bytes.fromString "é") == [195, 169]
+-- ```
 fromString : String -> Bytes
 fromString = native "fangort.BytesFromString($1)"
 
@@ -87,14 +197,27 @@ isUtf8 = native "fangort.BytesIsUtf8($1)"
 unvalidatedString : Bytes -> String
 unvalidatedString = native "fangort.BytesUnvalidatedString($1)"
 
--- toString answers Nothing for bytes that are not text, so nothing silently
--- rewrites a body that is not UTF-8.
+-- The text these bytes encode, or `Nothing` when they are not valid UTF-8,
+-- so input that is not text is never silently rewritten.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.toString (Bytes.fromList [104, 105]) == Just "hi"
+-- Bytes.toString (Bytes.fromList [255]) == Nothing
+-- ```
 toString : Bytes -> Maybe String
 toString bytes =
     if isUtf8 bytes then Just (unvalidatedString bytes) else Nothing
 
--- toStringLossy substitutes U+FFFD for each malformed byte. It is the
--- reporting path, not a conversion.
+-- The text these bytes encode, with U+FFFD in place of each malformed byte.
+-- It is meant for reporting what was received, not for conversion.
+--
+-- ```fango
+-- import Bytes
+--
+-- Bytes.toStringLossy (Bytes.fromList [104, 255, 105]) == "h�i"
+-- ```
 toStringLossy : Bytes -> String
 toStringLossy = native "fangort.BytesToStringLossy($1)"
 
@@ -146,6 +269,21 @@ and writes all of it before returning. Neither carries a close: closing belongs
 to the scope owning the file or socket, and a leaf outliving that scope is
 already rejected because it captures the handle. -}
 
-type Source e = { pull : () ->{e} Maybe Bytes }
+-- A producer of byte chunks whose reads perform `e`. `Reader` buffers one.
+-- It has no close: the scope that owns the underlying file or socket closes
+-- it.
+type Source e =
+    {
+      -- The next available chunk, which may be short, or `Nothing` at the end
+      -- of input. An empty chunk is not the end of input.
+      pull : () ->{e} Maybe Bytes
+    }
 
-type Sink e = { write : Bytes ->{e} () }
+-- A consumer of byte chunks whose writes perform `e`. `Writer` buffers one.
+-- It has no close: the scope that owns the underlying file or socket closes
+-- it.
+type Sink e =
+    {
+      -- Writes the whole chunk before returning.
+      write : Bytes ->{e} ()
+    }

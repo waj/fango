@@ -1,4 +1,15 @@
 {-# no-prelude #-}
+-- Immutable dictionaries ordered by key.
+--
+-- A `Dict k v` maps keys of any `Ord` type to values. Operations that find a
+-- key need `Ord k`; the rest never compare keys and take no constraint.
+-- Traversals visit keys in ascending order, except `foldr`, which descends,
+-- and callbacks run in that order.
+--
+-- `size` and `isEmpty` are constant time; `get`, `member`, `insert`,
+-- `remove`, and `update` are logarithmic; `keys`, `values`, `toList`, the
+-- folds, and `map` are linear; `fromList` is `n log n`. An update shares every
+-- node off its search path rather than copying the dictionary.
 module Dict exposing
     ( Dict
     , empty, foldl, foldr, fromList, get, insert, isEmpty, keys, map, member
@@ -23,6 +34,21 @@ import Tuple exposing (Pair(..), Triple(..))
 --      "equivalent" means neither < holds in either direction; and
 --   3. either size left + size right <= 1, or neither subtree exceeds delta
 --      times the other.
+
+-- A dictionary from keys `k` to values `v`. Its representation is private.
+-- Dictionaries are equal when they hold the same entries, whatever order
+-- they were built in, and display their entries in key order.
+--
+-- ```fango
+-- import Dict exposing (Dict)
+--
+-- none : Dict Int String
+-- none = Dict.empty
+--
+-- Dict.fromList [(2, "b"), (1, "a")] == Dict.fromList [(1, "a"), (2, "b")]
+-- show (Dict.fromList [(2, "b"), (1, "a")]) == "Dict [1 = \"a\", 2 = \"b\"]"
+-- show none == "Dict []"
+-- ```
 type Dict k v = Tip | Bin Int k v (Dict k v) (Dict k v)
 
 -- delta bounds the size ratio between siblings; ratio picks a single rotation
@@ -34,21 +60,32 @@ delta = 3
 ratio : Int
 ratio = 2
 
+-- The number of entries, in constant time.
 size : Dict k v -> Int
 size dict =
     case dict of
         Tip -> 0
         Bin count _ _ _ _ -> count
 
+-- Whether the dictionary has no entries.
 isEmpty : Dict k v -> Bool
 isEmpty dict =
     case dict of
         Tip -> True
         Bin _ _ _ _ _ -> False
 
+-- The dictionary with no entries.
 empty : Dict k v
 empty = Tip
 
+-- The dictionary with one entry.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.singleton 1 "one" == Dict.insert 1 "one" Dict.empty
+-- Dict.size (Dict.singleton 1 "one") == 1
+-- ```
 singleton : k -> v -> Dict k v
 singleton key value = Bin 1 key value Tip Tip
 
@@ -102,6 +139,15 @@ balance key value left right =
         Bin (sizeLeft + sizeRight + 1) key value left right
 
 -- Ord has no compare, so navigation costs two comparisons per node.
+
+-- The value stored under `key`, or `Nothing` when it is absent.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.get 1 (Dict.fromList [(1, "one")]) == Just "one"
+-- Dict.get 2 (Dict.fromList [(1, "one")]) == Nothing
+-- ```
 get : Ord k => k -> Dict k v -> Maybe v
 get key dict =
     case dict of
@@ -116,6 +162,14 @@ get key dict =
 
 -- member is written out rather than as a get comparison, so a lookup that
 -- only asks whether a key is present allocates no Maybe.
+
+-- Whether `key` has an entry.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.member 1 (Dict.fromList [(1, "one")])
+-- ```
 member : Ord k => k -> Dict k v -> Bool
 member key dict =
     case dict of
@@ -132,6 +186,16 @@ member key dict =
 -- That is one rule for insert, update, and fromList alike; update has no new
 -- key to substitute, so replacing here would need a second rule. It is
 -- observable only through an Ord that calls distinguishable keys equivalent.
+
+-- The dictionary with `value` stored under `key`, replacing any value it had.
+-- A key already present keeps its original key; only an `Ord` that calls
+-- distinguishable keys equivalent can tell.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.get 1 (Dict.insert 1 "uno" (Dict.fromList [(1, "one")])) == Just "uno"
+-- ```
 insert : Ord k => k -> v -> Dict k v -> Dict k v
 insert key value dict =
     case dict of
@@ -183,6 +247,13 @@ glue left right =
                         case minViewSure rightKey rightValue rightLeft rightRight of
                             (foundKey, foundValue, rest) -> balance foundKey foundValue left rest
 
+-- The dictionary without an entry for `key`; unchanged when it has none.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.remove 1 (Dict.fromList [(1, "one"), (2, "two")]) == Dict.fromList [(2, "two")]
+-- ```
 remove : Ord k => k -> Dict k v -> Dict k v
 remove key dict =
     case dict of
@@ -199,6 +270,21 @@ remove key dict =
 -- curried callback costs one allocation per call rather than one per level.
 -- Returning Nothing for a present key removes it; for an absent key it leaves
 -- the dictionary alone.
+
+-- Changes the entry for `key` through `alter`, which receives its current
+-- value, or `Nothing`, and answers the new one: `Nothing` removes a present
+-- key and leaves an absent one absent. `alter` runs exactly once.
+--
+-- ```fango
+-- import Dict
+--
+-- increment : Maybe Int -> Maybe Int
+-- increment count = Just (Maybe.withDefault 0 count + 1)
+--
+-- Dict.update "a" increment (Dict.fromList [("a", 1)]) == Dict.fromList [("a", 2)]
+-- Dict.update "b" increment (Dict.fromList [("a", 1)]) == Dict.fromList [("a", 1), ("b", 1)]
+-- Dict.update "a" { _ -> Nothing } (Dict.fromList [("a", 1)]) == Dict.empty
+-- ```
 update : Ord k => k -> (Maybe v ->{e} Maybe v) -> Dict k v ->{e} Dict k v
 update key alter dict =
     case dict of
@@ -225,6 +311,13 @@ keysHelp dict acc =
         Tip -> acc
         Bin _ key _ left right -> keysHelp left [key | keysHelp right acc]
 
+-- The keys in ascending order.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.keys (Dict.fromList [(2, "b"), (1, "a")]) == [1, 2]
+-- ```
 keys : Dict k v -> List k
 keys dict = keysHelp dict []
 
@@ -234,6 +327,13 @@ valuesHelp dict acc =
         Tip -> acc
         Bin _ _ value left right -> valuesHelp left [value | valuesHelp right acc]
 
+-- The values in ascending order of their keys.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.values (Dict.fromList [(2, "b"), (1, "a")]) == ["a", "b"]
+-- ```
 values : Dict k v -> List v
 values dict = valuesHelp dict []
 
@@ -243,6 +343,13 @@ toListHelp dict acc =
         Tip -> acc
         Bin _ key value left right -> toListHelp left [(key, value) | toListHelp right acc]
 
+-- The entries in ascending key order.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.toList (Dict.fromList [(2, "b"), (1, "a")]) == [(1, "a"), (2, "b")]
+-- ```
 toList : Dict k v -> List (k, v)
 toList dict = toListHelp dict []
 
@@ -254,7 +361,14 @@ fromListHelp entries dict =
             case entry of
                 (key, value) -> fromListHelp rest (insert key value dict)
 
--- Later entries win the value; the first-inserted key is the one kept.
+-- The dictionary of the given entries. When a key repeats, the later entry's
+-- value wins and the first entry's key is kept.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.fromList [(1, "one"), (1, "uno")] == Dict.fromList [(1, "uno")]
+-- ```
 fromList : Ord k => List (k, v) -> Dict k v
 fromList entries = fromListHelp entries Tip
 
@@ -264,6 +378,15 @@ fromList entries = fromListHelp entries Tip
 --
 -- Effects are propagated, so visit order is part of the contract: foldl and
 -- map ascend, foldr descends.
+
+-- Combines the entries into one value in ascending key order: `combine`
+-- receives each `(key, value)` pair and the result so far.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.foldl { (k, v) acc -> acc ++ k ++ v } "" (Dict.fromList [("b", "2"), ("a", "1")]) == "a1b2"
+-- ```
 foldl : ((k, v) -> b ->{e} b) -> b -> Dict k v ->{e} b
 foldl combine initial dict =
     case dict of
@@ -273,6 +396,14 @@ foldl combine initial dict =
             afterNode = combine (key, value) afterLeft
             foldl combine afterNode right
 
+-- Combines the entries into one value in descending key order: `combine`
+-- receives each `(key, value)` pair and the result so far.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.foldr { (k, _) acc -> [k | acc] } [] (Dict.fromList [(2, "b"), (1, "a")]) == [1, 2]
+-- ```
 foldr : ((k, v) -> b ->{e} b) -> b -> Dict k v ->{e} b
 foldr combine initial dict =
     case dict of
@@ -286,6 +417,15 @@ foldr combine initial dict =
 -- reuses each cached size and never calls balance, and takes no Ord. The
 -- three bindings force ascending callback order rather than relying on
 -- constructor argument evaluation order.
+
+-- Replaces every value with `transform` of its `(key, value)` pair, keeping
+-- the keys. `transform` runs in ascending key order.
+--
+-- ```fango
+-- import Dict
+--
+-- Dict.map { (k, v) -> k * v } (Dict.fromList [(2, 10), (3, 10)]) == Dict.fromList [(2, 20), (3, 30)]
+-- ```
 map : ((k, a) ->{e} b) -> Dict k a ->{e} Dict k b
 map transform dict =
     case dict of
