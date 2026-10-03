@@ -2,6 +2,13 @@ module Main exposing (main)
 
 import Applied exposing (Put(..), both)
 
-main = if handle (handle both() of
-    put text -> resume ()) of
-    put flag -> resume () then 42 else 0
+-- Each handler names the application it takes; label order never decides.
+dropStrings : (() ->{Put String | e} a) ->{e} a
+dropStrings action = handle action() of
+    put _ -> resume ()
+
+dropBools : (() ->{Put Bool | e} a) ->{e} a
+dropBools action = handle action() of
+    put _ -> resume ()
+
+main = if dropBools { dropStrings { both() } } then 42 else 0

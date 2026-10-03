@@ -103,6 +103,10 @@ type mismatch struct {
 	a, b   types.Type
 	note   string // extra context, e.g. "a Number literal cannot be String"
 	effect bool
+	// ambiguous marks an application whose arguments are still unknown and
+	// that could be any of several applications of its effect. Solve retries
+	// it once other constraints have run, and reports it if still ambiguous.
+	ambiguous *types.EffLabel
 }
 
 // unify makes a and b equal under sub, binding metavariables in place.
@@ -254,6 +258,12 @@ func occurs(v *types.TVar, t types.Type, sub Subst) bool {
 
 func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
 	a, b = sub.applyRow(a), sub.applyRow(b)
+	if m := ambiguousApplication(a, b); m != nil {
+		return m
+	}
+	if m := ambiguousApplication(b, a); m != nil {
+		return m
+	}
 	// A fully resolved application has its own identity. An unresolved
 	// application still overlaps another occurrence of its nominal effect:
 	// unify its arguments before deciding whether it is the same label.
@@ -340,6 +350,39 @@ func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply)
 	}
 }
 
+// ambiguousApplication finds an application in a whose arguments are unknown
+// and that could stand for more than one application of its effect in b,
+// counting only those b applications a does not already name exactly.
+// Choosing one would make the order of labels decide which handler runs.
+func ambiguousApplication(a, b types.Row) *mismatch {
+	for i := range a.Labels {
+		label := a.Labels[i]
+		if !unresolvedEffectArgs(label.Args) {
+			continue
+		}
+		candidates := 0
+		for _, other := range b.Labels {
+			if other.Unique != label.Unique || rowHasEqualLabel(a, other) {
+				continue
+			}
+			candidates++
+		}
+		if candidates > 1 {
+			return &mismatch{a: a, b: b, effect: true, ambiguous: &a.Labels[i]}
+		}
+	}
+	return nil
+}
+
+func rowHasEqualLabel(r types.Row, label types.EffLabel) bool {
+	for _, l := range r.Labels {
+		if equalEffLabel(l, label) {
+			return true
+		}
+	}
+	return false
+}
+
 func unresolvedEffectArgs(args []types.Type) bool {
 	for _, arg := range args {
 		if containsEffectVariable(arg) {
@@ -378,6 +421,12 @@ func containsEffectVariable(t types.Type) bool {
 // only its explicit labels.
 func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
 	subrow, superrow = sub.applyRow(subrow), sub.applyRow(superrow)
+	if m := ambiguousApplication(superrow, subrow); m != nil {
+		return m
+	}
+	if m := ambiguousApplication(subrow, superrow); m != nil {
+		return m
+	}
 	if left, ok := subrow.Tail.(*types.TVar); ok {
 		if right, ok := superrow.Tail.(*types.TVar); ok && left.ID == right.ID {
 			for _, row := range []types.Row{subrow, superrow} {

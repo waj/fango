@@ -63,10 +63,28 @@ The same application cannot appear twice. When an argument still contains a
 type variable, inference treats occurrences of the same nominal effect as
 potentially overlapping and unifies their arguments. An incompatible overlap,
 such as `{Put a, Put Bool}` for an unknown `a`, reports `EFFECT MISMATCH`.
-Operation calls still use their argument and result types to select an
-application. If these types leave an effect argument unknown while multiple
-applications are available, the checker reports `AMBIGUOUS EFFECT APPLICATION`.
-No additional source syntax is required.
+
+The order of labels never chooses an application. An application whose
+argument is still unknown, met by a row holding several applications of its
+effect, waits until the rest of the declaration determines the argument.
+Operation calls use their argument and result types; a handler or a
+polymorphic function such as `Fail.attempt` uses whatever fixes its effect
+argument, typically a pattern on the payload or a helper whose callback
+parameter names one application:
+
+```fango
+printStrings : (() ->{Put String, IO | e} a) ->{IO | e} a
+printStrings action = handle action() of
+    put text -> print text; resume ()
+```
+
+`printStrings { both() }` handles `Put String` and leaves `Put Bool` to an
+outer handler. If nothing determines the argument, an operation call reports
+`AMBIGUOUS EFFECT APPLICATION` and any other use reports `AMBIGUOUS EFFECT`;
+nesting two `handle` expressions whose clauses ignore their payload types is
+rejected this way. A function's result annotation is checked after its body,
+so it does not determine the argument. No additional source syntax is
+required.
 
 A body may call arrows that carry the bare tail alongside arrows that add
 labels to it, in either order:

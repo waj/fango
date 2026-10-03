@@ -24,9 +24,11 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	type pending struct {
 		at int
 		c  Constraint
+		m  *mismatch
 	}
 	var failures []failure
 	var vs map[int][]polarity
+	var ambiguous []pending
 	solve := func(at int, c Constraint) bool {
 		var m *mismatch
 		if c.Include {
@@ -39,6 +41,10 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			}
 		} else {
 			m = unify(c.Left, c.Right, sub, bi, sup)
+		}
+		if m != nil && m.ambiguous != nil {
+			ambiguous = append(ambiguous, pending{at: at, c: c, m: m})
+			return true
 		}
 		if m != nil {
 			failures = append(failures, failure{at: at, err: mismatchError(c, m, sub)})
@@ -191,6 +197,22 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			failures = append(failures, failure{at: p.at, err: err})
 		}
 	}
+	// An ambiguous application waits for other constraints to determine its
+	// arguments. Each pass may settle another, so retry while there is
+	// progress; what remains is reported rather than chosen by label order.
+	for len(ambiguous) > 0 {
+		retry := ambiguous
+		ambiguous = nil
+		for _, p := range retry {
+			solve(p.at, p.c)
+		}
+		if len(ambiguous) == len(retry) {
+			break
+		}
+	}
+	for _, p := range ambiguous {
+		failures = append(failures, failure{at: p.at, err: ambiguousError(p.c, p.m, sub)})
+	}
 	// Row-tail expansion can expose another application of the same effect.
 	// Revisit each solved row so unresolved overlaps unify their arguments;
 	// fully resolved applications with different arguments remain distinct.
@@ -202,7 +224,11 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 		}
 		for _, side := range []types.Type{c.Left, c.Right} {
 			if m := reconcileRows(side, sub, bi, sup); m != nil {
-				failures = append(failures, failure{at: i, err: mismatchError(c, m, sub)})
+				if m.ambiguous != nil {
+					failures = append(failures, failure{at: i, err: ambiguousError(c, m, sub)})
+				} else {
+					failures = append(failures, failure{at: i, err: mismatchError(c, m, sub)})
+				}
 				break
 			}
 		}
@@ -255,6 +281,16 @@ func splitRigidTail(c Constraint, sub Subst) (labels []types.EffLabel, tail *typ
 		return nil, nil, false
 	}
 	return subrow.Labels, rigid, true
+}
+
+// ambiguousError reports an effect application that could mean more than one
+// application of its effect in the same row.
+func ambiguousError(c Constraint, m *mismatch, sub Subst) diag.Error {
+	p := types.NewPrinter()
+	name := types.SurfaceName(m.ambiguous.Name)
+	return diag.Errorf(c.Span, "AMBIGUOUS EFFECT",
+		"`%s` appears more than once in this row, with different arguments:\n\n    %s\n\nand nothing here says which one is meant. Name it in a type the body can see:\na pattern on its payload, or a helper whose callback parameter lists only\nthat application, such as\n\n    (() ->{%s T | e} a) ->{e} Result T a",
+		name, p.Type(sub.Apply(m.b)), name)
 }
 
 func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
@@ -370,6 +406,17 @@ func reconcileRows(t types.Type, sub Subst, bi *types.Builtins, sup *types.Suppl
 		}
 	case types.Row:
 		for i, label := range t.Labels {
+			if unresolvedEffectArgs(label.Args) {
+				same := 0
+				for j, other := range t.Labels {
+					if j != i && other.Unique == label.Unique {
+						same++
+					}
+				}
+				if same > 1 {
+					return &mismatch{a: t, b: t, effect: true, ambiguous: &t.Labels[i]}
+				}
+			}
 			for _, first := range t.Labels[:i] {
 				if first.Unique != label.Unique || (!unresolvedEffectArgs(first.Args) && !unresolvedEffectArgs(label.Args)) {
 					continue

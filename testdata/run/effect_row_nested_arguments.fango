@@ -8,6 +8,13 @@ both() =
     put (Key True)
     put (Key "answer")
 
-main() = handle (handle both() of
-    put (Key text) -> print text; resume ()) of
+-- Each handler names the application it takes; label order never decides.
+printStrings : (() ->{Put (Key String), IO | e} a) ->{IO | e} a
+printStrings action = handle action() of
+    put (Key text) -> print text; resume ()
+
+printBools : (() ->{Put (Key Bool), IO | e} a) ->{IO | e} a
+printBools action = handle action() of
     put (Key flag) -> print flag; resume ()
+
+main() = printBools { printStrings { both() } }

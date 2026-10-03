@@ -94,12 +94,15 @@ explains the error (an API's error message, for example).
 Effect rows carry both failures as separate effects:
 `{Http, Fail Client.Error, Fail Client.Unexpected}`. A script that only needs
 "it failed" handles both; code that retries transport errors but reports bad
-statuses can tell them apart without matching half a union. A row can already
-hold two `Fail` effects with different payloads. In a quick check, nested
-`attempt` calls separated `Fail A` from `Fail B`, and the inner one caught the
-first label in the row. HC2 must confirm that a caller can catch either one
-without awkward annotations. If it can't, that is a language problem to fix,
-not one the client API should work around.
+statuses can tell them apart without matching half a union. The checker never
+picks one of the two by label order: a handler must
+[say which application it takes](reference/effects.md#row-inclusion-and-callback-compatibility). The client
+provides one helper per level, whose callback parameter names it:
+
+```fango
+attempt : (() ->{Fail Error | e} a) ->{e} Result Error a
+attemptUnexpected : (() ->{Fail Unexpected | e} a) ->{e} Result Unexpected a
+```
 
 ## Client types
 
@@ -264,6 +267,8 @@ getBytes : String ->{Http, Fail Error, Fail Unexpected} Bytes
 getJson : Decode a => Type a -> String ->{Http, Fail Error, Fail Unexpected} a
 postJson : (Encode b, Decode a) => Type a -> String -> b ->{Http, Fail Error, Fail Unexpected} a
 expectSuccess : Reply ->{Fail Unexpected} Reply
+attempt : (() ->{Fail Error | e} a) ->{e} Result Error a
+attemptUnexpected : (() ->{Fail Unexpected | e} a) ->{e} Result Unexpected a
 
 url : String ->{Fail Error} Url
 get : Url -> Request e
@@ -623,9 +628,8 @@ DONE. See the [URL reference](reference/library-url.md).
 
 ### HC2 Client core over plain HTTP
 
-Prototype the `send` row first, then check two language questions before
-building on them: whether a caller can catch either of two `Fail` effects,
-and whether the `Http` effect name clashes with the `Http` qualifier.
+Prototype the `send` row first. An effect named `Http` does not clash with the
+`Http` module qualifier.
 
 This milestone covers:
 

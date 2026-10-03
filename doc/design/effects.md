@@ -16,7 +16,9 @@ Rows contain distinct applied effect labels and an optional tail. Two fully
 resolved applications of one nominal effect may coexist. Occurrences whose
 arguments still contain type variables overlap until inference resolves them;
 the solver unifies their arguments and reconciles rows after the group is
-solved. Core keys lexical evidence by the full application. Residual rows and
+solved. An unresolved occurrence that could match several applications is
+never matched by label order: the solver retries its constraint after the
+others and reports it if it is still ambiguous. Core keys lexical evidence by the full application. Residual rows and
 inherited handler evidence carry type descriptors so runtime projection makes
 the same distinction across module boundaries. Source-defined
 resumptive operations may quantify unconstrained variables independently at
