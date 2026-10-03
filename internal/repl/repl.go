@@ -22,6 +22,7 @@ import (
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/compilecache"
+	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/elaborate"
@@ -76,6 +77,7 @@ type Session struct {
 	evalExec   atomic.Pointer[nativehost.Executor]
 	interrupts <-chan struct{}
 	color      bool
+	loading    *importProgress
 
 	// levels are the handler levels installed with `use`, outermost first;
 	// undo records what their names replaced.
@@ -114,6 +116,15 @@ type Session struct {
 }
 
 func NewSessionWith(out io.Writer, opts Options) *Session {
+	var loading *importProgress
+	observe := opts.Observe
+	if opts.Interactive {
+		loading = &importProgress{out: out}
+		observe = func(event compileevent.Event) {
+			loading.observe(event)
+			opts.Observe.Report(event)
+		}
+	}
 	root := opts.Root
 	if root == "" {
 		root = "."
@@ -126,13 +137,13 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
 	stage := staging.Install(ck)
-	stage.Observe(staging.Observer(opts.Observe))
+	stage.Observe(staging.Observer(observe))
 	// The prompt resolver canonicalizes every input, so the checker holds
 	// the prelude under canonical names only. Its roots install as ordinary
 	// dependency-role modules, so a fresh session reuses the very artifacts
 	// a build of the same sources produced.
 	ck.Fixity, ck.PreludeOwners = prelude.Fixities, prelude.Owners
-	installer := check.NewInstaller(ck, stage, opts.objectCache(root), opts.Observe)
+	installer := check.NewInstaller(ck, stage, opts.objectCache(root), observe)
 	preludeDefs, diagnostics, internalErr := installer.Install(prelude.Units, prelude.FixityHash)
 	if len(diagnostics) > 0 {
 		panic("invalid embedded prelude: " + diagnostics[0].Body)
@@ -166,6 +177,7 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 		installed:  preludeDefs,
 		promptDefs: map[string]core.Def{},
 		color:      opts.Color,
+		loading:    loading,
 	}
 }
 
@@ -690,9 +702,11 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	}
 	restore := s.checkpoint()
 	restoreGraph := s.graph.Checkpoint()
+	defer s.loading.clear()
 	fail := func(errs []diag.Error) inputResult {
 		restore()
 		restoreGraph()
+		s.loading.clear()
 		diag.Render(s.out, errs)
 		return inputDone
 	}
@@ -704,6 +718,9 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	var pending []core.Def
 	needsOpaqueWorker := false
 	for _, im := range m.Imports {
+		if !s.graph.Loaded(im.Module) {
+			s.loading.show(im.Module)
+		}
 		inc, errs := s.prompt.Import(im)
 		if len(errs) > 0 {
 			return fail(errs)
@@ -761,8 +778,12 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	if exec != nil {
 		s.commitNatives(natives, exec)
 	}
-	for _, name := range loaded {
-		fmt.Fprintf(s.out, "loaded %s\n", name)
+	if s.loading != nil {
+		s.loading.finish(m.Imports, loaded)
+	} else {
+		for _, name := range loaded {
+			fmt.Fprintf(s.out, "loaded %s\n", name)
+		}
 	}
 	return inputDone
 }

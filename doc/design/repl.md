@@ -83,6 +83,15 @@ rebuild the worker's module set. An increment records the operator table in
 effect when it was resolved; a later increment may widen it without changing
 how an accepted input was read.
 
+Interactive import progress is session-owned presentation over the shared
+compilation observer, composed with the caller's observer. It is active only
+during prompt imports, so Prelude bootstrap events remain silent. Resolution
+starts under the requested module's name; check starts and checked-cache hits
+update the current module. Progress is cleared before diagnostics, and the
+summary is printed only after the entire input commits. Noninteractive sessions
+retain dependency-ordered module echoes; exact output belongs to the
+[REPL reference](../reference/repl.md#imports).
+
 ## Handler levels
 
 A [level](../reference/repl.md#handler-levels) needs the head's handlers to stay

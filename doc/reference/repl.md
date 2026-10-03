@@ -33,9 +33,17 @@ directory, and a local `Foo.Bar` resolves to `Foo/Bar.fango` beneath it under
 the same rules and diagnostics as a build (`MISSING MODULE`, `RESERVED
 MODULE`, `MODULE/PATH MISMATCH`, `IMPORT CYCLE`, and so on). Bundled modules
 outside the prelude, such as `Dict` or `String`, import the same way. The
-session echoes `loaded M` for each module the import brought in for the first
-time, dependencies included, in dependency order; a module already loaded
-echoes nothing. The imported module's instances and derivers become usable at
+interactive session shows `loading M` on a single line that is overwritten as
+other modules load. After the whole input succeeds, that line becomes
+`loaded M (and N other modules)`, counting only newly loaded dependencies;
+the parenthetical is omitted when there are none, and one dependency uses
+`and 1 other module`. An input with several imports names its newly loaded
+explicit imports once, in input order, as in `loaded Foo, Bar (and 3 other modules)`.
+Aliases do not change the module names in this summary. Failed imports clear
+the progress line before printing diagnostics and print no success summary.
+Piped or redirected sessions echo `loaded M` for each newly loaded module,
+dependencies included, in dependency order. A module already loaded echoes
+nothing. The imported module's instances and derivers become usable at
 the prompt, and its sidecar, if any, runs in the session's native worker.
 
 Prompt imports are cumulative. Importing a module again adds the names its
