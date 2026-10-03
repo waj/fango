@@ -38,7 +38,7 @@ a handler, or install one for the inputs that follow with `with`.
 
 1| Client.getText "http://example.com/"
    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-1> <value : StateResult Int ()> : StateResult Int ()
+1> StateResult { value = (), state = 15 } : StateResult Int ()
 > answer : a -> Result b Bytes
 > 1> 2> "ok" : String
 2> Unhandled Error: InvalidUrl "relative" : Error
@@ -76,4 +76,4 @@ I don't know a value named `total`.
 > 1> n : Int
 2> () : ()
 2> 
-<value : StateResult Int ()> : StateResult Int ()
+StateResult { value = (), state = 1 } : StateResult Int ()

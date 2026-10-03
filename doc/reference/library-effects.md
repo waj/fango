@@ -67,7 +67,7 @@ effect State s
     get : () -> s
     put : s -> ()
 
-type StateResult s a = { value : a, state : s }
+type StateResult s a = { value : a, state : s } deriving (Show)
 
 run : s -> (() ->{State s | e} a) ->{e} StateResult s a
 ```
