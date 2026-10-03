@@ -436,7 +436,34 @@ func matchTyArgs(genTy types.Type, vars []*types.TVar, occTy types.Type) []types
 	return out
 }
 
+// matchType assigns the generic type's parameters from an occurrence type.
+// A row may hold several applications of one effect, such as `Fail A` and
+// `Fail B`, and which one a generic label like `Fail error` stands for is
+// what the rest of the type says `error` is. So rows are matched after
+// everything else, each label against the occurrence's labels with the
+// parameters already assigned.
 func matchType(gen, occ types.Type, m map[int]types.Type) {
+	var rows []rowPair
+	matchShape(gen, occ, m, &rows)
+	for len(rows) > 0 {
+		pair := rows[0]
+		rows = rows[1:]
+		used := make([]bool, len(pair.occ.Labels))
+		for _, gl := range types.SortedRow(pair.gen).Labels {
+			j := matchAssignedRowLabel(gl, pair.occ.Labels, used, m)
+			if j >= 0 {
+				used[j] = true
+				for i := range gl.Args {
+					matchShape(gl.Args[i], pair.occ.Labels[j].Args[i], m, &rows)
+				}
+			}
+		}
+	}
+}
+
+type rowPair struct{ gen, occ types.Row }
+
+func matchShape(gen, occ types.Type, m map[int]types.Type, rows *[]rowPair) {
 	switch g := gen.(type) {
 	case *types.TVar:
 		if !g.Rigid {
@@ -452,7 +479,7 @@ func matchType(gen, occ types.Type, m map[int]types.Type) {
 				types.Show(occ), types.Show(gen)))
 		}
 		for i := range g.Args {
-			matchType(g.Args[i], o.Args[i], m)
+			matchShape(g.Args[i], o.Args[i], m, rows)
 		}
 	case *types.TFun:
 		o, ok := occ.(*types.TFun)
@@ -460,25 +487,43 @@ func matchType(gen, occ types.Type, m map[int]types.Type) {
 			panic(fmt.Sprintf("elaborate: occurrence type %s does not match generic %s",
 				types.Show(occ), types.Show(gen)))
 		}
-		matchType(g.Arg, o.Arg, m)
-		matchType(g.Eff, o.Eff, m)
-		matchType(g.Ret, o.Ret, m)
+		matchShape(g.Arg, o.Arg, m, rows)
+		matchShape(g.Eff, o.Eff, m, rows)
+		matchShape(g.Ret, o.Ret, m, rows)
 	case types.Row:
 		o, ok := occ.(types.Row)
 		if !ok {
 			panic(fmt.Sprintf("elaborate: occurrence type %s does not match generic %s", types.Show(occ), types.Show(gen)))
 		}
-		used := make([]bool, len(o.Labels))
-		for _, gl := range types.SortedRow(g).Labels {
-			j := matchAppliedRowLabel(gl, o.Labels, used)
-			if j >= 0 {
-				used[j] = true
-				for i := range gl.Args {
-					matchType(gl.Args[i], o.Labels[j].Args[i], m)
-				}
-			}
+		*rows = append(*rows, rowPair{gen: g, occ: o})
+	}
+}
+
+// matchAssignedRowLabel is matchAppliedRowLabel that first prefers a label
+// whose arguments agree with the parameters assigned so far.
+func matchAssignedRowLabel(pattern types.EffLabel, actual []types.EffLabel, used []bool, m map[int]types.Type) int {
+	for i, label := range actual {
+		if !used[i] && types.EffectLabelKey(pattern) == types.EffectLabelKey(label) {
+			return i
 		}
 	}
+	for i, label := range actual {
+		if used[i] || pattern.Unique != label.Unique || len(pattern.Args) != len(label.Args) {
+			continue
+		}
+		agrees := true
+		for j, arg := range pattern.Args {
+			assigned := types.SubstRigid(arg, m)
+			if len(types.RigidVarsIn(assigned)) == 0 && !types.Equal(assigned, label.Args[j]) {
+				agrees = false
+				break
+			}
+		}
+		if agrees {
+			return i
+		}
+	}
+	return matchAppliedRowLabel(pattern, actual, used)
 }
 
 func matchAppliedRowLabel(pattern types.EffLabel, actual []types.EffLabel, used []bool) int {
