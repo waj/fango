@@ -12,7 +12,7 @@
 2:39 RPAREN )
 4:1 handle handle
 4:8 LIDENT program
-4:16 of of
+4:16 on on
 5:5 LIDENT print
 5:11 LIDENT text
 5:16 ARROW ->

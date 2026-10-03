@@ -9,7 +9,7 @@ type Cell = Cell (() -> Int)
 
 counter : Int -> (Cell ->{Oops String, IO} a) ->{Oops String, IO} a
 counter start use =
-    handle use (Cell ({ _ -> tick() })) with n = start of
+    handle use (Cell ({ _ -> tick() })) with n = start on
         tick () -> resume n with n + 1
 
 body : () ->{Oops String, IO} Int
@@ -23,7 +23,7 @@ body() =
 
 main() =
     answer =
-        handle body() of
+        handle body() on
             oops _ -> 0 - 1
             return v -> v
     print answer

@@ -1,0 +1,26 @@
+reraised () =
+    handle
+        (handle fail "inner" on
+            fail message -> fail (message ++ "-outer")
+            return value -> value) on
+        fail message -> message
+        return _ -> "normal"
+
+inspect wire =
+    handle Reader.overBytes wire { input ->
+            result = readAll input
+            show result
+        } on
+            invalid error -> show error
+
+counted () =
+    total = handle
+                x = ask ()
+                x + 1
+          with count = 0 on
+            ask () -> resume count with count + 1
+    total
+
+oneLine action =
+    handle action() on
+        fail message -> 0

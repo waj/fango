@@ -28,7 +28,7 @@ failingBody token =
     fail "requested"
 
 scopeInsideHandler() =
-    handle Runtime.Scope.bracket ({ _ -> open "inner-first" }) close failingBody of
+    handle Runtime.Scope.bracket ({ _ -> open "inner-first" }) close failingBody on
         fail error ->
             print ("clause sees " ++ error)
             Err error
@@ -36,7 +36,7 @@ scopeInsideHandler() =
 
 handlerInsideScope() =
     Runtime.Scope.bracket ({ _ -> open "outer-first" }) close ({ token ->
-        handle failingBody token of
+        handle failingBody token on
             fail error ->
                 print ("clause sees " ++ error)
                 Err error
@@ -49,7 +49,7 @@ noted token =
 -- A resumptive handler's operation clauses also run inside the scope.
 counted() =
     Runtime.Scope.bracket ({ _ -> open "counted" }) close ({ token ->
-        handle noted token of
+        handle noted token on
             say message ->
                 print ("note " ++ message)
                 resume ()

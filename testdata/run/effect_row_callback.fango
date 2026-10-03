@@ -5,11 +5,11 @@ run action = action()
 
 -- Each handler names the application it takes; label order never decides.
 printStrings : (() ->{Put String, IO | e} a) ->{IO | e} a
-printStrings action = handle action() of
+printStrings action = handle action() on
     put text -> print text; resume ()
 
 printBools : (() ->{Put Bool, IO | e} a) ->{IO | e} a
-printBools action = handle action() of
+printBools action = handle action() on
     put flag -> print flag; resume ()
 
 main() = printBools { printStrings { run ({ _ -> put True; put "answer" }) } }

@@ -313,7 +313,7 @@ type CaseBranch struct {
 	Body    Expr
 }
 
-// Handle is `handle <expr> of` followed by operation clauses aligned at the
+// Handle is `handle <subject> on` followed by operation clauses aligned at the
 // column of the first clause token — layout rule 2, shared with `case`
 // (see doc/design.md, "Functions and effects").
 type Handle struct {
@@ -325,7 +325,7 @@ type Handle struct {
 }
 
 // HandlerState is the optional compiler-owned cell introduced by
-// `handle body with name = initial of`. Name denotes an immutable snapshot in
+// `handle body with name = initial on`. Name denotes an immutable snapshot in
 // operation and return clauses; it is deliberately not in scope in Body.
 type HandlerState struct {
 	Name     string

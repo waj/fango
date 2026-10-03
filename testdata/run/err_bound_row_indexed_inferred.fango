@@ -6,7 +6,7 @@ type Cell e = { step : () ->{e} Int }
 
 counter : Int -> (Cell e ->{e} a) ->{e} a
 counter start use =
-    handle use { step = { _ -> tick() } } with n = start of
+    handle use { step = { _ -> tick() } } with n = start on
         tick () -> resume n with n + 1
 
 main() =

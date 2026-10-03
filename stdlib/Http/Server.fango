@@ -170,18 +170,17 @@ writeSuccessful method output response =
 -- afterwards leaves the response truncated, and the connection closes.
 respond : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} Bool
 respond method output response =
-    valid = handle validResponse response of
+    valid = handle validResponse response on
         Http.invalid _ -> False
     if valid then
-        handle writeSuccessful method output response of
+        handle writeSuccessful method output response on
             Http.invalid _ -> False
     else
         sendError output 500
         False
 
 {-# scoped s #-}
-serveConnection : Config -> Net.Connection -> (Request s ->{s} Response s)
-    ->{Async Net.Error, IO, Fail Net.Error, Protocol | e} ()
+serveConnection : Config -> Net.Connection -> (Request s ->{s} Response s) ->{Async Net.Error, IO, Fail Net.Error, Protocol | e} ()
 serveConnection config connection handler =
     source = Net.sourceAsync connection
     sink = Net.sinkAsync connection
@@ -190,17 +189,19 @@ serveConnection config connection handler =
             loop() =
                 fromResult (Net.setReadDeadline connection config.headerDeadlineMs)
                 handle
-                    case withRequest config.requestLineLimit config.headerLimit config.bodyLimit input { request ->
+                    exchanged = withRequest config.requestLineLimit config.headerLimit config.bodyLimit input { request ->
                         fromResult (Net.setReadDeadline connection config.bodyDeadlineMs)
                         response = handler request
                         fromResult (Net.setWriteDeadline connection config.writeDeadlineMs)
                         sent = respond request.method output response
                         (sent, isClose request.headers, isClose response.headers)
-                    } of
+                    }
+                    case exchanged of
                         Nothing -> ()
                         Just ((sent, requestClose, responseClose), complete) ->
                             if sent && complete && requestClose == False && responseClose == False then loop()
-                            else () of
+                            else ()
+                on
                     Http.invalid error -> sendError output (errorStatus error)
             loop()
         }
@@ -270,7 +271,7 @@ serve : Config -> Channel () -> (Request {Protocol | s} ->{Protocol | s} Respons
 serve config stop handler =
     Net.withListener config.port { listener ->
         process connection =
-            handle serveConnection config connection handler of
+            handle serveConnection config connection handler on
                 Http.invalid _ -> ()
         runListener config stop listener process
     }

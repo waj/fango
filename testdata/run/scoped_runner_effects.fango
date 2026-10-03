@@ -30,7 +30,7 @@ main() =
         first = Reader.readUpTo reader 2
         if Bytes.length first == 2 then Fail.fail "stop" else first
     })
-    result = handle outer() of
+    result = handle outer() on
         log message ->
             print message
             resume ()

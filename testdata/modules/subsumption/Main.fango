@@ -23,10 +23,10 @@ calculation() =
     partial = Helpers.pair pure
     paired = partial count
     scoped =
-        handle Helpers.withValue pure release fail of
+        handle Helpers.withValue pure release fail on
             stop () -> 9
     first + second + paired + scoped
 
 main =
-    handle calculation() of
+    handle calculation() on
         tick () -> resume 2

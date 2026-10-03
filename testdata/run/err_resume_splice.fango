@@ -5,7 +5,7 @@ effect Ask
 
 main =
     print
-        (handle ask () of
+        (handle ask () on
             ask () ->
                 ignored = $(bad)
                 resume 2)

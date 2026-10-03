@@ -14,14 +14,14 @@ type Totals = { value : Int, count : Int }
 
 runCounter : (() ->{Counter | e} a) ->{e} Totals
 runCounter action =
-    handle action() with count = 0 of
+    handle action() with count = 0 on
         tick () -> resume count with count + 1
         reset () -> resume () with 0
         return value -> { value = value, count = count }
 
 runFail : (() ->{Fail String | e} a) ->{e} Int
 runFail action =
-    handle action() of
+    handle action() on
         fail message ->
             0
         return value -> 1

@@ -13,7 +13,7 @@ type Ops e = { read : () ->{Cell | e} Int }
 
 withCell : (Ops e ->{Cell | e} a) ->{e} a
 withCell use =
-    handle use (Ops { read = { _ -> get() } }) of
+    handle use (Ops { read = { _ -> get() } }) on
         get () -> resume 7
 
 body : () ->{Extra} Int
@@ -23,6 +23,6 @@ body() =
 
 main() =
     answer =
-        handle body() of
+        handle body() on
             bump n -> resume (n + 1)
     print answer

@@ -7,7 +7,7 @@ type Boxed = Boxed Cell
 
 leak : Int -> Boxed
 leak start =
-    handle Boxed (Cell ({ _ -> tick() })) with n = start of
+    handle Boxed (Cell ({ _ -> tick() })) with n = start on
         tick () -> resume n with n + 1
 
 main = 0

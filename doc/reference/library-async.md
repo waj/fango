@@ -69,7 +69,7 @@ effect Stop
     abort stop : String -> value
 
 localJob() =
-    handle stop "finished early" of
+    handle stop "finished early" on
         stop reason -> reason
 ```
 

@@ -113,7 +113,7 @@ func TestHandlerGroupsKeepCoreClauseCardinality(t *testing.T) {
 effect Ask
     ask : Choice -> Int
 main =
-    handle ask Yes of
+    handle ask Yes on
         ask Yes -> resume 1
         ask No -> resume 0
         return 1 -> Yes

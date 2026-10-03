@@ -14,7 +14,7 @@ effect Fail error
 
 attempt : (() ->{Fail String | e} Int) ->{e} Result String Int
 attempt action =
-    handle action() of
+    handle action() on
         fail error -> Err error
         return value -> Ok value
 

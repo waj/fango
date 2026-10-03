@@ -11,7 +11,7 @@ type StateResult s a = { value : a, state : s }
 
 run : s -> (() ->{State s | e} a) ->{e} StateResult s a
 run initial action =
-    handle action() with current = initial of
+    handle action() with current = initial on
         get () -> resume current with current
         put next -> resume () with next
         return value -> { value = value, state = current }

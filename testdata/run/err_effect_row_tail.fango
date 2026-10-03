@@ -6,7 +6,7 @@ effect Ask
 
 run : (() ->{Ask | e} a) ->{e} a
 run action =
-    handle action() of
+    handle action() on
         ask () ->
             print "asking"
             resume "yes"

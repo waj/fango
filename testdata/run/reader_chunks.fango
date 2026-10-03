@@ -13,7 +13,7 @@ paced = Source { pull = { _ -> next() } }
 {-# scoped s #-}
 drive : List Bytes -> (Reader s ->{s} a) ->{e} a
 drive pieces use =
-    handle Reader.over paced use with rest = pieces of
+    handle Reader.over paced use with rest = pieces on
         next () ->
             case rest of
                 [] -> resume Nothing with []

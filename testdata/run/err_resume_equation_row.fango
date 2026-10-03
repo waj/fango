@@ -5,6 +5,6 @@ effect Ask
 
 main =
     print
-        (handle ask Yes of
+        (handle ask Yes on
             ask Yes -> resume 1
             ask No -> 0)

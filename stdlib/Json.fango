@@ -75,7 +75,7 @@ withWriter writer action = TextWriter.borrow writer { text -> withTextWriter tex
 withTextWriter : TextWriter.Writer e -> (() ->{Emit, Fail Error | e} a) ->{e} Result Error a
 withTextWriter writer action =
     Fail.attempt {
-        handle action() of
+        handle action() on
             emit text ->
                 case TextWriter.tryWrite writer text of
                     Ok _ -> resume ()

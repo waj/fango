@@ -15,8 +15,9 @@ inspect wire =
                 (request.method, request.target, body)
             }
             show result
-        } of
-            Http.invalid error -> show error
+        }
+    on
+        Http.invalid error -> show error
 
 main() =
     print (inspect "GET /a HTTP/1.1\r\nHost: x\r\n\r\n")

@@ -5,7 +5,7 @@ type Box = Box (() ->{Stop} ())
 
 use : Int -> Box -> ()
 use _ (Box action) =
-    handle action() of
+    handle action() on
         stop _ -> ()
 
 run = use 0

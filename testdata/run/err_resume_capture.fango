@@ -3,7 +3,7 @@ effect Ask
 
 main =
     print
-        (handle ask () of
+        (handle ask () on
             ask () ->
                 later = { resume 1 }
                 resume 2)

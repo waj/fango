@@ -19,6 +19,6 @@ branch maybe = case maybe of
     Nothing -> print 0; 0
     Just x -> print x; x
 
-handled action = handle action() of
+handled action = handle action() on
     emit value -> print value; resume value
     return value -> print value; value

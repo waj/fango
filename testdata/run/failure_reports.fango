@@ -52,8 +52,10 @@ main() =
     showReport (Fail.attemptReport ({ _ -> Runtime.Scope.finally ({ _ -> 7 }) ({ _ -> Fail.fail "close after success" }) }))
     showReport (Fail.attemptReport ({ _ -> Runtime.Scope.finally ({ _ ->
         Stream.toList (Stream.take 1 (Stream.fromList [1, 2])) }) ({ _ -> Fail.fail "close after take" }) }))
-    handle showHeterogeneous (Fail.attemptReport ({ _ -> Runtime.Scope.finally ({ _ ->
-        Fail.fail "heterogeneous body" }) ({ _ -> close 42 }) })) of
+    handle
+        showHeterogeneous (Fail.attemptReport ({ _ -> Runtime.Scope.finally ({ _ ->
+            Fail.fail "heterogeneous body" }) ({ _ -> close 42 }) }))
+    on
         close _ -> print "unexpected close handler"
     result : Result (Fail.Report String) ()
     result = Fail.attemptReport ({ _ -> Runtime.Scope.finally ({ _ ->

@@ -4,11 +4,11 @@ import Applied exposing (Put(..), both)
 
 -- Each handler names the application it takes; label order never decides.
 dropStrings : (() ->{Put String | e} a) ->{e} a
-dropStrings action = handle action() of
+dropStrings action = handle action() on
     put _ -> resume ()
 
 dropBools : (() ->{Put Bool | e} a) ->{e} a
-dropBools action = handle action() of
+dropBools action = handle action() on
     put _ -> resume ()
 
 main = if dropBools { dropStrings { both() } } then 42 else 0

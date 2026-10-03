@@ -4,7 +4,7 @@ effect Echo
     echo : Key a -> Key a
 
 main() =
-    result = handle echo (Key 42) of
+    result = handle echo (Key 42) on
         echo (Key n) -> resume (Key n)
     case result of
         Key n -> print n

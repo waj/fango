@@ -29,7 +29,7 @@ effect Flag
 chooseBoth() = choose True + choose False
 
 runFlags action =
-    handle action() with count = 0 of
+    handle action() with count = 0 on
         choose True -> resume count with count + 1
         choose False -> resume 99 with count + 1
         return value -> value + count
@@ -46,7 +46,7 @@ ticks() =
     tick()
 
 runTicks() =
-    handle ticks() with count = 0 of
+    handle ticks() with count = 0 on
         tick () -> resume () with logNext (count + 1)
         return _ -> count
 
@@ -58,7 +58,7 @@ mark label value =
     value
 
 runOrder() =
-    handle draw() with current = 0 of
+    handle draw() with current = 0 on
         draw () -> resume (mark "value" 7) with mark "state" 1
         return value -> value + current
 
@@ -77,7 +77,7 @@ useSnapshots() =
     readSaved first + readSaved second
 
 runSnapshots() =
-    handle useSnapshots() with current = 3 of
+    handle useSnapshots() with current = 3 on
         take () -> resume (Saved ({ _ -> current })) with current + 1
         return value -> value + current
 

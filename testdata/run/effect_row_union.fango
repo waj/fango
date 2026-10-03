@@ -9,7 +9,7 @@ both _ = left () + right ()
 main =
     print
         (handle
-            handle both () of
+            handle both () on
                 left () -> resume 20
-         of
+         on
             right () -> resume 22)

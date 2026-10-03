@@ -1,0 +1,7 @@
+(module
+  (def statements (params ()) (handle (block (bind x (app (var ask) (unit))) (expr (app (var print) (var x))) (case (var x) (branch (pint 0) (app (var fail) (string "zero"))) (branch (pvar n) (var n)))) (clause fail (params message) (int 0))))
+  (def stateful (params ()) (handle (block (expr (app (var tick) (unit))) (app (var tick) (unit))) (state count (int 0)) (clause tick (params ()) (app (resume-with (binop + (var count) (int 1))) (var count))) (return _ (var count))))
+  (def assigned (params ()) (block (bind total (handle (block (bind x (app (var ask) (unit))) (binop + (var x) (int 1))) (clause ask (params ()) (app (resume) (int 1))))) (var total)))
+  (def nested (params ()) (handle (handle (app (var fail) (string "inner")) (clause fail (params message) (app (var fail) (var message)))) (clause fail (params message) (var message))))
+  (def inline (params ()) (handle (block (expr (app (var print) (string "a"))) (app (var ask) (unit))) (clause ask (params ()) (app (resume) (int 2)))))
+  (def nestedState (params ()) (handle (block (expr (handle (app (var tick) (unit)) (state inner (int 7)) (clause tick (params ()) (app (resume-with (var inner)) (var inner))))) (handle (app (var tick) (unit)) (state deeper (int 9)) (clause tick (params ()) (app (resume-with (var deeper)) (var deeper))))) (state outer (int 0)) (clause tick (params ()) (app (resume-with (var outer)) (var outer))))))

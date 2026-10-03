@@ -16,7 +16,9 @@ main() =
         Async.cancel child
         print (Async.awaitResult child)
         print (Async.awaitResult child) }))
-    handle ignore (Async.run ({ _ ->
-        child = Async.spawn (waiter 9)
-        stop child })) of
+    handle
+        ignore (Async.run ({ _ ->
+            child = Async.spawn (waiter 9)
+            stop child }))
+    on
         stop child -> print (Async.wait child)

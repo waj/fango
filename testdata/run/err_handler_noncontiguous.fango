@@ -5,7 +5,7 @@ effect Ask
     note : Choice -> ()
 
 main =
-    handle ask Yes of
+    handle ask Yes on
         ask Yes -> resume 1
         note _ -> resume ()
         ask No -> resume 0

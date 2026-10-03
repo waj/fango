@@ -5,12 +5,12 @@ get _ = ask ()
 
 program _ =
     first =
-        handle get () of
+        handle get () on
             ask () -> resume "inner"
     second = get ()
     first ++ second
 
 main =
     print
-        (handle program () of
+        (handle program () on
             ask () -> resume "outer")

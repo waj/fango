@@ -13,5 +13,5 @@ query x = read x
 argument : Int
 argument = 2
 
-main = print (handle query argument of
+main = print (handle query argument on
     ask () -> resume 40)

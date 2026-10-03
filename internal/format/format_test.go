@@ -338,7 +338,7 @@ func TestRaggedLayoutNormalizesAndRoundTrips(t *testing.T) {
 		{"main =\n    foo { _ ->\n    value = x\n        bar\n    }\n", "main =\n    foo { _ ->\n        value = x\n            bar\n    }\n"},
 		{"main = x = 1\n", "main = x = 1\n"},
 		{"match x =\n    case x of\n        True -> 1\n      False -> 2\n          _ -> 3\n", "match x =\n    case x of\n        True -> 1\n        False -> 2\n        _ -> 3\n"},
-		{"run action =\n    handle action of\n        emit value -> resume value\n      log value -> resume value\n          return value -> value\n", "run action =\n    handle action of\n        emit value -> resume value\n        log value -> resume value\n        return value -> value\n"},
+		{"run action =\n    handle action on\n        emit value -> resume value\n      log value -> resume value\n          return value -> value\n", "run action =\n    handle action on\n        emit value -> resume value\n        log value -> resume value\n        return value -> value\n"},
 		{"effect Console\n        print : String -> ()\n      read : () -> String\n", "effect Console\n    print : String -> ()\n    read : () -> String\n"},
 		{"class Show a\n        show : a -> String\n      debug : a -> String\n", "class Show a\n    show : a -> String\n    debug : a -> String\n"},
 		{"instance Show Int\n        show x = \"int\"\n      debug x = \"debug\"\n", "instance Show Int\n    show x = \"int\"\n    debug x = \"debug\"\n"},

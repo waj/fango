@@ -48,11 +48,13 @@ exitLoop() =
     loop 2000000
 
 makeReader() =
-    handle {
-        saved : () ->{Probe} Int
-        saved() = value()
-        saved
-    }() of
+    handle
+        {
+            saved : () ->{Probe} Int
+            saved() = value()
+            saved
+        }()
+    on
         value () -> resume 1
 
 main() =
@@ -62,9 +64,9 @@ main() =
     second = make 7
     print (first 10 1, second 10 1)
     print (makePartial 2 10)
-    print (Fail.attempt { handle exitLoop() of value () -> resume 9 })
+    print (Fail.attempt { handle exitLoop() on value () -> resume 9 })
     saved = makeReader()
-    print (handle saved() of value () -> resume 2)
+    print (handle saved() on value () -> resume 2)
     print (Runtime.Local.run 0 { cell ->
         stop = cell.read()
         loop n =

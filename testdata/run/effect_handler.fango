@@ -5,5 +5,5 @@ pick _ = choose ()
 
 main =
     print
-        (handle pick () of
+        (handle pick () on
             choose () -> resume True)

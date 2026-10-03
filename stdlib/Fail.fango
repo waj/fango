@@ -24,7 +24,7 @@ attemptReport = native
 -- attempt runs an action that may fail, capturing the failure as `Err`.
 attempt : (() ->{Fail error | e} value) ->{e} Result error value
 attempt action =
-    handle action() of
+    handle action() on
         fail error -> Err error
         return value -> Ok value
 

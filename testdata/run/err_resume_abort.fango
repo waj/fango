@@ -2,5 +2,5 @@ effect Fail error
     abort fail : error -> value
 
 main =
-    handle fail "no" of
+    handle fail "no" on
         fail error -> resume error

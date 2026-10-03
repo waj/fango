@@ -3,5 +3,5 @@ effect Ask
 
 main =
     print
-        (handle ask () of
+        (handle ask () on
             ask () -> resume (resume 1))

@@ -22,7 +22,8 @@ decode limit wire =
         Reader.withBytes wire { input ->
             (_, plain) = Writer.collecting { w -> Writer.copy (GZip.decoding limit input) w }
             show plain
-        } of
+        }
+    on
         Http.invalid error -> show error
 
 echo : Http.Server.Request e ->{e} Http.Server.Response e
@@ -41,7 +42,8 @@ serve wire =
                 }
             }
             show rendered
-        } of
+        }
+    on
         Http.invalid error -> show error
 
 gzipRequest : String -> Bytes -> Bytes

@@ -9,19 +9,19 @@ effect Stop
     abort stop : String -> value
 
 withDatabase body =
-    handle body() of
+    handle body() on
         lookup id -> resume "Alice"
 
 withBrokenDatabase body =
-    handle body() of
+    handle body() on
         lookup id -> Fail.fail "unavailable"
 
 withStoppingDatabase body =
-    handle body() of
+    handle body() on
         lookup id -> stop "stopped"
 
 withStop body =
-    handle body() of
+    handle body() on
         stop reason -> Err reason
         return value -> Ok value
 

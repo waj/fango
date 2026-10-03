@@ -9,7 +9,7 @@ type AskInstance = { askNow : () -> String }
 
 withAsk : String -> (AskInstance ->{e} a) ->{e} a
 withAsk str f =
-    handle f (AskInstance { askNow = { _ -> ask() } }) of
+    handle f (AskInstance { askNow = { _ -> ask() } }) on
         ask () -> resume str
 
 body : () ->{Extra} String
@@ -21,6 +21,6 @@ body() =
 
 main() =
     text =
-        handle body() of
+        handle body() on
             bump n -> resume (n + 1)
     print text

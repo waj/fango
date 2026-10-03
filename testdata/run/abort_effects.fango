@@ -9,12 +9,12 @@ asInt : Int -> Int
 asInt value = value
 
 attempt action =
-    handle action() of
+    handle action() on
         fail error -> Err error
         return value -> Ok value
 
 attemptLoud action =
-    handle action() of
+    handle action() on
         fail error ->
             print error
             Err error
@@ -31,7 +31,7 @@ effect FixedFail
 
 askWithAbort() =
     attempt ({ _ ->
-        handle ask True + ask False of
+        handle ask True + ask False on
             ask valid ->
                 if valid then resume 5 else
                     stopped = fail "ask-failed"
@@ -39,7 +39,7 @@ askWithAbort() =
             return total -> total })
 
 fixedFailure() =
-    handle stop "fixed" of
+    handle stop "fixed" on
         stop message -> message
         return _ -> "normal"
 
@@ -61,28 +61,30 @@ backtrack original =
 
 reraised() =
     handle
-        (handle fail "inner" of
+        handle fail "inner" on
             fail message -> fail (message ++ "-outer")
-            return value -> value) of
+            return value -> value
+    on
         fail message -> message
         return _ -> "normal"
 
 failedReturn() =
     handle
-        (handle 7 of
+        handle 7 on
             fail message -> message
-            return _ -> fail "return-failed") of
+            return _ -> fail "return-failed"
+    on
         fail message -> message
         return _ -> "normal"
 
 recursiveFailure n =
-    handle (if n == 0 then fail "deep" else recursiveFailure (n - 1)) of
+    handle (if n == 0 then fail "deep" else recursiveFailure (n - 1)) on
         fail message -> if n == 0 then fail (message ++ "!") else message ++ "?"
         return message -> message
 
 compileChoice : () -> Code
 compileChoice() =
-    handle fail "compile-time" of
+    handle fail "compile-time" on
         fail _ -> `17`
         return code -> code
 
@@ -110,7 +112,7 @@ main() =
     print (reraised())
     print (failedReturn())
     recursive =
-        handle recursiveFailure 2 of
+        handle recursiveFailure 2 on
             fail message -> message
             return message -> message
     print recursive

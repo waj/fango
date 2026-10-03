@@ -74,7 +74,7 @@ parameter names one application:
 
 ```fango
 printStrings : (() ->{Put String, IO | e} a) ->{IO | e} a
-printStrings action = handle action() of
+printStrings action = handle action() on
     put text -> print text; resume ()
 ```
 
@@ -173,7 +173,7 @@ query _ = if ask () == "yes" then 40 else 0
 
 main =
     print
-        (handle query () of
+        (handle query () on
             ask () -> resume "yes"
             return n -> n + 2)
 ```
@@ -184,6 +184,26 @@ declaring effect to each operation's type. Functions may
 annotate closed or open effect rows. An operation with a Unit argument is
 called explicitly with `()`.
 
+The handled subject follows `handle` the way a body follows `=`: an inline
+expression or `;`-separated block on the `handle` line, or an indented
+statement block below it. After a block, `on` (and a
+[state clause](#stateful-handlers)) may return to the `handle` keyword's
+column, which ends the block, so an inner `case` or handler never takes the
+outer clauses:
+
+```fango
+loop() =
+    handle
+        exchanged = readRequest input
+        case exchanged of
+            Nothing -> ()
+            Just request -> reply request; loop()
+    on
+        invalid error -> sendError error
+```
+
+`on` is reserved.
+
 A source-defined resumptive operation may use a type variable local to that
 operation. Each call instantiates it independently, while one handler clause
 must work for every instantiation:
@@ -192,7 +212,7 @@ must work for every instantiation:
 effect Echo
     echo : a -> a
 
-answer = handle (if echo True then echo 42 else 0) of
+answer = handle (if echo True then echo 42 else 0) on
     echo x -> resume x
 ```
 
@@ -231,7 +251,7 @@ handler answer directly and has no resume binding:
 
 ```fango
 attempt action =
-    handle action() of
+    handle action() on
         fail error -> Err error
         return value -> Ok value
 ```
@@ -252,10 +272,10 @@ unhandled effects in clauses must still be permitted by the annotation.
 ## Stateful handlers
 
 A parameterized handler inserts `with snapshot = initial` between its subject
-and `of`:
+and `on`:
 
 ```fango
-handle action() with current = initial of
+handle action() with current = initial on
     get () -> resume current with current
     put next -> resume () with next
     return value -> StateResult { value = value, state = current }

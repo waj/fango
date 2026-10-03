@@ -36,7 +36,7 @@ main() =
                     -- A memory reader nested inside both keeps its own buffer.
                     print (Reader.overBytes (Bytes.fromString "zz") ({ inner -> Reader.readUpTo inner 99 }))
                     print (Reader.atEnd left) }) })
-        with b = Bytes.fromString "wxyz" of
+        with b = Bytes.fromString "wxyz" on
             nextB () -> resume (step b) with after b
-    with a = Bytes.fromString "abcdef" of
+    with a = Bytes.fromString "abcdef" on
         nextA () -> resume (step a) with after a

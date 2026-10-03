@@ -4,7 +4,7 @@ effect Observe
     observe : Int -> ()
 
 main() =
-    handle Stream.forEach observe (Stream.fromList [1]) of
+    handle Stream.forEach observe (Stream.fromList [1]) on
         observe value ->
             print value
             resume ()

@@ -4,6 +4,6 @@ effect Ask
     ask : Choice -> Int
 
 main =
-    handle ask Yes of
+    handle ask Yes on
         ask _ -> resume 1
         ask Yes -> resume 2

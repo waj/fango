@@ -27,7 +27,7 @@ entropySeed = native
 -- started at seed: the same seed always produces the same draws. Under the
 runSeeded : Int -> (() ->{Random | e} a) ->{e} a
 runSeeded seed action =
-    handle action() with current = seed of
+    handle action() with current = seed on
         int lo hi ->
             next = nextState current
             resume (valueAt next lo hi) with next

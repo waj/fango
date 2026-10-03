@@ -40,7 +40,7 @@ opaqueRun() =
         Ok _ -> print "unexpected success"
 
 main() =
-    handle privateRun() of
+    handle privateRun() on
         privateError _ -> print "unexpected handler"
-    handle opaqueRun() of
+    handle opaqueRun() on
         opaqueError _ -> print "unexpected handler"

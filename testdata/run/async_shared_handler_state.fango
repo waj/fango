@@ -7,7 +7,7 @@ effect Counter
     next : () -> Int
 
 withCounter body =
-    handle body() with count = 0 of
+    handle body() with count = 0 on
         next () -> resume count with count + 1
         return value -> (value, count)
 

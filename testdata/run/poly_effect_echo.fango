@@ -4,5 +4,5 @@ effect Echo
 apply f x = f x
 
 main() =
-    print (handle (if apply echo True then apply echo 42 else 0) of
+    print (handle (if apply echo True then apply echo 42 else 0) on
         echo x -> resume x)

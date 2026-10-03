@@ -39,7 +39,7 @@ main = 0`, ""},
 keep : (() ->{e} Int) -> (() ->{e} Int)
 keep action = action
 leak =
-    handle keep ({ _ -> readCounter() }) with state = 0 of
+    handle keep ({ _ -> readCounter() }) with state = 0 on
         readCounter () -> resume state with state
 main = 0`, ""},
 		{"mutual resource escape", `first port stop = if stop then ({ _ -> readPort port }) else second port True
@@ -69,9 +69,9 @@ keep : (() ->{e} Int) -> (() ->{e} Int)
 keep action = action
 safe =
     handle keep { _ ->
-        handle readCounter() with inner = 7 of
+        handle readCounter() with inner = 7 on
             readCounter () -> resume inner with inner
-    } with outer = 0 of
+    } with outer = 0 on
         readCounter () -> resume outer with outer
 main = safe()`, ""},
 		{"direct", `main = withPort identity`, ""},
@@ -85,12 +85,12 @@ main = saved()`, ""},
     withPort ({ port -> State.put (Just port) })
     () })`, ""},
 		{"outer user handler", `main =
-    handle withPort ({ port -> save (Just port) }) with saved = Nothing of
+    handle withPort ({ port -> save (Just port) }) with saved = Nothing on
         save next -> resume () with next
         return _ -> ()`, ""},
 		{"indirect store", `retain port = save (Just port)
 main =
-    handle withPort ({ port -> apply retain port }) with saved = Nothing of
+    handle withPort ({ port -> apply retain port }) with saved = Nothing on
         save next -> resume () with next
         return _ -> ()`, ""},
 		{"dictionary store", `class SaveValue a
@@ -100,7 +100,7 @@ instance SaveValue Port
 throughDictionary : SaveValue a => a ->{Store a} ()
 throughDictionary port = saveValue port
 main =
-    handle withPort ({ port -> throughDictionary port }) with saved = Nothing of
+    handle withPort ({ port -> throughDictionary port }) with saved = Nothing on
         save next -> resume () with Just next
         return _ -> ()`, ""},
 		{"distinct nested owners", `main = withPort ({ outer ->
@@ -109,7 +109,7 @@ main =
     ignored = attempt ({ _ -> fail port })
     42 })`, ""},
 		{"outer synchronous borrow", `main =
-    handle withPort ({ port -> save port }) of
+    handle withPort ({ port -> save port }) on
         save port ->
             n = readPort port
             resume ()`, ""},
@@ -119,7 +119,7 @@ main =
     42 })`, ""},
 		{"abort payload", `main = attempt ({ _ -> withPort ({ port -> fail port }) })`, ""},
 		{"release retention", `main =
-    handle Runtime.Scope.bracket openPort ({ port -> save port }) ({ _ -> () }) with saved = Nothing of
+    handle Runtime.Scope.bracket openPort ({ port -> save port }) ({ _ -> () }) with saved = Nothing on
         save port -> resume () with Just port
         return _ -> ()`, ""},
 		{"callback ADT", `type Box a = Box a

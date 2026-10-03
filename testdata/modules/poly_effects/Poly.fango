@@ -5,5 +5,5 @@ type Key a = Key a
 effect Fetch
     fetch : Key a -> a
 
-run key = handle fetch key of
+run key = handle fetch key on
     fetch (Key x) -> resume x

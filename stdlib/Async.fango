@@ -106,12 +106,12 @@ closeChannel : Channel value -> ()
 closeChannel = native
 
 enter owner body =
-    handle body() of
+    handle body() on
         current () -> resume owner
         active () -> if scopeCancelled owner then stopTask() else resume owner
 
 capture owner body =
-    handle Completed (Fail.attempt { enter owner body }) of
+    handle Completed (Fail.attempt { enter owner body }) on
         stopTask () -> Cancelled
 
 status outcome =

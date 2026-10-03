@@ -11,7 +11,7 @@ effect Note
     say : String -> ()
 
 attempt action =
-    handle action() of
+    handle action() on
         fail error -> Err error
         return value -> Ok value
 
@@ -24,7 +24,7 @@ close label = print ("close " ++ label)
 noted token = say ("note " ++ token)
 
 failingReturn token =
-    handle noted token of
+    handle noted token on
         say message ->
             print message
             resume ()

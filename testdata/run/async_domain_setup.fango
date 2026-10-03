@@ -22,13 +22,15 @@ job input = case input of
 
 interpret : Config -> (() ->{Database, Http | e} a) ->{e} a
 interpret config action =
-    handle (handle action() of
-        lookup number -> resume (config.database + number)) of
+    handle
+        handle action() on
+            lookup number -> resume (config.database + number)
+    on
         request number -> resume (config.http + number)
 
 serial : Config -> (() ->{Scheduling | e} a) ->{e} a
 serial config action =
-    handle action() of
+    handle action() on
         submit input -> resume (Completed (interpret config ({ _ -> job input })))
         await ticket -> resume (case ticket of
                 Completed value -> value
@@ -36,7 +38,7 @@ serial config action =
 
 parallel : Config -> (() ->{Scheduling, IO | e} a) ->{IO | e} Async.Outcome (Result String a)
 parallel config action = Async.run ({ _ ->
-    handle action() of
+    handle action() on
         submit input -> resume (Running (interpret config ({ _ -> Async.spawn ({ _ -> job input }) })))
         await ticket ->
             value = case ticket of

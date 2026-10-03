@@ -39,7 +39,12 @@ Layout children indent below their owner, including braced lambda bodies
 that the parser accepts at any column. Case/handler branches and block items
 align. Then/else anchor to their own if; an if that follows other text on its
 line, such as a binding's right-hand side, anchors a level in from that line,
-since at the line's indent `else` would begin the next statement. Composite commas, pipes, and closing
+since at the line's indent `else` would begin the next statement. A handled
+subject that spans lines, or sits below its `handle`, takes its own lines a
+level in, with `with`/`on` back at the `handle`'s column. That `handle` leads
+its line, breaking from preceding text other than opening parentheses, so the
+keyword sits where a reader scanning up from `on` looks for it.
+Composite commas, pipes, and closing
 delimiters align with their opener; the parser admits
 that punctuation at an enclosing layout boundary. Failed printing rolls back
 the buffer before copying the declaration verbatim.

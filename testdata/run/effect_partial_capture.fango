@@ -5,7 +5,7 @@ send f = f "hello"
 program _ = send write
 
 main =
-    handle program () of
+    handle program () on
         write text ->
             print text
             resume ()

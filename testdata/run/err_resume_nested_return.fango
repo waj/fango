@@ -6,10 +6,10 @@ effect Pick
 
 main =
     print
-        (handle ask () of
+        (handle ask () on
             ask () ->
                 ignored =
-                    handle pick () of
+                    handle pick () on
                         pick () -> resume False
                         return True -> 0
                         return False -> resume 1

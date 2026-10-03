@@ -324,7 +324,7 @@ effect Ask
     ask : Bool -> Int
 
 run() =
-    handle ask True + ask False of
+    handle ask True + ask False on
         ask valid -> if valid then resume 5 else resume 0
         return total -> total
 `)
@@ -334,7 +334,7 @@ effect Note
     note : Int -> Int
 
 filler() =
-    handle note 1 of
+    handle note 1 on
         note n -> resume n
         return total -> total
 `)

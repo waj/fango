@@ -3,7 +3,7 @@ effect Exception ex
 
 finally : (() ->{Exception ex | e} a) -> (() ->{e} ()) ->{Exception ex | e} a
 finally action cleanup =
-    handle action() of
+    handle action() on
         throw msg ->
             cleanup()
             throw msg
@@ -13,7 +13,7 @@ finally action cleanup =
 
 catch : (() ->{Exception ex | e} a) -> (ex ->{e} a) ->{e} a
 catch action handler =
-    handle action() of
+    handle action() on
         throw msg -> handler msg
         return result -> result
 

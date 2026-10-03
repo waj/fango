@@ -16,7 +16,7 @@ effect SecondInput
 
 withFirst : Bytes.Bytes -> (Reader FirstInput ->{FirstInput | e} a) ->{e} a
 withFirst bytes use =
-    handle use { buffered = firstBuffer, refill = { _ -> False }, skip = firstSkip } with contents = bytes of
+    handle use { buffered = firstBuffer, refill = { _ -> False }, skip = firstSkip } with contents = bytes on
         firstBuffer () -> resume contents with contents
         firstSkip wanted ->
             count = clamp wanted (Bytes.length contents)
@@ -24,7 +24,7 @@ withFirst bytes use =
 
 withSecond : Bytes.Bytes -> (Reader SecondInput ->{SecondInput | e} a) ->{e} a
 withSecond bytes use =
-    handle use { buffered = secondBuffer, refill = { _ -> False }, skip = secondSkip } with contents = bytes of
+    handle use { buffered = secondBuffer, refill = { _ -> False }, skip = secondSkip } with contents = bytes on
         secondBuffer () -> resume contents with contents
         secondSkip wanted ->
             count = clamp wanted (Bytes.length contents)

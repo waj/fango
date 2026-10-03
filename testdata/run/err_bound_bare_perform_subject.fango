@@ -14,9 +14,9 @@ both use =
                         seen ->
                             print seen
                             use outerCell
-                with m = 100 of
+                with m = 100 on
                     tick () -> resume m with m + 1
-    with n = 0 of
+    with n = 0 on
         tick () -> resume n with n + 1
 
 main() =

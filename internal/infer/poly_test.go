@@ -78,7 +78,7 @@ func TestPolyPositive(t *testing.T) {
 		{"type Foo eff = Foo (() ->{IO | eff} ())\nwrap action = Foo action", "wrap : (() ->{IO | e} ()) -> Foo e"},
 		{"type Test eff = TestCase (() ->{eff} ())\nsuite : Test IO\nsuite = TestCase { _ -> print () }", "suite : Test {IO}"},
 		{"type Test eff = Wrap (Test eff) | Bar (() ->{eff} ())\nmake action = Bar action", "make : (() ->{e} ()) -> Test e"},
-		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{IO | eff} ()\nrunHelper (TestCase action) =\n    handle action() of\n        fail msg -> print msg", "runHelper : Test e ->{IO | e} ()"},
+		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{IO | eff} ()\nrunHelper (TestCase action) =\n    handle action() on\n        fail msg -> print msg", "runHelper : Test e ->{IO | e} ()"},
 		// Applied types in annotations.
 		{"type Opt a = None | Some a\nx : Opt Int\nx = Some 1", "x : Opt Int"},
 		{"type Opt a = None | Some a\nf : Opt a -> Opt a\nf m = m", "f : Opt a -> Opt a"},
@@ -91,7 +91,7 @@ func TestPolyPositive(t *testing.T) {
 		// An annotated handler wrapper with an open effect-row tail: the
 		// annotation's rigid row variable unifies with the fresh row a call
 		// site mints, because a label-free open row normalizes to its tail.
-		{"effect Ask\n    ask : () -> String\nrun : (() ->{Ask | e} a) ->{e} a\nrun action =\n    handle action() of\n        ask () -> resume \"yes\"", "run : (() ->{Ask | e} a) ->{e} a"},
+		{"effect Ask\n    ask : () -> String\nrun : (() ->{Ask | e} a) ->{e} a\nrun action =\n    handle action() on\n        ask () -> resume \"yes\"", "run : (() ->{Ask | e} a) ->{e} a"},
 	}
 	for _, c := range cases {
 		ck, infos, errs := checkPoly(t, c.src)

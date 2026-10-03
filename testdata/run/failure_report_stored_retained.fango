@@ -9,6 +9,6 @@ effect Release
 
 main() =
     report = Runtime.Scope.bracket ({ _ -> Port { emit = print } }) ({ _ -> () }) ({ port ->
-        handle Fail.attemptReport ({ _ -> Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> release port.emit }) }) of
+        handle Fail.attemptReport ({ _ -> Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> release port.emit }) }) on
             release _ -> Ok () })
     ()

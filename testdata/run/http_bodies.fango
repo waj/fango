@@ -12,7 +12,7 @@ written method output response =
 -- Reports a protocol failure after whatever was written before it.
 attempt : String -> Writer {Protocol | e} -> Http.Server.Response {Protocol | e} ->{e} String
 attempt method output response =
-    handle written method output response of
+    handle written method output response on
         Http.invalid error -> show error
 
 report : (String, Bytes) -> String

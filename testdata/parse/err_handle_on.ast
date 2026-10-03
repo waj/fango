@@ -1,0 +1,15 @@
+(module)
+-- errors --
+-- SYNTAX PROBLEM -------------------------- err_handle_on.fango
+
+I expect `on` after the expression being handled.
+
+2|     handle action() of
+                       ^^
+
+-- UNFINISHED PROGRAM ---------------------- err_handle_on.fango
+
+I got to the end of the input too soon. I expect `on` after the expression being handled.
+
+8|         x
+           ^

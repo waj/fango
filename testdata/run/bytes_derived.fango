@@ -49,5 +49,5 @@ main() =
     table = Dict.insert (Bytes.fromString "k") 7 Dict.empty
     print (Dict.get (Bytes.fromString "k") table)
     print (Dict.get (Bytes.fromString "j") table)
-    handle report () of
+    handle report () on
         send _ -> print "unexpected abort"

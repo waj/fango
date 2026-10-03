@@ -6,7 +6,7 @@ type Cell = Cell (() -> Int)
 
 counter : Int -> (Cell ->{IO} a) ->{IO} a
 counter start use =
-    handle use (Cell ({ _ -> tick() })) with n = start of
+    handle use (Cell ({ _ -> tick() })) with n = start on
         tick () -> resume n with n + 1
 
 main() =

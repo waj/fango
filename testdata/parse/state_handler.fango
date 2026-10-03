@@ -3,7 +3,7 @@ effect Cell s
     put : s -> ()
 
 run initial action =
-    handle action() with current = initial of
+    handle action() with current = initial on
         get () -> resume current with current
         put next -> resume () with next
         return value -> value

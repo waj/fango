@@ -15,7 +15,7 @@ program() =
 
 main : () ->{IO} ()
 main() =
-    print (handle program() of
+    print (handle program() on
         ask Yes -> resume 10
         ask No -> resume 1
         weigh Yes n -> resume (n * 10)
@@ -25,7 +25,7 @@ main() =
         return 23 -> 100
         return other -> other)
     -- Omitting `return` keeps the identity transformation.
-    print (handle program() of
+    print (handle program() on
         ask _ -> resume 2
         weigh _ n -> resume n
         note _ -> resume ())

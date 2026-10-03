@@ -98,7 +98,7 @@ before its final resume:
 
 ```fango
 -- Proposed use of the coroutine capability; routine imports omitted.
-handle producer() of
+handle producer() on
     emit value -> resume (pause value)
 ```
 

@@ -6,7 +6,7 @@ program() = write "handled"
 
 collect : (() ->{Console} ()) ->{IO} ()
 collect action =
-    handle action() of
+    handle action() on
         write text ->
             print text
             resume ()

@@ -957,7 +957,7 @@ withTextReader : TextReader.Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result
 withTextReader reader action =
     initial = TextReader.window reader
     Fail.attempt {
-        handle Runtime.Scope.finally action { ignore at() } with state = PullState { cursor = Cursor { window = initial, ended = False, offset = 0, line = 1, column = 1, path = [] }, pending = Nothing, depth = 0, mark = Nothing } of
+        handle Runtime.Scope.finally action { ignore at() } with state = PullState { cursor = Cursor { window = initial, ended = False, offset = 0, line = 1, column = 1, path = [] }, pending = Nothing, depth = 0, mark = Nothing } on
             peek () ->
                 case state.pending of
                     Just token -> resume token with state

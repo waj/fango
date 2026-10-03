@@ -25,13 +25,17 @@ suppressedArguments report =
         Ok _ -> []
 
 cleanups action =
-    handle action () of
-        cleanupShape value -> resume (handle
-            Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> closeShape (Square [value] [value, value]) }) of
+    handle action () on
+        cleanupShape value -> resume (
+            handle
+                Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> closeShape (Square [value] [value, value]) })
+            on
                 closeShape _ -> ()
                 closePair _ -> ())
-        cleanupPair value -> resume (handle
-            Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> closePair (Just (Pair 1 value)) }) of
+        cleanupPair value -> resume (
+            handle
+                Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> closePair (Just (Pair 1 value)) })
+            on
                 closeShape _ -> ()
                 closePair _ -> ())
 
@@ -50,7 +54,7 @@ main() =
         argument = Failure.argument 0 failure
         print argument }) pairs
     nested = suppressedArguments (Fail.attemptReport ({ _ -> cleanups ({ _ ->
-        handle outer 7 of
+        handle outer 7 on
             outer value -> resume (cleanupShape [value]) }) }))
     List.each ({ failure ->
         argument : Maybe (Shape (List (List Int)))

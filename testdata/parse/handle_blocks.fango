@@ -1,0 +1,45 @@
+statements () =
+    handle
+        x = ask ()
+        print x
+        case x of
+            0 -> fail "zero"
+            n -> n
+    on
+        fail message -> 0
+
+stateful () =
+    handle
+        tick ()
+        tick ()
+    with count = 0 on
+        tick () -> resume count with count + 1
+        return _ -> count
+
+assigned () =
+    total = handle
+            x = ask ()
+            x + 1
+        on
+            ask () -> resume 1
+    total
+
+nested () =
+    handle
+        handle fail "inner" on
+            fail message -> fail message
+    on
+        fail message -> message
+
+inline () = handle print "a"; ask () on ask () -> resume 2
+
+nestedState () =
+    handle
+        handle tick () with inner = 7 on
+            tick () -> resume inner with inner
+        handle
+            tick ()
+        with deeper = 9 on
+            tick () -> resume deeper with deeper
+    with outer = 0 on
+        tick () -> resume outer with outer

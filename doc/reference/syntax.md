@@ -62,8 +62,8 @@ answer: `ignore (reader.skip 4)`. Its argument is evaluated before the call,
 like every argument.
 
 The same block may be written inline with `;` between its items. This works in
-every statement-bearing body: after `=`, `->`, `then`, and `else`, including
-case branches and handler clauses:
+every statement-bearing body: after `=`, `->`, `then`, `else`, and `handle`,
+including case branches and handler clauses:
 
 ```fango
 incrementAfterPrinting = { a b -> print a; b + 1 }

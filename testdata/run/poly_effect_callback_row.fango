@@ -4,6 +4,6 @@ effect Read a
 effect Apply
     apply : a -> (() ->{Read a} a) -> a
 
-main() = print (handle apply 42 ({ _ -> read() }) of
-    apply value f -> resume (handle f() of
+main() = print (handle apply 42 ({ _ -> read() }) on
+    apply value f -> resume (handle f() on
         read () -> resume value))

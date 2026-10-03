@@ -12,7 +12,7 @@ useAsk action = action()
 asking() = ask()
 
 runAsk action =
-    handle useAsk action of
+    handle useAsk action on
         ask () -> resume 7
 
 pure() = 1
@@ -101,7 +101,7 @@ main() =
         ]
     print (run (branch tests))
     answer =
-        handle scoped() of
+        handle scoped() on
             boom () -> 9
     print answer
     3 |> ({ n -> n + 1 }) |> print

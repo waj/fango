@@ -8,7 +8,7 @@ effect Fail error
     abort fail : error -> value
 
 attempt action =
-    handle action() of
+    handle action() on
         fail error -> Err error
         return value -> Ok value
 

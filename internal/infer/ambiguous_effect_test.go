@@ -14,13 +14,13 @@ both() =
 func TestAmbiguousEffectApplicationsAreRejected(t *testing.T) {
 	for name, src := range map[string]string{
 		"nested handlers": putEffect + `
-main() = handle (handle both() of
-    put text -> resume ()) of
+main() = handle (handle both() on
+    put text -> resume ()) on
     put flag -> resume ()
 `,
 		"polymorphic handler": putEffect + `
 drop : (() ->{Put x | e} a) ->{e} a
-drop action = handle action() of
+drop action = handle action() on
     put _ -> resume ()
 
 main() = drop { drop { both() } }
@@ -42,19 +42,19 @@ func TestEffectApplicationsChosenByType(t *testing.T) {
 	for name, src := range map[string]string{
 		"typed helpers": putEffect + `
 dropStrings : (() ->{Put String | e} a) ->{e} a
-dropStrings action = handle action() of
+dropStrings action = handle action() on
     put _ -> resume ()
 
 dropBools : (() ->{Put Bool | e} a) ->{e} a
-dropBools action = handle action() of
+dropBools action = handle action() on
     put _ -> resume ()
 
 main() = dropBools { dropStrings { both() } }
 `,
 		"payload pattern": putEffect + `
-main() = handle (handle both() of
+main() = handle (handle both() on
     put True -> resume ()
-    put False -> resume ()) of
+    put False -> resume ()) on
     put _ -> resume ()
 `,
 	} {

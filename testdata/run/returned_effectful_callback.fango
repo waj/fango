@@ -5,9 +5,9 @@ keep : (() ->{e} Int) -> () ->{e} Int
 keep action = action
 
 leak =
-    handle keep ({ _ -> readCounter() }) with state = 0 of
+    handle keep ({ _ -> readCounter() }) with state = 0 on
         readCounter () -> resume state with state
 
 main =
-    handle leak() of
+    handle leak() on
         readCounter () -> resume 41

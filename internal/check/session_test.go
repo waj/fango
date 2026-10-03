@@ -968,7 +968,7 @@ keep action = action
 
 leak : Code -> () ->{Counter} Int
 leak code =
-    handle keep { _ -> readCounter() } with state = code of
+    handle keep { _ -> readCounter() } with state = code on
         readCounter () -> resume 1 with state
 
 main() = print "ok"

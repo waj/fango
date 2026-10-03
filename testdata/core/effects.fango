@@ -5,6 +5,6 @@ query _ = if ask () == "yes" then 40 else 0
 
 main =
     print
-        (handle query () of
+        (handle query () on
             ask () -> resume "yes"
             return n -> n + 2)

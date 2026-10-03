@@ -128,11 +128,19 @@ async function main() {
     if (line === 'following = 1') assert(result.tokens.every(t => !t.scopes.includes('meta.quote.fango')));
   }
 
-  const handler = 'handle action() with state = 0 of';
-  const handlerTokens = grammar.tokenizeLine(handler).tokens;
-  const handlerScopeAt = index => handlerTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
-  assert(handlerScopeAt(handler.indexOf("with")).includes("keyword.control.with.fango"));
-  assert(!handlerScopeAt(handler.indexOf("state")).some(scope => scope.startsWith("keyword.")));
+  // A handler's state may follow its subject on the `handle` line, or start
+  // its own line after a block subject; `on` is a keyword wherever it sits.
+  for (const handler of ['handle action() with state = 0 on', '    with state = 0 on']) {
+    const handlerTokens = grammar.tokenizeLine(handler).tokens;
+    const handlerScopeAt = index => handlerTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+    assert(handlerScopeAt(handler.indexOf("with")).includes("keyword.control.with.fango"));
+    assert(!handlerScopeAt(handler.indexOf("state")).some(scope => scope.startsWith("keyword.")));
+    assert(handlerScopeAt(handler.lastIndexOf("on")).includes("keyword.control.fango"));
+  }
+  const ownLine = grammar.tokenizeLine('    on').tokens;
+  assert(ownLine.find(t => t.startIndex <= 4 && t.endIndex > 4).scopes.includes("keyword.control.fango"));
+  const binding = grammar.tokenizeLine('    with x = 1').tokens;
+  assert(!binding.find(t => t.startIndex <= 4 && t.endIndex > 4).scopes.includes("keyword.control.with.fango"));
 
   // Declaration and handler-clause heads keep their scopes when later lines
   // outdent from the first item of an indented group.

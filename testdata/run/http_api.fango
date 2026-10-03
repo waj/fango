@@ -28,5 +28,6 @@ main() =
                 }
             }
             print rendered
-        } of
+        }
+    on
         Http.invalid error -> print error

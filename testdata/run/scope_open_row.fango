@@ -10,7 +10,7 @@ effect Log
     log : String -> ()
 
 withLog action =
-    handle action() with lines = [] of
+    handle action() with lines = [] on
         log line -> resume () with [line | lines]
         return value -> (value, lines)
 

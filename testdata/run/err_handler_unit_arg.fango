@@ -2,5 +2,5 @@ effect Log
     log : String -> ()
 
 main =
-    handle log "hi" of
+    handle log "hi" on
         log () -> resume ()

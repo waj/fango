@@ -39,7 +39,7 @@ func TestScalarSpecializationLeavesHandlersGeneric(t *testing.T) {
 	p := elabPoly(t, `effect Choose
     choose : () -> Bool
 step n =
-    handle (if choose () then n + 1 else n) of
+    handle (if choose () then n + 1 else n) on
         choose () -> resume True
 main = print (step 5)
 `)

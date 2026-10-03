@@ -2,6 +2,7 @@ package format
 
 import (
 	"bytes"
+	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/source"
@@ -246,22 +247,47 @@ func (p *printer) renderArrow(body ast.Expr, ind int) bool {
 	return p.renderExpr(body, ind)
 }
 
-// renderHandle writes `handle body [with name = initial] of` and its clauses,
-// which align exactly as a case's branches do.
+// renderHandle writes `handle subject [with name = initial] on` and its
+// clauses, which align exactly as a case's branches do. A subject that spans
+// lines, or that the author put below `handle`, takes its own lines a level
+// in, and `with` and `on` return to the `handle`'s column. That column must be
+// where a reader finds the `handle`, so a block-form `handle` that would
+// follow other text starts its own line a level in from that text instead.
+// Opening parentheses alone are not such text: the `handle` after them still
+// leads its line, and its own column is the anchor.
 func (p *printer) renderHandle(h *ast.Handle, ind int) bool {
-	body, ok := exprInline(h.Body)
-	if !ok {
-		return false
-	}
-	head := "handle " + body
+	state := ""
 	if h.State != nil {
-		initial, initOK := exprInline(h.State.Initial)
-		if !initOK {
+		initial, ok := exprInline(h.State.Initial)
+		if !ok {
 			return false
 		}
-		head += " with " + h.State.Name + " = " + initial
+		state = "with " + h.State.Name + " = " + initial + " "
 	}
-	p.emit(head + " of")
+	if bodyOnOwnLine(h.Sp.File, h.Body.Span().Start) || brokeWithin(h.Body.Span()) {
+		if lead := strings.TrimRight(string(p.cur), " "); p.open && strings.Trim(lead, "(") == "" {
+			ind = p.column()
+		} else if p.open {
+			ind = p.ind + Indent
+			p.start(ind)
+		}
+		p.emit("handle")
+		if !p.placeBefore(h.Body.Span().Start, ind+Indent) {
+			return false
+		}
+		p.start(ind + Indent)
+		if !p.renderExpr(h.Body, ind+Indent) {
+			return false
+		}
+		p.start(ind)
+		p.emit(state + "on")
+	} else {
+		body, ok := exprInline(h.Body)
+		if !ok {
+			return false
+		}
+		p.emit("handle " + body + " " + state + "on")
+	}
 
 	clauseInd := ind + Indent
 	for _, cl := range h.Clauses {

@@ -7,8 +7,11 @@ effect Read a
 effect Apply
     apply : a -> (() ->{Read a} a) -> a
 
-main() = print (handle apply 42 ({ _ -> read() }) of
-    apply value f -> resume (handle (case Async.run ({ _ -> Async.await (Async.spawn f) }) of
-        Completed (Ok result) -> result
-        _ -> value) of
-        read () -> resume value))
+main() = print (handle apply 42 ({ _ -> read() }) on
+    apply value f -> resume (
+            handle
+                case Async.run ({ _ -> Async.await (Async.spawn f) }) of
+                    Completed (Ok result) -> result
+                    _ -> value
+            on
+                read () -> resume value))

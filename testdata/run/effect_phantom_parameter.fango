@@ -4,5 +4,5 @@ effect Tag value
 run _ = ping ()
 
 main =
-    handle run () of
+    handle run () on
         ping () -> resume ()

@@ -13,7 +13,7 @@ parse() = Reader.withBytes (Bytes.fromString "abc") ({ first ->
         Bytes.toStringLossy (Bytes.append a b) ++ lookup() }) })
 
 interpreted : String
-interpreted = handle parse() of
+interpreted = handle parse() on
     lookup () -> resume "db"
 
 -- An older reader may be returned through an inner scope.
@@ -34,7 +34,7 @@ withDomain : (() ->{e} String) ->{e} String
 withDomain action = withText "generic" ({ reader -> readAll reader ++ action() })
 
 generic : String
-generic = handle withDomain lookup of
+generic = handle withDomain lookup on
     lookup () -> resume "db"
 
 counter : Int

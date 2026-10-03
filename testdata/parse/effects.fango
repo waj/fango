@@ -7,6 +7,6 @@ effect Console
 
 program : () ->{Console, Fail String | e} String
 program unit =
-    handle readLine True of
+    handle readLine True on
         print text -> resume True
         return value -> value

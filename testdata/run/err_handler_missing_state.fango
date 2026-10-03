@@ -2,5 +2,5 @@ effect Cell
     get : () -> Int
 
 main() =
-    handle get() with current = 0 of
+    handle get() with current = 0 on
         get () -> resume current

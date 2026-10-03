@@ -106,7 +106,7 @@ func TestFlexibleIndentationKeepsCanonicalTree(t *testing.T) {
 		{"case branches", "match x =\n    case x of\n        True -> 1\n      False -> 2\n          _ -> 3\n", "match x =\n    case x of\n        True -> 1\n        False -> 2\n        _ -> 3\n"},
 		{"nested cases", "match x y =\n    case x of\n        True ->\n            case y of\n                True -> 1\n              False -> 2\n      False -> 3\n", "match x y =\n    case x of\n        True ->\n            case y of\n                True -> 1\n                False -> 2\n        False -> 3\n"},
 		{"constructor result before branch", "match x =\n    case x of\n        Just y ->\n            if y then\n                1\n            else\n                Found y\n        Nothing -> 0\n", "match x =\n    case x of\n        Just y ->\n            if y then\n                1\n            else\n                Found y\n        Nothing -> 0\n"},
-		{"handler clauses", "run action =\n    handle action of\n        emit value -> resume value\n      log value -> resume value\n          return value -> value\n", "run action =\n    handle action of\n        emit value -> resume value\n        log value -> resume value\n        return value -> value\n"},
+		{"handler clauses", "run action =\n    handle action on\n        emit value -> resume value\n      log value -> resume value\n          return value -> value\n", "run action =\n    handle action on\n        emit value -> resume value\n        log value -> resume value\n        return value -> value\n"},
 		{"block items", "main =\n        x = 1\n      y = x + 2\n       y\n", "main =\n    x = 1\n    y = x + 2\n    y\n"},
 		{"nested blocks", "main =\n    x =\n            y = 1\n          y\n   x\n", "main =\n    x =\n        y = 1\n        y\n    x\n"},
 		{"braced lambda outdent", "main =\n    foo { _ ->\n        foo\n    bar\n    }\n", "main =\n    foo { _ ->\n        foo\n        bar\n    }\n"},
@@ -197,7 +197,7 @@ func TestMalformedSemicolonBlocks(t *testing.T) {
 
 func TestInlineBodyClassificationStopsAtNestedDelimiters(t *testing.T) {
 	src := "main =\n" +
-		"    handle keep { _ -> readCounter() } with state = 0 of\n" +
+		"    handle keep { _ -> readCounter() } with state = 0 on\n" +
 		"        keepValue value -> resume value with state\n"
 	f := source.NewFile("<test>", []byte(src))
 	toks, lexErrs := lexer.Lex(f)

@@ -18,8 +18,8 @@ effect Http
 
 interpret : (() ->{Database, Http | e} a) ->{e} a
 interpret action =
-    handle (handle action() of
-        lookup value -> resume (request value)) of
+    handle (handle action() on
+        lookup value -> resume (request value)) on
         request value -> resume (value + 1)
 `,
 		`effect Ask
@@ -27,8 +27,8 @@ interpret action =
 
 interpret : (() ->{Ask | e} a) ->{e} a
 interpret action =
-    handle (handle action() of
-        ask () -> resume (ask() + 1)) of
+    handle (handle action() on
+        ask () -> resume (ask() + 1)) on
         ask () -> resume 10
 `,
 	} {
@@ -56,7 +56,7 @@ func TestAnnotatedHandlersDoNotGainAmbientIOOrSelfHandling(t *testing.T) {
 
 interpret : (() ->{Ask | e} a) ->{e} a
 interpret action =
-    handle action() of
+    handle action() on
         `+clause+"\n")
 		var found bool
 		for _, err := range errs {
@@ -129,7 +129,7 @@ bad _ = ()
 type Reader e = { read : () ->{e} Int }
 
 bad : (Reader e ->{e} a) -> a
-bad use = handle use { read = read } of
+bad use = handle use { read = read } on
     read () -> resume 42
 `, "EFFECT MISMATCH"},
 	} {
@@ -156,7 +156,7 @@ func TestScopedDeclarationErrors(t *testing.T) {
 		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun _ = 0\n",
 		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun = native\n",
 		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = use 0\nalias = run\n",
-		"effect Tell a\n    tell : a -> ()\n\n{-# scoped s #-}\nrun : (Int ->{Tell (Int ->{s} Int) | s} a) ->{e} a\nrun use = handle use 0 of\n    tell _ -> resume ()\n",
+		"effect Tell a\n    tell : a -> ()\n\n{-# scoped s #-}\nrun : (Int ->{Tell (Int ->{s} Int) | s} a) ->{e} a\nrun use = handle use 0 on\n    tell _ -> resume ()\n",
 	} {
 		t.Run(src, func(t *testing.T) {
 			_, _, errs := check(t, src)

@@ -2,5 +2,5 @@ effect Ask
     ask : () -> Int
 
 main() =
-    handle ask() of
+    handle ask() on
         ask () -> resume 1 with 2

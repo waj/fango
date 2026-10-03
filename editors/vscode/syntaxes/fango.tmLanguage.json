@@ -15,6 +15,7 @@
     { "include": "#operator_annotation" },
     { "include": "#operator_definition" },
     { "include": "#annotation" },
+    { "include": "#handler_state" },
     { "include": "#function_definition" },
     { "include": "#binding" },
     { "include": "#expressions" }
@@ -549,7 +550,7 @@
       "patterns": [
         {
           "name": "keyword.control.fango",
-          "match": "\\b(if|then|else|case|of|handle|resume|typeOf)\\b"
+          "match": "\\b(if|then|else|case|of|on|handle|resume|typeOf)\\b"
         },
         {
           "name": "keyword.other.fango",
@@ -567,8 +568,17 @@
       "match": "^\\s*(return)\\b(?=(?:[ \\t]+(?:\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]|\\{[^{}]*\\}|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:\\\\.|[^'\\\\])'|-?[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?|\\^?[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*))+[ \\t]*->)"
     },
     "handler_state": {
-      "name": "keyword.control.with.fango",
-      "match": "(?<=\\bhandle\\b[^\\n]*)\\bwith\\b(?=[ \\t]+[a-z][A-Za-z0-9_]*[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~]))"
+      "comment": "After a block subject, `with name = initial on` starts its own line.",
+      "patterns": [
+        {
+          "name": "keyword.control.with.fango",
+          "match": "(?<=\\bhandle\\b[^\\n]*)\\bwith\\b(?=[ \\t]+[a-z][A-Za-z0-9_]*[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~]))"
+        },
+        {
+          "name": "keyword.control.with.fango",
+          "match": "^[ \\t]*\\bwith\\b(?=[ \\t]+[a-z][A-Za-z0-9_]*[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~])[^\\n]*\\bon[ \\t]*(?:--[^\\n]*)?$)"
+        }
+      ]
     },
     "resume_expression": {
       "begin": "\\b(resume)\\b",

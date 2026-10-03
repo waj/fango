@@ -1,0 +1,8 @@
+oldSpelling action =
+    handle action() of
+        fail message -> 0
+
+missingBlock () =
+    handle
+        x = ask ()
+        x

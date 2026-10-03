@@ -1346,10 +1346,10 @@ func (p *parser) parseInlineBlock() ast.Expr {
 
 // closesBlock reports whether a token at a block's own column ends the block
 // instead of starting another statement. An `if` branch body indented level
-// with its own `then`/`else` puts that keyword at the body block's column,
-// and neither keyword can begin a statement.
+// with its own `then`/`else` puts that keyword at the body block's column, as
+// a handled block can put its `on`, and none of them can begin a statement.
 func closesBlock(k token.Kind) bool {
-	return k == token.KwThen || k == token.KwElse || k == token.COMMA || k == token.RPAREN || k == token.RBRACKET || k == token.RBRACE || k == token.RQUOTE
+	return k == token.KwThen || k == token.KwElse || k == token.KwOn || k == token.COMMA || k == token.RPAREN || k == token.RBRACKET || k == token.RBRACE || k == token.RQUOTE
 }
 
 func (p *parser) blockMissingResult(binds []ast.LocalBind, items []ast.BlockItem, at source.Span) ast.Expr {
@@ -1383,7 +1383,7 @@ func (p *parser) parseBlock(col int) ast.Expr {
 				"This block has no result expression yet. A block is zero or more\n`name = …` bindings followed by one final expression.")
 			return nil
 		}
-		if p.branchBoundary() || t.Pos().Col <= owner || closesBlock(t.Kind) {
+		if p.branchBoundary() || t.Pos().Col <= owner || closesBlock(t.Kind) || p.handlerStateAhead() {
 			if pendingAnn != nil {
 				p.errorAt(t.Span, "MISSING DEFINITION",
 					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nabove its binding.")
@@ -1490,7 +1490,7 @@ func (p *parser) parseBlock(col int) ast.Expr {
 			if result == nil {
 				return nil
 			}
-			if nt := p.peek(); nt.Kind != token.EOF && nt.Pos().Col > owner && nt.Pos().Col <= col && !p.branchBoundary() && !closesBlock(nt.Kind) {
+			if nt := p.peek(); nt.Kind != token.EOF && nt.Pos().Col > owner && nt.Pos().Col <= col && !p.branchBoundary() && !closesBlock(nt.Kind) && !p.handlerStateAhead() {
 				items = append(items, ast.BlockItem{BindIndex: -1, Expr: result})
 				hasExprStmt = true
 				continue
@@ -1807,16 +1807,23 @@ func (p *parser) parsePostfixAtom() ast.Expr {
 	return expr
 }
 
+// parseHandle parses `handle subject [with name = initial] on` and its
+// clauses. The subject is an inline body on the `handle` line or an indented
+// statement block below it, as after `=`. The `handle` token's column anchors
+// the head: `with` and `on` may sit exactly there after a block subject, the
+// way `then` and `else` may sit at their `if`.
 func (p *parser) parseHandle() ast.Expr {
 	h := p.next()
+	anchor := h.Pos().Col
 	p.stopWith++
-	body := p.parseExpr()
+	body := p.parseBodyAfter(h, "This `handle` has no expression — the next line does not belong\nto it.")
 	p.stopWith--
 	if body == nil {
 		return nil
 	}
 	var state *ast.HandlerState
-	if t := p.peek(); t.Kind == token.LIDENT && t.Text == "with" {
+	if p.ownsHandlerState(anchor) {
+		p.stmtStart = p.pos
 		p.next()
 		name := p.peekInExpr()
 		if name.Kind != token.LIDENT {
@@ -1833,12 +1840,13 @@ func (p *parser) parseHandle() ast.Expr {
 		}
 		state = &ast.HandlerState{Name: name.Text, NameSpan: name.Span, Initial: initial}
 	}
-	if !p.expect(token.KwOf, "I expect `of` after the expression being handled.") {
+	p.allowAtAnchor(anchor, token.KwOn)
+	if !p.expect(token.KwOn, "I expect `on` after the expression being handled.") {
 		return nil
 	}
 	first := p.peek()
 	if first.Kind == token.EOF {
-		p.errorAt(p.prevSpan(), TitleUnexpectedEOF, "I expect at least one handler clause after `of`.")
+		p.errorAt(p.prevSpan(), TitleUnexpectedEOF, "I expect at least one handler clause after `on`.")
 		return nil
 	}
 	owner := h.Pos().Col
@@ -2304,9 +2312,9 @@ func (p *parser) parseIfChain(anchor int) ast.Expr {
 }
 
 // allowAtAnchor exempts one `then`/`else` token sitting exactly at its `if`
-// chain's anchor column, which peekInExpr would otherwise read as a sibling
-// boundary. Neither keyword can start a statement or a branch, so the
-// exemption cannot swallow a following construct.
+// chain's anchor column, or an `on` at its `handle`'s, which peekInExpr would
+// otherwise read as a sibling boundary. None of these keywords can start a
+// statement or a branch, so the exemption cannot swallow a following construct.
 func (p *parser) allowAtAnchor(anchor int, k token.Kind) {
 	if t := p.peek(); t.Kind == k && t.Pos().Col == anchor {
 		p.stmtStart = p.pos
@@ -2754,6 +2762,25 @@ func (p *parser) parseRecordExprFieldsAfterOpen() ([]ast.RecordExprField, source
 // handlerStateStart recognizes contextual state syntax without reserving its words.
 func (p *parser) handlerStateStart(pos int) bool {
 	return pos+2 < len(p.toks) && p.toks[pos].Kind == token.LIDENT && p.toks[pos].Text == "with" && p.toks[pos+1].Kind == token.LIDENT && p.toks[pos+2].Kind == token.EQ
+}
+
+// ownsHandlerState reports whether a `with name =` after a handled subject
+// belongs to this handler: it continues the subject's last line, sits at the
+// `handle` keyword's column, or is indented past the enclosing layout column.
+// An outer handler's state, further left, ends this one's subject instead.
+func (p *parser) ownsHandlerState(anchor int) bool {
+	if !p.handlerStateStart(p.pos) {
+		return false
+	}
+	t := p.peek()
+	return t.Pos().Line == p.prevSpan().EndPos().Line || t.Pos().Col == anchor || p.lay.checkOffside(t.Pos()) == offContinue
+}
+
+// handlerStateAhead reports whether a handled block's `with name =` starts
+// here. Like closesBlock's keywords, it ends the subject block rather than
+// binding a local named `with`.
+func (p *parser) handlerStateAhead() bool {
+	return p.stopWith > 0 && p.handlerStateStart(p.pos)
 }
 
 // peek returns the current token, ignoring layout.

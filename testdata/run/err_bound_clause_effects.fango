@@ -7,7 +7,7 @@ type Cell = Cell (() -> Int)
 
 noisy : Int -> (Cell ->{IO} a) ->{IO} a
 noisy start use =
-    handle use (Cell ({ _ -> tick() })) with n = start of
+    handle use (Cell ({ _ -> tick() })) with n = start on
         tick () ->
             print "tick"
             resume n with n + 1

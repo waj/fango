@@ -162,7 +162,7 @@ run : Config -> (() ->{Http, Fail Error | e} a) ->{IO, Fail Error | e} a
 run config action =
     pool = Net.newPool 8 60000
     Runtime.Scope.finally {
-        handle action() of
+        handle action() on
             connect endpoint -> resume (dial pool endpoint)
             transmit connection bytes timeout -> resume (socketWrite connection bytes timeout)
             receive connection most timeout -> resume (socketRead connection most timeout)
@@ -173,7 +173,7 @@ run config action =
 -- Runs `action` with the configuration adjusted. Overrides nest.
 configure : (Config -> Config) -> (() ->{Http | e} a) ->{Http | e} a
 configure adjust action =
-    handle action() of
+    handle action() on
         connect endpoint -> resume (connect endpoint)
         transmit connection bytes timeout -> resume (transmit connection bytes timeout)
         receive connection most timeout -> resume (receive connection most timeout)
@@ -187,7 +187,7 @@ type Exchange = { request : Bytes, response : Maybe Bytes }
 -- record requests. Requests run one at a time.
 stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http, Fail Error | e} a) ->{Fail Error | e} a
 stub respond action =
-    handle action() with exchange = Exchange { request = Bytes.empty, response = Nothing } of
+    handle action() with exchange = Exchange { request = Bytes.empty, response = Nothing } on
         connect _ -> resume (Ok (Memory 0)) with Exchange { request = Bytes.empty, response = Nothing }
         transmit _ bytes _ ->
             resume (Ok ()) with { exchange | request = Bytes.append exchange.request bytes }
@@ -267,7 +267,7 @@ framedRequest method body =
 
 protocol : (() ->{Protocol, Fail Error | e} a) ->{Fail Error | e} a
 protocol action =
-    handle action() of
+    handle action() on
         Http.invalid error -> failWith (Protocol error)
 
 -- Reading responses
@@ -334,7 +334,7 @@ drain body most =
 drainQuietly : Reader {Protocol, Fail Error | e} ->{e} ()
 drainQuietly body =
     ignore (attempt {
-            handle drain body 65536 of
+            handle drain body 65536 on
                 Http.invalid _ -> ()
     })
 

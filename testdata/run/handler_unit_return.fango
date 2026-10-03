@@ -13,22 +13,22 @@ effect Counter
     step : () -> Int
 
 answering action =
-    handle action() of
+    handle action() on
         ask () -> resume "yes"
         return _ -> print "answered"
 
 ignoring action =
-    handle action() of
+    handle action() on
         ask () -> resume "no"
         return unused -> 5
 
 rescuing action handler =
-    handle action() of
+    handle action() on
         fail err -> handler err
         return _ -> ()
 
 counting action =
-    handle action() with count = 0 of
+    handle action() with count = 0 on
         step () -> resume count with count + 1
         return _ -> print "counted"
 

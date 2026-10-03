@@ -23,10 +23,10 @@ effect Database
 runStrings : (() ->{Async.Async String, IO, Fail String | e} a) ->{IO | e} Async.Outcome (Result String a)
 runStrings body = Async.run body
 withDatabase body =
-    handle body() of
+    handle body() on
         lookup () -> stop()
 withStop body =
-    handle body() of
+    handle body() on
         stop () -> ()
 job : () ->{IO, Database} Int
 job() =

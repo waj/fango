@@ -14,9 +14,11 @@ effect Cleanup
 main() =
     report : Result (Fail.Report String) ()
     report = Fail.attemptReport ({ _ ->
-        handle cleanup 42 of
-            cleanup value -> resume (handle
-                Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> close (Box [value]) }) of
+        handle cleanup 42 on
+            cleanup value -> resume (
+                handle
+                    Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> close (Box [value]) })
+                on
                     close _ -> ()) })
     case report of
         Err failure -> List.each ({ suppressed ->
