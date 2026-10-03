@@ -37,7 +37,9 @@ left item.
 
 Layout children indent below their owner, including braced lambda bodies
 that the parser accepts at any column. Case/handler branches and block items
-align. Then/else anchor to their own if. Composite commas, pipes, and closing
+align. Then/else anchor to their own if; an if that follows other text on its
+line, such as a binding's right-hand side, anchors a level in from that line,
+since at the line's indent `else` would begin the next statement. Composite commas, pipes, and closing
 delimiters align with their opener; the parser admits
 that punctuation at an enclosing layout boundary. Failed printing rolls back
 the buffer before copying the declaration verbatim.

@@ -292,9 +292,65 @@ func (p *printer) renderHandle(h *ast.Handle, ind int) bool {
 
 // renderIf writes the broken form: the condition and `then` on one line, each
 // arm a level in, and `else` back at the `if`'s own column, which is where the
-// layout rule anchors it. An `else if` continues the same chain rather than
-// staircasing rightward.
+// layout rule anchors it. An `if` that follows other text on its line, such as
+// a binding's right-hand side, anchors a level in from that line instead: at
+// the line's own indent, `else` would read as the enclosing block's next
+// statement. An `else if` continues the same chain rather than staircasing
+// rightward.
 func (p *printer) renderIf(e *ast.If, ind int) bool {
+	if p.open && len(p.cur) > 0 && p.keywordStartsLine(e) {
+		ind = p.ind + Indent
+	}
+	return p.renderIfAt(e, ind)
+}
+
+// keywordStartsLine reports whether renderIfAt puts a `then` or an `else` of
+// this `if`, or of the `else if` chain it continues, at the start of a line.
+func (p *printer) keywordStartsLine(e *ast.If) bool {
+	f := e.Sp.File
+	if keywordOnOwnLine(f, e.Cond.Span().End) || p.elseStartsLine(e) {
+		return true
+	}
+	if inner, isIf := e.Else.(*ast.If); isIf && !bodyOnOwnLine(f, inner.Sp.Start) && brokeWithin(inner.Span()) {
+		return p.keywordStartsLine(inner)
+	}
+	return false
+}
+
+// elseStartsLine reports whether the author put this `if`'s `else` keyword at
+// the start of a line. An `else` that ends the `then` line keeps its place
+// even when its body follows on the next lines. The keyword is found among
+// the tokens, since an arm's span can end before a closing parenthesis.
+func (p *printer) elseStartsLine(e *ast.If) bool {
+	for _, t := range p.toks {
+		if t.Span.Start < e.Then.Span().End {
+			continue
+		}
+		if t.Span.Start >= e.Else.Span().Start {
+			break
+		}
+		if t.Kind == token.KwElse {
+			return startsLine(e.Sp.File, t.Span.Start)
+		}
+	}
+	return e.Then.Span().EndPos().Line != e.Else.Span().StartPos().Line
+}
+
+// startsLine reports whether only spaces precede pos on its line.
+func startsLine(f *source.File, pos int) bool {
+	for i := pos - 1; i >= 0; i-- {
+		switch f.Content[i] {
+		case ' ', '\t':
+		case '\n':
+			return true
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (p *printer) renderIfAt(e *ast.If, ind int) bool {
 	cond, ok := exprInline(e.Cond)
 	if !ok {
 		return false
@@ -314,9 +370,9 @@ func (p *printer) renderIf(e *ast.If, ind int) bool {
 		return false
 	}
 
-	// `else` goes back to the `if`'s own column when the author put it on a
-	// line of its own, which is where the layout rule anchors it.
-	if e.Then.Span().EndPos().Line != e.Else.Span().StartPos().Line {
+	// `else` goes back to the `if`'s own column when the author put the keyword
+	// at the start of a line, which is where the layout rule anchors it.
+	if p.elseStartsLine(e) {
 		p.start(ind)
 	} else {
 		p.emit(" ")
@@ -334,7 +390,7 @@ func (p *printer) renderIf(e *ast.If, ind int) bool {
 			p.emit(s)
 			return true
 		}
-		return p.renderIf(inner, ind)
+		return p.renderIfAt(inner, ind)
 	}
 	return p.renderArm(e.Else, ind)
 }

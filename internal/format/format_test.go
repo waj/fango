@@ -118,6 +118,38 @@ func TestLambdaInlineBodyKeepsClosingBraceInline(t *testing.T) {
 	}
 }
 
+// An `if` that follows other text on its line anchors `then` and `else` a level
+// in from that line; at the line's own indent `else` would start the enclosing
+// block's next statement.
+func TestIfAfterTextAnchorsALevelIn(t *testing.T) {
+	src := "f x =\n" +
+		"    chained = if x > 10 then\n            1\n        else if x > 5 then\n            2\n        else 3\n" +
+		"    picked = case Just x of\n        Just y -> if y > 0 then\n                y\n            else 0\n        Nothing -> 0\n" +
+		"    chained + picked\n"
+	for _, input := range []string{src, strings.ReplaceAll(src, "        else", "         else")} {
+		out, errs := Source(source.NewFile("if.fango", []byte(input)))
+		if len(errs) > 0 {
+			t.Fatalf("formatting failed: %v", errs)
+		}
+		if string(out) != src {
+			t.Errorf("unexpected if layout:\n%s", out)
+		}
+	}
+}
+
+// An `else` written at the end of the `then` line stays there even when its
+// body follows on the next lines.
+func TestElseEndingThenLineKeepsItsPlace(t *testing.T) {
+	src := "loop n total = if n <= 0 then total else\n    next = n - 1\n    loop next (total + n)\n"
+	out, errs := Source(source.NewFile("else.fango", []byte(src)))
+	if len(errs) > 0 {
+		t.Fatalf("formatting failed: %v", errs)
+	}
+	if string(out) != src {
+		t.Errorf("unexpected else layout:\n%s", out)
+	}
+}
+
 func TestMultilineContainerLambdasAlignWithItems(t *testing.T) {
 	input := "testList =\n" +
 		"    [ { foo }\n    , { x ->\n        foo x\n    }\n    ]\n\n" +
