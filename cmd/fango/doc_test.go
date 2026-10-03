@@ -196,7 +196,11 @@ func TestDocWholeLibrary(t *testing.T) {
 
 // documentedModules have been migrated to source documentation. Each stays
 // complete under --strict, and its examples keep holding.
-var documentedModules = []string{"Basics", "Bytes", "Char", "Dict", "Fail", "Failure", "Iterator", "List", "Maybe", "Range", "Result", "State", "Stream", "String", "Tuple"}
+var documentedModules = []string{
+	"Basics", "Bytes", "Char", "Console", "Derive", "Dict", "Encoding", "Fail", "Failure", "File", "Iterator", "List", "Maybe",
+	"Prelude", "Process", "Random", "Range", "Regex", "Result", "Runtime.Local", "Runtime.Native", "Runtime.Prompt",
+	"Runtime.Scope", "State", "Stream", "String", "Text.Builder", "Tuple", "Url",
+}
 
 func moduleArgs(names []string) []string {
 	args := []string{"--stdlib"}

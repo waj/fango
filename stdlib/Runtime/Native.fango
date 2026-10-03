@@ -1,7 +1,10 @@
 {-# no-prelude #-}
+-- Types for native Go sidecars.
 module Runtime.Native exposing (Any)
 
--- An opaque Go value carried by native sidecars. The compiler gives this
--- declaration an `any` representation; its constructor stays private so only
--- native code can introduce useful values.
+-- An opaque Go value carried through Fango by native sidecars. Only native
+-- code creates useful values of it; Fango code passes them along.
+
+-- The compiler gives this declaration an `any` representation, and its
+-- constructor stays private.
 type Any = Any

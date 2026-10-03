@@ -1,4 +1,9 @@
 {-# no-prelude #-}
+-- Cleanup scopes: releasing what a computation acquired, however it exits.
+--
+-- A release runs exactly once when its scope exits: on a normal return, on
+-- an abort aimed at any outer handler, and on a failure inside a handler's
+-- `return` clause. Nested scopes release in reverse order of acquisition.
 module Runtime.Scope exposing (bracket, finally)
 
 import Basics exposing (..)
@@ -19,10 +24,43 @@ value, raised an abort aimed at any outer handler, or failed inside a handler's
 If the body succeeds and the release fails, the release failure propagates. If
 both fail the body failure stays primary. -}
 
+-- Acquires a resource with `acquire`, passes it to `use`, and releases it
+-- with `release` when the scope exits. If acquisition fails there is nothing
+-- to release. If `use` fails, that failure stays primary even when the
+-- release fails too; if only the release fails, its failure propagates.
+--
+-- ```fango
+-- import Fail
+-- import Result exposing (Result(..))
+-- import Runtime.Scope
+-- import State
+--
+-- released = State.run [] { Runtime.Scope.bracket { 5 } { _ -> State.put ["released"] } { r -> r * 2 } }
+-- failed =
+--     State.run [] {
+--         Fail.attempt { Runtime.Scope.bracket { 5 } { _ -> State.put ["released"] } { r -> if r > 0 then Fail.fail "boom" else r } }
+--     }
+--
+-- released.value == 10
+-- released.state == ["released"]
+-- failed.value == Err "boom"
+-- failed.state == ["released"]
+-- ```
 bracket : (() ->{e} resource) -> (resource ->{e} ()) -> (resource ->{e} result) ->{e} result
 bracket = native
 
 -- `finally` is an ordinary wrapper: its resource is Unit, so it carries no
 -- lifetime obligation and puts no restriction on the result it returns.
+
+-- Runs `action`, then `cleanup` when it exits, however it exits.
+--
+-- ```fango
+-- import Runtime.Scope
+-- import State
+--
+-- log = State.run [] { Runtime.Scope.finally { State.put ["body"] } { State.put ["cleanup" | State.get ()] } }
+--
+-- log.state == ["cleanup", "body"]
+-- ```
 finally : (() ->{e} result) -> (() ->{e} ()) ->{e} result
 finally action cleanup = bracket { () } { cleanup() } { action() }

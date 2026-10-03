@@ -1,11 +1,23 @@
 {-# no-prelude #-}
+-- Local mutable state confined to a scoped callback.
+--
+-- `run` gives its callback a fresh cell. The cell's permission cannot leave
+-- the callback, so a computation that only uses local state is pure where it
+-- is called, and may run during compile-time evaluation.
 module Runtime.Local exposing (Cell(..), run)
 
 import Basics exposing (..)
+
 -- Each handler activation owns its own state. The row records permission to
 -- access that activation; it has no runtime identity.
+
+-- A mutable cell holding an `a`, accessed with permission `e`. A cell
+-- contains functions, so it cannot cross a task boundary.
 type Cell e a =
-    { read : () ->{e} a
+    {
+      -- The last value written, initially the one `run` was given.
+      read : () ->{e} a
+      -- Replaces the value.
     , write : a ->{e} ()
     }
 
@@ -13,6 +25,21 @@ effect LocalState a
     readState : () -> a
     writeState : a -> ()
 
+-- Calls `action` with a fresh cell holding `initial` and returns its result.
+-- The result may not carry the cell's permission; other effects of `action`
+-- pass through. Nested runs have independent cells.
+--
+-- ```fango
+-- import Runtime.Local
+--
+-- doubled =
+--     Runtime.Local.run 21 { cell ->
+--         cell.write (cell.read () * 2)
+--         cell.read ()
+--     }
+--
+-- doubled == 42
+-- ```
 {-# scoped s #-}
 run : a -> (Cell s a ->{s} b) ->{e} b
 run initial action =

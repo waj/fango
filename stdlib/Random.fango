@@ -1,10 +1,17 @@
 {-# no-prelude #-}
+-- Random numbers as an effect.
+--
+-- Code that needs randomness performs `Random`; the program chooses where the
+-- numbers come from by running it under `runSeeded`, for reproducible draws,
+-- or `runSystem`, for fresh ones.
 module Random exposing (Random(..), int, runSeeded, runSystem)
 
 import Basics exposing (..)
 import IO exposing (IO)
 
+-- Drawing random integers. It has no default handler.
 effect Random
+    -- A draw from `lo` to `hi` inclusive; reversed bounds are swapped.
     int : Int -> Int -> Int
 
 nextState : Int -> Int
@@ -23,8 +30,20 @@ valueAt state lo hi =
 entropySeed : () ->{IO} Int
 entropySeed = native
 
--- runSeeded answers every `int lo hi` draw from a deterministic generator
--- started at seed: the same seed always produces the same draws. Under the
+-- Answers every draw from a deterministic generator started at `seed`, so
+-- the same seed produces the same draws, in the interpreter and in compiled
+-- programs alike. The generator is a 31-bit linear congruential one: it is
+-- modulo-biased and not suitable for cryptography. Nested runs keep separate
+-- sequences.
+--
+-- ```fango
+-- import Random
+--
+-- roll = Random.runSeeded 7 { Random.int 1 6 }
+--
+-- roll >= 1 && roll <= 6
+-- Random.runSeeded 7 { Random.int 1 6 } == roll
+-- ```
 runSeeded : Int -> (() ->{Random | e} a) ->{e} a
 runSeeded seed action =
     handle action() with current = seed on
@@ -32,7 +51,7 @@ runSeeded seed action =
             next = nextState current
             resume (valueAt next lo hi) with next
 
--- runSystem answers draws from a system-entropy seed: a fresh sequence on
--- every run.
+-- `runSeeded` from a seed drawn from system entropy, so every run draws a
+-- fresh sequence.
 runSystem : (() ->{Random | e} a) ->{IO | e} a
 runSystem action = runSeeded entropySeed() action

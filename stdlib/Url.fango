@@ -1,4 +1,10 @@
 {-# no-prelude #-}
+-- URLs: parsing, printing, resolution, and percent-encoding, following RFC
+-- 3986.
+--
+-- A `Url` is a record of its components, so it is read and updated with
+-- ordinary field access. Internationalized host names are not supported:
+-- hosts must be ASCII.
 module Url exposing (Component(..), Url(..), appendPath, parse, percentDecode, percentEncode, queryParams, requestTarget, resolve, toString, withQuery)
 
 import Basics exposing (..)
@@ -14,19 +20,43 @@ import String
 `#`. The scheme and a registered host name are lowercased; an IPv6 literal is
 stored without its brackets. Hosts must be ASCII. -}
 
+-- A URI reference, absolute or relative. A relative one has no scheme and
+-- possibly no host. `path`, `query`, and `fragment` hold their encoded form.
 type Url =
-    { scheme : Maybe String
+    {
+      -- The scheme, lowercased and without its `:`, as in `Just "https"`.
+      scheme : Maybe String
+      -- The user information before `@` in the authority. It occurs only
+      -- with a host.
     , userinfo : Maybe String
+      -- The host, present exactly when the reference has an authority
+      -- (`//`). A registered name is lowercased, and an IPv6 literal is held
+      -- without its brackets, as a socket dial needs it.
     , host : Maybe String
+      -- The port, when the authority names one. It occurs only with a host.
     , port : Maybe Int
+      -- The encoded path, possibly empty.
     , path : String
+      -- The encoded query, without its `?`. `Just ""` is a bare `?`, which
+      -- stays distinct from `Nothing`.
     , query : Maybe String
+      -- The encoded fragment, without its `#`.
     , fragment : Maybe String
     }
     deriving (Eq, Show)
 
 -- The part of a URL a string is encoded for, which decides what stays literal.
-type Component = PathSegment | QueryPart | FragmentPart deriving (Eq, Show)
+type Component
+    -- One path segment: unreserved characters, sub-delimiters, `:`, and `@`
+    -- stay literal, and `/` is encoded.
+    = PathSegment
+    -- One query key or value: unreserved characters and
+    -- `! $ ' ( ) * , / : ; ? @` stay literal; `&`, `=`, `+`, `#`, and spaces
+    -- are encoded.
+    | QueryPart
+    -- A fragment: path characters, `/`, and `?` stay literal.
+    | FragmentPart
+    deriving (Eq, Show)
 
 mapMaybe : (a -> b) -> Maybe a -> Maybe b
 mapMaybe f value =
@@ -252,15 +282,48 @@ parseBytes input =
                     }
                 )
 
--- Parses a URI reference. Fails on characters outside RFC 3986, malformed
--- escapes, a non-ASCII or malformed host, or a port above 65535.
+-- Parses a URI reference, or answers `Nothing` for a character its component
+-- does not allow (such as a space or a non-ASCII character; encode it
+-- first), a malformed percent escape, a relative reference whose first path
+-- segment holds a `:`, a malformed or non-ASCII host, and a port that is not
+-- decimal or is above 65535.
+--
+-- ```fango
+-- import Url
+--
+-- hostOf : String -> Maybe String
+-- hostOf text =
+--     case Url.parse text of
+--         Just url -> Just (Maybe.withDefault "" url.host)
+--         Nothing -> Nothing
+--
+-- hostOf "HTTPS://Example.com:8080/a?b#c" == Just "example.com"
+-- hostOf "http://[::1]/" == Just "::1"
+-- hostOf "/docs" == Just ""
+-- Url.parse "a b" == Nothing
+-- Url.parse "http://h:70000/" == Nothing
+-- ```
 parse : String -> Maybe Url
 parse raw = parseBytes (Bytes.fromString raw)
 
 hostText : String -> String
 hostText host = if String.contains ":" host then "[" ++ host ++ "]" else host
 
--- Gives back what `parse` read, with scheme and host case normalized.
+-- The text of a URL. For anything `parse` accepted it is the input, except
+-- that the scheme and host are lowercased and an empty port is dropped.
+--
+-- ```fango
+-- import Url
+--
+-- roundTrip : String -> Maybe String
+-- roundTrip text =
+--     case Url.parse text of
+--         Just url -> Just (Url.toString url)
+--         Nothing -> Nothing
+--
+-- roundTrip "HTTP://Example.com:/a?b#c" == Just "http://example.com/a?b#c"
+-- roundTrip "http://[::1]:80/" == Just "http://[::1]:80/"
+-- ```
 toString : Url -> String
 toString url =
     scheme = case url.scheme of
@@ -284,7 +347,22 @@ toString url =
         Nothing -> ""
     scheme ++ authority ++ url.path ++ query ++ fragment
 
--- The origin-form request target: the path, `/` when empty, and its query.
+-- The target an HTTP request line names: the path, or `/` when it is empty,
+-- followed by `?` and the query when there is one. The fragment is never
+-- part of it.
+--
+-- ```fango
+-- import Url
+--
+-- target : String -> Maybe String
+-- target text =
+--     case Url.parse text of
+--         Just url -> Just (Url.requestTarget url)
+--         Nothing -> Nothing
+--
+-- target "http://h/a/b?x=1#top" == Just "/a/b?x=1"
+-- target "http://h" == Just "/"
+-- ```
 requestTarget : Url -> String
 requestTarget url =
     path = if url.path == "" then "/" else url.path
@@ -328,7 +406,24 @@ merge base path =
         at = lastIndexOf 47 bytes (Bytes.length bytes - 1)
         if at < 0 then path else text (before (at + 1) bytes) ++ path
 
--- Resolves a reference against a base URL, RFC 3986 §5.2.2.
+-- Resolves `reference` against `base` (RFC 3986 §5.2): a reference with a
+-- scheme or host replaces the base's, an empty path keeps the base path, a
+-- relative path joins the base path's directory, and dot segments are
+-- removed. The reference's fragment always wins.
+--
+-- ```fango
+-- import Url
+--
+-- resolved : String -> String -> Maybe String
+-- resolved base reference =
+--     case (Url.parse base, Url.parse reference) of
+--         (Just b, Just r) -> Just (Url.toString (Url.resolve b r))
+--         _ -> Nothing
+--
+-- resolved "http://h/a/b/c" "../d" == Just "http://h/a/d"
+-- resolved "http://h/a/b" "?q" == Just "http://h/a/b?q"
+-- resolved "http://h/a" "//other/x" == Just "http://other/x"
+-- ```
 resolve : Url -> Url -> Url
 resolve base reference =
     if reference.scheme /= Nothing then { reference | path = removeDots reference.path }
@@ -357,7 +452,16 @@ encodeByte component code =
     if keeps component code then String.fromChar (Maybe.withDefault ' ' (Char.fromCode code))
     else "%" ++ hexDigit (quotientBy 16 code) ++ hexDigit (modBy 16 code)
 
--- Percent-encodes the UTF-8 bytes of `raw` that `component` does not keep.
+-- Percent-encodes the UTF-8 bytes of `raw` that `component` does not keep
+-- literally, as `%XX` with uppercase hex.
+--
+-- ```fango
+-- import Url exposing (Component(..))
+--
+-- Url.percentEncode PathSegment "a b/c" == "a%20b%2Fc"
+-- Url.percentEncode QueryPart "x=1&y" == "x%3D1%26y"
+-- Url.percentEncode PathSegment "é" == "%C3%A9"
+-- ```
 percentEncode : Component -> String -> String
 percentEncode component raw = String.concat (List.map (encodeByte component) (Bytes.toList (Bytes.fromString raw)))
 
@@ -372,7 +476,16 @@ decodeBytes bytes reversed =
         [37 | _] -> Nothing
         [code | rest] -> decodeBytes rest [code | reversed]
 
--- Decodes percent escapes. Fails on a malformed escape or invalid UTF-8.
+-- Decodes percent escapes, or answers `Nothing` for a malformed escape or
+-- bytes that are not valid UTF-8. `+` stays as it is.
+--
+-- ```fango
+-- import Url
+--
+-- Url.percentDecode "a%20b+c" == Just "a b+c"
+-- Url.percentDecode "%zz" == Nothing
+-- Url.percentDecode "%FF" == Nothing
+-- ```
 percentDecode : String -> Maybe String
 percentDecode raw =
     case decodeBytes (Bytes.toList (Bytes.fromString raw)) [] of
@@ -391,8 +504,22 @@ queryPair part =
     (key, value) = cut 61 (Bytes.fromString part)
     (queryDecode (text key), queryDecode (Maybe.withDefault "" (mapMaybe text value)))
 
--- The decoded `key=value` pairs of the query, in order. Empty parts are
--- skipped and a part without `=` has an empty value.
+-- The decoded `key=value` pairs of the query, in order. `+` reads as a
+-- space, as HTML forms write it; empty parts are skipped, a part without `=`
+-- has an empty value, and a part that fails to decode is kept as written.
+--
+-- ```fango
+-- import Url
+--
+-- params : String -> List (String, String)
+-- params text =
+--     case Url.parse text of
+--         Just url -> Url.queryParams url
+--         Nothing -> []
+--
+-- params "/s?q=a+b&&flag&x=%41" == [("q", "a b"), ("flag", ""), ("x", "A")]
+-- params "/s" == []
+-- ```
 queryParams : Url -> List (String, String)
 queryParams url =
     case url.query of
@@ -402,7 +529,21 @@ queryParams url =
 encodePair : (String, String) -> String
 encodePair (key, value) = percentEncode QueryPart key ++ "=" ++ percentEncode QueryPart value
 
--- Appends encoded pairs to the query. Spaces become `%20`.
+-- Appends `key=value` pairs to the query, encoding each key and value.
+-- Spaces become `%20`, which every server accepts.
+--
+-- ```fango
+-- import Url
+--
+-- added : String -> Maybe String
+-- added text =
+--     case Url.parse text of
+--         Just url -> Just (Url.toString (Url.withQuery [("q", "a b"), ("n", "1")] url))
+--         Nothing -> Nothing
+--
+-- added "http://h/s?x=1" == Just "http://h/s?x=1&q=a%20b&n=1"
+-- added "http://h/s" == Just "http://h/s?q=a%20b&n=1"
+-- ```
 withQuery : List (String, String) -> Url -> Url
 withQuery pairs url =
     case pairs of
@@ -419,6 +560,18 @@ withoutTrailingSlash path =
     if size > 0 && String.slice (size - 1) size path == "/" then String.slice 0 (size - 1) path else path
 
 -- Appends segments to the path, encoding each one, `/` included.
+--
+-- ```fango
+-- import Url
+--
+-- joined : String -> Maybe String
+-- joined text =
+--     case Url.parse text of
+--         Just url -> Just (Url.toString (Url.appendPath ["a b", "c/d"] url))
+--         Nothing -> Nothing
+--
+-- joined "http://h/base/" == Just "http://h/base/a%20b/c%2Fd"
+-- ```
 appendPath : List String -> Url -> Url
 appendPath segments url =
     case segments of

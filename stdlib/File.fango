@@ -1,4 +1,16 @@
 {-# no-prelude #-}
+-- Files and directories.
+--
+-- `withFile`, `withOutput`, and `withAppend` open a file as an `IO.Handle`
+-- for the length of a callback and close it exactly once when the callback
+-- exits, however it exits. A failed open raises before anything is acquired.
+-- A failed close after a successful callback is the scope's failure; after a
+-- failed one it is recorded beside it. A handle that escapes its scope
+-- reports a closed-resource error when used.
+--
+-- The whole-file and directory operations need no handle and answer a
+-- `Result`; a missing path is an `Err` of kind `NotFound`. Relative paths
+-- resolve from the program's working directory.
 module File exposing (isDirectory, listDirectory, read, size, withAppend, withFile, withOutput, writeAll)
 
 import Basics exposing (..)
@@ -63,26 +75,34 @@ close file = fromResult (closeHandle file)
 withOpened : (String ->{IO} Result Error IO.Handle) -> String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withOpened open path action = Runtime.Scope.bracket { fromResult (open path) } close action
 
--- withFile opens path for reading and runs action on the handle.
+-- Opens `path` for reading and runs `action` on the handle, closing it when
+-- `action` exits. The callback may perform fewer effects than allowed.
 withFile : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withFile path action = withOpened openRead path action
 
--- withOutput creates or truncates path and runs action on the handle.
+-- Creates or truncates `path`, opens it for writing, and runs `action` on
+-- the handle, closing it when `action` exits.
 withOutput : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withOutput path action = withOpened openWrite path action
 
--- withAppend opens path for appending, creating it if needed.
+-- Opens `path` for appending, creating it if needed, and runs `action` on
+-- the handle, closing it when `action` exits.
 withAppend : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withAppend path action = withOpened openAppend path action
 
 -- Whole-file operations need no handle and report failure as a Result.
 
+-- The whole contents of the file at `path` as text, with U+FFFD in place of
+-- malformed UTF-8.
 read : String ->{IO} Result Error String
 read path = readFileResult path
 
+-- Writes `text` as the whole contents of the file at `path`, creating or
+-- replacing it.
 writeAll : String -> String ->{IO} Result Error ()
 writeAll path text = writeFileResult path text
 
+-- Whether `path` names a directory rather than a file.
 isDirectory : String ->{IO} Result Error Bool
 isDirectory path = isDirectoryPath path
 
@@ -101,7 +121,7 @@ collectEntries directory found =
 closeListing : Directory ->{IO, Fail Error} ()
 closeListing directory = fromResult (closeDirectory directory)
 
--- listDirectory names the entries of a directory in sorted order.
+-- The names of the entries of the directory at `path`, sorted.
 listDirectory : String ->{IO} Result Error (List String)
 listDirectory path =
     attempt {

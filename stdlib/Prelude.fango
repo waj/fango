@@ -1,10 +1,15 @@
 {-# no-prelude #-}
-module Prelude exposing ()
-
 -- The default scope. Every module that does not carry `{-# no-prelude #-}`
 -- resolves as though these imports stood at the top of its own file, so they
--- grant qualified access exactly as a written import does. The bundled
--- standard library sits below this file and carries the pragma.
+-- grant qualified access exactly as a written import does: `List.map` needs
+-- no import, while `map` alone does. The module itself exports nothing.
+--
+-- Unqualified, the prelude provides the standard classes and operators,
+-- `show`, `display`, `ignore`, `Type`, `print`, `readLine`, `write`, `IO`,
+-- `stdin`, `stdout`, `stderr`, `List`, and `Maybe` with its constructors.
+module Prelude exposing ()
+
+-- The bundled standard library sits below this file and carries the pragma.
 
 import Basics exposing
     ( Display, Eq, Num, Ord, Show, Type

@@ -1,4 +1,9 @@
 {-# no-prelude #-}
+-- Line-oriented console output and input.
+--
+-- These are the prelude's `print`, `write`, and `readLine`. They treat a
+-- failure of standard input or output as fatal; `IO` offers the same
+-- operations on handles with recoverable errors.
 module Console exposing (print, readLine, write)
 
 import Basics exposing (..)
@@ -9,15 +14,21 @@ import Maybe exposing (Maybe(..))
 panic : String ->{IO} ()
 panic = native
 
+-- Writes the text to standard output as it is, without a newline. A write
+-- error ends the program.
 write : String ->{IO} ()
 write text =
     handle IO.write IO.stdout text on
         Fail.fail error -> panic (IO.describeError error)
         return value -> value
 
+-- Writes the value's `display` text and a newline to standard output. A
+-- write error ends the program.
 print : Display a => a ->{IO} ()
 print value = write (display value ++ "\n")
 
+-- The next line of standard input with its ending, or `Nothing` at the end
+-- of input. A read error ends the program.
 readLine : () ->{IO} Maybe Line
 readLine() =
     handle IO.readLine IO.stdin on

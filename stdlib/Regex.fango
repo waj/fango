@@ -1,4 +1,12 @@
 {-# no-prelude #-}
+-- Regular expressions, with the syntax and semantics of Go's `regexp`
+-- package (RE2): matching runs in time linear in the input.
+--
+-- A literal such as `/[a-z]+/` or `/(?i)hello/` needs no import and is
+-- checked by the compiler; compiled programs build each literal once at
+-- startup. `compile` builds a pattern at run time instead. Positions are
+-- zero-based, half-open offsets in Unicode scalars, as `String.slice` uses,
+-- not bytes.
 module Regex exposing (Capture(..), Error(..), Match(..), Regex, Span(..), compile, escape, find, findAll, matches, message, pattern, replaceAll, replaceAllLiteral, split)
 
 import Basics exposing (..)
@@ -7,15 +15,52 @@ import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
 import Runtime.Native
 
+-- A compiled pattern. It is immutable and has no equality or display; use
+-- `pattern` to see its source.
 type Regex = Regex Runtime.Native.Any
 
-type Error = InvalidPattern String deriving (Eq, Show)
+-- Why a pattern did not compile.
+type Error
+    -- The pattern is not valid, for the reason the engine gives.
+    = InvalidPattern String
+    deriving (Eq, Show)
 
-type Span = { text : String, start : Int, end : Int } deriving (Eq, Show)
+-- A matched piece of the input and where it lies.
+type Span =
+    {
+      -- The matched text.
+      text : String
+      -- Where it starts.
+    , start : Int
+      -- Where it ends, exclusive.
+    , end : Int
+    }
+    deriving (Eq, Show)
 
-type Capture = { name : Maybe String, value : Maybe Span } deriving (Eq, Show)
+-- One capture group of a match, numbered from group 1.
+type Capture =
+    {
+      -- The group's name for `(?P<name>...)`, `Nothing` for an unnamed group.
+      name : Maybe String
+      -- What it matched: `Nothing` when the group took no part in the match,
+      -- and an empty span when it matched empty text.
+    , value : Maybe Span
+    }
+    deriving (Eq, Show)
 
-type Match = { text : String, start : Int, end : Int, captures : List Capture } deriving (Eq, Show)
+-- One match of a whole pattern.
+type Match =
+    {
+      -- The matched text.
+      text : String
+      -- Where it starts.
+    , start : Int
+      -- Where it ends, exclusive.
+    , end : Int
+      -- The capture groups in group order, excluding the whole match.
+    , captures : List Capture
+    }
+    deriving (Eq, Show)
 
 type Compilation = Compilation Runtime.Native.Any
 type MatchBatch = MatchBatch Runtime.Native.Any
@@ -30,18 +75,51 @@ compiledRegex = native
 compileMessage : Compilation -> String
 compileMessage = native
 
+-- Compiles a pattern at run time; each call compiles again. Literal patterns
+-- need no call.
+--
+-- ```fango
+-- import Regex
+-- import Result exposing (Result(..))
+--
+-- valid : String -> Bool
+-- valid source =
+--     case Regex.compile source of
+--         Ok _ -> True
+--         Err _ -> False
+--
+-- valid "[a-z]+"
+-- valid "[a-z" == False
+-- ```
 compile : String -> Result Error Regex
 compile source =
     result = compileRaw source
     if compileSucceeded result then Ok (compiledRegex result)
     else Err (InvalidPattern (compileMessage result))
 
+-- The reason a pattern did not compile, worded by the engine.
 message : Error -> String
 message (InvalidPattern reason) = reason
 
+-- The pattern's source, without literal delimiters or delimiter escapes.
+--
+-- ```fango
+-- import Regex
+--
+-- Regex.pattern /a\/b+/ == "a/b+"
+-- ```
 pattern : Regex -> String
 pattern = native
 
+-- Whether the pattern matches anywhere in the text; anchor it with `^` and
+-- `$` to match the whole text.
+--
+-- ```fango
+-- import Regex
+--
+-- Regex.matches /(?i)hello/ "Say HELLO"
+-- Regex.matches /^[0-9]+$/ "12a" == False
+-- ```
 matches : Regex -> String -> Bool
 matches = native
 
@@ -81,6 +159,20 @@ matchAt batch index =
     whole = spanAt batch index 0
     { text = whole.text, start = whole.start, end = whole.end, captures = capturesAt batch index 1 [] }
 
+-- The first match in the text, or `Nothing`.
+--
+-- ```fango
+-- import Regex
+--
+-- firstWord : String -> Maybe String
+-- firstWord text =
+--     case Regex.find /[a-z]+/ text of
+--         Just found -> Just found.text
+--         Nothing -> Nothing
+--
+-- firstWord "12 abc de" == Just "abc"
+-- firstWord "123" == Nothing
+-- ```
 find : Regex -> String -> Maybe Match
 find regex text =
     batch = findRaw regex text
@@ -90,12 +182,41 @@ allMatches batch index reverse =
     if index >= matchCount batch then List.reverse reverse
     else allMatches batch (index + 1) [matchAt batch index | reverse]
 
+-- Every successive non-overlapping match, in order. An empty match right
+-- after a previous match is omitted.
+--
+-- ```fango
+-- import Regex
+--
+-- starts : List Int
+-- starts = List.map { found -> found.start } (Regex.findAll /[0-9]+/ "a1 b22 c333")
+--
+-- starts == [1, 4, 8]
+-- ```
 findAll : Regex -> String -> List Match
 findAll regex text = allMatches (findAllRaw regex text) 0 []
 
+-- Replaces every match in the text with `replacement`, in which `$1` and
+-- `${name}` stand for captures and `$$` for a dollar sign. A missing group
+-- stands for empty text, and a name takes its longest spelling, so write
+-- `${1}x` to follow group 1 with `x`.
+--
+-- ```fango
+-- import Regex
+--
+-- Regex.replaceAll /(\w+)@(\w+)/ "$2 at $1" "me@host" == "host at me"
+-- Regex.replaceAll /(a)/ "${1}x" "banana" == "baxnaxnax"
+-- ```
 replaceAll : Regex -> String -> String -> String
 replaceAll = native
 
+-- Replaces every match in the text with `replacement` exactly as written.
+--
+-- ```fango
+-- import Regex
+--
+-- Regex.replaceAllLiteral /[0-9]+/ "$1" "a1b22" == "a$1b$1"
+-- ```
 replaceAllLiteral : Regex -> String -> String -> String
 replaceAllLiteral = native
 
@@ -110,8 +231,24 @@ splitItems batch index reverse =
     if index >= splitCount batch then List.reverse reverse
     else splitItems batch (index + 1) [splitItem batch index | reverse]
 
+-- The pieces of the text between matches, as Go's `Regexp.Split` gives
+-- them with no limit.
+--
+-- ```fango
+-- import Regex
+--
+-- Regex.split /,\s*/ "a, b,c" == ["a", "b", "c"]
+-- ```
 split : Regex -> String -> List String
 split regex text = splitItems (splitRaw regex text) 0 []
 
+-- The text with every metacharacter quoted, for including literal text in
+-- a pattern built at run time.
+--
+-- ```fango
+-- import Regex
+--
+-- Regex.escape "1+1=2?" == "1\\+1=2\\?"
+-- ```
 escape : String -> String
 escape = native

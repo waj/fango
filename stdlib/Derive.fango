@@ -1,12 +1,19 @@
 {-# no-prelude #-}
+-- The derivers for the standard classes: `deriving (Eq, Ord, Show)` uses
+-- them. They are ordinary `deriver` declarations, which is how any library
+-- opens `deriving` to its own class; see `Meta`.
+--
+-- Derived `Eq` compares constructors and then fields; derived `Ord` orders
+-- constructors by declaration position and then fields left to right; derived
+-- `Show` writes a constructor applied to its arguments, or a record's
+-- fields, with arguments parenthesized where juxtaposition would misread
+-- them. The module exports nothing to import.
 module Derive exposing ()
 
 import Basics exposing (..)
 import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..), Shape(..), TypeInfo(..))
 
-{- The derivers for the standard classes.
-
-`deriving (Eq)` runs the `deriver Eq` block below: the compiler hands it the
+{- `deriving (Eq)` runs the `deriver Eq` block below: the compiler hands it the
 type's schema plus one `Code` per method parameter, and it answers with the
 method's body. Nothing here is privileged — this module is what any library
 writes to open `deriving` to its own class.
