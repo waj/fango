@@ -49,6 +49,12 @@ exercise independent rejection.
 | .files/ | Seed data copied to a fresh working directory for each backend |
 | .native.go | Sidecar installed in a private interpreter worker |
 
+The bundled library is held to [`fango doc --strict`](../reference/commands.md#api-documentation):
+a new public declaration or module must arrive documented. The fenced `fango`
+examples in its documentation compile into one program that runs under both
+backends ([doc tests](../../cmd/fango/doc_test.go)); every top-level line that
+binds no name must evaluate to `True`.
+
 Portable failure tests use missing paths or a directory opened as a file, not chmod.
 Stateful command examples run sequences in isolated directories with matched argv
 and working-directory contexts. Example sources stay directly under

@@ -400,7 +400,7 @@ type Maybe a
 Library examples, as in [Maybe](../../stdlib/Maybe.fango), are fenced
 `fango` blocks. A block brings its own imports, may bind helper names, and
 every other top-level line is a `Bool` expression that holds. The test suite
-runs the examples of every documented library module under both backends.
+runs them under both backends.
 
 ### Output
 

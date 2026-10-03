@@ -54,14 +54,13 @@ semantic tokens. Non-VS Code client configuration can be documented when tested.
 
 ## API documentation
 
-[`fango doc`](reference/commands.md#api-documentation) is implemented for the
-bundled library. Most modules are documented in source;
-`documentedModules` in the [doc command tests](../cmd/fango/doc_test.go)
-lists them, holds them complete under `--strict`, and runs their examples
-under both backends. A module joins that list when it reaches no gaps.
+[`fango doc`](reference/commands.md#api-documentation) is implemented, and
+every bundled module is documented in source under the
+[verification gate](design/verification.md#differential-fixtures-and-examples).
 
-- Document the remaining bundled module, Meta. Then replace the library reference topics with links
-  to the generated reference once the website renders it.
+- Replace the library reference topics with links to the generated reference
+  once the website renders it, keeping in the reference only what the
+  generated pages cannot say, such as cross-module guides.
 - Decide how to document a user's own modules: which modules a local source
   root publishes, and how paths are reported outside the repository.
 - Many IO, network, and task operations have no natural `Bool` assertion.

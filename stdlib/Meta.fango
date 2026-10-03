@@ -1,4 +1,12 @@
 {-# no-prelude #-}
+-- The compile-time stage: code values, type reflection, attributes, and the
+-- builders derivers use.
+--
+-- A backtick quotation is a `Code` value, and `$(...)` splices one back in.
+-- `typeOf T` reflects a type as a `TypeRepr`, which `info` reads as a schema
+-- when it is visible where `typeOf` was written. `Code`, `TypeRepr`, and the
+-- types built from them exist only while the compiler runs, so a definition
+-- whose type mentions them is never part of a program.
 module Meta exposing
     ( Attached(..), Attributes, Bound(..), BoundField(..), Code, Ctor(..)
     , Field(..), Items(..), Lift(..), Reflected(..), Shape(..), Site
@@ -26,30 +34,56 @@ The natives below have Go templates that are never emitted, because every one
 of them has a compile-time-only type. They exist so the interpreter registry
 and the surface declaration agree on arity. -}
 
+-- A piece of Fango code at compile time, from a quotation or a builder. It
+-- keeps the scope it was written in, and is checked when it is spliced.
 type Code = Code
 
+-- A reflected type. Nominal types compare by compiler identity; applications
+-- and function arrows compare structurally, including their effects.
 type TypeRepr = TypeRepr
 
-type Items a = NoItems | Item a (Items a)
+-- `Meta`'s own list. `Meta` cannot use `List`, which derives its instances
+-- and so depends on the module that depends on `Meta`.
+type Items a
+    -- The empty list.
+    = NoItems
+    -- An item in front of the rest.
+    | Item a (Items a)
 
+-- Combines the items into one value, first to last.
+--
+-- ```fango
+-- import Meta exposing (Items(..))
+--
+-- Meta.foldItems { total n -> total + n } 0 (Item 1 (Item 2 NoItems)) == 3
+-- ```
 foldItems : (b -> a -> b) -> b -> Items a -> b
 foldItems combine start items =
     case items of
         NoItems -> start
         Item value rest -> foldItems combine (combine start value) rest
 
+-- Applies a function to every item, keeping their order.
+--
+-- ```fango
+-- import Meta exposing (Items(..))
+--
+-- Meta.lengthItems (Meta.mapItems { n -> n * 2 } (Item 1 (Item 2 NoItems))) == 2
+-- ```
 mapItems : (a -> b) -> Items a -> Items b
 mapItems change items =
     case items of
         NoItems -> NoItems
         Item value rest -> Item (change value) (mapItems change rest)
 
+-- The number of items.
 lengthItems : Items a -> Int
 lengthItems items = foldItems { total _ -> total + 1 } 0 items
 
--- Lifting a scalar builds a literal that keeps its own type.
-
+-- Values that become literal code. `Int`, `Float`, `String`, `Char`, `Bool`,
+-- and `()` have it.
 class Lift a
+    -- A literal for the value, which keeps its own type.
     lift : a -> Code
 
 liftInt : Int -> Code
@@ -90,12 +124,15 @@ instance Lift ()
 
 -- Reflected types compare by compiler identity, never by name.
 
+-- Whether two reflected types are the same type. Names never decide it.
 sameType : TypeRepr -> TypeRepr -> Bool
 sameType = native "$1 == $2"
 
+-- The type constructor an application applies, or the type itself.
 head : TypeRepr -> TypeRepr
 head = native "$1"
 
+-- Whether the type is a type variable.
 isVar : TypeRepr -> Bool
 isVar = native "$1"
 
@@ -142,13 +179,25 @@ fieldType = native "$1 == $2 == $3"
 -- Generic, typed metadata. The lookup primitive is specialized by the compiler.
 type Attributes = Attributes
 
+-- Where an attribute was written, for reporting a failure there.
 type Site = Site
 
-type Attached a = { value : a, site : Site }
+-- An attribute value and where it was written.
+type Attached a =
+    {
+      -- The attribute's value.
+      value : a
+      -- Its source location.
+    , site : Site
+    }
 
+-- The attributes in a collection whose type is exactly `a`, type arguments
+-- included, in source order. Collections follow reflection visibility: an
+-- opaque import hides a type's metadata.
 attributes : Type a -> Attributes -> Items (Attached a)
 attributes = native "$1 == $2"
 
+-- Stops compilation with a `COMPILE-TIME FAILURE` at an attribute's site.
 failAt : Site -> String -> a
 failAt = native "$1 == $2"
 
@@ -161,23 +210,70 @@ ctorAttributes = native "$1 == $2"
 fieldAttributes : TypeRepr -> Int -> Int -> Attributes
 fieldAttributes = native "$1 == $2 == $3"
 
+-- One field of a reflected constructor.
 type Field =
-    { name : String
+    {
+      -- The field's name, or `""` for a union constructor's positional field.
+      name : String
+      -- Its zero-based position.
     , index : Int
+      -- Its type, instantiated at the reflected type's arguments.
     , ty : TypeRepr
+      -- Its attributes.
     , attributes : Attributes
     }
 
-type Ctor = { name : String, symbol : String, index : Int, owner : TypeRepr, fields : Items Field, attributes : Attributes }
+-- One constructor of a reflected type. A record's sole constructor carries
+-- the type's own name.
+type Ctor =
+    {
+      -- The constructor's name.
+      name : String
+      -- Its canonical name, which identifies it in generated code.
+    , symbol : String
+      -- Its zero-based declaration position.
+    , index : Int
+      -- The type it constructs.
+    , owner : TypeRepr
+      -- Its fields in order.
+    , fields : Items Field
+      -- Its own attributes; a record's synthetic constructor has none.
+    , attributes : Attributes
+    }
 
-type Shape = Union (Items Ctor) | Record Ctor
+-- How a reflected type is built.
+type Shape
+    -- A union of these constructors.
+    = Union (Items Ctor)
+    -- A record, as its one constructor with named fields.
+    | Record Ctor
 
-type TypeInfo = { name : String, moduleName : String, ty : TypeRepr, params : Items TypeRepr, shape : Shape, attributes : Attributes }
+-- The schema of a reflected type.
+type TypeInfo =
+    {
+      -- The type's name.
+      name : String
+      -- The module that declares it.
+    , moduleName : String
+      -- The reflected type itself.
+    , ty : TypeRepr
+      -- Its type arguments.
+    , params : Items TypeRepr
+      -- Its constructors or record fields.
+    , shape : Shape
+      -- The attributes written before its `type`.
+    , attributes : Attributes
+    }
 
 -- info answers Opaque unless the type's schema is visible where `typeOf` was
 -- written: `exposing (T)` reflects opaque and `exposing (T(..))` reflects in
 -- full, exactly as those forms already govern patterns and field access.
-type Reflected = Opaque | Visible TypeInfo
+type Reflected
+    -- No schema is readable: the type is imported opaquely, or it is a
+    -- scalar or a type variable.
+    = Opaque
+    -- The type's schema.
+    | Visible TypeInfo
 
 argsFrom : TypeRepr -> Int -> Items TypeRepr
 argsFrom repr index =
@@ -186,6 +282,7 @@ argsFrom repr index =
     else
         Item (argAt repr index) (argsFrom repr (index + 1))
 
+-- The arguments a type application applies, in order.
 args : TypeRepr -> Items TypeRepr
 args repr = argsFrom repr 0
 
@@ -238,6 +335,7 @@ infoOf repr =
     , shape = shapeOf repr
     }
 
+-- The type's schema, when it is visible where `typeOf` was written.
 info : TypeRepr -> Reflected
 info repr = if schemaVisible repr then Visible (infoOf repr) else Opaque
 
@@ -253,15 +351,29 @@ ctorsIn subject =
 -- introduces, so a deriver never invents a name and exhaustiveness is
 -- structural rather than checked after the fact.
 
+-- One field of a constructor that `match` has bound.
 type BoundField =
-    { name : String
+    {
+      -- The field's name, or `""` for a positional field.
+      name : String
+      -- Its zero-based position.
     , index : Int
+      -- Its type.
     , ty : TypeRepr
+      -- Code naming the bound value.
     , value : Code
+      -- Its attributes.
     , attributes : Attributes
     }
 
-type Bound = { ctor : Ctor, fields : Items BoundField }
+-- One branch of a `match`: a constructor and its bound fields.
+type Bound =
+    {
+      -- The constructor matched.
+      ctor : Ctor
+      -- Its fields, bound in order.
+    , fields : Items BoundField
+    }
 
 binderName : Code -> Int -> Int -> String
 binderName = native "$1 == $2 == $3"

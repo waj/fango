@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -194,56 +195,96 @@ func TestDocWholeLibrary(t *testing.T) {
 	}
 }
 
-// documentedModules have been migrated to source documentation. Each stays
-// complete under --strict, and its examples keep holding.
-var documentedModules = []string{
-	"Async", "Basics", "Bytes", "Char", "Console", "Derive", "Dict", "Encoding", "Fail", "Failure", "File", "Http", "Http.Client", "Http.GZip", "Http.Server", "Http.Server.Route", "Http.Wire", "IO", "Iterator", "Json", "Json.Field", "Json.Pull", "List", "Maybe", "Net",
-	"Prelude", "Process", "Random", "Range", "Reader", "Regex", "Result", "Runtime.Local", "Runtime.Native", "Runtime.Prompt",
-	"Runtime.Scope", "State", "Stream", "String", "Text.Builder", "Text.Reader", "Text.Writer", "Tuple", "Url", "Writer",
-}
-
-func moduleArgs(names []string) []string {
-	args := []string{"--stdlib"}
-	for _, name := range names {
-		args = append(args, "--module", name)
-	}
-	return args
-}
-
+// Every bundled module documents itself and each public declaration it
+// owns, so a new library module must arrive documented.
 func TestDocStrict(t *testing.T) {
 	t.Parallel()
-	stdout, stderr, code := runDoc(t, append(moduleArgs(documentedModules), "--strict")...)
+	stdout, stderr, code := runDoc(t, "--stdlib", "--strict")
 	if code != 0 || stderr != "" {
-		t.Fatalf("documented modules: code %d, stderr:\n%s", code, stderr)
+		t.Fatalf("code %d, stderr:\n%s", code, stderr)
 	}
 	decodeDoc(t, stdout)
+}
 
-	// Meta is not migrated yet.
-	stdout, stderr, code = runDoc(t, "--stdlib", "--strict", "--module", "Meta")
+// A library with an undocumented module fails --strict with one line per gap
+// and no JSON, and documents it with empty text without --strict. The CLI
+// runs as its own process so its library root stays private to this test.
+func TestDocStrictReportsGaps(t *testing.T) {
+	t.Parallel()
+	real, err := libroot.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	err = filepath.WalkDir(filepath.Join(real, "stdlib"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(entry.Name(), ".") && entry.IsDir() {
+			return filepath.SkipDir
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(real, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(rel)), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(root, rel), data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := "{-# no-prelude #-}\nmodule Undocumented exposing (Kind(..), value)\n\nimport Basics exposing (..)\n\n-- Documented.\ntype Kind = Kind\n\nvalue : Int\nvalue = 1\n"
+	if err := os.WriteFile(filepath.Join(root, "stdlib", "Undocumented.fango"), []byte(module), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc := func(args ...string) (string, string, int) {
+		cmd := exec.Command(cliBinary(t), append([]string{"doc", "--stdlib"}, args...)...)
+		cmd.Env = append(os.Environ(), libroot.EnvRoot+"="+root)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		code := 0
+		if exit, ok := err.(*exec.ExitError); ok {
+			code = exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		return stdout.String(), stderr.String(), code
+	}
+	stdout, stderr, code := doc("--strict", "--module", "Undocumented")
 	if code != 1 || stdout != "" {
 		t.Fatalf("code %d, stdout %q; want 1 and no JSON", code, stdout)
 	}
-	for _, want := range []string{
-		"stdlib/Meta.fango:2: module:Meta has no documentation",
-		"stdlib/Meta.fango:29: type:Meta.Code has no documentation",
-		"missing documentation comment(s)",
-	} {
-		if !strings.Contains(stderr, want) {
-			t.Errorf("stderr lacks %q:\n%s", want, stderr)
-		}
+	want := "stdlib/Undocumented.fango:2: module:Undocumented has no documentation\n" +
+		"stdlib/Undocumented.fango:7: constructor:Undocumented.Kind has no documentation\n" +
+		"stdlib/Undocumented.fango:9: value:Undocumented.value has no documentation\n" +
+		"fango doc: 3 missing documentation comment(s)\n"
+	if stderr != want {
+		t.Fatalf("stderr:\n%s\nwant:\n%s", stderr, want)
 	}
-	// Without --strict the same module is emitted with empty documentation.
-	stdout, stderr, code = runDoc(t, "--stdlib", "--module", "Meta")
-	if code != 0 || stderr != "" || decodeDoc(t, stdout).Modules[0].Documentation != "" {
-		t.Fatalf("lenient Meta: code %d, stderr %q", code, stderr)
+	stdout, stderr, code = doc("--module", "Undocumented")
+	if code != 0 || stderr != "" {
+		t.Fatalf("lenient: code %d, stderr %q", code, stderr)
+	}
+	if got := decodeDoc(t, stdout).Modules[0]; got.Documentation != "" || len(got.Declarations) != 3 {
+		t.Fatalf("lenient module = %+v", got)
 	}
 }
 
-// The examples in documented modules are programs: each fenced block runs as
-// its own function under both backends, and every assertion line holds.
+// The library's examples are programs: each fenced block runs as its own
+// function under both backends, and every assertion line holds.
 func TestDocExamplesHold(t *testing.T) {
 	t.Parallel()
-	stdout, stderr, code := runDoc(t, moduleArgs(documentedModules)...)
+	stdout, stderr, code := runDoc(t, "--stdlib")
 	if code != 0 {
 		t.Fatalf("doc: %s", stderr)
 	}
