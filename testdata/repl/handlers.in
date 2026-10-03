@@ -1,0 +1,15 @@
+effect Fail error
+    abort fail : error -> value
+type Problem = Problem Int
+type Outage = Outage String
+describe : (() ->{Fail Problem, Fail Outage | e} String) ->{e} String
+describe action =
+    handle action() on
+        fail : Problem -> a
+        fail (Problem code) -> "problem " ++ show code
+        fail : Outage -> a
+        fail (Outage reason) -> "outage: " ++ reason
+        return text -> "ok: " ++ text
+describe { "fine" }
+describe { fail (Problem 7) }
+describe { fail (Outage "power") }

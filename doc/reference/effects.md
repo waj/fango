@@ -268,9 +268,12 @@ than re-entering that activation.
 Handler clauses execute outside their own activation, and outside every
 application it handles. They may use an enclosing handler, including another
 handler of the same effect; a sibling application of the same handler is
-never reachable from a clause. A function annotation does not need to expose
-effects discharged by those enclosing handlers; unhandled effects in clauses
-must still be permitted by the annotation.
+never reachable from a clause. A resumptive clause that must abandon the
+whole computation therefore aborts through an enclosing handler, as the JSON
+writer's `emit` clause fails into the `Fail.attempt` around its handler,
+rather than through a `fail` group of its own handler. A function annotation
+does not need to expose effects discharged by those enclosing handlers;
+unhandled effects in clauses must still be permitted by the annotation.
 
 ### Several applications in one handler
 

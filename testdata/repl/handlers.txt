@@ -1,0 +1,9 @@
+Fango 0.1 — :help for commands
+> | | Fail : effect
+Problem : Int -> Problem
+> Outage : String -> Outage
+> | | | | | | | | describe : (() ->{Fail Problem, Fail Outage | e} String) ->{e} String
+"ok: fine" : String
+> "problem 7" : String
+> "outage: power" : String
+> 
