@@ -178,6 +178,10 @@ same runner. The runner must consume that value before its scope ends. Within
 the implementation the callback can be instantiated at different rows
 extending the runner's residual row.
 
+A [`with` item](syntax.md#with-items) calls a runner this way, binding the
+callback's parameter for the rest of the block:
+`with reader <- Reader.withBytes bytes`.
+
 Runners must be called by name with all parameters supplied. Partial application,
 first-class aliases, recursion, mutual recursion, class-constrained runner
 annotations, and scoped native sidecars are rejected with `SCOPED CALLBACK`.

@@ -446,6 +446,9 @@ func DumpExpr(e Expr) string {
 		if strings.HasPrefix(p, "(params ") {
 			p = "(" + strings.TrimSuffix(strings.TrimPrefix(p, "(params "), ")") + ")"
 		}
+		if e.With != nil {
+			return fmt.Sprintf("(with-lambda %s %s)", p, DumpExpr(e.Body))
+		}
 		return fmt.Sprintf("(lambda %s %s)", p, DumpExpr(e.Body))
 	case *Handle:
 		var b strings.Builder

@@ -65,6 +65,9 @@ func exprInline(e ast.Expr) (string, bool) {
 		operand, ok := exprAtomInline(e.Operand)
 		return "-" + operand, ok
 	case *ast.App:
+		if lambda, ok := withLambda(e); ok {
+			return withInline(e.Fn, lambda)
+		}
 		return appInline(e)
 	case *ast.OpChain:
 		return opChainInline(e)
@@ -139,6 +142,25 @@ func semicolonBlockInline(b *ast.Block) (string, bool) {
 		return "", false
 	}
 	return strings.Join(parts, "; "), true
+}
+
+// withInline renders a `with` item of a semicolon block and the rest of that
+// block after its separator.
+func withInline(head ast.Expr, lambda *ast.Lambda) (string, bool) {
+	if lambda.With.Semi.File == nil {
+		return "", false
+	}
+	text := "with "
+	if lambda.With.Arrow.File != nil {
+		params, ok := patternsInline(lambda.Params)
+		if !ok {
+			return "", false
+		}
+		text += params + " <- "
+	}
+	h, ok1 := exprInline(head)
+	rest, ok2 := exprInline(lambda.Body)
+	return text + h + "; " + rest, ok1 && ok2
 }
 
 func localBindInline(b ast.LocalBind) ([]string, bool) {

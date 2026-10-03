@@ -1,0 +1,26 @@
+bare =
+    with   run config
+    fetch url
+
+binder =
+    first = 1
+    with (a,b) <- pair first
+    -- a comment between items
+    with (Just c) <- lookup
+    a + b + c
+
+configured =
+    with Client.run
+    with Client.configure { c ->
+        { c | readTimeoutMs = 200 }
+    }
+    Client.getText "/slow"
+
+inline = twice { with x <- pair 1;  with run; x }
+
+scoped =
+    total =
+        with State.run 0
+        bump()
+        get()
+    total.value

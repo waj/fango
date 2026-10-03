@@ -1,0 +1,53 @@
+-- A `with` item applies its head to the rest of the block as a callback.
+bare =
+    with run config
+    fetch url
+
+binder =
+    first = 1
+    with (a, b) <- pair first
+    with (Just c) <- lookup
+    a + b + c
+
+nested =
+    with outer
+    with inner 2
+    log "both"
+    done
+
+inline = twice { with x <- pair 1; with run; x }
+
+scoped =
+    total =
+        with State.run 0
+        bump()
+        get()
+    branch = if total.value > 0 then
+            with x <- pair total.value
+            x
+        else 0
+    case branch of
+        0 ->
+            with r <- Reader.withBytes bytes
+            Reader.readAll r
+        _ -> empty
+
+-- A local named `with` is still a binding.
+binding =
+    with x = x + 1
+    with 2
+
+stateful action =
+    handle
+        with run
+        action()
+    with count = 0 on
+        tick () -> resume () with count + 1
+
+-- A `with` line after `resume v` starts an item; it is not resume state.
+resumed action =
+    handle action() on
+        tick () ->
+            n = resume ()
+            with run
+            n

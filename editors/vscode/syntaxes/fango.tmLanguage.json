@@ -16,6 +16,7 @@
     { "include": "#operator_definition" },
     { "include": "#annotation" },
     { "include": "#handler_state" },
+    { "include": "#with_item" },
     { "include": "#function_definition" },
     { "include": "#binding" },
     { "include": "#expressions" }
@@ -358,6 +359,7 @@
         { "include": "#char" },
         { "include": "#pin_pattern" },
         { "include": "#handler_state" },
+        { "include": "#with_item" },
         { "include": "#resume_expression" },
         { "include": "#record_expression" },
         { "include": "#lambda" },
@@ -566,6 +568,24 @@
       "comment": "Handler clauses may use different indentation columns within the enclosing layout.",
       "name": "keyword.control.return.fango",
       "match": "^\\s*(return)\\b(?=(?:[ \\t]+(?:\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]|\\{[^{}]*\\}|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:\\\\.|[^'\\\\])'|-?[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?|\\^?[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*))+[ \\t]*->)"
+    },
+    "with_item": {
+      "comment": "A `with` block item, `with head` or `with patterns <- head`, starts a line or follows `{` or `;`. A line binding a local named `with` is not one; the binder ends at the exact `<-` token.",
+      "begin": "(?:^|(?<=[{;]))[ \\t]*(with)\\b(?=[ \\t]+[A-Za-z_(\\[{])(?!(?:[ \\t]+[a-z_][A-Za-z0-9_]*)*[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~]))",
+      "end": "(?<![!#%&*+\\-/:<=>?@^|~])(<-)(?![!#%&*+\\-/:<=>?@^|~])|(?=$|;)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.with.fango" }
+      },
+      "endCaptures": {
+        "1": { "name": "keyword.operator.arrow.fango" }
+      },
+      "patterns": [
+        {
+          "name": "variable.parameter.fango",
+          "match": "\\b[a-z][A-Za-z0-9_]*\\b(?=[^\\n;]*?(?<![!#%&*+\\-/:<=>?@^|~])<-(?![!#%&*+\\-/:<=>?@^|~]))"
+        },
+        { "include": "#expressions" }
+      ]
     },
     "handler_state": {
       "comment": "After a block subject, `with name = initial on` starts its own line.",

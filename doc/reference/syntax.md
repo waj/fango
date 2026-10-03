@@ -83,6 +83,44 @@ to continue the surrounding body instead: `(if condition then a else b); c`.
 A semicolon after a local binding RHS ends that binding item, as in the
 `withLocal` example.
 
+### `with` items
+
+A block item `with head` applies `head` to the rest of the block, as a Unit
+callback, and makes that application the block's result. `with patterns <- head`
+passes a callback taking those parameters instead:
+
+```fango
+fetchStatus () =
+    with Fail.attempt
+    with Client.run
+    with reply <- Client.send (Client.request "GET" "https://example.com/")
+    reply.status
+```
+
+is `Fail.attempt { Client.run { Client.send (Client.request "GET" "https://example.com/") { reply -> reply.status } } }`.
+Consecutive items nest, so the first `with` is outermost. Binder patterns are
+lambda parameters: a constructor pattern with arguments needs parentheses, as
+in `with (Just value) <- lookup`. Because the expansion is an ordinary named
+call, a [scoped runner](functions.md#scoped-callbacks) may head a `with` when
+it is applied to all of its other parameters.
+
+The callback reaches the end of the enclosing block, so the block, not the
+function, delimits a `with`. A binding's indented right-hand side, a branch, or
+a case arm ends it early:
+
+```fango
+main() =
+    status =
+        with Client.run
+        Client.getText "https://example.com/status"
+    print status
+```
+
+Items before a `with` stay in the outer block. A `with` needs at least one item
+after it. In an inline block it is followed by `;`: `{ with x <- pair 1; x }`.
+`with` is not reserved: `with x = …` still binds a local named `with`, and
+handler state keeps its own `with name = initial` form.
+
 ## Conditionals
 
 `if condition then a else b` requires a Bool condition and equal branch types.

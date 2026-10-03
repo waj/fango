@@ -281,7 +281,8 @@ handle action() with current = initial on
     return value -> StateResult { value = value, state = current }
 ```
 
-`with` is contextual and remains an ordinary lowercase name elsewhere. The
+`with` is contextual and remains an ordinary lowercase name elsewhere, apart
+from the [`with` block item](syntax.md#with-items). The
 initial state is evaluated once before entering the handled body. `current` is
 an immutable snapshot visible in operation and `return` clauses, but not in the
 handled body. Every operation path must use `resume value with nextState`;

@@ -60,6 +60,9 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 	case *ast.OpChain:
 		return p.renderOpChain(e, ind)
 	case *ast.App:
+		if lambda, ok := withLambda(e); ok {
+			return p.renderWith(e.Fn, lambda, ind)
+		}
 		if elems, tail, ok := asList(e); ok {
 			return p.renderList(elems, tail, ind)
 		}
@@ -133,6 +136,43 @@ func (p *printer) renderBlock(b *ast.Block, ind int) bool {
 	}
 	p.start(ind)
 	return p.renderExpr(b.Result, ind)
+}
+
+// withLambda recognizes the expansion of a `with` block item: a head applied
+// to the callback the parser built from the rest of the block.
+func withLambda(e *ast.App) (*ast.Lambda, bool) {
+	lambda, ok := e.Arg.(*ast.Lambda)
+	return lambda, ok && lambda.With != nil
+}
+
+// renderWith writes a `with` item and then the rest of its block at the same
+// column, which is where the parser found them.
+func (p *printer) renderWith(head ast.Expr, lambda *ast.Lambda, ind int) bool {
+	if lambda.With.Semi.File != nil {
+		return false
+	}
+	p.emit("with ")
+	if lambda.With.Arrow.File != nil {
+		params, ok := patternsInline(lambda.Params)
+		if !ok {
+			return false
+		}
+		p.emit(params + " <- ")
+	}
+	if !p.renderExpr(head, ind) {
+		return false
+	}
+	if rest, ok := lambda.Body.(*ast.Block); ok {
+		if len(rest.Semicolons) > 0 {
+			return false
+		}
+		return p.renderBlock(rest, ind)
+	}
+	if !p.placeBefore(lambda.Body.Span().Start, ind) {
+		return false
+	}
+	p.start(ind)
+	return p.renderExpr(lambda.Body, ind)
 }
 
 // blockItems presents the two shapes a block can take — an ordered item list,
