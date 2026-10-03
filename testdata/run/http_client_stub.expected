@@ -1,6 +1,7 @@
 GET /a?b=1 HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Connection: close
 
 
@@ -8,6 +9,7 @@ Ok "200 [Header { name = \"Content-Length\", value = \"5\" }] hello"
 GET / HTTP/1.1
 Host: example.com:8080
 User-Agent: fango
+Accept-Encoding: gzip
 Connection: close
 
 
@@ -15,6 +17,7 @@ Ok "200 [Header { name = \"Transfer-Encoding\", value = \"chunked\" }] abcde"
 GET / HTTP/1.1
 Host: [::1]
 User-Agent: fango
+Accept-Encoding: gzip
 Connection: close
 
 
@@ -22,6 +25,7 @@ Ok "200 [] until close"
 HEAD / HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Connection: close
 
 
@@ -29,6 +33,7 @@ Ok "200 [Header { name = \"Content-Length\", value = \"5\" }] "
 POST /v1/items HTTP/1.1
 Host: api.example.com
 User-Agent: fango
+Accept-Encoding: gzip
 X-Team: core
 Authorization: Bearer token
 Connection: close
@@ -43,6 +48,7 @@ Ok "204 [] "
 POST /upload HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Connection: close
 Content-Length: 3
 
@@ -51,6 +57,7 @@ Ok "200 [Header { name = \"Content-Length\", value = \"2\" }] ok"
 POST /n HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Accept: application/json
 Content-Type: application/json
 Connection: close
@@ -65,14 +72,40 @@ Ok (Err (BadBody (Error { message = "Expected JSON number", offset = 0, line = 1
 GET /n HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Accept: application/json
 Connection: close
 
 
 Ok (Ok [1, 2])
+GET /z HTTP/1.1
+Host: example.com
+User-Agent: fango
+Accept-Encoding: gzip
+Connection: close
+
+
+Ok "200 [] decoded body"
+GET /z HTTP/1.1
+Host: example.com
+User-Agent: fango
+Accept-Encoding: gzip
+Connection: close
+
+
+Ok "[Header { name = \"Content-Encoding\", value = \"gzip\" }, Header { name = \"Content-Length\", value = \"36\" }] True"
+GET /z HTTP/1.1
+Host: example.com
+User-Agent: fango
+Accept-Encoding: gzip
+Connection: close
+
+
+Err (Protocol (Malformed "invalid gzip body: unexpected EOF"))
 GET /big HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Connection: close
 
 
@@ -80,6 +113,7 @@ Err (Protocol BodyTooLarge)
 GET /missing HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Connection: close
 
 
@@ -87,6 +121,7 @@ Ok (Err (BadStatus (Reply { url = Url { scheme = Just "http", userinfo = Nothing
 GET /n HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Accept: application/json
 Connection: close
 
@@ -96,6 +131,7 @@ Err Timeout
 GET / HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Connection: close
 
 
@@ -103,6 +139,7 @@ Err (Protocol (Malformed "invalid status code"))
 GET / HTTP/1.1
 Host: example.com
 User-Agent: fango
+Accept-Encoding: gzip
 Connection: close
 
 

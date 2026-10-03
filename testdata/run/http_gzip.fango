@@ -1,0 +1,58 @@
+import Bytes exposing (Bytes)
+import Http exposing (Body(..), Protocol(..))
+import Http.GZip as GZip
+import Http.Server
+import Reader
+import String
+import Writer
+
+compress : String -> Bytes
+compress text =
+    (_, bytes) = Writer.collecting { w ->
+        case GZip.encoding (BytesBody (Bytes.fromString text)) of
+            StreamBody write -> write w
+            _ -> ()
+    }
+    bytes
+
+-- Decodes `wire` with a limit, reporting a protocol failure.
+decode : Int -> Bytes -> String
+decode limit wire =
+    handle
+        Reader.withBytes wire { input ->
+            (_, plain) = Writer.collecting { w -> Writer.copy (GZip.decoding limit input) w }
+            show plain
+        } of
+        Http.invalid error -> show error
+
+echo : Http.Server.Request e ->{e} Http.Server.Response e
+echo request =
+    (_, plain) = Writer.collecting { w -> Writer.copy request.body w }
+    Http.Server.Response { status = 200, headers = request.headers, body = BytesBody plain }
+
+-- Parses a request, decodes its body through the middleware, and echoes it.
+serve : Bytes -> String
+serve wire =
+    handle
+        Reader.withBytes wire { input ->
+            (_, rendered) = Writer.collecting { output ->
+                Http.Server.withRequest 8192 65536 1048576 input { request ->
+                    Http.Server.writeResponse request.method output (GZip.decodeRequests 1024 echo request)
+                }
+            }
+            show rendered
+        } of
+        Http.invalid error -> show error
+
+gzipRequest : String -> Bytes -> Bytes
+gzipRequest coding body =
+    Bytes.append (Bytes.fromString ("POST /up HTTP/1.1\r\nHost: x\r\nContent-Encoding: " ++ coding ++ "\r\nContent-Length: " ++ show (Bytes.length body) ++ "\r\n\r\n")) body
+
+main() =
+    wire = compress "hello, gzip"
+    print (decode 1024 wire)
+    print (decode 1024 (Bytes.slice 0 (Bytes.length wire - 3) wire))
+    print (decode 1024 (Bytes.append wire (compress " and more")))
+    print (decode 1000 (compress (String.padLeft 100000 'z' "")))
+    print (serve (gzipRequest "gzip" wire))
+    print (serve (gzipRequest "br" wire))

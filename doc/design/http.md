@@ -17,6 +17,14 @@ The socket adapter peeks into its reusable read buffer before allocating the
 immutable result. Short requests therefore allocate for bytes received rather
 than the maximum read size.
 
+Gzip decoding pushes compressed bytes as they arrive, while Go's gzip reader
+pulls its input. The native decoder runs that reader in its own goroutine and
+hands it one chunk at a time, waiting until it asks for more, so the two never
+run at once. The decoder keeps its output buffer itself, which makes the
+decoding reader an ordinary unscoped `Reader`: middleware can hand it to a
+handler whose response streams after the middleware returns. A finalizer on
+the handle ends the goroutine of a body that was never read to its end.
+
 A streaming body is called with a writer whose row is the body's own, so it
 has no room for local state. Chunk collection and the sized-body byte count
 therefore keep their state in a native batch buffer owned by `Http.Wire`, like

@@ -1,76 +1,20 @@
 # Roadmap: HTTP client
 
-The plain HTTP/1.1 [client](reference/library-http-client.md), the shared
-[bodies and errors](reference/library-http.md), and [URLs](reference/library-url.md)
-are implemented; the [HTTP design](design/http.md#the-client-transport) explains
-the client's transport effect. This document tracks what remains: compression,
-TLS, redirects, connection reuse, and mocking. The [HTTP roadmap](roadmap-io.md)
+The plain HTTP/1.1 [client](reference/library-http-client.md) with gzip, the
+shared [bodies and errors](reference/library-http.md), and
+[URLs](reference/library-url.md) are implemented; the
+[HTTP design](design/http.md#the-client-transport) explains the client's
+transport effect. This document tracks what remains: TLS, redirects, connection
+reuse, and mocking. The [HTTP roadmap](roadmap-io.md)
 tracks the remaining server follow-ups.
 
 ## Configuration and errors still to come
 
-Later milestones add two `Config` fields and one error:
+[HC5a](#hc5a-redirects) adds a `Config` field and an error:
 
-- `decompress : Bool`, on by default ([HC7](#hc7-gzip)). When on, the client
-  also sends `Accept-Encoding: gzip`, merged as a default header before
-  `Config.headers`.
-- `maxRedirects : Int`, 10 by default ([HC5a](#hc5a-redirects)).
+- `maxRedirects : Int`, 10 by default.
 - `TooManyRedirects` in `Client.Error`, raised once redirects exceed
   `maxRedirects`.
-
-A malformed gzip stream reuses `Malformed`, and a decompressed body over its
-limit is `BodyTooLarge`.
-
-## Compression
-
-`Http.GZip` provides a codec both directions use, plus a policy for each side.
-Only `gzip` is supported. `deflate` is ambiguous in practice, and other
-codings would need new native code.
-
-**Codec.**
-
-- `encoding : Body e -> Body e` generalizes today's `compressBody`. It returns
-  a `StreamBody`, because the compressed length isn't known in advance, even
-  for a `SizedBody`.
-- `decoding : Int -> Reader e -> (Reader s ->{s} a) ->{e} a` wraps a reader
-  in a decompressing one, with a limit on decompressed bytes. Each refill
-  pulls compressed bytes from the inner reader and feeds a native inflater.
-  The native side mirrors the existing compressor: `newDecompressor`,
-  `push : Decompressor -> Bytes -> Result String Bytes`, and
-  `finish : Decompressor -> Result String ()`, which checks the trailer.
-  Concatenated gzip members are accepted, as Go does.
-- A corrupt or truncated stream raises `Malformed`. Going over the limit
-  raises `BodyTooLarge`. The limit guards against zip bombs.
-
-**Client responses.** Decompression is on by default (`Config.decompress`).
-The client adds `Accept-Encoding: gzip` unless the request or config sets
-`Accept-Encoding` itself. If either does, the caller asked for specific
-encodings and gets the raw bytes. This is Go's rule. When the client added the
-header and the response has `Content-Encoding: gzip`:
-
-- the response reader is wrapped with `decoding`;
-- `Content-Encoding` and `Content-Length` are removed from `Response.headers`,
-  since they no longer describe the body;
-- `maxBodyBytes` counts decompressed bytes wherever a body is buffered. A
-  `send` callback reading the stream itself is not limited.
-
-HEAD, 204, and 304 responses are left alone. Any other `Content-Encoding` is
-passed through untouched.
-
-**Client requests.** Request compression is opt-in, since few servers accept
-compressed request bodies:
-`compressRequest : Request e -> Request e` sets `Content-Encoding: gzip` and
-wraps the body with `encoding`.
-
-**Server responses.** `wrap` keeps today's behaviour: it negotiates with the
-request's `Accept-Encoding` and compresses eligible responses, `SizedBody`
-included.
-
-**Server requests.** A new opt-in middleware,
-`decodeRequests : Int -> (Request e ->{e} Response e) -> Request e ->{e} Response e`,
-decodes request bodies with `Content-Encoding: gzip` and removes the header.
-The limit counts decompressed bytes. Any other content coding gets a 415
-response.
 
 ## Redirects
 
@@ -158,7 +102,7 @@ follow allocation order, not that order.
 | HC8 Runner-handled effects in scoped callbacks | HC1 (DONE) |
 | HC6 URL | — (DONE) |
 | HC2 Client core over plain HTTP | HC1, HC6 (DONE) |
-| HC7 GZip | HC2 |
+| HC7 GZip | HC2 (DONE) |
 | HC4 TLS | HC2 |
 | HC5 Redirects and keep-alive | HC2, HC6 |
 | HC3 Mock | HC2, the [test framework](roadmap-testing.md) |
@@ -213,16 +157,8 @@ a loopback test that counts accepted connections.
 
 ### HC7 GZip
 
-The [compression](#compression) design:
-
-- the native decompressor and `decoding`;
-- `encoding`, generalized from `compressBody`;
-- automatic decompression of client responses, and `compressRequest`;
-- the server's `decodeRequests` middleware.
-
-Fixtures cover a round trip through both directions, a response the caller
-asked to keep encoded, a truncated stream, concatenated members, and a zip
-bomb stopped by the decompressed limit.
+DONE. See [client compression](reference/library-http-client.md#compression)
+and [server GZip](reference/library-http.md#routing-and-gzip).
 
 ## Open questions
 

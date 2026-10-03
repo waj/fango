@@ -31,6 +31,8 @@ requests file =
     }
     print (Bytes.toStringLossy (Client.fetch (Client.post (Client.url "/count") generated)).body)
     print (Bytes.toStringLossy (Client.fetch (Client.post (Client.url "/file") (Http.fileBody file))).body)
+    roundTrip = Client.compressRequest (Client.post (Client.url "/gzip") (BytesBody (Bytes.fromString "round trip")))
+    print (Bytes.toStringLossy (Client.fetch roundTrip).body)
     print (Client.attempt { Client.configure { c -> { c | readTimeoutMs = 200 } } { Client.fetch (Client.get (Client.url "/slow")) } }
             |> Result.map { _ -> "" }
     )

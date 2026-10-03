@@ -15,7 +15,7 @@ import Writer exposing (Writer(..))
 {- HTTP/1.1 framing shared by both directions: header blocks, body framing,
 and message serialization. Start lines belong to the direction. -}
 
-type Framing = NoBody | Fixed Int | Chunked | UntilClose
+type Framing = NoBody | Fixed Int | Chunked | UntilClose deriving (Eq)
 type ChunkState = { remaining : Int, done : Bool, total : Int }
 type ChunkCell e = { read : () ->{e} ChunkState, write : ChunkState ->{e} () }
 

@@ -2,6 +2,7 @@ import Bytes exposing (Bytes)
 import Fail exposing (Fail)
 import Http exposing (Body(..))
 import Http.Client as Client
+import Http.GZip as GZip
 import IO exposing (IO)
 import Result exposing (Result(..))
 import Url
@@ -12,6 +13,22 @@ answer : String -> Bytes ->{IO} Result Client.Error Bytes
 answer wire request =
     print (Bytes.toStringLossy request)
     Ok (Bytes.fromString wire)
+
+compressed : String -> Bytes
+compressed text =
+    (_, bytes) = Writer.collecting { w ->
+        case GZip.encoding (BytesBody (Bytes.fromString text)) of
+            StreamBody write -> write w
+            _ -> ()
+    }
+    bytes
+
+-- Answers with a gzip-encoded body.
+answerGzip : String -> Bytes ->{IO} Result Client.Error Bytes
+answerGzip text request =
+    print (Bytes.toStringLossy request)
+    body = compressed text
+    Ok (Bytes.append (Bytes.fromString ("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: " ++ show (Bytes.length body) ++ "\r\n\r\n")) body)
 
 reply : Client.Reply -> String
 reply r = show r.status ++ " " ++ show r.headers ++ " " ++ Bytes.toStringLossy r.body
@@ -48,6 +65,17 @@ main() =
     } })
     print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n[1,2]\n") {
         Client.attemptUnexpected { Client.getJson @(List Int) "http://example.com/n" }
+    } })
+    -- Compression.
+    print (Client.attempt { Client.stub (answerGzip "decoded body") {
+        reply (Client.fetch (Client.get (Client.url "http://example.com/z")))
+    } })
+    print (Client.attempt { Client.stub (answerGzip "kept encoded") {
+        r = Client.fetch (Client.withHeader "Accept-Encoding" "gzip" (Client.get (Client.url "http://example.com/z")))
+        show r.headers ++ " " ++ show (r.body == compressed "kept encoded")
+    } })
+    print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 4\r\n\r\nnope") {
+        reply (Client.fetch (Client.get (Client.url "http://example.com/z")))
     } })
     -- Failures.
     print (Client.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n123456") {

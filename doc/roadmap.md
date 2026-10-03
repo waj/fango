@@ -101,7 +101,7 @@ implemented over [buffered readers and writers](reference/library-readers.md),
 [HTTP follow-up work](roadmap-io.md) tracks transport acceptance coverage and
 future protocol variants. The [plain HTTP client](reference/library-http-client.md)
 is implemented; the [HTTP client roadmap](roadmap-http-client.md) covers
-compression, TLS, redirects, connection reuse, and mocking.
+TLS, redirects, connection reuse, and mocking.
 
 ## Addressing a specific handler
 

@@ -1,0 +1,6 @@
+"hello, gzip"
+Malformed "invalid gzip body: unexpected EOF"
+"hello, gzip and more"
+BodyTooLarge
+"HTTP/1.1 200 \r\nHost: x\r\nContent-Length: 11\r\n\r\nhello, gzip"
+"HTTP/1.1 415 \r\nContent-Length: 0\r\n\r\n"

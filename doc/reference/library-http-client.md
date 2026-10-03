@@ -39,8 +39,7 @@ effects, for example to record requests. Under `stub`, requests run one at a
 time and the configuration starts from `defaultConfig`.
 
 Each request uses a new connection and sends `Connection: close`. Only `http`
-URLs are supported; `https` fails with `InvalidUrl`. Redirects are not followed
-and responses are not decompressed.
+URLs are supported; `https` fails with `InvalidUrl`. Redirects are not followed.
 
 ## Configuration
 
@@ -49,6 +48,7 @@ type Config =
     { baseUrl : Maybe Url
     , headers : List Header
     , userAgent : String
+    , decompress : Bool
     , connectTimeoutMs : Int
     , readTimeoutMs : Int
     , writeTimeoutMs : Int
@@ -57,8 +57,8 @@ type Config =
     }
 ```
 
-`defaultConfig` has no base URL and no headers, the user agent `fango`, a 10 s
-connect timeout, 30 s read and write timeouts, a 64 KiB header limit, and a
+`defaultConfig` has no base URL and no headers, the user agent `fango`,
+decompression on, a 10 s connect timeout, 30 s read and write timeouts, a 64 KiB header limit, and a
 10 MiB body limit.
 
 A request URL without a scheme is resolved against `baseUrl` with
@@ -67,8 +67,9 @@ A request URL without a scheme is resolved against `baseUrl` with
 or a missing host. Credentials belong in a header (`withBearer`).
 
 Headers come from three sources, each replacing same-named headers (compared
-ignoring ASCII case) from the ones before it: `User-Agent` from `userAgent`,
-then `Config.headers`, then the request's own. The client writes `Host`,
+ignoring ASCII case) from the ones before it: `User-Agent` from `userAgent`
+and, with `decompress`, `Accept-Encoding: gzip`; then `Config.headers`; then
+the request's own. The client writes `Host`,
 `Content-Length`, `Transfer-Encoding`, and `Connection` itself; setting one in
 the configuration or a request fails with `Protocol (InvalidMessage …)`.
 
@@ -119,6 +120,24 @@ Protocols` fails with `Unsupported`. A body that ends early fails with
 `Malformed` when the reader reaches the gap. HTTP/1.0 status lines are
 accepted. `withResponse` parses a response from any reader, the way
 [`withRequest`](library-http.md#parsing-and-framing) parses a request.
+
+## Compression
+
+With `decompress` on, a response with `Content-Encoding: gzip` is decoded as it
+streams with [`Http.GZip.decoding`](library-http.md#routing-and-gzip), and its
+`Content-Encoding` and `Content-Length` headers are removed, since they no
+longer describe the body. A HEAD, 204, or 304 response is left alone, as is any
+other content coding. When the configuration or the request sets
+`Accept-Encoding` itself, the caller asked for specific encodings and gets the
+body as sent. `maxBodyBytes` counts decoded bytes wherever the client reads a
+body into memory; a `send` callback reading the stream itself has no limit.
+
+```fango
+compressRequest : Request e -> Request e
+```
+
+`compressRequest` sends the body gzip-compressed with `Content-Encoding: gzip`.
+Few servers accept that unasked, so it is never automatic.
 
 ## Helpers
 

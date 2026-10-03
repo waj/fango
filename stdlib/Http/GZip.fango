@@ -1,12 +1,13 @@
 {-# no-prelude #-}
-module Http.GZip exposing (wrap)
+module Http.GZip exposing (acceptsGzip, decodeRequests, decoding, encoding, wrap)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes)
-import Http exposing (Body(..))
+import Http exposing (Body(..), Error(..), Protocol(..))
 import Http.Server exposing (Request(..), Response(..))
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
+import Reader exposing (Reader(..))
 import Runtime.Native
 import String
 import Writer exposing (Writer(..))
@@ -24,6 +25,84 @@ flush = native
 
 finish : Compressor -> Bytes
 finish = native
+
+type Decoder = Decoder Runtime.Native.Any
+
+-- Status codes the decoder answers.
+decoderOk : Int
+decoderOk = 0
+
+decoderTooLarge : Int
+decoderTooLarge = 2
+
+newDecoder : Int -> Decoder
+newDecoder = native
+
+decoderPush : Decoder -> Bytes -> Int
+decoderPush = native
+
+decoderFinish : Decoder -> Int
+decoderFinish = native
+
+decoderPending : Decoder -> Bytes
+decoderPending = native
+
+decoderSkip : Decoder -> Int -> Int
+decoderSkip = native
+
+decoderMessage : Decoder -> String
+decoderMessage = native
+
+checkStatus : Decoder -> Int ->{Protocol} ()
+checkStatus decoder status =
+    if status == decoderOk then ()
+    else if status == decoderTooLarge then invalid BodyTooLarge
+    else invalid (Malformed ("invalid gzip body: " ++ decoderMessage decoder))
+
+-- Pulls compressed input until the decoder has new output or the input ends.
+refillFrom : Decoder -> Reader {Protocol | e} ->{Protocol | e} Bool
+refillFrom decoder input =
+    before = Bytes.length (decoderPending decoder)
+    chunk = Reader.readUpTo input 65536
+    if Bytes.length chunk == 0 then
+        checkStatus decoder (decoderFinish decoder)
+        Bytes.length (decoderPending decoder) > before
+    else
+        checkStatus decoder (decoderPush decoder chunk)
+        if Bytes.length (decoderPending decoder) > before then True else refillFrom decoder input
+
+-- A reader of the gzip-decoded content of `input`. A corrupt or truncated
+-- stream raises `Malformed`, and more than `limit` decoded bytes
+-- `BodyTooLarge`.
+decoding : Int -> Reader {Protocol | e} -> Reader {Protocol | e}
+decoding limit input =
+    decoder = newDecoder limit
+    Reader
+        { buffered = { decoderPending decoder }
+        , refill = { refillFrom decoder input }
+        , skip = { count -> decoderSkip decoder count }
+        }
+
+-- A body that sends `body` gzip-compressed. Its length is not known in
+-- advance, so it streams.
+encoding : Body e -> Body e
+encoding body =
+    case body of
+        Empty -> Empty
+        _ -> StreamBody (compressBody body)
+
+-- Decodes request bodies sent with `Content-Encoding: gzip`, up to `limit`
+-- decoded bytes, before `handler` sees them. Another content coding gets 415.
+decodeRequests : Int -> (Request {Protocol | e} ->{Protocol | e} Response {Protocol | e}) -> Request {Protocol | e} ->{Protocol | e} Response {Protocol | e}
+decodeRequests limit handler request =
+    case Http.getHeader "content-encoding" request.headers of
+        Nothing -> handler request
+        Just raw ->
+            coding = String.trim raw
+            if Http.equalAscii coding "gzip" then
+                handler { request | headers = Http.removeHeader "content-encoding" (Http.removeHeader "content-length" request.headers), body = decoding limit request.body }
+            else if Http.equalAscii coding "identity" then handler request
+            else Response { status = 415, headers = [], body = Empty }
 
 weight : String -> Int
 weight raw =

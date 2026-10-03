@@ -7,8 +7,7 @@ checks cover malformed framing, truncated bodies, oversized headers, chunked
 requests, keep-alive, simultaneous clients, and GZip.
 
 Server-side TLS and HTTP/2 are deferred. Client-side TLS is part of the
-[HTTP client roadmap](roadmap-http-client.md#hc4-tls), which also owns gzip
-request decoding for the server ([HC7](roadmap-http-client.md#hc7-gzip)). A policy for request bodies that an application
+[HTTP client roadmap](roadmap-http-client.md#hc4-tls). A policy for request bodies that an application
 leaves unread is also deferred: the current server closes a connection when
 its handler leaves the request body incomplete. A future API may expose a
 deliberate drain policy.

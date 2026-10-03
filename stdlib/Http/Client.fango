@@ -2,15 +2,16 @@
 module Http.Client exposing
     ( Config(..), Connection, Error(..), Http, Reply(..), Request(..)
     , Response(..), Unexpected(..)
-    , attempt, attemptUnexpected, configure, defaultConfig, expectSuccess, fetch
-    , get, getBytes, getJson, getText, post, postJson, run, send, stub, url
-    , withBearer, withHeader, withResponse
+    , attempt, attemptUnexpected, compressRequest, configure, defaultConfig
+    , expectSuccess, fetch, get, getBytes, getJson, getText, post, postJson, run
+    , send, stub, url, withBearer, withHeader, withResponse
     )
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Source(..))
 import Fail exposing (Fail, fromResult)
 import Http exposing (Body(..), Header(..), Protocol(..))
+import Http.GZip as GZip
 import Http.Wire as Wire exposing (Framing(..))
 import IO exposing (IO)
 import Json exposing (Decode, Encode)
@@ -67,6 +68,7 @@ type Config =
     { baseUrl : Maybe Url
     , headers : List Header
     , userAgent : String
+    , decompress : Bool
     , connectTimeoutMs : Int
     , readTimeoutMs : Int
     , writeTimeoutMs : Int
@@ -79,6 +81,7 @@ defaultConfig = Config
     { baseUrl = Nothing
     , headers = []
     , userAgent = "fango"
+    , decompress = True
     , connectTimeoutMs = 10000
     , readTimeoutMs = 30000
     , writeTimeoutMs = 30000
@@ -293,25 +296,35 @@ readHead input limit =
         Reader.Ended _ -> invalid (Http.Malformed "incomplete status line")
         Reader.Overflowed -> invalid Http.LineTooLong
 
+largest : Int
+largest = 9223372036854775807
+
+gzipped : List Header -> Bool
+gzipped headers =
+    case Http.getHeader "content-encoding" headers of
+        Just coding -> Http.equalAscii (String.trim coding) "gzip"
+        Nothing -> False
+
 -- Parses a response from `input` and scopes its body to `use`. A response to
 -- HEAD, and a 204 or 304, has no body; any other is framed by Content-Length,
--- chunked encoding, or the connection closing.
+-- chunked encoding, or the connection closing. With `decode`, a gzip body is
+-- decompressed and loses the headers that described its encoded form.
 {-# scoped s #-}
-withResponse : Url -> Bool -> Int -> Int -> Reader e -> (Response s ->{s} a) ->{Protocol | e} a
-withResponse target headRequest headerLimit bodyLimit input use =
+withResponse : Url -> Bool -> Bool -> Int -> Int -> Reader e -> (Response s ->{s} a) ->{Protocol | e} a
+withResponse target headRequest decode headerLimit bodyLimit input use =
     (status, headers) = readHead input headerLimit
     bodyFraming =
         if headRequest || status == 204 || status == 304 then NoBody
         else Wire.responseFraming headers bodyLimit
     (value, _) = Wire.withBody bodyFraming input bodyLimit headerLimit { body ->
-        use (Response { url = target, status = status, headers = headers, body = body })
+        if decode && bodyFraming /= NoBody && gzipped headers then
+            plain = Http.removeHeader "content-encoding" (Http.removeHeader "content-length" headers)
+            use (Response { url = target, status = status, headers = plain, body = GZip.decoding largest body })
+        else use (Response { url = target, status = status, headers = headers, body = body })
     }
     value
 
 -- Sending
-
-largest : Int
-largest = 9223372036854775807
 
 -- Sends `request` and streams the response to `use`, which may read the body
 -- only while it runs. Any status is a normal response.
@@ -323,7 +336,9 @@ send request use =
     endpoint = endpointOf config target
     checkHeaders config.headers
     checkHeaders request.headers
-    headers = overlay (overlay [Header { name = "User-Agent", value = config.userAgent }] config.headers) request.headers
+    defaults = [Header { name = "User-Agent", value = config.userAgent } | if config.decompress then [Header { name = "Accept-Encoding", value = "gzip" }] else []]
+    headers = overlay (overlay defaults config.headers) request.headers
+    decode = config.decompress && Http.hasHeader "accept-encoding" config.headers == False && Http.hasHeader "accept-encoding" request.headers == False
     wireHeaders = [Header { name = "Host", value = hostHeader endpoint } | List.foldr { header rest -> [header | rest] } [Header { name = "Connection", value = "close" }] headers]
     if Wire.allToken (Bytes.fromString request.method) 0 == False then failWith (Protocol (Http.InvalidMessage "invalid method")) else ()
     framed = framedRequest request.method request.body
@@ -336,7 +351,7 @@ send request use =
         Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (request.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
             wireHeaders request.body framed True
         Reader.over (Source { pull = { fromResult (receive connection 65536 config.readTimeoutMs) } }) { input ->
-            protocol { withResponse target (request.method == "HEAD") config.maxHeaderBytes largest input use }
+            protocol { withResponse target (request.method == "HEAD") decode config.maxHeaderBytes largest input use }
         }
     }
 
@@ -372,6 +387,11 @@ post target body = Request { method = "POST", url = target, headers = [], body =
 
 withHeader : String -> String -> Request e -> Request e
 withHeader name value request = { request | headers = Http.setHeader name value request.headers }
+
+-- Sends the body gzip-compressed, which few servers accept unasked.
+compressRequest : Request e -> Request e
+compressRequest request =
+    { request | headers = Http.setHeader "Content-Encoding" "gzip" request.headers, body = GZip.encoding request.body }
 
 withBearer : String -> Request e -> Request e
 withBearer token request = withHeader "Authorization" ("Bearer " ++ token) request

@@ -138,3 +138,20 @@ runs. `Http.Server.Route.lookup` finds a captured parameter.
 accepts gzip, including quality values and wildcard negotiation. It leaves
 `HEAD`, 204, 304, empty, and already encoded responses alone. Compression is
 streaming, turns a sized body into a chunked one, and sets `Content-Encoding: gzip` plus `Vary: Accept-Encoding`.
+
+```fango
+encoding : Body e -> Body e
+decoding : Int -> Reader {Protocol | e} -> Reader {Protocol | e}
+decodeRequests : Int -> (Request {Protocol | e} ->{Protocol | e} Response {Protocol | e})
+    -> Request {Protocol | e} ->{Protocol | e} Response {Protocol | e}
+```
+
+`encoding body` compresses any body as a stream. `decoding limit reader` reads
+the gzip-decoded content of `reader` as it arrives, accepting concatenated
+members; a corrupt or truncated stream raises `Malformed`, and more than
+`limit` decoded bytes `BodyTooLarge`, which guards against small inputs that
+expand enormously. `decodeRequests limit handler` decodes request bodies sent
+with `Content-Encoding: gzip` before `handler` sees them, removing that header
+and `Content-Length`; `identity` passes through, and any other content coding
+gets 415. The [client](library-http-client.md) decodes responses with the same
+reader.

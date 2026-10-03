@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -59,6 +60,26 @@ func TestHTTPClientLoopback(t *testing.T) {
 		}
 		fmt.Fprintf(w, "%s %d bytes, same %v", framing(r), len(body), bytes.Equal(body, upload))
 	})
+	mux.HandleFunc("/gzip", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Content-Encoding") != "gzip" || r.Header.Get("Accept-Encoding") != "gzip" {
+			http.Error(w, "expected gzip both ways", http.StatusBadRequest)
+			return
+		}
+		plain, err := gzip.NewReader(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		body, err := io.ReadAll(plain)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		out := gzip.NewWriter(w)
+		fmt.Fprintf(out, "server read %q", body)
+		out.Close()
+	})
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(time.Second)
 		io.WriteString(w, "late")
@@ -77,6 +98,7 @@ func TestHTTPClientLoopback(t *testing.T) {
 		"status 404 gone\n",
 		"chunked 200000 numbers, last 199999",
 		fmt.Sprintf("length %d bytes, same true", len(upload)),
+		`server read "round trip"`,
 		"Err Timeout",
 		"Ok (Ok ())",
 		"",
