@@ -3,10 +3,13 @@ package native
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -99,6 +102,39 @@ func Dial(host string, port int64) (any, error) {
 func DialTimeout(host string, port int64, millis int64) (any, error) {
 	dialer := net.Dialer{Timeout: time.Duration(millis) * time.Millisecond}
 	c, err := dialer.Dial("tcp", net.JoinHostPort(host, strconv.FormatInt(port, 10)))
+	if err != nil {
+		return nil, err
+	}
+	return &connection{value: c, reader: bufio.NewReader(c)}, nil
+}
+
+// DialTls connects and completes a TLS handshake within millis, verifying the
+// server's certificate for host against the system roots plus any in the PEM
+// file at rootsPath.
+func DialTls(host string, port int64, millis int64, rootsPath string) (any, error) {
+	config := &tls.Config{ServerName: host}
+	if rootsPath != "" {
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			roots = x509.NewCertPool()
+		}
+		pem, err := os.ReadFile(rootsPath)
+		if err != nil {
+			return nil, err
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("no certificates in %s", rootsPath)
+		}
+		config.RootCAs = roots
+	}
+	ctx := context.Background()
+	if millis > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(millis)*time.Millisecond)
+		defer cancel()
+	}
+	dialer := tls.Dialer{Config: config}
+	c, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.FormatInt(port, 10)))
 	if err != nil {
 		return nil, err
 	}

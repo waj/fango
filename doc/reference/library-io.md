@@ -175,13 +175,17 @@ Libraries that manage a connection's lifetime themselves, such as the
 
 ```fango
 dialTimeout : String -> Int -> Int ->{IO} Result Net.Error Net.Connection
+dialTls : String -> Int -> Int -> String ->{IO} Result Net.Error Net.Connection
 readConnectionBytes : Net.Connection -> Int ->{IO} Result Net.Error Bytes
 writeConnectionBytes : Net.Connection -> Bytes ->{IO} Result Net.Error ()
 closeConnection : Net.Connection ->{IO} Result Net.Error ()
 ```
 
 `dialTimeout host port millis` gives up after `millis` milliseconds; 0 leaves
-the limit to the system. `readConnectionBytes` answers up to the requested
+the limit to the system. `dialTls host port millis roots` also completes a TLS
+handshake within that time, sending `host` for SNI and verifying the
+certificate for it against the system roots plus the PEM file at `roots`
+(`""` for none). The connection then reads and writes plaintext like any other. `readConnectionBytes` answers up to the requested
 count, and an empty `Bytes` at end of stream.
 
 `Net.Error` is `{ kind : Net.Kind, address : String, message : String }`.

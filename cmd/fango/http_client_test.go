@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -148,5 +149,30 @@ func TestHTTPProxyStreamsRequestBody(t *testing.T) {
 	}
 	if want := fmt.Sprintf("/upload chunked %d bytes", len(body)); response.StatusCode != 200 || string(got) != want {
 		t.Fatalf("%s: %q, want %q", response.Status, got, want)
+	}
+}
+
+// TestHTTPClientTLS checks certificate verification against a loopback TLS
+// server whose CA the client trusts only through Config.caFile.
+func TestHTTPClientTLS(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "secure hello")
+	}))
+	defer server.Close()
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(caFile, certificate, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The test certificate names 127.0.0.1 and example.com, not localhost.
+	otherHost := strings.Replace(server.URL, "127.0.0.1", "localhost", 1)
+	binary := cliCompiledBinary(t, filepath.Join("testdata", "http_tls.fango"))
+	out, err := exec.Command(binary, server.URL, caFile, otherHost).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if want := "secure hello\nrejected\nrejected\n"; string(out) != want {
+		t.Fatalf("output:\n%s\nwant:\n%s", out, want)
 	}
 }

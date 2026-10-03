@@ -74,6 +74,7 @@ type Config =
     , writeTimeoutMs : Int
     , maxHeaderBytes : Int
     , maxBodyBytes : Int
+    , caFile : Maybe String
     }
 
 defaultConfig : Config
@@ -87,9 +88,10 @@ defaultConfig = Config
     , writeTimeoutMs = 30000
     , maxHeaderBytes = 65536
     , maxBodyBytes = 10485760
+    , caFile = Nothing
     }
 
-type Endpoint = { secure : Bool, host : String, port : Int, connectTimeoutMs : Int }
+type Endpoint = { secure : Bool, host : String, port : Int, connectTimeoutMs : Int, caFile : Maybe String }
 
 -- A transport's handle on one connection.
 type Connection = Socket Net.Connection | Memory Int
@@ -117,11 +119,12 @@ foreign = Err (Protocol (Http.InvalidMessage "connection belongs to another tran
 
 dial : Endpoint ->{IO} Result Error Connection
 dial endpoint =
-    if endpoint.secure then Err (InvalidUrl "https is not supported yet")
-    else
-        case Net.dialTimeout endpoint.host endpoint.port endpoint.connectTimeoutMs of
-            Ok connection -> Ok (Socket connection)
-            Err error -> Err (netError error)
+    dialed =
+        if endpoint.secure then Net.dialTls endpoint.host endpoint.port endpoint.connectTimeoutMs (Maybe.withDefault "" endpoint.caFile)
+        else Net.dialTimeout endpoint.host endpoint.port endpoint.connectTimeoutMs
+    case dialed of
+        Ok connection -> Ok (Socket connection)
+        Err error -> Err (netError error)
 
 socketWrite : Connection -> Bytes -> Int ->{IO} Result Error ()
 socketWrite connection bytes timeout =
@@ -239,7 +242,7 @@ endpointOf config target =
                     port = case target.port of
                         Just number -> number
                         Nothing -> if secure then 443 else 80
-                    Endpoint { secure = secure, host = host, port = port, connectTimeoutMs = config.connectTimeoutMs }
+                    Endpoint { secure = secure, host = host, port = port, connectTimeoutMs = config.connectTimeoutMs, caFile = config.caFile }
 
 hostHeader : Endpoint -> String
 hostHeader endpoint =

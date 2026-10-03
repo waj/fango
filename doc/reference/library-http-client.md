@@ -1,7 +1,7 @@
 # HTTP/1.1 client
 
-Sending requests over plain HTTP/1.1, streaming bodies in both directions, and
-answering requests without sockets in tests.
+Sending requests over HTTP/1.1 and HTTPS, streaming bodies in both directions,
+and answering requests without sockets in tests.
 
 [Reference index](../reference.md). Source: [Http.Client](../../stdlib/Http/Client.fango).
 The client shares [bodies, headers, and protocol errors](library-http.md) with
@@ -38,8 +38,8 @@ response, or an `Error` to fail the request with. It may use the caller's
 effects, for example to record requests. Under `stub`, requests run one at a
 time and the configuration starts from `defaultConfig`.
 
-Each request uses a new connection and sends `Connection: close`. Only `http`
-URLs are supported; `https` fails with `InvalidUrl`. Redirects are not followed.
+Each request uses a new connection and sends `Connection: close`. Redirects are
+not followed.
 
 ## Configuration
 
@@ -54,17 +54,19 @@ type Config =
     , writeTimeoutMs : Int
     , maxHeaderBytes : Int
     , maxBodyBytes : Int
+    , caFile : Maybe String
     }
 ```
 
 `defaultConfig` has no base URL and no headers, the user agent `fango`,
 decompression on, a 10 s connect timeout, 30 s read and write timeouts, a 64 KiB header limit, and a
-10 MiB body limit.
+10 MiB body limit, and no extra certificate authorities.
 
 A request URL without a scheme is resolved against `baseUrl` with
 [`Url.resolve`](library-url.md#resolution). Without a base URL it fails with
 `InvalidUrl`, as does a URL carrying user information, an unsupported scheme,
-or a missing host. Credentials belong in a header (`withBearer`).
+or a missing host; only `http` and `https` are accepted. Credentials belong in
+a header (`withBearer`).
 
 Headers come from three sources, each replacing same-named headers (compared
 ignoring ASCII case) from the ones before it: `User-Agent` from `userAgent`
@@ -73,8 +75,11 @@ the request's own. The client writes `Host`,
 `Content-Length`, `Transfer-Encoding`, and `Connection` itself; setting one in
 the configuration or a request fails with `Protocol (InvalidMessage …)`.
 
-The read and write timeouts bound each wait for the socket, not the whole
-request. `maxHeaderBytes` limits the status line and the header block.
+`https` URLs use TLS. The client sends the host name for SNI and verifies the
+server's certificate for it against the system's roots, plus the certificates
+in the PEM file named by `caFile` when it is set; a failed verification is a
+`Transport` error. The connect timeout covers the handshake. The read and
+write timeouts bound each wait for the socket, not the whole request. `maxHeaderBytes` limits the status line and the header block.
 `maxBodyBytes` limits a body the client reads into memory.
 
 ## Requests and responses

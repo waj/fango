@@ -1,11 +1,11 @@
 # Roadmap: HTTP client
 
-The plain HTTP/1.1 [client](reference/library-http-client.md) with gzip, the
+The HTTP/1.1 [client](reference/library-http-client.md) with TLS and gzip, the
 shared [bodies and errors](reference/library-http.md), and
 [URLs](reference/library-url.md) are implemented; the
 [HTTP design](design/http.md#the-client-transport) explains the client's
-transport effect. This document tracks what remains: TLS, redirects, connection
-reuse, and mocking. The [HTTP roadmap](roadmap-io.md)
+transport effect. This document tracks what remains: redirects, connection reuse,
+and mocking. The [HTTP roadmap](roadmap-io.md)
 tracks the remaining server follow-ups.
 
 ## Configuration and errors still to come
@@ -103,7 +103,7 @@ follow allocation order, not that order.
 | HC6 URL | — (DONE) |
 | HC2 Client core over plain HTTP | HC1, HC6 (DONE) |
 | HC7 GZip | HC2 (DONE) |
-| HC4 TLS | HC2 |
+| HC4 TLS | HC2 (DONE) |
 | HC5 Redirects and keep-alive | HC2, HC6 |
 | HC3 Mock | HC2, the [test framework](roadmap-testing.md) |
 
@@ -134,13 +134,8 @@ that use Route handlers as the mock, check the requests they receive, and run
 
 ### HC4 TLS
 
-A `Net` native over Go's `crypto/tls` that uses the system roots, sends SNI,
-and verifies the host name. It returns a `Net.Connection`, so the transport
-treats both kinds of connection alike and `Endpoint.secure` picks the dial.
-This milestone also adds `https://` URLs with 443 as the default port. Tests
-need a loopback TLS server with a test certificate, so the native accepts
-extra root certificates. Whether those are also exposed in `Config` is an open
-question below. TLS for the server stays deferred.
+DONE. See [configuration](reference/library-http-client.md#configuration) and
+[Net](reference/library-io.md#net). TLS for the server stays deferred.
 
 ### HC5 Redirects and keep-alive
 
@@ -173,7 +168,7 @@ and [server GZip](reference/library-http.md#routing-and-gzip).
   example a 413 during an upload. The client currently fails with `Transport`
   when its write is refused; it could read the early response instead.
   `Expect: 100-continue` is related.
-- Custom root certificates and client certificates in `Config`.
+- Client certificates in `Config`.
 - Proxy support (`HTTP_PROXY` and similar) and cookies are out of scope for
   now.
 - Streaming a proxied response. A server handler can stream its request body
