@@ -1,53 +1,53 @@
--- A `with` item applies its head to the rest of the block as a callback.
+-- A `use` item applies its head to the rest of the block as a callback.
 bare =
-    with run config
+    use run config
     fetch url
 
 binder =
     first = 1
-    with (a, b) <- pair first
-    with (Just c) <- lookup
+    use (a, b) <- pair first
+    use (Just c) <- lookup
     a + b + c
 
 nested =
-    with outer
-    with inner 2
+    use outer
+    use inner 2
     log "both"
     done
 
-inline = twice { with x <- pair 1; with run; x }
+inline = twice { use x <- pair 1; use run; x }
 
 scoped =
     total =
-        with State.run 0
+        use State.run 0
         bump()
         get()
     branch = if total.value > 0 then
-            with x <- pair total.value
+            use x <- pair total.value
             x
         else 0
     case branch of
         0 ->
-            with r <- Reader.withBytes bytes
+            use r <- Reader.withBytes bytes
             Reader.readAll r
         _ -> empty
 
--- A local named `with` is still a binding.
+-- `with` is still an ordinary name outside handler state.
 binding =
     with x = x + 1
     with 2
 
 stateful action =
     handle
-        with run
+        use run
         action()
     with count = 0 on
         tick () -> resume () with count + 1
 
--- A `with` line after `resume v` starts an item; it is not resume state.
+-- A `use` line after `resume v` starts an item; it is not resume state.
 resumed action =
     handle action() on
         tick () ->
             n = resume ()
-            with run
+            use run
             n

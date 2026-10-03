@@ -205,11 +205,11 @@ chunkPull input state maxBody headersLimit =
 
 {-# scoped s #-}
 withChunked : Reader e -> Int -> Int -> (Reader s ->{s} a) ->{Protocol | e} (a, Bool)
-withChunked input maxBody headersLimit use =
+withChunked input maxBody headersLimit action =
     Runtime.Local.run (ChunkState { remaining = 0, done = False, total = 0 }) { state ->
         cell = ChunkCell { read = state.read, write = state.write }
         Reader.over (Source { pull = { chunkPull input cell maxBody headersLimit } }) { body ->
-            value = use body
+            value = action body
             finished = state.read().done && Bytes.length body.buffered() == 0
             (value, finished)
         }
@@ -222,13 +222,13 @@ emptyBody = Reader
     , skip = { _ -> 0 }
     }
 
--- Scopes a framed body reader to `use`. The Bool reports whether the consumer
+-- Scopes a framed body reader to `action`. The Bool reports whether the consumer
 -- reached the end of the framed body.
 {-# scoped s #-}
 withBody : Framing -> Reader e -> Int -> Int -> (Reader s ->{s} a) ->{Protocol | e} (a, Bool)
-withBody bodyFraming input bodyLimit headersLimit use =
+withBody bodyFraming input bodyLimit headersLimit action =
     case bodyFraming of
-        NoBody -> (use emptyBody, True)
+        NoBody -> (action emptyBody, True)
         Fixed size ->
             (value, remaining, _) = Runtime.Local.run size { left ->
                 Reader.limitedRemaining input size { body ->
@@ -246,13 +246,13 @@ withBody bodyFraming input bodyLimit headersLimit use =
                             taken
                           }
                         }
-                    use strict
+                    action strict
                 }
             }
             (value, remaining == 0)
-        Chunked -> withChunked input bodyLimit headersLimit use
+        Chunked -> withChunked input bodyLimit headersLimit action
         UntilClose ->
-            value = use input
+            value = action input
             (value, Reader.atEnd input)
 
 validHeader : Header ->{Protocol} ()

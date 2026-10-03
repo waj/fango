@@ -19,7 +19,7 @@ type Port = Port Int
 
 openPort() = Port 1
 closePort port = ()
-withPort use = Runtime.Scope.bracket openPort closePort use
+withPort action = Runtime.Scope.bracket openPort closePort action
 readPort (Port n) = n
 identity value = value
 apply action arg = action arg

@@ -5,8 +5,8 @@ effect Stop
 type Halt = Halt (() -> Int)
 
 guarded : (Halt -> Int) -> Int
-guarded use =
-    handle use (Halt ({ _ -> stop() })) on
+guarded action =
+    handle action (Halt ({ _ -> stop() })) on
         stop () -> 0
 
 main() =

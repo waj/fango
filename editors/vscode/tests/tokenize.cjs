@@ -152,22 +152,26 @@ async function main() {
   const binding = grammar.tokenizeLine('    with x = 1').tokens;
   assert(!binding.find(t => t.startIndex <= 4 && t.endIndex > 4).scopes.includes("keyword.control.with.fango"));
 
-  // A `with` block item is a keyword at the start of an item; its binder
+  // A `use` block item is a keyword at the start of an item; its binder
   // patterns are parameters up to the `<-`.
-  for (const item of ['    with Client.run', '    with (a, b) <- pair first', 'x = twice { with n <- pair 1; with run; n }']) {
+  for (const item of ['    use Client.run', '    use (a, b) <- pair first', 'x = twice { use n <- pair 1; use run; n }']) {
     const itemTokens = grammar.tokenizeLine(item).tokens;
     const itemScopeAt = index => itemTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
-    assert(itemScopeAt(item.indexOf("with")).includes("keyword.control.with.fango"));
+    assert(itemScopeAt(item.indexOf("use")).includes("keyword.control.use.fango"));
     if (item.includes("<-")) {
       assert(itemScopeAt(item.indexOf("<-")).includes("keyword.operator.arrow.fango"));
       if (item.includes("n <-")) assert(itemScopeAt(item.indexOf("n <-")).includes("variable.parameter.fango"));
     }
-    if (item.includes("; with run")) {
-      assert(itemScopeAt(item.indexOf("with run")).includes("keyword.control.with.fango"));
+    if (item.includes("; use run")) {
+      assert(itemScopeAt(item.indexOf("use run")).includes("keyword.control.use.fango"));
     }
   }
+  // `with` outside handler state is an ordinary name, and `use` is reserved
+  // even where it cannot start an item.
   const withFunction = grammar.tokenizeLine('    with f x = f x').tokens;
-  assert(!withFunction.find(t => t.startIndex <= 4 && t.endIndex > 4).scopes.includes("keyword.control.with.fango"));
+  assert(!withFunction.find(t => t.startIndex <= 4 && t.endIndex > 4).scopes.some(scope => scope.startsWith("keyword.")));
+  const misplacedUse = grammar.tokenizeLine('x = f use').tokens;
+  assert(misplacedUse.find(t => t.startIndex <= 6 && t.endIndex > 6).scopes.includes("keyword.control.fango"));
 
   // Declaration and handler-clause heads keep their scopes when later lines
   // outdent from the first item of an indented group.

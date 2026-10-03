@@ -5,8 +5,8 @@ import IO exposing (Error)
 -- The wrapper exports the callback lifetime obligation to its callers.
 
 withLogged : String -> (File.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-withLogged path use =
+withLogged path action =
     print ("opening " ++ path)
-    File.withFile path use
+    File.withFile path action
 
 main() = print "ready"

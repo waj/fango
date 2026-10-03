@@ -32,9 +32,9 @@ grow source pending =
 
 {-# scoped s #-}
 buffering : Bytes -> Source e -> (Reader s ->{s} a) ->{e} a
-buffering initial source use =
+buffering initial source action =
     Runtime.Local.run initial { pending ->
-        use
+        action
             { buffered = pending.read
             , refill = {
                 before = pending.read()
@@ -53,17 +53,17 @@ buffering initial source use =
 
 {-# scoped s #-}
 limited : Reader e -> Int -> (Reader s ->{s} a) ->{e} a
-limited parent allowance use =
-    (result, _, _) = limitedRemaining parent allowance use
+limited parent allowance action =
+    (result, _, _) = limitedRemaining parent allowance action
     result
 
 -- Return the unconsumed allowance without pulling from the parent. Framed
 -- protocols can decide whether to reuse a connection after their consumer.
 {-# scoped s #-}
 limitedRemaining : Reader e -> Int -> (Reader s ->{s} a) ->{e} (a, Int, Bool)
-limitedRemaining parent allowance use =
+limitedRemaining parent allowance action =
     Runtime.Local.run (clamp allowance allowance, False) { state ->
-        result = use
+        result = action
             { buffered = {
                 window = parent.buffered()
                 (left, _) = state.read()
@@ -90,19 +90,19 @@ limitedRemaining parent allowance use =
 
 {-# scoped s #-}
 over : Source e -> (Reader s ->{s} a) ->{e} a
-over source use = buffering Bytes.empty source use
+over source action = buffering Bytes.empty source action
 
 {-# scoped s #-}
 overBytes : Bytes -> (Reader s ->{s} a) ->{e} a
-overBytes contents use = buffering contents { pull = { Nothing } } use
+overBytes contents action = buffering contents { pull = { Nothing } } action
 
 -- Each invocation introduces a fresh scoped row. The consumer may perform
 -- other effects; those remain in e after the local state effect is discharged.
 {-# scoped s #-}
 withBytes : Bytes -> (Reader s ->{s} a) ->{e} a
-withBytes contents use =
+withBytes contents action =
     Runtime.Local.run contents { pending ->
-        use
+        action
             { buffered = pending.read
             , refill = { False }
             , skip = { n ->

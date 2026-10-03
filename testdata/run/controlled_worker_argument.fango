@@ -3,11 +3,11 @@ effect Stop
 
 type Box = Box (() ->{Stop} ())
 
-use : Int -> Box -> ()
-use _ (Box action) =
+consume : Int -> Box -> ()
+consume _ (Box action) =
     handle action() on
         stop _ -> ()
 
-run = use 0
+run = consume 0
 
 main() = ()

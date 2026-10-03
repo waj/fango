@@ -1,7 +1,7 @@
 import Runtime.Scope
 {-# resource #-}
 type Handle = Handle Int
-withHandle use = Runtime.Scope.bracket { _ -> Handle 1 } { _ -> () } use
+withHandle action = Runtime.Scope.bracket { _ -> Handle 1 } { _ -> () } action
 withHandle { resource -> 42 }
 withHandle { resource -> resource }
 saved = withHandle { resource -> { _ -> 17 } }

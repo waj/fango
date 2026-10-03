@@ -1,0 +1,9 @@
+(module
+  (def bare (app (app (var run) (var config)) (use-lambda (()) (app (var fetch) (var url)))))
+  (def binder (block (bind first (int 1)) (app (app (var pair) (var first)) (use-lambda (patterns (pctor Tuple.Pair (pvar a) (pvar b))) (app (var lookup) (use-lambda (patterns (pctor Just (pvar c))) (binop + (binop + (var a) (var b)) (var c))))))))
+  (def nested (app (var outer) (use-lambda (()) (app (app (var inner) (int 2)) (use-lambda (()) (block (expr (app (var log) (string "both"))) (var done)))))))
+  (def inline (app (var twice) (lambda (()) (app (app (var pair) (int 1)) (use-lambda (x) (app (var run) (use-lambda (()) (var x))))))))
+  (def scoped (block (bind total (app (app (var State.run) (int 0)) (use-lambda (()) (block (expr (app (var bump) (unit))) (app (var get) (unit)))))) (bind branch (if (binop > (field value (var total)) (int 0)) (app (app (var pair) (field value (var total))) (use-lambda (x) (var x))) (int 0))) (case (var branch) (branch (pint 0) (app (app (var Reader.withBytes) (var bytes)) (use-lambda (r) (app (var Reader.readAll) (var r))))) (branch _ (var empty)))))
+  (def binding (block (bind with (params x) (binop + (var x) (int 1))) (app (var with) (int 2))))
+  (def stateful (params action) (handle (app (var run) (use-lambda (()) (app (var action) (unit)))) (state count (int 0)) (clause tick (params ()) (app (resume-with (binop + (var count) (int 1))) (unit)))))
+  (def resumed (params action) (handle (app (var action) (unit)) (clause tick (params ()) (block (bind n (app (resume) (unit))) (app (var run) (use-lambda (()) (var n))))))))

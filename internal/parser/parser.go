@@ -100,21 +100,20 @@ func ParseExprInput(toks []token.Token, f *source.File) (ast.Expr, []diag.Error)
 	return e, p.errs
 }
 
-// IsWithInput reports whether a prompt input is a `with` item: `with` and the
-// start of a head, and no `=` that would make it a definition named `with`.
-func IsWithInput(toks []token.Token) bool {
-	return len(toks) > 1 && withItemStart(toks, 0) && !hasStatementEqual(toks, 1, 0)
+// IsUseInput reports whether a prompt input is a `use` item.
+func IsUseInput(toks []token.Token) bool {
+	return len(toks) > 0 && toks[0].Kind == token.KwUse
 }
 
-// ParseWithInput parses a `with` item typed at the prompt, where the rest of
+// ParseUseInput parses a `use` item typed at the prompt, where the rest of
 // the block is the rest of the session: it returns the item's binder patterns,
 // if any, and its head.
-func ParseWithInput(toks []token.Token, f *source.File) (*ast.WithSugar, []ast.Pattern, ast.Expr, []diag.Error) {
+func ParseUseInput(toks []token.Token, f *source.File) (*ast.UseSugar, []ast.Pattern, ast.Expr, []diag.Error) {
 	p := &parser{f: f, toks: toks, stmtStart: -1}
 	p.lay.push(ctxDecl, 0)
-	w, params, head := p.parseWithHead()
+	w, params, head := p.parseUseHead()
 	if t := p.peek(); head != nil && t.Kind != token.EOF && len(p.errs) == 0 {
-		p.errorAt(t.Span, "SYNTAX PROBLEM", "I parsed a complete `with` item but then ran into this.")
+		p.errorAt(t.Span, "SYNTAX PROBLEM", "I parsed a complete `use` item but then ran into this.")
 	}
 	return w, params, head, p.errs
 }
@@ -1037,24 +1036,10 @@ const (
 	// but recognized so it gets its own diagnostic rather than the generic
 	// "expression seemed complete" one.
 	stmtLocalOp
-	// stmtWith is `with head` or `with patterns <- head`: the rest of the
+	// stmtUse is `use head` or `use patterns <- head`: the rest of the
 	// block becomes the head's final callback argument.
-	stmtWith
+	stmtUse
 )
-
-// withItemStart recognizes a `with` block item at toks[i] without reserving
-// the word: a local binding or function named `with` has a statement `=`, and
-// handler state is recognized before items are classified.
-func withItemStart(toks []token.Token, i int) bool {
-	if toks[i].Kind != token.LIDENT || toks[i].Text != "with" {
-		return false
-	}
-	switch toks[i+1].Kind {
-	case token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACKET, token.LBRACE, token.UNDERSCORE:
-		return true
-	}
-	return false
-}
 
 // classifyStmt inspects the statement starting at the current token. The
 // lookahead is bounded by the offside rule — it never scans past a token at
@@ -1066,6 +1051,9 @@ func (p *parser) classifyStmt(col int) stmtKind {
 		return t.Kind != token.EOF && t.Span.StartPos().Col > col
 	}
 	i := p.pos
+	if p.toks[i].Kind == token.KwUse {
+		return stmtUse
+	}
 	if _, isOpName := p.opNameAt(i); isOpName {
 		// `(+) 1 2` is an application; only a following `=` makes it a
 		// definition attempt.
@@ -1095,9 +1083,6 @@ func (p *parser) classifyStmt(col int) stmtKind {
 	}
 	if hasStatementEqual(p.toks, i+1, col) {
 		return stmtLocalFn
-	}
-	if withItemStart(p.toks, i) {
-		return stmtWith
 	}
 	return stmtResult
 }
@@ -1182,6 +1167,9 @@ func (p *parser) classifyInlineStmt() stmtKind {
 	}
 
 	i := p.pos
+	if p.toks[i].Kind == token.KwUse {
+		return stmtUse
+	}
 	if _, isOpName := p.opNameAt(i); isOpName {
 		j := i + 3
 		for inBounds(j) && (p.toks[j].Kind == token.LIDENT || p.toks[j].Kind == token.UNDERSCORE) {
@@ -1209,9 +1197,6 @@ func (p *parser) classifyInlineStmt() stmtKind {
 	}
 	if hasEqual(i + 1) {
 		return stmtLocalFn
-	}
-	if withItemStart(p.toks, i) && !(p.stopWith > 0 && p.handlerStateStart(i)) {
-		return stmtWith
 	}
 	return stmtResult
 }
@@ -1343,14 +1328,14 @@ func (p *parser) parseInlineBlock() ast.Expr {
 			pendingAnn = &ast.TypeAnn{Type: te, Preds: preds, Sp: colon.Span.Merge(te.Span())}
 			pendingAnnName = nameT
 
-		case stmtWith:
+		case stmtUse:
 			if pendingAnn != nil {
 				p.errorAt(t.Span, "MISSING DEFINITION",
 					"The type annotation for `"+pendingAnnName.Text+"` must sit directly before its binding.")
 				return nil
 			}
 			p.stmtStart = p.pos
-			w, params, head := p.parseWithHead()
+			w, params, head := p.parseUseHead()
 			if head == nil {
 				return nil
 			}
@@ -1359,7 +1344,7 @@ func (p *parser) parseInlineBlock() ast.Expr {
 				if p.peek().Kind == token.EOF {
 					title = TitleUnexpectedEOF
 				}
-				p.errorAt(w.Keyword, title, withNeedsRest)
+				p.errorAt(w.Keyword, title, useNeedsRest)
 				return nil
 			}
 			w.Semi = p.next().Span
@@ -1370,7 +1355,7 @@ func (p *parser) parseInlineBlock() ast.Expr {
 			if rest == nil {
 				return nil
 			}
-			result := withCall(w, params, head, rest)
+			result := useCall(w, params, head, rest)
 			if len(binds) == 0 && !hasExprStmt {
 				return result
 			}
@@ -1431,14 +1416,14 @@ func (p *parser) blockMissingResult(binds []ast.LocalBind, items []ast.BlockItem
 	return &ast.Block{Binds: binds, Items: items, Result: &ast.UnitLit{Sp: p.prevSpan()}, MissingResultAt: at}
 }
 
-const withNeedsRest = "A `with` applies its function to the rest of the block as a callback,\nbut nothing follows it here. Add the statements it should run around."
+const useNeedsRest = "A `use` applies its function to the rest of the block as a callback,\nbut nothing follows it here. Add the statements it should run around."
 
-// parseWithHead parses `with head` or `with patterns <- head` and leaves the
+// parseUseHead parses `use head` or `use patterns <- head` and leaves the
 // rest of the block to its caller. The binder patterns are tried as in a
 // lambda and kept only when `<-` follows them.
-func (p *parser) parseWithHead() (*ast.WithSugar, []ast.Pattern, ast.Expr) {
+func (p *parser) parseUseHead() (*ast.UseSugar, []ast.Pattern, ast.Expr) {
 	kw := p.next()
-	w := &ast.WithSugar{Keyword: kw.Span}
+	w := &ast.UseSugar{Keyword: kw.Span}
 	q := *p
 	q.lay.stack = append([]layoutCtx(nil), p.lay.stack...)
 	q.errs = nil
@@ -1463,16 +1448,16 @@ func (p *parser) parseWithHead() (*ast.WithSugar, []ast.Pattern, ast.Expr) {
 		if p.peek().Kind == token.EOF {
 			title = TitleUnexpectedEOF
 		}
-		p.errorAt(p.prevSpan(), title, "I expect the function to apply after `with`.")
+		p.errorAt(p.prevSpan(), title, "I expect the function to apply after `use`.")
 		return w, nil, nil
 	}
 	head := p.parseExpr()
 	return w, params, head
 }
 
-// withCall expands a `with` item: the head applied to a callback whose body
+// useCall expands a `use` item: the head applied to a callback whose body
 // is the rest of the block.
-func withCall(w *ast.WithSugar, params []ast.Pattern, head, rest ast.Expr) ast.Expr {
+func useCall(w *ast.UseSugar, params []ast.Pattern, head, rest ast.Expr) ast.Expr {
 	sp := w.Keyword
 	if w.Arrow.File != nil {
 		sp = sp.Merge(w.Arrow)
@@ -1480,7 +1465,7 @@ func withCall(w *ast.WithSugar, params []ast.Pattern, head, rest ast.Expr) ast.E
 	if len(params) == 0 {
 		params = []ast.Pattern{&ast.PUnit{Sp: w.Keyword}}
 	}
-	return &ast.App{Fn: head, Arg: &ast.Lambda{Params: params, Body: rest, Sp: sp, With: w}}
+	return &ast.App{Fn: head, Arg: &ast.Lambda{Params: params, Body: rest, Sp: sp, Use: w}}
 }
 
 // parseBlock parses a statement block at the given column: `name = expr`
@@ -1497,7 +1482,7 @@ func (p *parser) parseBlock(col int) ast.Expr {
 }
 
 // blockItems parses the items of the layout block at col, which the caller
-// has pushed. A `with` item parses the block's remaining items as a block of
+// has pushed. A `use` item parses the block's remaining items as a block of
 // their own, in the same layout context.
 func (p *parser) blockItems(col, owner int) ast.Expr {
 	var binds []ast.LocalBind
@@ -1612,30 +1597,30 @@ func (p *parser) blockItems(col, owner int) ast.Expr {
 			pendingAnn = &ast.TypeAnn{Type: te, Preds: preds, Sp: colon.Span.Merge(te.Span())}
 			pendingAnnName = nameT
 
-		case stmtWith:
+		case stmtUse:
 			if pendingAnn != nil {
 				p.errorAt(t.Span, "MISSING DEFINITION",
 					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nabove its binding.")
 				return nil
 			}
-			w, params, head := p.parseWithHead()
+			w, params, head := p.parseUseHead()
 			if head == nil {
 				return nil
 			}
 			nt := p.peek()
 			if nt.Kind == token.EOF {
-				p.errorAt(w.Keyword, TitleUnexpectedEOF, withNeedsRest)
+				p.errorAt(w.Keyword, TitleUnexpectedEOF, useNeedsRest)
 				return nil
 			}
 			if p.branchBoundary() || nt.Pos().Col <= owner || closesBlock(nt.Kind) || p.handlerStateAhead() {
-				p.errorAt(w.Keyword, "SYNTAX PROBLEM", withNeedsRest)
+				p.errorAt(w.Keyword, "SYNTAX PROBLEM", useNeedsRest)
 				return nil
 			}
 			rest := p.blockItems(col, owner)
 			if rest == nil {
 				return nil
 			}
-			result := withCall(w, params, head, rest)
+			result := useCall(w, params, head, rest)
 			if len(binds) == 0 && !hasExprStmt {
 				return result
 			}

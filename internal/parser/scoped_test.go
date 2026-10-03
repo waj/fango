@@ -11,7 +11,7 @@ import (
 
 func TestScopedPragma(t *testing.T) {
 	for _, src := range []string{
-		"{-# scoped\ts #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = use 0\n",
+		"{-# scoped\ts #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = action 0\n",
 		"{-# no-prelude #-}\n{-# scoped s #-}\n-- callback\nrun : (Int ->{s} a) ->{e} a\nrun = native\n",
 	} {
 		f := source.NewFile("scoped.fango", []byte(src))

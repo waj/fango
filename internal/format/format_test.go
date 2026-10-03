@@ -423,9 +423,9 @@ func TestResourceMarkerStaysWithDeclaration(t *testing.T) {
 
 func TestScopedMarkerStaysWithDeclaration(t *testing.T) {
 	for _, src := range []string{
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use=use 0\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action=action 0\n",
 		"{-# scoped s #-}\n-- callback comment\nrun : (Int ->{s} a) ->{e} a\nrun = native\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use =\n    -- body comment\n    use 0\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action =\n    -- body comment\n    action 0\n",
 	} {
 		out, errs := Source(source.NewFile("scoped.fango", []byte(src)))
 		if len(errs) > 0 {

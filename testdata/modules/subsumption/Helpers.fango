@@ -6,4 +6,4 @@ pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
 pair left right = left() + right()
 
 withValue : (() ->{e} Int) -> (Int ->{e} ()) -> (Int ->{e} a) ->{e} a
-withValue acquire release use = Runtime.Scope.bracket acquire release use
+withValue acquire release action = Runtime.Scope.bracket acquire release action

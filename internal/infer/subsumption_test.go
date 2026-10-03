@@ -5,35 +5,35 @@ import "testing"
 func TestSubsumptionRejectsEffectLoss(t *testing.T) {
 	for name, src := range map[string]string{
 		"callback narrowing": `emit() = print "x"
-use : (() -> ()) -> ()
-use action = action()
-bad = use emit`,
+consume : (() -> ()) -> ()
+consume action = action()
+bad = consume emit`,
 		"contravariant argument": `emit() =
     print "x"
     1
 consumePure : (() -> Int) -> Int
 consumePure action = action()
-use : ((() ->{IO} Int) ->{IO} Int) ->{IO} Int
-use consumer = consumer emit
-bad() = use consumePure`,
+consume : ((() ->{IO} Int) ->{IO} Int) ->{IO} Int
+consume consumer = consumer emit
+bad() = consume consumePure`,
 		"invariant row": `type Cell e = Cell (() ->{e} Int) ((() ->{e} Int) -> Int)
 pure() = 1
 ignore action = 0
 cell = Cell pure ignore
-use : Cell IO -> Int
-use value = 1
-bad = use cell`,
-		"rigid tail": `use : (() ->{e} ()) ->{e} ()
-use action =
+consume : Cell IO -> Int
+consume value = 1
+bad = consume cell`,
+		"rigid tail": `consume : (() ->{e} ()) ->{e} ()
+consume action =
     action()
     print "hidden"`,
 		"parameterized label": `effect Read a
     read : () -> a
-use : (() ->{Read Int} Int) ->{Read Int} Int
-use action = action()
+consume : (() ->{Read Int} Int) ->{Read Int} Int
+consume action = action()
 text : () ->{Read String} String
 text() = read()
-bad() = use text`,
+bad() = consume text`,
 		"exact annotation": `pure : () ->{IO} Int
 pure() = 1`,
 		"exact local annotation": `outer() =
@@ -42,10 +42,10 @@ pure() = 1`,
     inner()`,
 		"stored callback narrowing": `type Box a = Box a
 emit() = print "x"
-use : Box (() -> ()) -> ()
-use box = case box of
+consume : Box (() -> ()) -> ()
+consume box = case box of
     Box action -> action()
-bad = use (Box emit)`,
+bad = consume (Box emit)`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, errs := check(t, src)
@@ -79,10 +79,10 @@ quiet = leaf pure
 loud = leaf emit
 `
 	for _, body := range []string{
-		"use() = pair pure emit", "use() = pair emit pure",
-		"use() = pair emit fail", "use() = pair fail emit",
-		"use() = pair { _ -> 1 } emit", "use() = pair emit { _ -> 1 }",
-		"use = branch [quiet, loud]", "use = branch [loud, quiet]",
+		"consume() = pair pure emit", "consume() = pair emit pure",
+		"consume() = pair emit fail", "consume() = pair fail emit",
+		"consume() = pair { _ -> 1 } emit", "consume() = pair emit { _ -> 1 }",
+		"consume = branch [quiet, loud]", "consume = branch [loud, quiet]",
 	} {
 		t.Run(body, func(t *testing.T) {
 			_, _, errs := check(t, prefix+"\n"+body)

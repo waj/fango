@@ -339,11 +339,11 @@ drainQuietly body =
                 Http.invalid _ -> ()
     })
 
--- Scopes the body of a response whose head was read to `use`, and reports
+-- Scopes the body of a response whose head was read to `action`, and reports
 -- whether the connection can serve another request.
 {-# scoped s #-}
 responseBody : Url -> Bool -> Bool -> Int -> Head -> Reader {Fail Error | e} -> (Response s ->{s} a) ->{Protocol, Fail Error | e} (a, Bool)
-responseBody target headRequest decode headerLimit head input use =
+responseBody target headRequest decode headerLimit head input action =
     bodyFraming =
         if headRequest || head.status == 204 || head.status == 304 then NoBody
         else Wire.responseFraming head.headers largest
@@ -351,23 +351,23 @@ responseBody target headRequest decode headerLimit head input use =
         result =
             if decode && bodyFraming /= NoBody && gzipped head.headers then
                 plain = Http.removeHeader "content-encoding" (Http.removeHeader "content-length" head.headers)
-                use (Response { url = target, status = head.status, headers = plain, body = GZip.decoding largest body })
-            else use (Response { url = target, status = head.status, headers = head.headers, body = body })
+                action (Response { url = target, status = head.status, headers = plain, body = GZip.decoding largest body })
+            else action (Response { url = target, status = head.status, headers = head.headers, body = body })
         drainQuietly body
         result
     }
     reusable = complete && head.http11 && bodyFraming /= UntilClose && closes head.headers == False
     (value, reusable)
 
--- Parses a response from `input` and scopes its body to `use`. A response to
+-- Parses a response from `input` and scopes its body to `action`. A response to
 -- HEAD, and a 204 or 304, has no body; any other is framed by Content-Length,
 -- chunked encoding, or the connection closing. With `decode`, a gzip body is
 -- decompressed and loses the headers that described its encoded form.
 {-# scoped s #-}
 withResponse : Url -> Bool -> Bool -> Int -> Reader {Fail Error | e} -> (Response s ->{s} a) ->{Protocol, Fail Error | e} a
-withResponse target headRequest decode headerLimit input use =
+withResponse target headRequest decode headerLimit input action =
     head = readHead input headerLimit
-    (value, _) = responseBody target headRequest decode headerLimit head input use
+    (value, _) = responseBody target headRequest decode headerLimit head input action
     value
 
 -- Sending
@@ -427,7 +427,7 @@ reused connection =
 -- Sends one request to `target`. `hops` redirects were followed before it.
 {-# scoped s #-}
 exchange : Config -> Request {Http, Fail Error | e} -> Url -> Bool -> Int -> Bool -> (Response s ->{s} a) ->{Http, Fail Error | e} Step a
-exchange config outgoing target crossOrigin hops fresh use =
+exchange config outgoing target crossOrigin hops fresh action =
     endpoint = endpointOf config target fresh
     defaults = [Header { name = "User-Agent", value = config.userAgent } | if config.decompress then [Header { name = "Accept-Encoding", value = "gzip" }] else []]
     merged = overlay (overlay defaults config.headers) outgoing.headers
@@ -461,7 +461,7 @@ exchange config outgoing target crossOrigin hops fresh use =
                                     case next of
                                         Just (location, keep) ->
                                             if hops >= config.maxRedirects then failWith TooManyRedirects else Follow location keep
-                                        Nothing -> Done (use response)
+                                        Nothing -> Done (action response)
                                 }
                             }
                 }
@@ -469,19 +469,19 @@ exchange config outgoing target crossOrigin hops fresh use =
                 step
     }
 
--- Sends `request` and streams the response to `use`, which may read the body
+-- Sends `request` and streams the response to `action`, which may read the body
 -- only while it runs. Redirects are followed up to `maxRedirects`; any other
 -- status is a normal response.
 {-# scoped s #-}
 send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
-send outgoing use =
+send outgoing action =
     config = currentConfig()
     checkHeaders config.headers
     checkHeaders outgoing.headers
     if Wire.allToken (Bytes.fromString outgoing.method) 0 == False then failWith (Protocol (Http.InvalidMessage "invalid method")) else ()
     first = absolute config (parseUrl outgoing.url)
     follow current target hops fresh =
-        case exchange config current target (originOf target /= originOf first) hops fresh use of
+        case exchange config current target (originOf target /= originOf first) hops fresh action of
             Done value -> value
             Retry -> follow current target hops True
             Follow next keep ->

@@ -113,10 +113,10 @@ isDirectory : String ->{IO} Result IO.Error Bool
 size : String ->{IO} Result IO.Error Int
 ```
 
-`withFile path use` opens `path` for reading and runs `use` on the handle;
+`withFile path action` opens `path` for reading and runs `action` on the handle;
 `withOutput` creates or truncates the file first, and `withAppend` opens it
 for appending, creating it if needed. Each is a [cleanup scope](resources.md): the
-file is closed exactly once when `use` finishes, whether it returned, failed,
+file is closed exactly once when `action` finishes, whether it returned, failed,
 or exited to an outer handler. A failed open raises `Fail IO.Error` before
 anything is acquired; a failed close after a successful body is the scope's
 failure, and after a failed body it is recorded alongside the body's failure.
@@ -153,10 +153,10 @@ Named callbacks may perform fewer effects than the wrapper permits.
 
 ## Net
 
-`Net` supplies scoped TCP listeners and connections. `withListener port use`
-binds the wildcard address, runs `use`, and closes the listener on every exit.
-`accept listener use` waits for one connection and scopes it; `withClient host
-port use` connects and scopes the client side.
+`Net` supplies scoped TCP listeners and connections. `withListener port action`
+binds the wildcard address, runs `action`, and closes the listener on every exit.
+`accept listener action` waits for one connection and scopes it; `withClient host
+port action` connects and scopes the client side.
 
 ```fango
 withListener : Int -> (Net.Listener ->{IO, Fail Net.Error | e} a) ->{IO, Fail Net.Error | e} a

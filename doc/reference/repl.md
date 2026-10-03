@@ -94,7 +94,7 @@ Supported commands are:
 
 ```text
 :type <expr>   show a type without evaluating
-:with          list the installed handler levels
+:uses          list the installed handler levels
 :end           end the innermost handler level (Ctrl-D also does)
 :help          show command help
 :quit, :q      end every level and leave the REPL
@@ -114,15 +114,15 @@ not re-read in the same session.
 
 ## Handler levels
 
-A [`with` item](syntax.md#with-items) typed at the prompt installs a handler
+A [`use` item](syntax.md#use-items) typed at the prompt installs a handler
 level: the rest of the session is the item's callback, so every later input
 runs inside the head's handlers until the level ends. The prompt shows how many
 levels are installed:
 
 ```text
 > import Http.Client as Client
-> with Client.run
-1> with Client.configure { c -> { c | readTimeoutMs = 2000 } }
+> use Client.run
+1> use Client.configure { c -> { c | readTimeoutMs = 2000 } }
 2> Client.getText "https://example.com/status"
 "ok" : String
 2> :end
@@ -130,19 +130,19 @@ levels are installed:
 >
 ```
 
-The head runs once, so what it holds lasts for the level: `with Client.run`
-keeps its connection pool across inputs, and `with State.run 0` its state. An
+The head runs once, so what it holds lasts for the level: `use Client.run`
+keeps its connection pool across inputs, and `use State.run 0` its state. An
 input may perform what any level's callback may, besides IO and `Fail`; when
 several levels grant the same effect, one whose type arguments already agree is
-used, and otherwise the innermost. `:with` lists each level's item, the effects
+used, and otherwise the innermost. `:uses` lists each level's item, the effects
 its callback may perform, and its binders.
 
-`with patterns <- head` binds the callback's parameters for the inputs that
+`use patterns <- head` binds the callback's parameters for the inputs that
 follow, echoing their types. A scoped runner may head a level: its scoped
 values stay usable until the level ends.
 
 ```text
-> with reader <- Reader.withBytes (Bytes.fromString "hello world")
+> use reader <- Reader.withBytes (Bytes.fromString "hello world")
 reader : Reader {local scope}
 1> Bytes.toStringLossy (Reader.readUpTo reader 5)
 "hello" : String

@@ -5,7 +5,7 @@ effect Counter
 type Cell = Cell (() -> Int)
 
 both : (Cell ->{IO} a) ->{IO} a
-both use =
+both action =
     handle
         case Cell ({ _ -> tick() }) of
             outerCell ->
@@ -13,7 +13,7 @@ both use =
                     case tick() of
                         seen ->
                             print seen
-                            use outerCell
+                            action outerCell
                 with m = 100 on
                     tick () -> resume m with m + 1
     with n = 0 on

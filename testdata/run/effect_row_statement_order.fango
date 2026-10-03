@@ -16,9 +16,9 @@ finally action cleanup =
             result
 
 bracket : (() ->{e} a) -> (a ->{Exception ex | e} b) -> (a ->{e} ()) ->{Exception ex | e} b
-bracket acquire use release =
+bracket acquire action release =
     resource = acquire()
-    finally ({ _ -> use resource }) ({ _ -> release resource })
+    finally ({ _ -> action resource }) ({ _ -> release resource })
 
 catch : (() ->{Exception ex | e} a) -> (ex ->{e} a) ->{e} a
 catch action handler =

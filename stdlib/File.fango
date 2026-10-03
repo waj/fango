@@ -88,19 +88,19 @@ close : Handle ->{IO, Fail Error} ()
 close file = fromResult (closeHandle file)
 
 withOpened : (String ->{IO} Result Error Handle) -> String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-withOpened open path use = Runtime.Scope.bracket { fromResult (open path) } close use
+withOpened open path action = Runtime.Scope.bracket { fromResult (open path) } close action
 
--- withFile opens path for reading and runs use on the handle.
+-- withFile opens path for reading and runs action on the handle.
 withFile : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-withFile path use = withOpened openRead path use
+withFile path action = withOpened openRead path action
 
--- withOutput creates or truncates path and runs use on the handle.
+-- withOutput creates or truncates path and runs action on the handle.
 withOutput : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-withOutput path use = withOpened openWrite path use
+withOutput path action = withOpened openWrite path action
 
 -- withAppend opens path for appending, creating it if needed.
 withAppend : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-withAppend path use = withOpened openAppend path use
+withAppend path action = withOpened openAppend path action
 
 -- readLine has the console readLine's contract: Nothing at end of file,
 -- otherwise the line and its exact terminator.

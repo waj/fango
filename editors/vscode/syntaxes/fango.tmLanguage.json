@@ -16,7 +16,7 @@
     { "include": "#operator_definition" },
     { "include": "#annotation" },
     { "include": "#handler_state" },
-    { "include": "#with_item" },
+    { "include": "#use_item" },
     { "include": "#function_definition" },
     { "include": "#binding" },
     { "include": "#expressions" }
@@ -359,7 +359,7 @@
         { "include": "#char" },
         { "include": "#pin_pattern" },
         { "include": "#handler_state" },
-        { "include": "#with_item" },
+        { "include": "#use_item" },
         { "include": "#resume_expression" },
         { "include": "#record_expression" },
         { "include": "#lambda" },
@@ -552,7 +552,7 @@
       "patterns": [
         {
           "name": "keyword.control.fango",
-          "match": "\\b(if|then|else|case|of|on|handle|resume|typeOf)\\b"
+          "match": "\\b(if|then|else|case|of|on|handle|resume|use|typeOf)\\b"
         },
         {
           "name": "keyword.other.fango",
@@ -569,12 +569,12 @@
       "name": "keyword.control.return.fango",
       "match": "^\\s*(return)\\b(?=(?:[ \\t]+(?:\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]|\\{[^{}]*\\}|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:\\\\.|[^'\\\\])'|-?[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?|\\^?[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*))+[ \\t]*->)"
     },
-    "with_item": {
-      "comment": "A `with` block item, `with head` or `with patterns <- head`, starts a line or follows `{` or `;`. A line binding a local named `with` is not one; the binder ends at the exact `<-` token.",
-      "begin": "(?:^|(?<=[{;]))[ \\t]*(with)\\b(?=[ \\t]+[A-Za-z_(\\[{])(?!(?:[ \\t]+[a-z_][A-Za-z0-9_]*)*[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~]))",
+    "use_item": {
+      "comment": "A `use` block item, `use head` or `use patterns <- head`, starts a line or follows `{` or `;`; the binder ends at the exact `<-` token.",
+      "begin": "(?:^|(?<=[{;]))[ \\t]*(use)\\b",
       "end": "(?<![!#%&*+\\-/:<=>?@^|~])(<-)(?![!#%&*+\\-/:<=>?@^|~])|(?=$|;)",
       "beginCaptures": {
-        "1": { "name": "keyword.control.with.fango" }
+        "1": { "name": "keyword.control.use.fango" }
       },
       "endCaptures": {
         "1": { "name": "keyword.operator.arrow.fango" }

@@ -197,16 +197,16 @@ delay work = Defer work
 yield value = Emit value (Done ())
 lift work = Defer { _ -> Done (work()) }
 
-bind producer use = Defer { _ -> case producer of
-    Done value -> use value
-    Emit value rest -> Emit value (bind rest use)
-    Defer work -> bind (work()) use
+bind producer action = Defer { _ -> case producer of
+    Done value -> action value
+    Emit value rest -> Emit value (bind rest action)
+    Defer work -> bind (work()) action
 }
 ```
 
 Each call to `bind` constructs a `Defer`; it does not advance its input.
-On a pull, `Done` passes its result to `use`, `Emit` returns an element while
-retaining `use` for the tail, and `Defer` executes one pending action.
+On a pull, `Done` passes its result to `action`, `Emit` returns an element while
+retaining `action` for the tail, and `Defer` executes one pending action.
 Repeated pulls of the same producer position may repeat its effects; a
 consumer advances by using the returned tail. A builder should give `pure`
 and `bind` their usual sequencing laws, but the compiler checks types rather

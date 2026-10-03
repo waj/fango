@@ -1,26 +1,26 @@
 bare =
-    with   run config
+    use run config
     fetch url
 
 binder =
     first = 1
-    with (a,b) <- pair first
+    use (a, b) <- pair first
     -- a comment between items
-    with (Just c) <- lookup
+    use (Just c) <- lookup
     a + b + c
 
 configured =
-    with Client.run
-    with Client.configure { c ->
+    use Client.run
+    use Client.configure { c ->
         { c | readTimeoutMs = 200 }
     }
     Client.getText "/slow"
 
-inline = twice { with x <- pair 1;  with run; x }
+inline = twice { use x <- pair 1; use run; x }
 
 scoped =
     total =
-        with State.run 0
+        use State.run 0
         bump()
         get()
     total.value

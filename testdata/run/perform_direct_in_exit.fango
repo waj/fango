@@ -12,7 +12,7 @@ effect Count
     readTotal : () -> Int
 
 withValue : Int -> (Int ->{Fail String | e} a) ->{Fail String | e} a
-withValue x use = use x
+withValue x action = action x
 
 counted : Int ->{Count, Fail String} Int
 counted v =

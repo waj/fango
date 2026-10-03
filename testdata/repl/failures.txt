@@ -14,7 +14,7 @@ Unhandled Error: 7 : Int
 > -- UNHANDLED EFFECT ------------------------------------- <repl>
 
 This performs `State a`, and nothing at the prompt handles it. Run it inside
-a handler, or install one for the inputs that follow with `with`.
+a handler, or install one with `use` for the inputs that follow.
 
 1| State.get()
    ^^^^^^^^^^^

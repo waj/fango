@@ -20,7 +20,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// A level is a `with` typed at the prompt. Its head runs with a callback whose
+// A level is a `use` typed at the prompt. Its head runs with a callback whose
 // body is Runtime.Prompt.level, and the evaluator answers that call by running
 // the following inputs inside the head's handlers, so their state and
 // resources last until the level ends (doc/design/repl.md, "Handler levels").
@@ -361,11 +361,11 @@ func (s *Session) allowed() []types.EffLabel {
 	return labels
 }
 
-// levelInput installs a `with` typed at the prompt: it checks the head applied
+// levelInput installs a `use` typed at the prompt: it checks the head applied
 // to a callback whose body is Runtime.Prompt.level over the binders, runs it,
 // and, once the callback starts, binds the binders for the inputs that follow.
 func (s *Session) levelInput(text string, toks []token.Token, f *source.File, force bool) inputResult {
-	w, params, head, errs := parser.ParseWithInput(toks, f)
+	w, params, head, errs := parser.ParseUseInput(toks, f)
 	if !force && wantsMore(errs) {
 		return needMoreInput
 	}
@@ -403,7 +403,7 @@ func (s *Session) levelInput(text string, toks []token.Token, f *source.File, fo
 		params = []ast.Pattern{&ast.PUnit{Sp: w.Keyword}}
 	}
 	call := &ast.Var{Name: "Runtime.Prompt.level", Sp: w.Keyword}
-	lambda := &ast.Lambda{Params: params, Body: &ast.App{Fn: call, Arg: pack}, Sp: w.Keyword, With: w}
+	lambda := &ast.Lambda{Params: params, Body: &ast.App{Fn: call, Arg: pack}, Sp: w.Keyword, Use: w}
 	var e ast.Expr = &ast.App{Fn: head, Arg: lambda}
 
 	restore := s.checkpoint()
@@ -440,7 +440,7 @@ func (s *Session) levelInput(text string, toks []token.Token, f *source.File, fo
 	}
 	if !ok {
 		restore()
-		diag.Render(s.out, []diag.Error{diag.Errorf(w.Keyword, "INVALID LEVEL", "The head of this `with` does not take a callback.")})
+		diag.Render(s.out, []diag.Error{diag.Errorf(w.Keyword, "INVALID LEVEL", "The head of this `use` does not take a callback.")})
 		return inputDone
 	}
 	lvl := &level{source: strings.TrimSpace(text), result: s.ck.Sub.Apply(ty), names: map[string]bool{}}

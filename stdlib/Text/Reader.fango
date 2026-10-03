@@ -78,9 +78,9 @@ readyAt encoding bytes offset =
 
 {-# scoped s #-}
 overWith : Encoding -> ByteReader.Reader e -> (Reader s ->{s} a) ->{e} a
-overWith encoding parent use =
+overWith encoding parent action =
     Runtime.Local.run 0 { consumed ->
-        use (Reader (Input
+        action (Reader (Input
             { at = { offset -> inspect encoding parent consumed.read() offset }
             , peek = { peekResult (inspect encoding parent consumed.read() 0) }
             , ready = { offset -> readyAt encoding parent.buffered() offset }
@@ -98,16 +98,16 @@ overWith encoding parent use =
 
 {-# scoped s #-}
 over : ByteReader.Reader e -> (Reader s ->{s} a) ->{e} a
-over parent use = overWith Encoding.utf8 parent use
+over parent action = overWith Encoding.utf8 parent action
 
 -- Memory starts with valid text. The common read operations still expose
 -- their decoding failure effect, which consumers can handle locally.
 {-# scoped s #-}
 withString : String -> (Reader s ->{s} a) ->{e} a
-withString text use =
+withString text action =
     bytes = Bytes.fromString text
     Runtime.Local.run 0 { consumed ->
-        use (Reader (Input
+        action (Reader (Input
             { at = { offset -> decodeScalar Encoding.utf8 bytes (consumed.read() + offset) }
             , peek = { peekResult (decodeScalar Encoding.utf8 bytes consumed.read()) }
             , ready = { offset -> consumed.read() + offset < Bytes.length bytes }

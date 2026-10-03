@@ -110,25 +110,25 @@ closeConnectionFail : Connection ->{IO, Fail Error} ()
 closeConnectionFail connection = fromResult (closeConnection connection)
 
 -- withListener binds the wildcard address on port and closes the listener on
--- every exit from use.
+-- every exit from action.
 withListener : Int -> (Listener ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-withListener port use =
-    Runtime.Scope.bracket { fromResult (listen port) } closeListenerFail use
+withListener port action =
+    Runtime.Scope.bracket { fromResult (listen port) } closeListenerFail action
 
 -- accept waits for one client and scopes the accepted connection.
 accept : Listener -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-accept listener use =
-    Runtime.Scope.bracket { fromResult (acceptConnection listener) } closeConnectionFail use
+accept listener action =
+    Runtime.Scope.bracket { fromResult (acceptConnection listener) } closeConnectionFail action
 
 acceptAsync : Listener -> (Connection ->{IO, Fail Error, Async.Async err | e} a) ->{IO, Fail Error, Async.Async err | e} a
-acceptAsync listener use =
+acceptAsync listener action =
     token = Async.contextToken()
-    Runtime.Scope.bracket { fromResult (acceptConnectionAsync token listener) } closeConnectionFail use
+    Runtime.Scope.bracket { fromResult (acceptConnectionAsync token listener) } closeConnectionFail action
 
 -- withClient connects to host and port and scopes the connection.
 withClient : String -> Int -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-withClient host port use =
-    Runtime.Scope.bracket { fromResult (dial host port) } closeConnectionFail use
+withClient host port action =
+    Runtime.Scope.bracket { fromResult (dial host port) } closeConnectionFail action
 
 chunk : Int
 chunk = 8192

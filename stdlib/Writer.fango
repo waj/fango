@@ -17,7 +17,7 @@ windowOf size = if size < 1 then 1 else size
 -- Flush on normal completion only; a failed body does not emit a partial message.
 {-# scoped s #-}
 over : Sink e -> Int -> (Writer s ->{s} a) ->{e} a
-over sink size use =
+over sink size action =
     Runtime.Local.run Bytes.empty { pending ->
         writer =
             { emit = { chunk ->
@@ -33,16 +33,16 @@ over sink size use =
                 pending.write Bytes.empty
               }
             }
-        result = use writer
+        result = action writer
         writer.flush()
         result
     }
 
 {-# scoped s #-}
 collecting : (Writer s ->{s} a) ->{e} (a, Bytes)
-collecting use =
+collecting action =
     Runtime.Local.run [] { parts ->
-        result = use
+        result = action
             { emit = { chunk -> parts.write [chunk | parts.read()] }
             , flush = { () }
             }

@@ -78,12 +78,12 @@ readHead reader lineLimit headersLimit bodyLimit =
 -- The Bool reports whether the handler consumed the whole framed body.
 {-# scoped s #-}
 withRequest : Int -> Int -> Int -> Reader e -> (Request s ->{s} a) ->{Protocol | e} Maybe (a, Bool)
-withRequest lineLimit headersLimit bodyLimit input use =
+withRequest lineLimit headersLimit bodyLimit input action =
     case readHead input lineLimit headersLimit bodyLimit of
         Nothing -> Nothing
         Just head ->
             result = Wire.withBody head.framing input bodyLimit headersLimit { body ->
-                use (Request { method = head.method, target = head.target, version = Http11, headers = head.headers, body = body })
+                action (Request { method = head.method, target = head.target, version = Http11, headers = head.headers, body = body })
             }
             Just result
 

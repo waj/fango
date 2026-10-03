@@ -4,21 +4,21 @@ import Bytes
 import Reader
 import Result exposing (Result(..))
 :end
-with State.run 10
+use State.run 10
 State.get()
 State.put (State.get() + 5)
 State.get()
 Client.getText "http://example.com/"
 :end
 answer _ = Ok (Bytes.fromString "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-with Client.stub answer
-with Client.configure { c -> { c | userAgent = "levels" } }
+use Client.stub answer
+use Client.configure { c -> { c | userAgent = "levels" } }
 Client.getText "http://example.com/"
 Client.getText "relative"
-:with
+:uses
 :end
 :end
-with r <- Reader.withBytes (Bytes.fromString "hello world")
+use r <- Reader.withBytes (Bytes.fromString "hello world")
 reader = r
 Bytes.toStringLossy (Reader.readUpTo reader 5)
 :end
@@ -27,7 +27,7 @@ pair : Int -> ((Int, Int) ->{e} a) ->{e} a
 pair n k = k (n, n * 2)
 skip : (() ->{e} a) -> Int
 skip _ = 5
-with skip
+use skip
 effect Stop
     abort stop : () -> a
 
@@ -37,14 +37,14 @@ runStop action =
         stop () -> Nothing
         return v -> Just v
 
-with runStop
-with (a, b) <- pair 4
+use runStop
+use (a, b) <- pair 4
 total = a + b
 kept = 7
 total
 stop ()
 kept
 total
-with State.run 0
-with (n, _) <- pair 1
+use State.run 0
+use (n, _) <- pair 1
 State.put n

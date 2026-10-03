@@ -108,7 +108,7 @@ commitWindow : Text.Reader.Reader e -> Window ->{e} ()
 refillWindow : Text.Reader.Reader e -> Window ->{e} (Window, Bool)
 ```
 
-`over parent use` selects UTF-8; `overWith encoding parent use` selects an
+`over parent action` selects UTF-8; `overWith encoding parent action` selects an
 encoding once for the scope. `withString` starts with valid text in memory.
 Its reads use the common failure-effect signatures even though that input
 cannot have a decoding error. Handle decoding failures around the read or

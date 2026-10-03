@@ -28,8 +28,8 @@ main() =
     print text
 ```
 
-`bracket acquire release use` evaluates `acquire()` once. If that fails,
-nothing is released. Otherwise `use` runs on the acquired resource and
+`bracket acquire release action` evaluates `acquire()` once. If that fails,
+nothing is released. Otherwise `action` runs on the acquired resource and
 `release` runs exactly once when the scope exits:
 
 | Event | Behavior |
@@ -100,8 +100,8 @@ import Runtime.Native
 {-# resource #-}
 type Handle = Handle Runtime.Native.Any
 
-withConnection address use =
-    Runtime.Scope.bracket { openConnection address } closeConnection use
+withConnection address action =
+    Runtime.Scope.bracket { openConnection address } closeConnection action
 ```
 
 Here `openConnection` and `closeConnection` are private library functions.

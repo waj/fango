@@ -126,7 +126,7 @@ Client.request "PUT" "/items/7"
 The URL is parsed when the request is sent; one that does not parse fails with
 `InvalidUrl`.
 
-`send request use` writes the request and streams the response body to `use`,
+`send request action` writes the request and streams the response body to `action`,
 which may read it only while it runs: the reader cannot escape the callback, so
 it is never read after the connection closes. A value that does not depend on
 the reader, such as decoded JSON, can leave. `fetch`, `get`, and `post` read

@@ -25,7 +25,7 @@ outerReader = Reader.withBytes (Bytes.fromString "old") ({ outer ->
 -- A library wrapper preserves the scoped callback contract across calls.
 {-# scoped s #-}
 withText : String -> (Reader.Reader s ->{s} a) ->{e} a
-withText text use = Reader.withBytes (Bytes.fromString text) use
+withText text action = Reader.withBytes (Bytes.fromString text) action
 
 readAll : Reader.Reader e ->{e} String
 readAll reader = Bytes.toStringLossy (Reader.readUpTo reader 99)

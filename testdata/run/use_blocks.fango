@@ -12,19 +12,19 @@ bump () = put (get() + 1)
 answer : Bytes -> Result Client.Error Bytes
 answer _ = Ok (Bytes.fromString "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
 
--- Each `with` wraps the rest of its block; the first one is outermost.
+-- Each `use` wraps the rest of its block; the first one is outermost.
 fetchTwice : () -> Result Client.Error String
 fetchTwice () =
-    with Fail.attempt
-    with Client.stub answer
-    with Client.configure { c -> { c | userAgent = "with" } }
+    use Fail.attempt
+    use Client.stub answer
+    use Client.configure { c -> { c | userAgent = "with" } }
     first = Client.getText "http://example.com/a"
     first ++ " " ++ Client.getText "http://example.com/b"
 
 -- A scoped runner's callback parameter is bound by `<-`.
 firstWord : String -> String
 firstWord text =
-    with reader <- Reader.withBytes (Bytes.fromString text)
+    use reader <- Reader.withBytes (Bytes.fromString text)
     Bytes.toStringLossy (Reader.readUpTo reader 5)
 
 main() =
@@ -32,9 +32,9 @@ main() =
     print (firstWord "hello world")
     counted =
         -- The block on the right of `=` ends the State handler's scope.
-        with State.run 10
+        use State.run 10
         bump()
         bump()
         get()
     print counted.value
-    print (List.map { n -> with (a, b) <- { k -> k (n, n * 2) }; a + b } [1, 2, 3])
+    print (List.map { n -> use (a, b) <- { k -> k (n, n * 2) }; a + b } [1, 2, 3])

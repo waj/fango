@@ -17,7 +17,7 @@ type Writer e = Writer (Output e)
 
 {-# scoped s #-}
 overWith : Encoding -> ByteWriter.Writer e -> (Writer s ->{s} a) ->{Fail Encoding.Error | e} a
-overWith encoding parent use =
+overWith encoding parent action =
     Runtime.Local.run () { local ->
         writer = Writer (Output
             { emit = { text ->
@@ -38,16 +38,16 @@ overWith encoding parent use =
               }
             }
         )
-        result = use writer
+        result = action writer
         flush writer
         result
     }
 
 {-# scoped s #-}
 over : ByteWriter.Writer e -> (Writer s ->{s} a) ->{e} a
-over parent use =
+over parent action =
     borrow parent { writer ->
-        result = use writer
+        result = action writer
         flush writer
         result
     }
@@ -55,7 +55,7 @@ over parent use =
 -- A nested encoder borrows a writer without taking over its flush boundary.
 {-# scoped s #-}
 borrow : ByteWriter.Writer e -> (Writer s ->{s} a) ->{e} a
-borrow parent use =
+borrow parent action =
     Runtime.Local.run () { local ->
         writer = Writer (Output
             { emit = { text ->
@@ -73,14 +73,14 @@ borrow parent use =
               }
             }
         )
-        use writer
+        action writer
     }
 
 {-# scoped s #-}
 collecting : (Writer s ->{s} a) ->{e} (a, String)
-collecting use =
+collecting action =
     Runtime.Local.run Builder.empty { built ->
-        result = use (Writer (Output
+        result = action (Writer (Output
             { emit = { text -> built.write (Builder.append built.read() text) }
             , attempt = { text ->
                 built.write (Builder.append built.read() text)

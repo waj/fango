@@ -65,8 +65,8 @@ func exprInline(e ast.Expr) (string, bool) {
 		operand, ok := exprAtomInline(e.Operand)
 		return "-" + operand, ok
 	case *ast.App:
-		if lambda, ok := withLambda(e); ok {
-			return withInline(e.Fn, lambda)
+		if lambda, ok := useLambda(e); ok {
+			return useInline(e.Fn, lambda)
 		}
 		return appInline(e)
 	case *ast.OpChain:
@@ -144,14 +144,14 @@ func semicolonBlockInline(b *ast.Block) (string, bool) {
 	return strings.Join(parts, "; "), true
 }
 
-// withInline renders a `with` item of a semicolon block and the rest of that
+// useInline renders a `use` item of a semicolon block and the rest of that
 // block after its separator.
-func withInline(head ast.Expr, lambda *ast.Lambda) (string, bool) {
-	if lambda.With.Semi.File == nil {
+func useInline(head ast.Expr, lambda *ast.Lambda) (string, bool) {
+	if lambda.Use.Semi.File == nil {
 		return "", false
 	}
-	text := "with "
-	if lambda.With.Arrow.File != nil {
+	text := "use "
+	if lambda.Use.Arrow.File != nil {
 		params, ok := patternsInline(lambda.Params)
 		if !ok {
 			return "", false

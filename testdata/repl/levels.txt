@@ -34,7 +34,7 @@ loaded Http.Client
 1> -- UNHANDLED EFFECT ------------------------------------- <repl>
 
 This performs `Http`, and nothing at the prompt handles it. Run it inside
-a handler, or install one for the inputs that follow with `with`.
+a handler, or install one with `use` for the inputs that follow.
 
 1| Client.getText "http://example.com/"
    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -42,9 +42,9 @@ a handler, or install one for the inputs that follow with `with`.
 > answer : a -> Result b Bytes
 > 1> 2> "ok" : String
 2> Unhandled Error: InvalidUrl "relative" : Error
-2> 1  with Client.stub answer
+2> 1  use Client.stub answer
    provides {Http}
-2  with Client.configure { c -> { c | userAgent = "levels" } }
+2  use Client.configure { c -> { c | userAgent = "levels" } }
    provides {Http}
 2> 1> > r : Reader {local scope}
 1> reader : Reader {local scope}

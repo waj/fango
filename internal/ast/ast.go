@@ -149,15 +149,15 @@ type LocalBind struct {
 type Lambda struct {
 	Params []Pattern
 	Body   Expr
-	Sp     source.Span // opening through closing brace; `with` through `<-` for sugar
-	// With is non-nil when a `with` block item spelled this callback: the
+	Sp     source.Span // opening through closing brace; `use` through `<-` for sugar
+	// Use is non-nil when a `use` block item spelled this callback: the
 	// rest of the enclosing block is Body and the head is the App applying it.
-	With *WithSugar
+	Use *UseSugar
 }
 
-// WithSugar records how a `with` item was written, so the formatter can
+// UseSugar records how a `use` item was written, so the formatter can
 // print the item rather than its expansion.
-type WithSugar struct {
+type UseSugar struct {
 	Keyword source.Span
 	Arrow   source.Span // `<-` of the binder form; zero without a binder
 	Semi    source.Span // the separator after the head in a semicolon block; zero in a layout block

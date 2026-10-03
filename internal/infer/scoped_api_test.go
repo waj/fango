@@ -76,7 +76,7 @@ func TestOrdinaryPhantomParameterDoesNotCreateFreshScope(t *testing.T) {
 	ck, infos, errs := check(t, `type Token r = Token
 
 withToken : (Token r -> a) -> a
-withToken use = use Token
+withToken action = action Token
 
 chosenByCaller : Token Int
 chosenByCaller = withToken { token -> token }
@@ -129,7 +129,7 @@ bad _ = ()
 type Reader e = { read : () ->{e} Int }
 
 bad : (Reader e ->{e} a) -> a
-bad use = handle use { read = read } on
+bad action = handle action { read = read } on
     read () -> resume 42
 `, "EFFECT MISMATCH"},
 	} {
@@ -148,15 +148,15 @@ bad use = handle use { read = read } on
 
 func TestScopedDeclarationErrors(t *testing.T) {
 	for _, src := range []string{
-		"{-# scoped missing #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = use 0\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{s} a\nrun use = use 0\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = run use\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = other use\nother use = run use\n",
-		"{-# scoped s #-}\nrun : Show a => (Int ->{s} a) ->{e} a\nrun use = use 0\n",
+		"{-# scoped missing #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = action 0\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{s} a\nrun action = action 0\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = run action\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = other action\nother action = run action\n",
+		"{-# scoped s #-}\nrun : Show a => (Int ->{s} a) ->{e} a\nrun action = action 0\n",
 		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun _ = 0\n",
 		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun = native\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = use 0\nalias = run\n",
-		"effect Tell a\n    tell : a -> ()\n\n{-# scoped s #-}\nrun : (Int ->{Tell (Int ->{s} Int) | s} a) ->{e} a\nrun use = handle use 0 on\n    tell _ -> resume ()\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = action 0\nalias = run\n",
+		"effect Tell a\n    tell : a -> ()\n\n{-# scoped s #-}\nrun : (Int ->{Tell (Int ->{s} Int) | s} a) ->{e} a\nrun action = handle action 0 on\n    tell _ -> resume ()\n",
 	} {
 		t.Run(src, func(t *testing.T) {
 			_, _, errs := check(t, src)
@@ -176,7 +176,7 @@ func TestScopedRunnerMustHandleEffectsItGrants(t *testing.T) {
 
 {-# scoped s #-}
 run : (Int ->{Tell | s} a) ->{e} a
-run use = use 0
+run action = action 0
 `)
 	if len(errs) == 0 {
 		t.Fatal("a runner that leaves a granted effect unhandled was accepted")

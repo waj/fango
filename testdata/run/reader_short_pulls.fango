@@ -14,8 +14,8 @@ trickle = Source { pull = { _ -> next() } }
 
 {-# scoped s #-}
 drive : Bytes -> (Reader s ->{s} a) ->{e} a
-drive text use =
-    handle Reader.over trickle use with pending = (True, text) on
+drive text action =
+    handle Reader.over trickle action with pending = (True, text) on
         next () ->
             case pending of
                 (True, rest) -> resume (Just Bytes.empty) with (False, rest)

@@ -259,6 +259,19 @@ func TestWithRemainsAnOrdinaryIdentifier(t *testing.T) {
 	}
 }
 
+func TestUseIsReserved(t *testing.T) {
+	for _, src := range []string{"use = 1\n", "f use = 1\n", "f x =\n    use = x\n    use\n"} {
+		f := source.NewFile("reserved.fango", []byte(src))
+		toks, lexErrs := lexer.Lex(f)
+		if len(lexErrs) > 0 {
+			t.Fatal(lexErrs)
+		}
+		if _, errs := Parse(toks, f); len(errs) == 0 {
+			t.Errorf("%q: accepted `use` as a name", src)
+		}
+	}
+}
+
 func TestParseExprInputUnfinished(t *testing.T) {
 	for _, src := range []string{"1 +", "(1 + 2", "[1, 2", "[head |"} {
 		f := source.NewFile("<repl>", []byte(src))

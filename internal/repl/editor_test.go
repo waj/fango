@@ -164,8 +164,8 @@ func TestEditorCtrlDEndsLevels(t *testing.T) {
 	eof := func(*scriptedEditor) inputLine { return inputLine{err: io.EOF} }
 	ed, out := runScripted(t,
 		typed("import State"),
-		typed("with State.run 1"),
-		typed("with State.run 2"),
+		typed("use State.run 1"),
+		typed("use State.run 2"),
 		typed("State.get()"),
 		eof,
 		typed("State.get()"),

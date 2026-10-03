@@ -151,7 +151,7 @@ func TestREPLInterruptInsideLevel(t *testing.T) {
 	r.waitFor("> ")
 	r.write("spin() =\n    print \"counting\"\n    count 1000000000\n\n")
 	r.waitFor("> ")
-	r.write("with State.run 41\n")
+	r.write("use State.run 41\n")
 	r.waitFor("1> ")
 	r.write("spin()\n")
 	r.waitFor("counting")

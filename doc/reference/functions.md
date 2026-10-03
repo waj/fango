@@ -33,7 +33,7 @@ when passed as an argument:
 
 ```fango
 Runtime.Scope.bracket acquire release { resource ->
-    use resource
+    action resource
 }
 ```
 
@@ -148,7 +148,7 @@ A declaration pragma binds a row universally within the final callback:
 ```fango
 {-# scoped s #-}
 withText : String -> (Reader s ->{s} a) ->{e} a
-withText text use = Reader.withBytes (Bytes.fromString text) use
+withText text action = Reader.withBytes (Bytes.fromString text) action
 ```
 
 At each call, `s` contains a fresh local permission plus the runner's residual
@@ -167,7 +167,7 @@ must handle them:
 ```fango
 {-# scoped s #-}
 guarded : String -> (Reader s ->{Fail String | s} a) ->{e} Result String a
-guarded text use = Reader.withBytes (Bytes.fromString text) { reader -> Fail.attempt { use reader } }
+guarded text action = Reader.withBytes (Bytes.fromString text) { reader -> Fail.attempt { action reader } }
 ```
 
 At each call the callback may perform `Fail String` besides its scope's
@@ -178,9 +178,9 @@ same runner. The runner must consume that value before its scope ends. Within
 the implementation the callback can be instantiated at different rows
 extending the runner's residual row.
 
-A [`with` item](syntax.md#with-items) calls a runner this way, binding the
+A [`use` item](syntax.md#use-items) calls a runner this way, binding the
 callback's parameter for the rest of the block:
-`with reader <- Reader.withBytes bytes`.
+`use reader <- Reader.withBytes bytes`.
 
 Runners must be called by name with all parameters supplied. Partial application,
 first-class aliases, recursion, mutual recursion, class-constrained runner

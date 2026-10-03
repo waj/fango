@@ -78,7 +78,7 @@ the buffer and answers how many bytes it took, which is `n` clamped to what was
 there. A caller projects them off the reader — they are operation names, so
 they are not module functions.
 
-`withBytes contents use` creates a private advancing cursor over memory. Its
+`withBytes contents action` creates a private advancing cursor over memory. Its
 [scoped callback](functions.md#scoped-callbacks) may read it and return parsed
 data. A consumer with no other effects gives a pure result:
 
@@ -94,8 +94,8 @@ streams that advance them cannot escape this callback. Nested `withBytes` calls
 can pass independent readers to one parser; see the executable
 [two-reader example](../../testdata/run/reader_scoped_memory.fango).
 
-`over source use` runs `use` with a reader over `source`. `overBytes contents
-use` starts with the contents in its buffer over an exhausted source. These
+`over source action` runs `action` with a reader over `source`. `overBytes contents
+action` starts with the contents in its buffer over an exhausted source. These
 constructors follow the same scoped callback rule as `withBytes`: the local
 permission is discharged, while source and consumer effects remain visible.
 A `Reader {}` has pure operations, such as an exhausted reader with
@@ -103,7 +103,7 @@ constant fields. Domain-specific readers can expose a domain effect without IO.
 Parsing code written against `Reader e` works with all these implementations;
 its effect row describes the reader operations, not just the underlying source.
 
-`limited parent n use` stages a reader over a parent, clamping every answer to
+`limited parent n action` stages a reader over a parent, clamping every answer to
 a remaining allowance held in its own scoped cell. Every byte it hands out
 is skipped through the parent, so when the scope ends the parent is positioned
 after what was consumed rather than after the allowance; a caller that wants
@@ -168,14 +168,14 @@ function, and a caller writes `writer.flush()`. `write` and `writeString` are
 `emit` with a `Bytes` and with a `String`'s UTF-8 bytes. `copy reader writer`
 writes everything left in the reader, chunk by chunk.
 
-`over sink size use` writes whenever the buffer reaches `size`, and once more
-when `use` returns normally. An emit is never split, so a single chunk larger
+`over sink size action` writes whenever the buffer reaches `size`, and once more
+when `action` returns normally. An emit is never split, so a single chunk larger
 than the window is one oversized write, and a window below one byte writes
 every emit straight through. The final write happens on normal completion only:
 a body that fails emits nothing further, so no reader receives a truncated
 message it would have to guess at.
 
-`collecting use` answers the body's value together with everything written,
+`collecting action` answers the body's value together with everything written,
 using scoped local storage. A consumer with no other effects gives a pure
 result. Its bytes become available only on successful completion. Its `flush()` has nowhere to push to and does nothing.
 

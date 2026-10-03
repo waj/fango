@@ -2,9 +2,9 @@ import Stream
 import Runtime.Scope
 import Fail
 
-withSource label use = Runtime.Scope.finally ({ _ ->
+withSource label action = Runtime.Scope.finally ({ _ ->
     print label
-    use (Stream.fromList [1, 2]) }) ({ _ -> print "close" })
+    action (Stream.fromList [1, 2]) }) ({ _ -> print "close" })
 
 main() =
     print (withSource "early" ({ source -> Stream.toList (Stream.take 1 source) }))

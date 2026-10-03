@@ -90,9 +90,9 @@ type Cell e a = { read : () ->{e} a, write : a ->{e} () }
 run : a -> (Cell s a ->{s} b) ->{e} b
 ```
 
-`run initial use` creates a fresh cell, calls `use`, and returns its result.
+`run initial action` creates a fresh cell, calls `action`, and returns its result.
 Reading returns the last written value, initially `initial`. Writing replaces
-that value. The cell's permission must stay inside `use`; parsed data or other
+that value. The cell's permission must stay inside `action`; parsed data or other
 permission-independent results may leave. Additional consumer effects remain
 in `e`. An entirely local computation is pure at the call boundary. `Cell`
 values contain functions and cannot cross a task boundary.

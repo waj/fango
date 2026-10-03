@@ -32,7 +32,7 @@ that reader's state and does not rewind it.
 `Iterator.next iterator` returns `Maybe (a, Iterator state a e)` with effects
 `e`. The caller must use the returned iterator to advance. Calling `next` again
 on the same iterator repeats the same state transition, including its effects.
-`Stream.withCursor stream use` passes a fresh iterator to `use` as a convenience.
+`Stream.withCursor stream action` passes a fresh iterator to `action` as a convenience.
 
 Resources are acquired around the consuming traversal with ordinary cleanup
 scopes. Stopping early does not trigger hidden producer cleanup. Recursive

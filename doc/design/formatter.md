@@ -37,7 +37,7 @@ left item.
 
 Layout children indent below their owner, including braced lambda bodies
 that the parser accepts at any column. Case/handler branches and block items
-align. A `with` item is printed from its expansion's marker, not as the call it
+align. A `use` item is printed from its expansion's marker, not as the call it
 lowers to: the item, then the callback body's items at the same column, as one
 block; in a semicolon block, the item and its separator. Then/else anchor to their own if; an if that follows other text on its
 line, such as a binding's right-hand side, anchors a level in from that line,

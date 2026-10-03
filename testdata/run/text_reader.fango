@@ -11,7 +11,7 @@ import Text.Reader as TextReader
 
 {-# scoped s #-}
 drive : List Bytes -> (TextReader.Reader s ->{s} a) ->{Fail.Fail Encoding.Error | e} a
-drive chunks use =
+drive chunks action =
     Runtime.Local.run chunks { remaining ->
         source = Bytes.Source
             { pull = {
@@ -22,7 +22,7 @@ drive chunks use =
                         Just chunk
               }
             }
-        Reader.over source { bytes -> TextReader.over bytes use }
+        Reader.over source { bytes -> TextReader.over bytes action }
     }
 
 splitAt index =

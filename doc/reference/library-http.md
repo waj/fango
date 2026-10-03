@@ -77,8 +77,8 @@ written. A file that changed size in between fails the length check.
 
 ## Parsing and framing
 
-`Http.Server.withRequest lineLimit headerLimit bodyLimit reader use` parses one
-request from any reader, scopes the body reader to `use`, and returns `Nothing`
+`Http.Server.withRequest lineLimit headerLimit bodyLimit reader action` parses one
+request from any reader, scopes the body reader to `action`, and returns `Nothing`
 at a clean end of input or `Just (value, bodyComplete)`. `bodyComplete` says
 whether the consumer reached the end of the framed body. The callback can return
 a response whose streaming body reads the request; the caller must write that

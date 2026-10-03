@@ -60,8 +60,8 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 	case *ast.OpChain:
 		return p.renderOpChain(e, ind)
 	case *ast.App:
-		if lambda, ok := withLambda(e); ok {
-			return p.renderWith(e.Fn, lambda, ind)
+		if lambda, ok := useLambda(e); ok {
+			return p.renderUse(e.Fn, lambda, ind)
 		}
 		if elems, tail, ok := asList(e); ok {
 			return p.renderList(elems, tail, ind)
@@ -138,21 +138,21 @@ func (p *printer) renderBlock(b *ast.Block, ind int) bool {
 	return p.renderExpr(b.Result, ind)
 }
 
-// withLambda recognizes the expansion of a `with` block item: a head applied
+// useLambda recognizes the expansion of a `use` block item: a head applied
 // to the callback the parser built from the rest of the block.
-func withLambda(e *ast.App) (*ast.Lambda, bool) {
+func useLambda(e *ast.App) (*ast.Lambda, bool) {
 	lambda, ok := e.Arg.(*ast.Lambda)
-	return lambda, ok && lambda.With != nil
+	return lambda, ok && lambda.Use != nil
 }
 
-// renderWith writes a `with` item and then the rest of its block at the same
+// renderUse writes a `use` item and then the rest of its block at the same
 // column, which is where the parser found them.
-func (p *printer) renderWith(head ast.Expr, lambda *ast.Lambda, ind int) bool {
-	if lambda.With.Semi.File != nil {
+func (p *printer) renderUse(head ast.Expr, lambda *ast.Lambda, ind int) bool {
+	if lambda.Use.Semi.File != nil {
 		return false
 	}
-	p.emit("with ")
-	if lambda.With.Arrow.File != nil {
+	p.emit("use ")
+	if lambda.Use.Arrow.File != nil {
 		params, ok := patternsInline(lambda.Params)
 		if !ok {
 			return false

@@ -86,6 +86,7 @@ const (
 	KwDeriver
 	KwDeriving
 	KwTypeOf
+	KwUse
 )
 
 var kindNames = map[Kind]string{
@@ -103,7 +104,7 @@ var kindNames = map[Kind]string{
 	KwType: "type", KwEffect: "effect", KwAbort: "abort", KwHandle: "handle", KwResume: "resume",
 	KwNative: "native", KwInfix: "infix", KwInfixL: "infixl", KwInfixR: "infixr",
 	KwClass: "class", KwInstance: "instance", KwDeriver: "deriver", KwDeriving: "deriving",
-	KwTypeOf: "typeOf",
+	KwTypeOf: "typeOf", KwUse: "use",
 }
 
 func (k Kind) String() string { return kindNames[k] }
@@ -117,7 +118,7 @@ var Keywords = map[string]Kind{
 	"type": KwType, "effect": KwEffect, "abort": KwAbort, "handle": KwHandle, "resume": KwResume,
 	"native": KwNative, "infix": KwInfix, "infixl": KwInfixL, "infixr": KwInfixR,
 	"class": KwClass, "instance": KwInstance, "deriver": KwDeriver, "deriving": KwDeriving,
-	"typeOf": KwTypeOf,
+	"typeOf": KwTypeOf, "use": KwUse,
 }
 
 // opChars is the operator character class. An operator name is a non-empty

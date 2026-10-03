@@ -6,8 +6,8 @@ type Cell = Cell (() -> Int)
 type Both = Both Cell Cell
 
 counter : Int -> (Cell ->{IO} a) ->{IO} a
-counter start use =
-    handle use (Cell ({ _ -> tick() })) with n = start on
+counter start action =
+    handle action (Cell ({ _ -> tick() })) with n = start on
         tick () -> resume n with n + 1
 
 report : Both ->{IO} ()

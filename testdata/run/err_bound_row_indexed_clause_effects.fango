@@ -11,8 +11,8 @@ effect Log
 type Cell e = { step : () ->{e} Int }
 
 counter : (Cell e ->{e} a) ->{Log | e} a
-counter use =
-    handle use { step = { _ -> tick() } } with n = 0 on
+counter action =
+    handle action { step = { _ -> tick() } } with n = 0 on
         tick () ->
             note "tick"
             resume n with n + 1

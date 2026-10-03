@@ -5,8 +5,8 @@ effect Counter
 type Cell e = Cell (() ->{e} Int)
 
 counter : Int -> (Cell e ->{e} a) ->{e} a
-counter start use =
-    handle use (Cell ({ _ -> tick() })) with n = start on
+counter start action =
+    handle action (Cell ({ _ -> tick() })) with n = start on
         tick () -> resume n with n + 1
 
 main() =

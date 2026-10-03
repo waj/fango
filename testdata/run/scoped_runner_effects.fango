@@ -7,9 +7,9 @@ import Result exposing (Result(..))
 -- failure never reaches the runner's caller.
 {-# scoped s #-}
 guarded : String -> (Reader s ->{Fail String | s} a) ->{e} Result String a
-guarded text use =
+guarded text action =
     Reader.withBytes (Bytes.fromString text) { reader ->
-        Fail.attempt { use reader }
+        Fail.attempt { action reader }
     }
 
 effect Log

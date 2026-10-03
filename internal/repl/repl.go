@@ -77,7 +77,7 @@ type Session struct {
 	interrupts <-chan struct{}
 	color      bool
 
-	// levels are the handler levels installed with `with`, outermost first;
+	// levels are the handler levels installed with `use`, outermost first;
 	// undo records what their names replaced.
 	levels      []*level
 	levelIO     *eval.ChannelLevels
@@ -340,12 +340,12 @@ func (s *Session) command(cmd string) (quit bool) {
 		return true
 	case cmd == ":end":
 		s.endLevel()
-	case cmd == ":with":
+	case cmd == ":uses":
 		s.listLevels()
 	case cmd == ":help":
 		fmt.Fprint(s.out, `commands:
   :type <expr>   show an expression's type without evaluating
-  :with          list the handler levels installed with `+"`with`"+`
+  :uses          list the handler levels installed with `+"`use`"+`
   :end           end the innermost handler level (also Ctrl-D)
   :help          this message
   :quit          end every level and leave the REPL
@@ -373,8 +373,8 @@ func (s *Session) parsesComplete(text string) bool {
 		return true // hopeless input: let flush render it
 	}
 	var errs []diag.Error
-	if parser.IsWithInput(toks) {
-		_, _, _, errs = parser.ParseWithInput(toks, f)
+	if parser.IsUseInput(toks) {
+		_, _, _, errs = parser.ParseUseInput(toks, f)
 	} else if isDecl(toks) {
 		_, errs = parser.Parse(toks, f)
 	} else {
@@ -393,7 +393,7 @@ func (s *Session) input(text string, force bool) inputResult {
 		diag.Render(s.out, lexErrs)
 		return inputDone
 	}
-	if parser.IsWithInput(toks) {
+	if parser.IsUseInput(toks) {
 		return s.levelInput(text, toks, f, force)
 	}
 	if isDecl(toks) {
@@ -921,7 +921,7 @@ func (s *Session) promptEffects(effects types.Type, at source.Span) ([]types.Typ
 				continue
 			}
 			errs = append(errs, diag.Errorf(at, "UNHANDLED EFFECT",
-				"This performs `%s`, and nothing at the prompt handles it. Run it inside\na handler, or install one for the inputs that follow with `with`.", strings.Trim(types.Show(types.Row{Labels: []types.EffLabel{label}}), "{}")))
+				"This performs `%s`, and nothing at the prompt handles it. Run it inside\na handler, or install one with `use` for the inputs that follow.", strings.Trim(types.Show(types.Row{Labels: []types.EffLabel{label}}), "{}")))
 		}
 	}
 	return fails, errs

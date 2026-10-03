@@ -55,11 +55,11 @@ import Reader
 
 {-# scoped s #-}
 withText : String -> (Reader.Reader s ->{s} a) ->{e} a
-withText text use = Reader.withBytes (Bytes.fromString text) use
+withText text action = Reader.withBytes (Bytes.fromString text) action
 
 {-# scoped s #-}
 withNumber : (Int ->{s} a) ->{e} a
-withNumber use = use 1
+withNumber action = action 1
 `)
 	path := writeModuleFile(t, dir, "Main.fango", `import Cursor
 import Reader

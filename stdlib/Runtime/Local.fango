@@ -15,7 +15,7 @@ effect LocalState a
 
 {-# scoped s #-}
 run : a -> (Cell s a ->{s} b) ->{e} b
-run initial use =
-    handle use { read = { readState() }, write = { value -> writeState value } } with state = initial on
+run initial action =
+    handle action { read = { readState() }, write = { value -> writeState value } } with state = initial on
         readState () -> resume state with state
         writeState value -> resume () with value

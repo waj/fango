@@ -291,13 +291,13 @@ fail = native "$1"
 -- Build a named local function, including self-recursive references, and an
 -- expression that uses it. Names must be private and parameters nonempty.
 localFunction : String -> Items String -> (Code -> Items Code -> Code) -> (Code -> Code) -> Code
-localFunction name parameters build use =
+localFunction name parameters build action =
     case parameters of
         NoItems -> fail "A generated local function requires at least one parameter."
         Item _ _ ->
             self = varCode name
             foldItems localFunctionParam
-                (localFunctionStart name (build self (mapItems varCode parameters)) (use self))
+                (localFunctionStart name (build self (mapItems varCode parameters)) (action self))
                 parameters
 
 -- Sequence a Unit expression before a result without introducing a lambda.

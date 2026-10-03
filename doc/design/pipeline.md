@@ -199,11 +199,11 @@ surface rules. AST and diagnostic dumps are golden-test interfaces.
 Layout and semicolon blocks share one ordered AST form; explicit blocks retain
 separator spans for formatting. Bracket lists and tuples lower to canonical
 bundled constructors. Braced lambdas use ordinary application/lambda nodes;
-the no-arrow form supplies a Unit pattern. A `with` block item lowers the same
+the no-arrow form supplies a Unit pattern. A `use` block item lowers the same
 way: the parser parses the block's remaining items as their own block and
 applies the item's head to a lambda over them, so checking, scoped-runner rules,
 and elaboration see an ordinary call. The lambda keeps a marker with the
-`with` and `<-` spans, which the AST dump shows and the formatter prints as the
+`use` and `<-` spans, which the AST dump shows and the formatter prints as the
 item. In expression position, complete
 record forms take precedence over a no-arrow lambda. A sibling statement at
 the field's indentation rules out a complete record, while a parameter row
