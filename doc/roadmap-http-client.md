@@ -1,55 +1,24 @@
 # Roadmap: HTTP client
 
-The HTTP/1.1 [client](reference/library-http-client.md) with TLS and gzip, the
-shared [bodies and errors](reference/library-http.md), and
+The HTTP/1.1 [client](reference/library-http-client.md) with TLS, gzip, and
+redirects, the shared [bodies and errors](reference/library-http.md), and
 [URLs](reference/library-url.md) are implemented; the
 [HTTP design](design/http.md#the-client-transport) explains the client's
-transport effect. This document tracks what remains: redirects, connection reuse,
-and mocking. The [HTTP roadmap](roadmap-io.md)
-tracks the remaining server follow-ups.
-
-## Configuration and errors still to come
-
-[HC5a](#hc5a-redirects) adds a `Config` field and an error:
-
-- `maxRedirects : Int`, 10 by default.
-- `TooManyRedirects` in `Client.Error`, raised once redirects exceed
-  `maxRedirects`.
-
-## Redirects
-
-Redirects are followed in library code, so they work the same under every
-handler.
-
-- 301, 302, 303, 307, and 308 are followed, up to `maxRedirects`. One more
-  raises `TooManyRedirects`. `maxRedirects = 0` turns following off, and the
-  caller gets the 3xx response.
-- `Location` is resolved against the current URL with `Url.resolve`. A
-  missing or unparseable `Location` returns the 3xx response unfollowed.
-- On 303, and on 301 or 302 after a method other than GET or HEAD, the next
-  request is a GET without a body, matching browsers and Go.
-- 307 and 308 resend the same method and body. Only `Empty` and `BytesBody`
-  can be sent again. A request with a streaming body gets the 3xx response
-  back unfollowed, because the stream has already been consumed.
-- When the origin (scheme, host, and port) changes, `Authorization` and
-  `Proxy-Authorization` are dropped from the next request.
-- A redirect from `https` to `http` is not followed; the caller gets the
-  3xx response.
-- Before following, the client discards the redirect response's body. In
-  HC5b that means draining it if the connection is to be reused.
-- `send`'s callback sees only the final response. `Response.url` and
-  `Reply.url` say where it came from.
+transport effect. This document tracks what remains: connection reuse and
+mocking. The [HTTP roadmap](roadmap-io.md) tracks the remaining server
+follow-ups.
 
 ## Connection reuse
 
-Until HC5, every request uses a new connection and sends `Connection: close`.
-HC5b adds a pool to each `run`:
+Every request uses a new connection and sends `Connection: close`. HC5b adds a
+pool to each `run`:
 
 - Idle connections are keyed by `Endpoint` without its timeout (secure,
   host, port), with a limit on idle connections per key and an idle timeout.
 - `release` gains a flag saying whether the connection can be reused, and
-  returns a connection to the pool when the response
-  was fully read, neither side sent `Connection: close`, and nothing aborted.
+  returns a connection to the pool when the response was fully read, neither
+  side sent `Connection: close`, and nothing aborted. Redirect responses are
+  drained the same way before the next hop.
   A response body that the callback left unread is drained up to a small
   limit (64 KiB) and otherwise closed. This is the client side of the drain
   policy that [the server roadmap](roadmap-io.md) also leaves open.
@@ -141,9 +110,7 @@ DONE. See [configuration](reference/library-http-client.md#configuration) and
 
 #### HC5a Redirects
 
-The [redirect rules](#redirects), with stub-transport fixtures for each
-status, method rewriting, a streaming body that can't be sent again,
-cross-origin header removal, refusing a downgrade, and the redirect limit.
+DONE. See [redirects](reference/library-http-client.md#redirects).
 
 #### HC5b Keep-alive
 

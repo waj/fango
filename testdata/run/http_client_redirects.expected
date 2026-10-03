@@ -1,0 +1,22 @@
+  GET /old HTTP/1.1; Host: example.com; 
+  GET /new HTTP/1.1; Host: example.com; 
+Ok "200 http://example.com/new at GET /new HTTP/1.1"
+  POST /see-other HTTP/1.1; Host: example.com; Content-Length: 4; 
+  GET /result HTTP/1.1; Host: example.com; 
+Ok "200 http://example.com/result at GET /result HTTP/1.1"
+  POST /temporary HTTP/1.1; Host: example.com; Content-Length: 4; 
+  POST /kept HTTP/1.1; Host: example.com; Content-Length: 4; 
+Ok "200 http://example.com/kept at POST /kept HTTP/1.1"
+  POST /temporary HTTP/1.1; Host: example.com; 
+Ok "307 http://example.com/temporary "
+  GET /elsewhere HTTP/1.1; Host: example.com; Authorization: Bearer secret; 
+  GET /landing HTTP/1.1; Host: other.example.com; 
+Ok "200 http://other.example.com/landing at GET /landing HTTP/1.1"
+  GET /downgrade HTTP/1.1; Host: example.com; 
+Ok "302 https://example.com/downgrade "
+  GET /loop HTTP/1.1; Host: example.com; 
+  GET /loop HTTP/1.1; Host: example.com; 
+  GET /loop HTTP/1.1; Host: example.com; 
+Err TooManyRedirects
+  GET /old HTTP/1.1; Host: example.com; 
+Ok "301 http://example.com/old "

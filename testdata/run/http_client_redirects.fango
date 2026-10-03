@@ -1,0 +1,67 @@
+import Bytes exposing (Bytes)
+import Http exposing (Body(..))
+import Http.Client as Client
+import IO exposing (IO)
+import Result exposing (Result(..))
+import String
+import Url
+import Writer
+
+-- The request line and the headers that matter here.
+summary : String -> String
+summary request =
+    case String.split "\r\n" request of
+        [line | rest] ->
+            kept = List.filter { h -> String.startsWith "Authorization" h || String.startsWith "Content-Length" h || String.startsWith "Host" h } rest
+            String.concat (List.map { part -> part ++ "; " } [line | kept])
+        [] -> ""
+
+redirect : Int -> String -> String
+redirect status location = "HTTP/1.1 " ++ show status ++ " Moved\r\nLocation: " ++ location ++ "\r\nContent-Length: 0\r\n\r\n"
+
+ok : String -> String
+ok text = "HTTP/1.1 200 OK\r\nContent-Length: " ++ show (String.length text) ++ "\r\n\r\n" ++ text
+
+-- Routes by request line, printing each request.
+server : Bytes ->{IO} Result Client.Error Bytes
+server raw =
+    request = Bytes.toStringLossy raw
+    print ("  " ++ summary request)
+    line = case String.split "\r\n" request of
+        [first | _] -> first
+        [] -> ""
+    response =
+        if String.contains " /old " line then redirect 301 "/new"
+        else if String.contains " /see-other " line then redirect 303 "/result"
+        else if String.contains " /temporary " line then redirect 307 "/kept"
+        else if String.contains " /elsewhere " line then redirect 302 "http://other.example.com/landing"
+        else if String.contains " /downgrade " line then redirect 302 "http://example.com/plain"
+        else if String.contains " /loop " line then redirect 302 "loop"
+        else ok ("at " ++ line)
+    Ok (Bytes.fromString response)
+
+describe : Client.Reply -> String
+describe reply = show reply.status ++ " " ++ Url.toString reply.url ++ " " ++ Bytes.toStringLossy reply.body
+
+
+main() =
+    print (Client.attempt { Client.stub server { describe (Client.fetch (Client.get (Client.url "http://example.com/old"))) } })
+    print (Client.attempt { Client.stub server {
+        describe (Client.fetch (Client.post (Client.url "http://example.com/see-other") (BytesBody (Bytes.fromString "form"))))
+    } })
+    print (Client.attempt { Client.stub server {
+        describe (Client.fetch (Client.post (Client.url "http://example.com/temporary") (BytesBody (Bytes.fromString "data"))))
+    } })
+    print (Client.attempt { Client.stub server {
+        describe (Client.fetch (Client.post (Client.url "http://example.com/temporary") (StreamBody { w -> Writer.writeString w "stream" })))
+    } })
+    print (Client.attempt { Client.stub server {
+        describe (Client.fetch (Client.withBearer "secret" (Client.get (Client.url "http://example.com/elsewhere"))))
+    } })
+    print (Client.attempt { Client.stub server { describe (Client.fetch (Client.get (Client.url "https://example.com/downgrade"))) } })
+    print (Client.attempt { Client.stub server {
+        Client.configure { c -> { c | maxRedirects = 2 } } { describe (Client.fetch (Client.get (Client.url "http://example.com/loop"))) }
+    } })
+    print (Client.attempt { Client.stub server {
+        Client.configure { c -> { c | maxRedirects = 0 } } { describe (Client.fetch (Client.get (Client.url "http://example.com/old"))) }
+    } })

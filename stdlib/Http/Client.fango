@@ -35,6 +35,7 @@ type Error
     | Transport Net.Error
     | Timeout
     | Protocol Http.Error
+    | TooManyRedirects
     deriving (Eq, Show)
 
 type Request e =
@@ -74,6 +75,7 @@ type Config =
     , writeTimeoutMs : Int
     , maxHeaderBytes : Int
     , maxBodyBytes : Int
+    , maxRedirects : Int
     , caFile : Maybe String
     }
 
@@ -88,6 +90,7 @@ defaultConfig = Config
     , writeTimeoutMs = 30000
     , maxHeaderBytes = 65536
     , maxBodyBytes = 10485760
+    , maxRedirects = 10
     , caFile = Nothing
     }
 
@@ -329,21 +332,56 @@ withResponse target headRequest decode headerLimit bodyLimit input use =
 
 -- Sending
 
--- Sends `request` and streams the response to `use`, which may read the body
--- only while it runs. Any status is a normal response.
+-- One hop of a request: the caller's result, or where a redirect leads and
+-- whether it keeps the method and body.
+type Step a = Done a | Follow Url Bool
+
+redirectStatus : Int -> Bool
+redirectStatus status = status == 301 || status == 302 || status == 303 || status == 307 || status == 308
+
+replayable : Body e -> Bool
+replayable body =
+    case body of
+        Empty -> True
+        BytesBody _ -> True
+        _ -> False
+
+-- Where a redirect response leads, unless it must be returned as it is: no
+-- usable Location, a downgrade from https, or a body that cannot be sent again.
+redirection : Request e -> Url -> Int -> List Header -> Maybe (Url, Bool)
+redirection request target status headers =
+    if redirectStatus status == False then Nothing
+    else
+        case Http.getHeader "location" headers of
+            Nothing -> Nothing
+            Just raw ->
+                case Url.parse (String.trim raw) of
+                    Nothing -> Nothing
+                    Just location ->
+                        next = Url.resolve target location
+                        safeMethod = request.method == "GET" || request.method == "HEAD"
+                        keep = status == 307 || status == 308 || (status /= 303 && safeMethod)
+                        if target.scheme == Just "https" && next.scheme /= Just "https" then Nothing
+                        else if keep && replayable request.body == False then Nothing
+                        else Just (next, keep)
+
+originOf : Url -> (Maybe String, Maybe String, Maybe Int)
+originOf target = (target.scheme, target.host, target.port)
+
+-- Credentials stay with the origin they were given for.
+withoutCredentials : List Header -> List Header
+withoutCredentials headers = Http.removeHeader "authorization" (Http.removeHeader "proxy-authorization" headers)
+
+-- Sends one request to `target`. `hops` redirects were followed before it.
 {-# scoped s #-}
-send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
-send request use =
-    config = currentConfig()
-    target = absolute config request.url
+exchange : Config -> Request {Http, Fail Error | e} -> Url -> Bool -> Int -> (Response s ->{s} a) ->{Http, Fail Error | e} Step a
+exchange config request target crossOrigin hops use =
     endpoint = endpointOf config target
-    checkHeaders config.headers
-    checkHeaders request.headers
     defaults = [Header { name = "User-Agent", value = config.userAgent } | if config.decompress then [Header { name = "Accept-Encoding", value = "gzip" }] else []]
-    headers = overlay (overlay defaults config.headers) request.headers
+    merged = overlay (overlay defaults config.headers) request.headers
+    headers = if crossOrigin then withoutCredentials merged else merged
     decode = config.decompress && Http.hasHeader "accept-encoding" config.headers == False && Http.hasHeader "accept-encoding" request.headers == False
     wireHeaders = [Header { name = "Host", value = hostHeader endpoint } | List.foldr { header rest -> [header | rest] } [Header { name = "Connection", value = "close" }] headers]
-    if Wire.allToken (Bytes.fromString request.method) 0 == False then failWith (Protocol (Http.InvalidMessage "invalid method")) else ()
     framed = framedRequest request.method request.body
     protocol { Wire.checkMessage wireHeaders request.body framed }
     Runtime.Scope.bracket { fromResult (connect endpoint) } { connection -> ignore (release connection) } { connection ->
@@ -354,9 +392,36 @@ send request use =
         Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (request.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
             wireHeaders request.body framed True
         Reader.over (Source { pull = { fromResult (receive connection 65536 config.readTimeoutMs) } }) { input ->
-            protocol { withResponse target (request.method == "HEAD") decode config.maxHeaderBytes largest input use }
+            protocol {
+                withResponse target (request.method == "HEAD") decode config.maxHeaderBytes largest input { response ->
+                    next = if config.maxRedirects > 0 then redirection request target response.status response.headers else Nothing
+                    case next of
+                        Just (location, keep) ->
+                            if hops >= config.maxRedirects then failWith TooManyRedirects else Follow location keep
+                        Nothing -> Done (use response)
+                }
+            }
         }
     }
+
+-- Sends `request` and streams the response to `use`, which may read the body
+-- only while it runs. Redirects are followed up to `maxRedirects`; any other
+-- status is a normal response.
+{-# scoped s #-}
+send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
+send request use =
+    config = currentConfig()
+    checkHeaders config.headers
+    checkHeaders request.headers
+    if Wire.allToken (Bytes.fromString request.method) 0 == False then failWith (Protocol (Http.InvalidMessage "invalid method")) else ()
+    first = absolute config request.url
+    follow current target hops =
+        case exchange config current target (originOf target /= originOf first) hops use of
+            Done value -> value
+            Follow next keep ->
+                following = if keep then { current | url = next } else { current | method = if current.method == "HEAD" then "HEAD" else "GET", body = Empty, url = next }
+                follow following next (hops + 1)
+    follow request first 0
 
 collect : Reader {Fail Error | e} -> Int -> List Bytes -> Int ->{Fail Error | e} Bytes
 collect reader limit parts size =

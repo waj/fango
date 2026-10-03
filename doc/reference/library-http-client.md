@@ -38,8 +38,7 @@ response, or an `Error` to fail the request with. It may use the caller's
 effects, for example to record requests. Under `stub`, requests run one at a
 time and the configuration starts from `defaultConfig`.
 
-Each request uses a new connection and sends `Connection: close`. Redirects are
-not followed.
+Each request uses a new connection and sends `Connection: close`.
 
 ## Configuration
 
@@ -54,13 +53,14 @@ type Config =
     , writeTimeoutMs : Int
     , maxHeaderBytes : Int
     , maxBodyBytes : Int
+    , maxRedirects : Int
     , caFile : Maybe String
     }
 ```
 
 `defaultConfig` has no base URL and no headers, the user agent `fango`,
 decompression on, a 10 s connect timeout, 30 s read and write timeouts, a 64 KiB header limit, and a
-10 MiB body limit, and no extra certificate authorities.
+10 MiB body limit, up to 10 redirects, and no extra certificate authorities.
 
 A request URL without a scheme is resolved against `baseUrl` with
 [`Url.resolve`](library-url.md#resolution). Without a base URL it fails with
@@ -126,6 +126,24 @@ Protocols` fails with `Unsupported`. A body that ends early fails with
 accepted. `withResponse` parses a response from any reader, the way
 [`withRequest`](library-http.md#parsing-and-framing) parses a request.
 
+## Redirects
+
+`send` follows 301, 302, 303, 307, and 308 responses before its callback runs,
+so the callback sees only the final response, whose `url` says where it came
+from. Following one more than `maxRedirects` fails with `TooManyRedirects`;
+`maxRedirects = 0` returns redirects as they are.
+
+- `Location` is resolved against the current URL. A redirect without a usable
+  `Location` is returned as it is.
+- A 303, and a 301 or 302 answering a method other than GET or HEAD, continues
+  as a GET without a body. Other redirects repeat the method and body.
+- A request whose body must be repeated but was a stream, which cannot be sent
+  twice, gets the redirect response itself.
+- A redirect from `https` to another scheme is returned, not followed.
+- Once a redirect leaves the original scheme, host, and port, `Authorization`
+  and `Proxy-Authorization` are no longer sent, whether they came from the
+  request or the configuration.
+
 ## Compression
 
 With `decompress` on, a response with `Content-Encoding: gzip` is decoded as it
@@ -165,6 +183,7 @@ applies the same status rule to a `fetch` result.
 
 ```fango
 type Error      = InvalidUrl String | Transport Net.Error | Timeout | Protocol Http.Error
+                | TooManyRedirects
 type Unexpected = BadStatus Reply | BadBody Json.Error
 
 attempt : (() ->{Fail Error | e} a) ->{e} Result Error a
@@ -173,8 +192,9 @@ attemptUnexpected : (() ->{Fail Unexpected | e} a) ->{e} Result Unexpected a
 
 `Error` is what can go wrong with any request: a URL the client cannot use, a
 [`Net.Error`](library-io.md#net) from connecting, reading, or writing, an
-expired timeout (never a `Transport` of kind `TimedOut`), or a
-[protocol error](library-http.md#errors) in the request or response.
+expired timeout (never a `Transport` of kind `TimedOut`), a
+[protocol error](library-http.md#errors) in the request or response, or too
+many redirects.
 `Unexpected` is raised only by the helpers: `BadStatus` carries the whole reply,
 body included, since an error response's body often explains it, and `BadBody`
 carries the JSON decoding error.
