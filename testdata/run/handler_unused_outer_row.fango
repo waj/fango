@@ -1,0 +1,36 @@
+-- A resumptive handler inside a function whose row carries other effects
+-- transports only what its body and clauses perform. The first two handled
+-- bodies never perform the outer effect, so their handlers stay Direct even
+-- in the function's Exit worker; the third reaches it.
+effect Ask
+    ask : () -> Int
+
+effect Cell
+    get : () -> Int
+    put : Int -> ()
+
+effect Other
+    other : () -> Int
+
+local : () ->{Other} Int
+local () = handle ask() on ask () -> resume 10
+
+shadowed : () ->{Cell} Int
+shadowed () =
+    handle
+        x = get()
+        put (x + 1)
+        get()
+    with s = 0 on
+        get () -> resume s with s
+        put n -> resume () with n
+
+reaching : () ->{Other} Int
+reaching () = handle ask() + other() on ask () -> resume 1
+
+main() =
+    print (handle local() on other () -> resume 0)
+    print (handle shadowed() on
+        get () -> resume 100
+        put _ -> resume ())
+    print (handle reaching() on other () -> resume 2)

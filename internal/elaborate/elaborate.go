@@ -1193,7 +1193,15 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	residualType := el.apply(info.Residual)
 	el.defaultFree(residualType)
 	residual := el.ck.Sub.Apply(residualType).(types.Row)
-	resultControl := rowControl(residual, el.ck)
+	// A resumptive activation transports exactly what its body and clauses
+	// do; its residual row is only an upper bound, which a caller's annotation
+	// can widen with effects nothing inside performs. An abort activation
+	// consumes its own body exits, so only the residual row tells which of
+	// that body's exits continue outward.
+	resultControl := core.ExprControl(body)
+	if info.Effect.Abort {
+		resultControl = rowControl(residual, el.ck)
+	}
 	for _, clause := range clauses {
 		resultControl = types.JoinControl(resultControl, core.ExprControl(clause.Body))
 	}
