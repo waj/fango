@@ -1,4 +1,11 @@
 {-# no-prelude #-}
+-- Writing text to a byte writer through an encoding.
+--
+-- A text writer encodes each string it is given, as a whole, before emitting
+-- any of it, so a string with an unrepresentable character emits nothing;
+-- earlier writes stay written. The scopes flush when their callback returns,
+-- including when it returns an `Err` value, but not when it aborts. The byte
+-- writer's own buffering still decides when bytes reach its sink.
 module Text.Writer exposing (Writer, borrow, collecting, flush, over, overWith, tryWrite, write, writeChar)
 
 import Basics exposing (..)
@@ -13,8 +20,12 @@ import Writer as ByteWriter
 
 type Output e = { emit : String ->{e} (), attempt : String ->{e} Result Encoding.Error (), flush : () ->{e} () }
 
+-- A text writer whose operations perform `e`.
 type Writer e = Writer (Output e)
 
+-- Runs `action` with a text writer over `parent` in `encoding`. An
+-- unrepresentable character fails with `Fail Encoding.Error`; handle it
+-- around the scope, or use `tryWrite`.
 {-# scoped s #-}
 overWith : Encoding -> ByteWriter.Writer e -> (Writer s ->{s} a) ->{Fail Encoding.Error | e} a
 overWith encoding parent action =
@@ -43,6 +54,8 @@ overWith encoding parent action =
         result
     }
 
+-- Runs `action` with a UTF-8 text writer over `parent`, which cannot fail to
+-- encode, and flushes when `action` returns.
 {-# scoped s #-}
 over : ByteWriter.Writer e -> (Writer s ->{s} a) ->{e} a
 over parent action =
@@ -52,7 +65,8 @@ over parent action =
         result
     }
 
--- A nested encoder borrows a writer without taking over its flush boundary.
+-- `over` for a nested encoder that leaves the flush boundary to its caller:
+-- it performs no final flush, though `flush` still reaches the parent.
 {-# scoped s #-}
 borrow : ByteWriter.Writer e -> (Writer s ->{s} a) ->{e} a
 borrow parent action =
@@ -76,6 +90,21 @@ borrow parent action =
         action writer
     }
 
+-- Runs `action` with a text writer that keeps everything written in memory,
+-- and answers the result with that text. Its `flush` does nothing. With no
+-- other effects in the callback, the call is pure.
+--
+-- ```fango
+-- import Text.Writer
+--
+-- written =
+--     Text.Writer.collecting { writer ->
+--         Text.Writer.write writer "ab"
+--         Text.Writer.writeChar writer 'c'
+--     }
+--
+-- written == ((), "abc")
+-- ```
 {-# scoped s #-}
 collecting : (Writer s ->{s} a) ->{e} (a, String)
 collecting action =
@@ -92,14 +121,19 @@ collecting action =
         (result, Builder.toString built.read())
     }
 
+-- Writes the text.
 write : Writer e -> String ->{e} ()
 write (Writer output) text = output.emit text
 
+-- Writes the text, answering an encoding error as a value instead of
+-- failing, so a consumer can recover from one failed write.
 tryWrite : Writer e -> String ->{e} Result Encoding.Error ()
 tryWrite (Writer output) text = output.attempt text
 
+-- Writes one character.
 writeChar : Writer e -> Char ->{e} ()
 writeChar writer char = write writer (String.fromChar char)
 
+-- Flushes the underlying byte writer.
 flush : Writer e ->{e} ()
 flush (Writer output) = output.flush()

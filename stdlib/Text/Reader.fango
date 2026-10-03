@@ -1,4 +1,19 @@
 {-# no-prelude #-}
+-- Reading characters from a byte reader through an encoding.
+--
+-- A text reader decodes a `Reader` as it reads, in UTF-8 or another
+-- `Encoding`. A character split across source chunks is completed by
+-- refilling; an incomplete sequence at the end of input is an error, not
+-- the end of input or a replacement character. Reads that can fail on
+-- malformed input perform `Fail Encoding.Error`; the `try` operations answer
+-- the error as a value instead. Every read stages its work before consuming,
+-- so a failure, a short exact read, or an overflow consumes nothing.
+--
+-- While a text reader is in use, advance its parent only through it. Leaving
+-- the scope keeps every unconsumed parent byte, lookahead included. Limits
+-- count characters; the byte reader may still prefetch larger chunks, so put
+-- a byte-framed body in `Reader.limited` first. The `Window` operations let a
+-- scanner inspect buffered text without consuming it, and commit what it used.
 module Text.Reader exposing (Read(..), Reader, Window, asciiAt, atEnd, chunks, commitWindow, matchWindow, over, overWith, peekChar, peekWindow, position, readChar, readExactly, readLine, readUntil, readUpTo, readWindow, refillWindow, skipAscii, spanWindow, spanWindowUntil, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, window, windowPosition, windowText, withString)
 
 import Basics exposing (..)
@@ -27,14 +42,27 @@ type Input e =
     , encoding : Encoding
     }
 
+-- A text reader whose operations perform `e`.
 type Reader e = Reader (Input e)
 
 -- Immutable buffer storage is shared across derived positions and tokens.
 -- Empty windows need no buffer object; byte decoding remains private here.
 type Buffer = EmptyBuffer | Buffered Encoding Bytes.Bytes Int
+-- An immutable snapshot of a reader's buffered bytes and a position in it.
+-- Inspecting one never refills or consumes; positions derived from it count
+-- bytes from the snapshot's start. An empty window does not mean the source
+-- has ended.
 type Window = { buffer : Buffer, index : Int }
 
-type Read = Found String | Ended String | Overflowed deriving (Eq, Show)
+-- The three distinct answers to a delimited read.
+type Read
+    -- The run before the delimiter, both consumed.
+    = Found String
+    -- The unterminated remainder at the end of input, consumed.
+    | Ended String
+    -- The limit was reached before either; nothing was consumed.
+    | Overflowed
+    deriving (Eq, Show)
 
 -- Bytes below 128 are one-byte scalars with the same code under every bundled
 -- encoding, so the common ASCII case needs no encoding dispatch. Everything
@@ -76,6 +104,8 @@ readyAt encoding bytes offset =
         Err (IncompleteSequence _) -> False
         _ -> True
 
+-- Runs `action` with a text reader over `parent` in `encoding`. It does not
+-- close the parent.
 {-# scoped s #-}
 overWith : Encoding -> ByteReader.Reader e -> (Reader s ->{s} a) ->{e} a
 overWith encoding parent action =
@@ -96,12 +126,22 @@ overWith encoding parent action =
         ))
     }
 
+-- Runs `action` with a UTF-8 text reader over `parent`.
 {-# scoped s #-}
 over : ByteReader.Reader e -> (Reader s ->{s} a) ->{e} a
 over parent action = overWith Encoding.utf8 parent action
 
--- Memory starts with valid text. The common read operations still expose
--- their decoding failure effect, which consumers can handle locally.
+-- Runs `action` with a text reader over `text` in memory. The input cannot
+-- be malformed, but the reads still perform `Fail Encoding.Error`; handle it
+-- around the read or the whole consumer.
+--
+-- ```fango
+-- import Fail
+-- import Result exposing (Result(..))
+-- import Text.Reader
+--
+-- Fail.attempt { Text.Reader.withString "héllo" { r -> Text.Reader.readUpTo r 2 } } == Ok "hé"
+-- ```
 {-# scoped s #-}
 withString : String -> (Reader s ->{s} a) ->{e} a
 withString text action =
@@ -120,18 +160,26 @@ withString text action =
         ))
     }
 
+-- The number of bytes consumed since the reader was created.
 position : Reader e ->{e} Int
 position (Reader input) = input.position()
 
+-- The next character without consuming it, or `Nothing` at the end of
+-- input. It may refill.
 peekChar : Reader e ->{Fail Encoding.Error | e} Maybe Char
 peekChar reader = fromResult (tryPeekChar reader)
 
+-- `peekChar`, answering a decoding error as a value.
 tryPeekChar : Reader e ->{e} Result Encoding.Error (Maybe Char)
 tryPeekChar (Reader input) = input.peek()
 
+-- `readChar`, answering a decoding error as a value.
 tryReadChar : Reader e ->{e} Result Encoding.Error (Maybe Char)
 tryReadChar reader = peekResult (tryReadScalar reader)
 
+-- Consumes the next character and answers it with its encoded width in
+-- bytes, or `Nothing` at the end of input. The width is in the reader's
+-- encoding, which may differ from the character's UTF-8 width.
 tryReadScalar : Reader e ->{e} Result Encoding.Error (Maybe (Char, Int))
 tryReadScalar (Reader input) =
     case input.at 0 of
@@ -141,6 +189,15 @@ tryReadScalar (Reader input) =
             input.consume size
             Ok (Just (char, size))
 
+-- Consumes and answers the next character, or `Nothing` at the end of input.
+--
+-- ```fango
+-- import Fail
+-- import Result exposing (Result(..))
+-- import Text.Reader
+--
+-- Fail.attempt { Text.Reader.withString "ab" { r -> [Text.Reader.readChar r, Text.Reader.readChar r, Text.Reader.readChar r] } } == Ok [Just 'a', Just 'b', Nothing]
+-- ```
 readChar : Reader e ->{Fail Encoding.Error | e} Maybe Char
 readChar reader = fromResult (tryReadChar reader)
 
@@ -163,6 +220,7 @@ prefixWidth encoding bytes keep offset =
                         else offset
                     _ -> offset
 
+-- A snapshot of the bytes buffered now, without refilling or consuming.
 window : Reader e ->{e} Window
 window (Reader input) =
     bytes = input.buffered()
@@ -171,9 +229,12 @@ window (Reader input) =
         , index = 0
         }
 
+-- The position's distance in bytes from the snapshot's start.
 windowPosition : Window -> Int
 windowPosition snapshot = snapshot.index
 
+-- The character at the position and its encoded width, or `Nothing` at the
+-- end of the window.
 peekWindow : Window -> Result Encoding.Error (Maybe (Char, Int))
 peekWindow snapshot =
     case snapshot.buffer of
@@ -230,6 +291,10 @@ matchWindow snapshot text =
             Nothing -> Nothing
             Just width -> Just { snapshot | index = snapshot.index + width }
 
+-- The longest valid prefix at the position whose characters satisfy `keep`,
+-- with its width in bytes and the position after it. A malformed or
+-- incomplete character ends the prefix; the next read at that position
+-- reports it.
 spanWindow : Window -> (Char -> Bool) -> Result Encoding.Error (String, Int, Window)
 spanWindow snapshot keep =
     case peekWindow snapshot of
@@ -258,6 +323,8 @@ spanWindowUntil snapshot stops =
                         Err error -> Err error
                         Ok text -> Ok (text, end - snapshot.index, { snapshot | index = end })
 
+-- The text between two positions derived from the same snapshot, `start`
+-- first.
 windowText : Window -> Window -> Result Encoding.Error String
 windowText start end =
     case start.buffer of
@@ -284,12 +351,28 @@ refillWindow reader snapshot =
     grew = input.refill()
     (window reader, grew)
 
+-- Consumes and answers the longest prefix of characters satisfying `keep`
+-- among those available. It waits for the first complete character, then
+-- stops at the current buffer boundary or the first rejected character,
+-- without pulling more input to extend the prefix. An empty answer means
+-- the end of input or a rejected first character. A valid prefix before
+-- malformed input succeeds; the next call reports the error.
+--
+-- ```fango
+-- import Fail
+-- import Result exposing (Result(..))
+-- import Text.Reader
+--
+-- Text.Reader.withString "abc1" { r -> Text.Reader.tryReadWhile r { c -> c /= '1' } } == Ok "abc"
+-- ```
 tryReadWhile : Reader e -> (Char -> Bool) ->{e} Result Encoding.Error String
 tryReadWhile reader keep =
     case tryReadSpan reader keep of
         Err error -> Err error
         Ok (text, _) -> Ok text
 
+-- `tryReadWhile`, also answering the number of bytes consumed in the
+-- reader's encoding.
 tryReadSpan : Reader e -> (Char -> Bool) ->{e} Result Encoding.Error (String, Int)
 tryReadSpan (Reader input) keep =
     case input.at 0 of
@@ -303,6 +386,7 @@ tryReadSpan (Reader input) keep =
                     if width > 0 then input.consume width else ()
                     Ok (text, width)
 
+-- Whether no characters remain.
 atEnd : Reader e ->{Fail Encoding.Error | e} Bool
 atEnd reader = peekChar reader == Nothing
 
@@ -319,6 +403,10 @@ upTo input remaining offset reverse =
         Nothing -> finish input offset reverse
         Just (char, size) -> upTo input (remaining - 1) (offset + size) [char | reverse]
 
+-- Consumes and answers at most `count` characters. It waits for the first
+-- complete character, then answers those already available without waiting
+-- to fill the count. A short answer is not the end of input; an empty one
+-- is, unless `count` is zero or less.
 readUpTo : Reader e -> Int ->{Fail Encoding.Error | e} String
 readUpTo (Reader input) count = upTo input count 0 []
 
@@ -329,6 +417,17 @@ exactly input remaining offset reverse =
         Nothing -> Nothing
         Just (char, size) -> exactly input (remaining - 1) (offset + size) [char | reverse]
 
+-- Consumes and answers exactly `count` characters, or `Nothing`, consuming
+-- nothing, when fewer remain. A count of zero or less answers `Just ""`.
+--
+-- ```fango
+-- import Fail
+-- import Result exposing (Result(..))
+-- import Text.Reader
+--
+-- Fail.attempt { Text.Reader.withString "héllo" { r -> Text.Reader.readExactly r 2 } } == Ok (Just "hé")
+-- Fail.attempt { Text.Reader.withString "hé" { r -> Text.Reader.readExactly r 3 } } == Ok Nothing
+-- ```
 readExactly : Reader e -> Int ->{Fail Encoding.Error | e} Maybe String
 readExactly (Reader input) count = exactly input count 0 []
 
@@ -360,11 +459,35 @@ until input delimiter delimiterLength limit count offset reverse =
         Nothing -> Ended (finish input offset reverse)
         Just (char, size) -> until input delimiter delimiterLength limit (count + 1) (offset + size) [char | reverse]
 
+-- Reads up to `delimiter`, consuming it without answering it. `limit` counts
+-- the characters of the run and delimiter together; a limit of zero or less
+-- always overflows. A delimiter may span source chunks.
+--
+-- ```fango
+-- import Fail
+-- import Result exposing (Result(..))
+-- import Text.Reader
+--
+-- Fail.attempt { Text.Reader.withString "k=v" { r -> Text.Reader.readUntil r "=" 10 } } == Ok (Text.Reader.Found "k")
+-- Fail.attempt { Text.Reader.withString "kv" { r -> Text.Reader.readUntil r "=" 10 } } == Ok (Text.Reader.Ended "kv")
+-- Fail.attempt { Text.Reader.withString "kv=" { r -> Text.Reader.readUntil r "=" 2 } } == Ok Text.Reader.Overflowed
+-- ```
 readUntil : Reader e -> String -> Int ->{Fail Encoding.Error | e} Read
 readUntil (Reader input) delimiter limit =
     if limit <= 0 then Overflowed
     else until input (reverseChars delimiter []) (String.length delimiter) limit 0 0 []
 
+-- Reads a line, dropping its line feed and a carriage return right before
+-- it; any other carriage return is content. The limit counts the actual
+-- terminator, so CRLF counts as two.
+--
+-- ```fango
+-- import Fail
+-- import Result exposing (Result(..))
+-- import Text.Reader
+--
+-- Fail.attempt { Text.Reader.withString "a\r\nb" { r -> [Text.Reader.readLine r 10, Text.Reader.readLine r 10] } } == Ok [Text.Reader.Found "a", Text.Reader.Ended "b"]
+-- ```
 readLine : Reader e -> Int ->{Fail Encoding.Error | e} Read
 readLine reader limit =
     case readUntil reader "\n" limit of
@@ -377,5 +500,8 @@ chunkStep reader _ =
     text = readUpTo reader 9223372036854775807
     if text == "" then Nothing else Just (text, ())
 
+-- The rest of the input as a stream of nonempty strings of whole
+-- characters. Its boundaries may differ from the source's chunks.
+-- Traversing it advances the reader.
 chunks : Reader e -> Stream () String {Fail Encoding.Error | e}
 chunks reader = Stream.unfold () (chunkStep reader)

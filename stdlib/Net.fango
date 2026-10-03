@@ -1,4 +1,14 @@
 {-# no-prelude #-}
+-- TCP listeners and connections.
+--
+-- `withListener`, `accept`, and `withClient` open a socket for the length of
+-- a callback and close it on every exit; `source` and `sink` adapt a
+-- connection to `Reader` and `Writer`. Libraries that manage a connection's
+-- lifetime themselves, as the HTTP client does, use the unscoped operations
+-- and pools. Reads on one connection serialize, as do whole writes, so tasks
+-- may share it; closing interrupts a blocked read or write and makes later
+-- operations fail. Cancelling a task does not close its connections, except
+-- through the `Async` variants.
 module Net exposing (Connection, Error(..), Kind(..), Listener, Pool, accept, acceptAsync, closeConnection, closePool, connectionReused, dialTimeout, dialTls, listenerStopped, newPool, poolConnect, poolRelease, readConnectionBytes, setReadDeadline, setWriteDeadline, sink, sinkAsync, source, sourceAsync, stopListener, withClient, withListener, writeConnectionBytes)
 
 import Async
@@ -14,13 +24,39 @@ import Runtime.Scope
 {- TCP sockets as scoped resources. Listener and Connection contain opaque Go
 values with private constructors. Native operations reject sockets after closure. -}
 
-type Kind = ConnectionRefused | ConnectionReset | AddressInUse | TimedOut | Other deriving (Eq, Show)
+-- The kinds of network failure a program can act on portably.
+type Kind
+    -- Nothing accepted the connection at the address.
+    = ConnectionRefused
+    -- The peer reset the connection.
+    | ConnectionReset
+    -- The port is already bound.
+    | AddressInUse
+    -- An operation exceeded its time limit or deadline.
+    | TimedOut
+    -- Any other failure.
+    | Other
+    deriving (Eq, Show)
 
-type Error = { kind : Kind, address : String, message : String } deriving (Eq, Show)
+-- A structured network failure.
+type Error =
+    {
+      -- What went wrong.
+      kind : Kind
+      -- The endpoint of the failed operation, when one is known.
+    , address : String
+      -- The system's description.
+    , message : String
+    }
+    deriving (Eq, Show)
 
+-- A listening socket. It has no public constructor; `withListener` scopes
+-- one.
 {-# resource #-}
 type Listener = Listener Runtime.Native.Any
 
+-- A connected socket. It has no public constructor; `accept`, `withClient`,
+-- and the dialing operations produce one.
 {-# resource #-}
 type Connection = Connection Runtime.Native.Any
 
@@ -30,9 +66,12 @@ listen = native
 closeListener : Listener ->{IO} Result Error ()
 closeListener = native
 
+-- Closes the listener, interrupting a blocked accept. Stopping it again does
+-- nothing.
 stopListener : Listener ->{IO} Result Error ()
 stopListener listener = closeListener listener
 
+-- Whether the listener has been closed.
 listenerStopped : Listener ->{IO} Bool
 listenerStopped = native
 
@@ -76,30 +115,38 @@ poolRelease = native
 connectionReused : Connection ->{IO} Bool
 connectionReused = native
 
+-- Closes the pool's idle connections.
 closePool : Pool ->{IO} Result Error ()
 closePool = native
 
+-- Closes the connection.
 closeConnection : Connection ->{IO} Result Error ()
 closeConnection = native
 
 connectionHasInput : Connection ->{IO} Result Error Bool
 connectionHasInput = native
 
+-- Up to `count` bytes, or empty bytes at the end of the stream.
 readConnectionBytes : Connection -> Int ->{IO} Result Error Bytes
 readConnectionBytes = native
 
 readConnectionBytesAsync : Runtime.Native.Any -> Connection -> Int ->{IO} Result Error Bytes
 readConnectionBytesAsync = native
 
+-- Writes all the bytes.
 writeConnectionBytes : Connection -> Bytes ->{IO} Result Error ()
 writeConnectionBytes = native
 
 writeConnectionBytesAsync : Runtime.Native.Any -> Connection -> Bytes ->{IO} Result Error ()
 writeConnectionBytesAsync = native
 
+-- Makes reads fail once `millis` milliseconds from now have passed; zero
+-- or less clears the deadline.
 setReadDeadline : Connection -> Int ->{IO} Result Error ()
 setReadDeadline = native
 
+-- Makes writes fail once `millis` milliseconds from now have passed;
+-- zero or less clears the deadline.
 setWriteDeadline : Connection -> Int ->{IO} Result Error ()
 setWriteDeadline = native
 
@@ -109,23 +156,26 @@ closeListenerFail listener = fromResult (closeListener listener)
 closeConnectionFail : Connection ->{IO, Fail Error} ()
 closeConnectionFail connection = fromResult (closeConnection connection)
 
--- withListener binds the wildcard address on port and closes the listener on
--- every exit from action.
+-- Listens on `port` at every address, runs `action` with the listener, and
+-- closes it on every exit.
 withListener : Int -> (Listener ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withListener port action =
     Runtime.Scope.bracket { fromResult (listen port) } closeListenerFail action
 
--- accept waits for one client and scopes the accepted connection.
+-- Waits for one client, runs `action` with its connection, and closes it on
+-- every exit.
 accept : Listener -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 accept listener action =
     Runtime.Scope.bracket { fromResult (acceptConnection listener) } closeConnectionFail action
 
+-- `accept` in a task: cancelling the waiting task closes the listener.
 acceptAsync : Listener -> (Connection ->{IO, Fail Error, Async.Async err | e} a) ->{IO, Fail Error, Async.Async err | e} a
 acceptAsync listener action =
     token = Async.contextToken()
     Runtime.Scope.bracket { fromResult (acceptConnectionAsync token listener) } closeConnectionFail action
 
--- withClient connects to host and port and scopes the connection.
+-- Connects to `host` and `port`, runs `action` with the connection, and
+-- closes it on every exit.
 withClient : String -> Int -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withClient host port action =
     Runtime.Scope.bracket { fromResult (dial host port) } closeConnectionFail action
@@ -138,6 +188,8 @@ readBytes connection =
     data = fromResult (readConnectionBytes connection chunk)
     if Bytes.length data == 0 then Nothing else Just data
 
+-- The connection as a byte source, answering at most 8192 bytes per pull
+-- once any arrive. It does not close the connection.
 source : Connection -> Source {IO, Fail Error}
 source connection = Source { pull = { readBytes connection } }
 
@@ -146,14 +198,20 @@ readBytesAsync token connection =
     data = fromResult (readConnectionBytesAsync token connection chunk)
     if Bytes.length data == 0 then Nothing else Just data
 
+-- `source` in a task: cancelling a task blocked in a read closes the
+-- connection.
 sourceAsync : Connection ->{Async.Async err} Source {IO, Fail Error}
 sourceAsync connection =
     token = Async.contextToken()
     Source { pull = { readBytesAsync token connection } }
 
+-- The connection as a byte sink that writes each chunk completely. It does
+-- not close the connection.
 sink : Connection -> Sink {IO, Fail Error}
 sink connection = Sink { write = { data -> fromResult (writeConnectionBytes connection data) } }
 
+-- `sink` in a task: cancelling a task blocked in a write closes the
+-- connection.
 sinkAsync : Connection ->{Async.Async err} Sink {IO, Fail Error}
 sinkAsync connection =
     token = Async.contextToken()

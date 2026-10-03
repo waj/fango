@@ -1,4 +1,9 @@
 {-# no-prelude #-}
+-- Buffered byte writers.
+--
+-- A `Writer e` accepts bytes through operations that perform exactly `e`.
+-- `over` buffers writes to a `Sink`, and `collecting` gathers them in memory.
+-- Both are scoped runners: the writer cannot leave their callback.
 module Writer exposing (Writer(..), collecting, copy, over, write, writeString)
 
 import Basics exposing (..)
@@ -7,14 +12,23 @@ import List exposing (List)
 import Reader exposing (Reader)
 import Runtime.Local
 
+-- A byte writer whose operations perform `e`.
 type Writer e =
-    { emit : Bytes ->{e} ()
+    {
+      -- Accepts bytes for eventual writing.
+      emit : Bytes ->{e} ()
+      -- Pushes everything accepted so far.
     , flush : () ->{e} ()
     }
 
 windowOf size = if size < 1 then 1 else size
 
--- Flush on normal completion only; a failed body does not emit a partial message.
+-- Runs `action` with a writer that buffers into windows of `size` bytes,
+-- writing to `sink` whenever the buffer reaches the window and once more
+-- when `action` returns. An emit is never split, so a chunk larger than the
+-- window is one write, and a window below one byte writes every emit
+-- straight through. A failed `action` writes nothing further, so no reader
+-- sees a truncated message it would have to guess at.
 {-# scoped s #-}
 over : Sink e -> Int -> (Writer s ->{s} a) ->{e} a
 over sink size action =
@@ -38,6 +52,18 @@ over sink size action =
         result
     }
 
+-- Runs `action` with a writer that keeps everything written in memory, and
+-- answers the result with those bytes. Its `flush` does nothing. With no
+-- other effects in the callback, the call is pure.
+--
+-- ```fango
+-- import Bytes
+-- import Writer
+--
+-- written = Writer.collecting { writer -> Writer.writeString writer "hi" }
+--
+-- written == ((), Bytes.fromString "hi")
+-- ```
 {-# scoped s #-}
 collecting : (Writer s ->{s} a) ->{e} (a, Bytes)
 collecting action =
@@ -49,12 +75,39 @@ collecting action =
         (result, Bytes.concat (List.reverse parts.read()))
     }
 
+-- Emits the bytes.
 write : Writer e -> Bytes ->{e} ()
 write writer text = writer.emit text
 
+-- Emits the text's UTF-8 bytes.
+--
+-- ```fango
+-- import Bytes
+-- import Tuple
+-- import Writer
+--
+-- written =
+--     Writer.collecting { writer ->
+--         Writer.writeString writer "é"
+--         Writer.write writer (Bytes.fromList [33])
+--     }
+--
+-- Bytes.toList (Tuple.second written) == [195, 169, 33]
+-- ```
 writeString : Writer e -> String ->{e} ()
 writeString writer text = writer.emit (Bytes.fromString text)
 
 -- Writes everything left in `reader`, chunk by chunk.
+--
+-- ```fango
+-- import Bytes
+-- import Reader
+-- import Tuple
+-- import Writer
+--
+-- copied = Reader.withBytes (Bytes.fromString "abc") { reader -> Writer.collecting { writer -> Writer.copy reader writer } }
+--
+-- Tuple.second copied == Bytes.fromString "abc"
+-- ```
 copy : Reader e -> Writer e ->{e} ()
 copy reader writer = Reader.forEachChunk reader (write writer)

@@ -1,4 +1,11 @@
 {-# no-prelude #-}
+-- External input and output: the `IO` effect, handles, and structured
+-- errors.
+--
+-- Open files and the standard streams share one opaque `Handle`. The
+-- operations here fail with `Fail Error`; `File` opens and closes file
+-- handles, and `Reader` and `Writer` buffer them through `source` and
+-- `sink`. The prelude exposes `IO`, `stdin`, `stdout`, and `stderr`.
 module IO exposing (Error(..), Handle, IO, Kind(..), Line(..), describeError, lineEnding, lineText, readBytes, readLine, sink, source, stderr, stdin, stdout, write, writeBytes)
 
 import Basics exposing (..)
@@ -8,20 +15,58 @@ import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
 import Runtime.Native
 
-type Line = { text : String, ending : String } deriving (Eq, Show)
+-- One line of input and the exact terminator that ended it.
+type Line =
+    {
+      -- The line without its terminator.
+      text : String
+      -- `"\n"`, `"\r\n"`, or `""` for an unterminated final line.
+    , ending : String
+    }
+    deriving (Eq, Show)
 
 -- The kinds of operating-system failure a program can act on. Anything else
--- is Other, with the system's own text in the error's message.
-type Kind = NotFound | PermissionDenied | AlreadyExists | IsDirectory | NotDirectory | Other deriving (Eq, Show)
+-- is `Other`, with the system's own text in the error's message. Match on the
+-- kind for behaviour that is the same on every platform.
+type Kind
+    -- The path does not exist.
+    = NotFound
+    -- The program may not access the path.
+    | PermissionDenied
+    -- Something already exists at the path.
+    | AlreadyExists
+    -- The path is a directory where a file was expected.
+    | IsDirectory
+    -- A path component is not a directory.
+    | NotDirectory
+    -- Any other failure.
+    | Other
+    deriving (Eq, Show)
 
--- A structured IO failure: what went wrong, the path the program supplied,
--- and a stable reason for a known kind or the system's message for Other.
--- Fallible natives produce these; see the design.
-type Error = { kind : Kind, path : String, message : String } deriving (Eq, Show)
+-- A structured IO failure.
+type Error =
+    {
+      -- What went wrong.
+      kind : Kind
+      -- The path the program supplied, or `stdin`, `stdout`, or `stderr` for
+      -- a standard stream.
+    , path : String
+      -- A stable reason for a known kind, or the system's message for
+      -- `Other`.
+    , message : String
+    }
+    deriving (Eq, Show)
 
--- describeError renders a failure in the conventional `path: reason` form.
--- Known kinds use text from the kind rather than the host, so they are the
--- same on every platform; Other shows the system message.
+-- The failure as `path: reason`. Known kinds use stable text rather than the
+-- system's, so they read the same on every platform; `Other` shows the
+-- system message.
+--
+-- ```fango
+-- import IO exposing (Kind(..))
+--
+-- IO.describeError { kind = NotFound, path = "a.txt", message = "" } == "a.txt: no such file or directory"
+-- IO.describeError { kind = Other, path = "b", message = "device busy" } == "b: device busy"
+-- ```
 describeError : Error -> String
 describeError error =
     case error.kind of
@@ -32,27 +77,51 @@ describeError error =
         NotDirectory -> error.path ++ ": not a directory"
         Other -> error.path ++ ": " ++ error.message
 
+-- Interaction with the world outside the program. It has no operations of its
+-- own: natives perform it, and only `main` and the interpreter can run it.
 effect IO
 
--- Files and standard streams share one opaque handle representation.
+-- An open file or standard stream. It has no public constructor, equality,
+-- display, or close operation: standard handles live as long as the
+-- process, and file handles until their `File` scope closes them.
 {-# resource #-}
 type Handle = Handle Runtime.Native.Any
 
 standardHandle : Int -> Handle
 standardHandle = native
 
+-- Standard input, which is readable. Standard handles reach the running
+-- program's streams, or the REPL session's.
 stdin : Handle
 stdin = standardHandle 0
 
+-- Standard output, which is writable.
 stdout : Handle
 stdout = standardHandle 1
 
+-- Standard error, which is writable.
 stderr : Handle
 stderr = standardHandle 2
 
+-- A raw line without its terminator, as `readLine` splits it.
+--
+-- ```fango
+-- import IO
+--
+-- IO.lineText "abc\r\n" == "abc"
+-- IO.lineText "abc" == "abc"
+-- ```
 lineText : String -> String
 lineText = native
 
+-- A raw line's terminator: `"\n"`, `"\r\n"`, or `""`.
+--
+-- ```fango
+-- import IO
+--
+-- IO.lineEnding "abc\r\n" == "\r\n"
+-- IO.lineEnding "abc" == ""
+-- ```
 lineEnding : String -> String
 lineEnding = native
 
@@ -71,20 +140,23 @@ writeHandle = native
 writeHandleBytes : Handle -> Bytes ->{IO} Result Error ()
 writeHandleBytes = native
 
--- readLine has the console readLine's contract: Nothing at end of file,
--- otherwise the line and its exact terminator.
+-- The next line and its exact terminator, or `Nothing` at the end of input.
+-- Malformed UTF-8 reads as U+FFFD. Reading from a handle opened for writing
+-- fails with kind `Other`.
 readLine : Handle ->{IO, Fail Error} Maybe Line
 readLine file =
     raw = fromResult (readHandleLine file)
     if raw == "" then Nothing else Just ({ text = lineText raw, ending = lineEnding raw })
 
+-- Writes the text exactly as given, with no newline or buffering of its
+-- own. Writes to one handle do not interleave.
 write : Handle -> String ->{IO, Fail Error} ()
 write file text = fromResult (writeHandle file text)
 
--- readBytes answers Nothing at end of file and otherwise up to count bytes,
--- which may be fewer than asked for; it shares the handle's buffered reader
--- with readLine, so the two interleave. This is already the shape a
--- Bytes.Source needs.
+-- Up to `count` bytes, at most 64 KiB, or `Nothing` at the end of input. A
+-- read may return fewer bytes than asked for. A count of zero or less
+-- returns empty bytes while input remains. Byte and line reads share the
+-- handle's input buffer, so they may interleave.
 readBytes : Handle -> Int ->{IO, Fail Error} Maybe Bytes
 readBytes file count =
     if count <= 0 then
@@ -93,6 +165,7 @@ readBytes file count =
         data = fromResult (readHandleBytes file count)
         if Bytes.length data == 0 then Nothing else Just data
 
+-- Writes all the bytes.
 writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
 writeBytes file data = fromResult (writeHandleBytes file data)
 
@@ -105,9 +178,13 @@ chunk = 65536
 
 -- source and sink adapt an open file to the leaves a Reader and a Writer are
 -- built over. Each captures the handle and checks its validity on use.
--- Neither closes it: closing belongs to the scope.
+
+-- The handle as a byte source for `Reader`. It does not take ownership of
+-- the handle or close it.
 source : Handle -> Source {IO, Fail Error}
 source file = Source { pull = { readBytes file chunk } }
 
+-- The handle as a byte sink for `Writer`. It does not take ownership of the
+-- handle or close it.
 sink : Handle -> Sink {IO, Fail Error}
 sink file = Sink { write = { data -> writeBytes file data } }

@@ -1,4 +1,12 @@
 {-# no-prelude #-}
+-- Buffered byte readers.
+--
+-- A `Reader e` reads bytes from memory or a `Source`, through operations that
+-- perform exactly `e`, so parsing code written against `Reader e` works over
+-- any of them and adds no `IO` of its own. The constructors (`withBytes`,
+-- `over`, `overBytes`, `limited`) are scoped runners: the reader cannot
+-- leave their callback, and the callback's other effects pass through.
+-- Separate readers advance independently.
 module Reader exposing (Read(..), Reader(..), atEnd, chunks, ensure, forEachChunk, limited, limitedRemaining, over, overBytes, readExactly, readLine, readUntil, readUpTo, withBytes)
 
 import Basics exposing (..)
@@ -7,9 +15,17 @@ import Maybe exposing (Maybe(..))
 import Runtime.Local
 import Stream exposing (Stream)
 
+-- A byte reader whose operations perform `e`. The three fields are its
+-- primitives; the module's functions build reads from them.
 type Reader e =
-    { buffered : () ->{e} Bytes
+    {
+      -- The bytes in hand, without consuming them.
+      buffered : () ->{e} Bytes
+      -- Pulls until the buffer grows, answering `True`, or the source ends,
+      -- answering `False`. It never answers `True` without growing, so a
+      -- loop on it makes progress.
     , refill : () ->{e} Bool
+      -- Consumes up to `n` buffered bytes and answers how many it took.
     , skip : Int ->{e} Int
     }
 
@@ -51,14 +67,34 @@ buffering initial source action =
             }
     }
 
+-- Runs `action` with a reader over at most `allowance` bytes of `parent`.
+-- Every byte it hands out is consumed from the parent, so afterwards the
+-- parent is positioned after what was read, not after the allowance; skip
+-- the rest before leaving to discard a whole frame. The parent stays usable
+-- inside the callback.
+--
+-- ```fango
+-- import Bytes
+-- import Reader
+--
+-- framed =
+--     Reader.withBytes (Bytes.fromString "abcdef") { reader ->
+--         inner = Reader.limited reader 3 { frame -> Reader.readUpTo frame 10 }
+--         (inner, Reader.readUpTo reader 10)
+--     }
+--
+-- framed == (Bytes.fromString "abc", Bytes.fromString "def")
+-- ```
 {-# scoped s #-}
 limited : Reader e -> Int -> (Reader s ->{s} a) ->{e} a
 limited parent allowance action =
     (result, _, _) = limitedRemaining parent allowance action
     result
 
--- Return the unconsumed allowance without pulling from the parent. Framed
--- protocols can decide whether to reuse a connection after their consumer.
+-- `limited`, also answering the allowance left unread and whether the parent
+-- ended before the allowance was used. It does not pull from the parent to
+-- find out, so a framed protocol can decide afterwards whether to reuse a
+-- connection.
 {-# scoped s #-}
 limitedRemaining : Reader e -> Int -> (Reader s ->{s} a) ->{e} (a, Int, Bool)
 limitedRemaining parent allowance action =
@@ -88,16 +124,27 @@ limitedRemaining parent allowance action =
         (result, left, ended)
     }
 
+-- Runs `action` with a reader that pulls from `source` as it needs bytes.
 {-# scoped s #-}
 over : Source e -> (Reader s ->{s} a) ->{e} a
 over source action = buffering Bytes.empty source action
 
+-- Runs `action` with a reader whose buffer starts with `contents`, over a
+-- source that has already ended.
 {-# scoped s #-}
 overBytes : Bytes -> (Reader s ->{s} a) ->{e} a
 overBytes contents action = buffering contents { pull = { Nothing } } action
 
--- Each invocation introduces a fresh scoped row. The consumer may perform
--- other effects; those remain in e after the local state effect is discharged.
+-- Runs `action` with a reader over `contents` in memory. With no other
+-- effects in the callback, the call is pure. Nested calls give independent
+-- readers that one parser can use together.
+--
+-- ```fango
+-- import Bytes
+-- import Reader
+--
+-- Reader.withBytes (Bytes.fromString "abcdef") { reader -> Reader.readUpTo reader 4 } == Bytes.fromString "abcd"
+-- ```
 {-# scoped s #-}
 withBytes : Bytes -> (Reader s ->{s} a) ->{e} a
 withBytes contents action =
@@ -116,8 +163,18 @@ withBytes contents action =
 
 -- ensure loops on a real terminator rather than on a length comparison: it
 -- stops because the source said end of input, never because two numbers
--- stopped changing. It grows the buffer and consumes nothing, which is what
--- lets a failed read leave everything in hand.
+-- stopped changing.
+
+-- Grows the buffer until it holds `n` bytes, answering whether it does. It
+-- consumes nothing.
+--
+-- ```fango
+-- import Bytes
+-- import Reader
+--
+-- Reader.withBytes (Bytes.fromString "abc") { reader -> Reader.ensure reader 3 }
+-- Reader.withBytes (Bytes.fromString "abc") { reader -> Reader.ensure reader 4 } == False
+-- ```
 ensure : Reader e -> Int ->{e} Bool
 ensure reader n =
     if Bytes.length reader.buffered() >= n then
@@ -127,12 +184,20 @@ ensure reader n =
     else
         False
 
+-- Whether no bytes remain, in hand or in the source.
+--
+-- ```fango
+-- import Bytes
+-- import Reader
+--
+-- Reader.withBytes Bytes.empty { reader -> Reader.atEnd reader }
+-- ```
 atEnd : Reader e ->{e} Bool
 atEnd reader = if ensure reader 1 then False else True
 
--- readUpTo answers what is in hand once there is anything at all, so it never
--- waits for bytes the caller said were optional. A short answer is not end of
--- input; an empty one is.
+-- Consumes and answers up to `n` bytes: what is in hand, once there is
+-- anything at all, so it never waits for bytes the caller said were
+-- optional. A short answer is not the end of input; an empty one is.
 readUpTo : Reader e -> Int ->{e} Bytes
 readUpTo reader n =
     if n <= 0 then
@@ -144,9 +209,16 @@ readUpTo reader n =
         ignore (reader.skip take)
         Bytes.slice 0 take window
 
--- readExactly consumes nothing when it answers Nothing, so a caller can try a
--- longer frame, a different framing, or report the truncation with the bytes
--- still buffered.
+-- Consumes and answers exactly `n` bytes, or `Nothing`, consuming nothing,
+-- when fewer remain. The caller still holds what it could not frame.
+--
+-- ```fango
+-- import Bytes
+-- import Reader
+--
+-- Reader.withBytes (Bytes.fromString "abc") { reader -> Reader.readExactly reader 2 } == Just (Bytes.fromString "ab")
+-- Reader.withBytes (Bytes.fromString "abc") { reader -> Reader.readExactly reader 4 } == Nothing
+-- ```
 readExactly : Reader e -> Int ->{e} Maybe Bytes
 readExactly reader n =
     if n <= 0 then
@@ -158,10 +230,15 @@ readExactly reader n =
     else
         Nothing
 
--- The three genuinely distinct answers to a delimited read: the run before a
--- delimiter that was found and consumed, the unterminated remainder at end of
--- input, and a limit reached before either.
-type Read = Found Bytes | Ended Bytes | Overflowed deriving (Eq, Show)
+-- The three distinct answers to a delimited read.
+type Read
+    -- The run before the delimiter, both consumed.
+    = Found Bytes
+    -- The unterminated remainder at the end of input, consumed.
+    | Ended Bytes
+    -- The limit was reached before either; nothing was consumed.
+    | Overflowed
+    deriving (Eq, Show)
 
 -- A delimiter straddling a refill begins at most one byte short of a full
 -- delimiter before the end of what was already scanned, so restarting there
@@ -197,11 +274,20 @@ scanning reader delimiter limit scanned =
                 ignore (reader.skip have)
                 Ended window
 
--- readUntil consumes the delimiter and does not answer it. `limit` bounds the
--- run and its delimiter together, which is the number of bytes the call will
--- ever buffer: a server reading an unbounded header line from an untrusted
--- peer has a memory bug, so there is no unlimited spelling. `Overflowed`
--- consumes nothing, so the caller still holds what it refused.
+-- Reads up to `delimiter`, consuming it without answering it. `limit` bounds
+-- the run and its delimiter together, which is all the call will ever
+-- buffer: reading an unbounded line from an untrusted peer is a memory bug,
+-- so there is no unlimited spelling. A delimiter straddling a refill is
+-- found, and the empty delimiter is found at once.
+--
+-- ```fango
+-- import Bytes
+-- import Reader
+--
+-- Reader.withBytes (Bytes.fromString "a;b") { reader -> Reader.readUntil reader (Bytes.fromString ";") 10 } == Reader.Found (Bytes.fromString "a")
+-- Reader.withBytes (Bytes.fromString "ab") { reader -> Reader.readUntil reader (Bytes.fromString ";") 10 } == Reader.Ended (Bytes.fromString "ab")
+-- Reader.withBytes (Bytes.fromString "abcdef;") { reader -> Reader.readUntil reader (Bytes.fromString ";") 4 } == Reader.Overflowed
+-- ```
 readUntil : Reader e -> Bytes -> Int ->{e} Read
 readUntil reader delimiter limit =
     if limit <= 0 then Overflowed else scanning reader delimiter limit 0
@@ -209,16 +295,28 @@ readUntil reader delimiter limit =
 newline : Bytes
 newline = Bytes.fromString "\n"
 
--- readLine is readUntil at a newline. A CRLF terminator leaves the carriage
--- return on the run, because whether that byte is framing or content is the
--- caller's question; a protocol that says CRLF reads readUntil at its own
--- delimiter.
+-- `readUntil` at a newline. A CRLF terminator leaves the carriage return on
+-- the run, because whether that byte is framing or content is the caller's
+-- question; a protocol that says CRLF reads until its own delimiter.
+--
+-- ```fango
+-- import Bytes
+-- import Reader
+--
+-- lines =
+--     Reader.withBytes (Bytes.fromString "one\r\ntwo") { reader ->
+--         first = Reader.readLine reader 100
+--         second = Reader.readLine reader 100
+--         [first, second]
+--     }
+--
+-- lines == [Reader.Found (Bytes.fromString "one\r"), Reader.Ended (Bytes.fromString "two")]
+-- ```
 readLine : Reader e -> Int ->{e} Read
 readLine reader limit = readUntil reader newline limit
 
--- forEachChunk hands over whatever one refill produced, so a consumer sees the
--- source's own chunking rather than a size this module invented and no chunk
--- is copied on the way.
+-- Consumes the rest of the input, handing `action` each chunk as the source
+-- produced it, so no chunk is resized or copied on the way.
 forEachChunk : Reader e -> (Bytes ->{e} ()) ->{e} ()
 forEachChunk reader action =
     if ensure reader 1 then
@@ -237,5 +335,15 @@ chunkStep reader _ =
         Just (window, ())
     else Nothing
 
+-- The rest of the input as a stream of the source's chunks. Traversing it
+-- advances the reader, so repeated traversals share its position.
+--
+-- ```fango
+-- import Bytes
+-- import Reader
+-- import Stream
+--
+-- Reader.withBytes (Bytes.fromString "abc") { reader -> Stream.toList (Reader.chunks reader) } == [Bytes.fromString "abc"]
+-- ```
 chunks : Reader e -> Stream () Bytes {e}
 chunks reader = Stream.unfold () (chunkStep reader)
