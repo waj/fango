@@ -13,8 +13,8 @@ follow-ups.
 
 ```fango
 {-# scoped s #-}
-mock : Config -> (Server.Request s ->{s} Server.Response s)
-    -> (() ->{Http, Fail Error | e} a) ->{Fail Error | e} a
+mock : (Server.Request s ->{s} Server.Response s)
+    -> (() ->{Http | e} a) ->{e} a
 ```
 
 `mock` is a transport handler that uses `Memory` handles. It collects the bytes

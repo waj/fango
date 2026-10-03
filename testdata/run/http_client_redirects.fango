@@ -1,4 +1,5 @@
 import Bytes exposing (Bytes)
+import Fail exposing (Fail)
 import Http exposing (Body(..))
 import Http.Client as Client
 import IO exposing (IO)
@@ -45,23 +46,23 @@ describe reply = show reply.status ++ " " ++ Url.toString reply.url ++ " " ++ By
 
 
 main() =
-    print (Client.attempt { Client.stub server { describe (Client.fetch (Client.get (Client.url "http://example.com/old"))) } })
-    print (Client.attempt { Client.stub server {
-        describe (Client.fetch (Client.post (Client.url "http://example.com/see-other") (BytesBody (Bytes.fromString "form"))))
+    print (Fail.attempt { Client.stub server { describe (Client.get "http://example.com/old") } })
+    print (Fail.attempt { Client.stub server {
+        describe (Client.post "http://example.com/see-other" (BytesBody (Bytes.fromString "form")))
     } })
-    print (Client.attempt { Client.stub server {
-        describe (Client.fetch (Client.post (Client.url "http://example.com/temporary") (BytesBody (Bytes.fromString "data"))))
+    print (Fail.attempt { Client.stub server {
+        describe (Client.post "http://example.com/temporary" (BytesBody (Bytes.fromString "data")))
     } })
-    print (Client.attempt { Client.stub server {
-        describe (Client.fetch (Client.post (Client.url "http://example.com/temporary") (StreamBody { w -> Writer.writeString w "stream" })))
+    print (Fail.attempt { Client.stub server {
+        describe (Client.post "http://example.com/temporary" (StreamBody { w -> Writer.writeString w "stream" }))
     } })
-    print (Client.attempt { Client.stub server {
-        describe (Client.fetch (Client.withBearer "secret" (Client.get (Client.url "http://example.com/elsewhere"))))
+    print (Fail.attempt { Client.stub server {
+        describe (Client.fetch (Client.withBearer "secret" (Client.request "GET" "http://example.com/elsewhere")))
     } })
-    print (Client.attempt { Client.stub server { describe (Client.fetch (Client.get (Client.url "https://example.com/downgrade"))) } })
-    print (Client.attempt { Client.stub server {
-        Client.configure { c -> { c | maxRedirects = 2 } } { describe (Client.fetch (Client.get (Client.url "http://example.com/loop"))) }
+    print (Fail.attempt { Client.stub server { describe (Client.get "https://example.com/downgrade") } })
+    print (Fail.attempt { Client.stub server {
+        Client.configure { c -> { c | maxRedirects = 2 } } { describe (Client.get "http://example.com/loop") }
     } })
-    print (Client.attempt { Client.stub server {
-        Client.configure { c -> { c | maxRedirects = 0 } } { describe (Client.fetch (Client.get (Client.url "http://example.com/old"))) }
+    print (Fail.attempt { Client.stub server {
+        Client.configure { c -> { c | maxRedirects = 0 } } { describe (Client.get "http://example.com/old") }
     } })

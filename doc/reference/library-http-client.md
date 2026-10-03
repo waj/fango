@@ -10,23 +10,24 @@ the server and takes [URLs](library-url.md). The bundled API is experimental.
 ## Running requests
 
 Code that makes requests performs the `Http` effect and `Fail Client.Error`,
-and needs no `IO`. `run` connects them to sockets where the program starts
-them:
+and needs no `IO`. `run` connects `Http` to sockets where the program starts
+it. Failures pass through `run` to whichever handler the program installs:
 
 ```fango
+import Fail
 import Http.Client as Client
 
 main() =
-    print (Client.attempt { Client.run Client.defaultConfig {
-        Client.attemptUnexpected { Client.getText "http://example.com/" }
-    } })
+    print (Fail.attempt { Client.run { Client.getText "http://example.com/" } })
 ```
 
 ```fango
-run : Config -> (() ->{Http, Fail Error | e} a) ->{IO, Fail Error | e} a
+run : (() ->{Http | e} a) ->{IO | e} a
 configure : (Config -> Config) -> (() ->{Http | e} a) ->{Http | e} a
-stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http, Fail Error | e} a) ->{Fail Error | e} a
+stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http | e} a) ->{e} a
 ```
+
+`run` starts from `defaultConfig`.
 
 `run` keeps idle connections for reuse, up to 8 per scheme, host, and port,
 for up to 60 s each, and closes them when it returns. Tasks that inherit the
@@ -40,7 +41,8 @@ be sent again is retried once on a new connection.
 
 `configure adjust action` runs `action` with `adjust` applied to the
 configuration in effect. Overrides nest and apply under every transport,
-`stub` included. A per-request timeout is a `configure` around that request.
+`stub` included. Program-wide settings, such as a base URL, are a `configure`
+just inside `run`; a per-request timeout is a `configure` around that request.
 
 `stub respond action` answers each request without sockets: `respond` receives
 the request's bytes exactly as the client wrote them and returns the bytes of a
@@ -93,27 +95,43 @@ write timeouts bound each wait for the socket, not the whole request. `maxHeader
 ## Requests and responses
 
 ```fango
-type Request e  = { method : String, url : Url, headers : List Header, body : Body e }
+type Request e  = { method : String, url : String, headers : List Header, body : Body e }
 type Response e = { url : Url, status : Int, headers : List Header, body : Reader e }
 type Reply      = { url : Url, status : Int, headers : List Header, body : Bytes }
+
+get : String ->{Http, Fail Error} Reply
+post : String -> Body {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
+
+request : String -> String -> Request e
+withBody : Body e -> Request e -> Request e
+withHeader : String -> String -> Request e -> Request e
+withBearer : String -> Request e -> Request e
 
 {-# scoped s #-}
 send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
 fetch : Request {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
-
-url : String ->{Fail Error} Url
-get : Url -> Request e
-post : Url -> Body e -> Request e
-withHeader : String -> String -> Request e -> Request e
-withBearer : String -> Request e -> Request e
 ```
+
+`get url` and `post url body` send a request and read the whole response.
+Anything else starts from `request method url`, which has no headers and an
+empty body, and goes to `send` or `fetch`:
+
+```fango
+Client.request "PUT" "/items/7"
+    |> Client.withBody (BytesBody payload)
+    |> Client.withBearer token
+    |> Client.fetch
+```
+
+The URL is parsed when the request is sent; one that does not parse fails with
+`InvalidUrl`.
 
 `send request use` writes the request and streams the response body to `use`,
 which may read it only while it runs: the reader cannot escape the callback, so
 it is never read after the connection closes. A value that does not depend on
-the reader, such as decoded JSON, can leave. `fetch` reads the whole body, up
-to `maxBodyBytes`, beyond which it fails with `Protocol BodyTooLarge`. Both
-return any status. `url` parses a string, failing with `InvalidUrl`.
+the reader, such as decoded JSON, can leave. `fetch`, `get`, and `post` read
+the whole body, up to `maxBodyBytes`, beyond which they fail with
+`Protocol BodyTooLarge`. All of them return any status.
 
 A request body is a [`Body`](library-http.md#messages-and-bodies). Its row
 includes `Http` and `Fail Error` because it runs between the client's writes;
@@ -173,14 +191,15 @@ Few servers accept that unasked, so it is never automatic.
 ## Helpers
 
 ```fango
-getText : String ->{Http, Fail Error, Fail Unexpected} String
-getBytes : String ->{Http, Fail Error, Fail Unexpected} Bytes
-getJson : Decode a => Type a -> String ->{Http, Fail Error, Fail Unexpected} a
-postJson : (Encode b, Decode a) => Type a -> String -> b ->{Http, Fail Error, Fail Unexpected} a
-expectSuccess : Reply ->{Fail Unexpected} Reply
+getText : String ->{Http, Fail Error} String
+getBytes : String ->{Http, Fail Error} Bytes
+getJson : Decode a => Type a -> String ->{Http, Fail Error} a
+postJson : (Encode b, Decode a) => Type a -> String -> b ->{Http, Fail Error} a
+expectSuccess : Reply ->{Fail Error} Reply
 ```
 
-The helpers take a URL string and expect a 2xx status. `getText` decodes the
+The helpers return the body as data, so they expect a 2xx status and fail with
+`BadStatus` otherwise. `getText` decodes the
 body as UTF-8, replacing invalid sequences. `getJson` and `postJson` set
 `Accept: application/json` unless the request has it and decode the response
 while it streams, within `maxBodyBytes`; `postJson` streams the encoded value
@@ -190,24 +209,19 @@ applies the same status rule to a `fetch` result.
 ## Errors
 
 ```fango
-type Error      = InvalidUrl String | Transport Net.Error | Timeout | Protocol Http.Error
-                | TooManyRedirects
-type Unexpected = BadStatus Reply | BadBody Json.Error
-
-attempt : (() ->{Fail Error | e} a) ->{e} Result Error a
-attemptUnexpected : (() ->{Fail Unexpected | e} a) ->{e} Result Unexpected a
+type Error = InvalidUrl String | Transport Net.Error | Timeout | Protocol Http.Error
+           | TooManyRedirects | BadStatus Reply | BadBody Json.Error
 ```
 
-`Error` is what can go wrong with any request: a URL the client cannot use, a
+`Error` is what can go wrong with a request: a URL the client cannot use, a
 [`Net.Error`](library-io.md#net) from connecting, reading, or writing, an
 expired timeout (never a `Transport` of kind `TimedOut`), a
 [protocol error](library-http.md#errors) in the request or response, or too
-many redirects.
-`Unexpected` is raised only by the helpers: `BadStatus` carries the whole reply,
-body included, since an error response's body often explains it, and `BadBody`
-carries the JSON decoding error.
+many redirects. Only the helpers and `expectSuccess` raise `BadStatus`, which
+carries the whole reply, body included, since an error response's body often
+explains it, and `BadBody`, which carries the JSON decoding error.
 
-Code using the helpers performs both `Fail Error` and `Fail Unexpected`. A
-handler must say which it takes, so `attempt` and `attemptUnexpected` name
-theirs in their callback type; see
-[effect rows](effects.md#row-inclusion-and-callback-compatibility).
+Requests fail through `Fail Error`, handled like any other failure, with
+`Fail.attempt` or a handler of the program's own. Where the code also performs
+another `Fail`, such as `Fail IO.Error`, the handler must name the one it
+takes; see [effect rows](effects.md#row-inclusion-and-callback-compatibility).

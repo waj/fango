@@ -81,7 +81,8 @@ requests, and that HTTP/1.1 framing sits above the effect.
 The `run` handler keeps no state: a `Socket` handle carries the live
 connection. Each operation returns a `Result`, and the caller's code raises it,
 so a failure reaches the caller's own `attempt` rather than the handler outside
-`run`. Configuration is read once per request and passed to each operation
+`run`, and `run` and `stub` handle `Http` alone; the program decides where
+`Fail Error` is handled. Configuration is read once per request and passed to each operation
 (the endpoint and connect timeout to `connect`, a timeout to each read or
 write); only then do `configure` overrides, which sit inside `run`, reach the
 transport.

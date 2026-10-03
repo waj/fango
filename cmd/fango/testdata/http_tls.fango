@@ -6,18 +6,17 @@ import Result exposing (Result(..))
 
 -- Fetches the first argument over TLS trusting the CA in the second, then
 -- without it, then the third argument, a host the certificate does not name.
-outcome : Result Client.Error (Result Client.Unexpected String) -> String
+outcome : Result Client.Error String -> String
 outcome result =
     case result of
-        Ok (Ok text) -> text
-        Ok (Err _) -> "unexpected status"
+        Ok text -> text
+        Err (Client.BadStatus _) -> "unexpected status"
         Err (Client.Transport _) -> "rejected"
         Err error -> show error
 
 fetchWith : Maybe String -> String ->{IO} String
 fetchWith caFile target =
-    config = { Client.defaultConfig | caFile = caFile }
-    outcome (Client.attempt { Client.run config { Client.attemptUnexpected { Client.getText target } } })
+    outcome (Fail.attempt { Client.run { Client.configure { config -> { config | caFile = caFile } } { Client.getText target } } })
 
 main() =
     case IO.args() of

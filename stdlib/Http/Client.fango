@@ -1,15 +1,15 @@
 {-# no-prelude #-}
 module Http.Client exposing
     ( Config(..), Connection, Error(..), Http, Reply(..), Request(..)
-    , Response(..), Unexpected(..)
-    , attempt, attemptUnexpected, compressRequest, configure, defaultConfig
-    , expectSuccess, fetch, get, getBytes, getJson, getText, post, postJson, run
-    , send, stub, url, withBearer, withHeader, withResponse
+    , Response(..)
+    , compressRequest, configure, defaultConfig, expectSuccess, fetch, get
+    , getBytes, getJson, getText, post, postJson, request, run, send, stub
+    , withBearer, withBody, withHeader, withResponse
     )
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Source(..))
-import Fail exposing (Fail, fromResult)
+import Fail exposing (Fail, attempt, fromResult)
 import Http exposing (Body(..), Header(..), Protocol(..))
 import Http.GZip as GZip
 import Http.Wire as Wire exposing (Framing(..))
@@ -29,18 +29,10 @@ import Writer exposing (Writer(..))
 transport that `run` connects to sockets; framing, header policy, and URL
 resolution run in the caller's code under every transport. -}
 
--- What can go wrong with a request, however the caller reads the response.
-type Error
-    = InvalidUrl String
-    | Transport Net.Error
-    | Timeout
-    | Protocol Http.Error
-    | TooManyRedirects
-    deriving (Eq, Show)
-
+-- `url` is parsed when the request is sent.
 type Request e =
     { method : String
-    , url : Url
+    , url : String
     , headers : List Header
     , body : Body e
     }
@@ -62,8 +54,17 @@ type Reply =
     }
     deriving (Eq, Show)
 
--- A response that does not meet a helper's expectation.
-type Unexpected = BadStatus Reply | BadBody Json.Error deriving (Eq, Show)
+-- What can go wrong with a request. Only the helpers that read a body as
+-- data raise `BadStatus` and `BadBody`.
+type Error
+    = InvalidUrl String
+    | Transport Net.Error
+    | Timeout
+    | Protocol Http.Error
+    | TooManyRedirects
+    | BadStatus Reply
+    | BadBody Json.Error
+    deriving (Eq, Show)
 
 type Config =
     { baseUrl : Maybe Url
@@ -156,10 +157,10 @@ socketRelease connection reusable =
         Socket socket _ -> fromNet (Net.poolRelease socket reusable)
         Memory _ -> foreign
 
--- Runs requests over TCP with `config` as the global configuration. Idle
--- connections are kept for reuse until `run` returns.
-run : Config -> (() ->{Http, Fail Error | e} a) ->{IO, Fail Error | e} a
-run config action =
+-- Runs requests over TCP with `defaultConfig`, which `configure` adjusts.
+-- Idle connections are kept for reuse until `run` returns.
+run : (() ->{Http | e} a) ->{IO | e} a
+run action =
     pool = Net.newPool 8 60000
     Runtime.Scope.finally {
         handle action() on
@@ -167,7 +168,7 @@ run config action =
             transmit connection bytes timeout -> resume (socketWrite connection bytes timeout)
             receive connection most timeout -> resume (socketRead connection most timeout)
             release connection reusable -> resume (socketRelease connection reusable)
-            currentConfig () -> resume config
+            currentConfig () -> resume defaultConfig
     } { ignore (Net.closePool pool) }
 
 -- Runs `action` with the configuration adjusted. Overrides nest.
@@ -185,7 +186,7 @@ type Exchange = { request : Bytes, response : Maybe Bytes }
 -- Answers each request from `respond`, given the request's bytes as written,
 -- without sockets. `respond` may use the caller's effects, for example to
 -- record requests. Requests run one at a time.
-stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http, Fail Error | e} a) ->{Fail Error | e} a
+stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http | e} a) ->{e} a
 stub respond action =
     handle action() with exchange = Exchange { request = Bytes.empty, response = Nothing } on
         connect _ -> resume (Ok (Memory 0)) with Exchange { request = Bytes.empty, response = Nothing }
@@ -388,7 +389,7 @@ replayable body =
 -- Where a redirect response leads, unless it must be returned as it is: no
 -- usable Location, a downgrade from https, or a body that cannot be sent again.
 redirection : Request e -> Url -> Int -> List Header -> Maybe (Url, Bool)
-redirection request target status headers =
+redirection outgoing target status headers =
     if redirectStatus status == False then Nothing
     else
         case Http.getHeader "location" headers of
@@ -398,10 +399,10 @@ redirection request target status headers =
                     Nothing -> Nothing
                     Just location ->
                         next = Url.resolve target location
-                        safeMethod = request.method == "GET" || request.method == "HEAD"
+                        safeMethod = outgoing.method == "GET" || outgoing.method == "HEAD"
                         keep = status == 307 || status == 308 || (status /= 303 && safeMethod)
                         if target.scheme == Just "https" && next.scheme /= Just "https" then Nothing
-                        else if keep && replayable request.body == False then Nothing
+                        else if keep && replayable outgoing.body == False then Nothing
                         else Just (next, keep)
 
 originOf : Url -> (Maybe String, Maybe String, Maybe Int)
@@ -413,9 +414,9 @@ withoutCredentials headers = Http.removeHeader "authorization" (Http.removeHeade
 
 -- A request that may be sent again when a reused connection turns out closed.
 retryable : Request e -> Bool
-retryable request =
-    idempotent = List.foldl { method found -> found || method == request.method } False ["GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"]
-    idempotent && replayable request.body
+retryable outgoing =
+    idempotent = List.foldl { method found -> found || method == outgoing.method } False ["GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"]
+    idempotent && replayable outgoing.body
 
 reused : Connection -> Bool
 reused connection =
@@ -426,26 +427,26 @@ reused connection =
 -- Sends one request to `target`. `hops` redirects were followed before it.
 {-# scoped s #-}
 exchange : Config -> Request {Http, Fail Error | e} -> Url -> Bool -> Int -> Bool -> (Response s ->{s} a) ->{Http, Fail Error | e} Step a
-exchange config request target crossOrigin hops fresh use =
+exchange config outgoing target crossOrigin hops fresh use =
     endpoint = endpointOf config target fresh
     defaults = [Header { name = "User-Agent", value = config.userAgent } | if config.decompress then [Header { name = "Accept-Encoding", value = "gzip" }] else []]
-    merged = overlay (overlay defaults config.headers) request.headers
+    merged = overlay (overlay defaults config.headers) outgoing.headers
     headers = if crossOrigin then withoutCredentials merged else merged
-    decode = config.decompress && Http.hasHeader "accept-encoding" config.headers == False && Http.hasHeader "accept-encoding" request.headers == False
+    decode = config.decompress && Http.hasHeader "accept-encoding" config.headers == False && Http.hasHeader "accept-encoding" outgoing.headers == False
     wireHeaders = [Header { name = "Host", value = hostHeader endpoint } | headers]
-    framed = framedRequest request.method request.body
-    protocol { Wire.checkMessage wireHeaders request.body framed }
+    framed = framedRequest outgoing.method outgoing.body
+    protocol { Wire.checkMessage wireHeaders outgoing.body framed }
     Runtime.Scope.bracket { fromResult (connect endpoint) } { connection -> ignore (release connection False) } { connection ->
         -- A reused connection the server already closed fails before any
         -- response byte; such a request starts over on a new connection.
-        stale = reused connection && retryable request
+        stale = reused connection && retryable outgoing
         output = Writer
             { emit = { bytes -> fromResult (transmit connection bytes config.writeTimeoutMs) }
             , flush = { () }
             }
         written = attempt {
-            Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (request.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
-                wireHeaders request.body framed True
+            Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (outgoing.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
+                wireHeaders outgoing.body framed True
         }
         case written of
             Err error -> if stale then Retry else failWith error
@@ -455,8 +456,8 @@ exchange config request target crossOrigin hops fresh use =
                         Err error -> if stale then (Retry, False) else failWith error
                         Ok head ->
                             protocol {
-                                responseBody target (request.method == "HEAD") decode config.maxHeaderBytes head input { response ->
-                                    next = if config.maxRedirects > 0 then redirection request target response.status response.headers else Nothing
+                                responseBody target (outgoing.method == "HEAD") decode config.maxHeaderBytes head input { response ->
+                                    next = if config.maxRedirects > 0 then redirection outgoing target response.status response.headers else Nothing
                                     case next of
                                         Just (location, keep) ->
                                             if hops >= config.maxRedirects then failWith TooManyRedirects else Follow location keep
@@ -473,20 +474,20 @@ exchange config request target crossOrigin hops fresh use =
 -- status is a normal response.
 {-# scoped s #-}
 send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
-send request use =
+send outgoing use =
     config = currentConfig()
     checkHeaders config.headers
-    checkHeaders request.headers
-    if Wire.allToken (Bytes.fromString request.method) 0 == False then failWith (Protocol (Http.InvalidMessage "invalid method")) else ()
-    first = absolute config request.url
+    checkHeaders outgoing.headers
+    if Wire.allToken (Bytes.fromString outgoing.method) 0 == False then failWith (Protocol (Http.InvalidMessage "invalid method")) else ()
+    first = absolute config (parseUrl outgoing.url)
     follow current target hops fresh =
         case exchange config current target (originOf target /= originOf first) hops fresh use of
             Done value -> value
             Retry -> follow current target hops True
             Follow next keep ->
-                following = if keep then { current | url = next } else { current | method = if current.method == "HEAD" then "HEAD" else "GET", body = Empty, url = next }
+                following = if keep then current else { current | method = if current.method == "HEAD" then "HEAD" else "GET", body = Empty }
                 follow following next (hops + 1) False
-    follow request first 0 False
+    follow outgoing first 0 False
 
 collect : Reader {Fail Error | e} -> Int -> List Bytes -> Int ->{Fail Error | e} Bytes
 collect reader limit parts size =
@@ -497,65 +498,66 @@ collect reader limit parts size =
 
 -- Sends `request` and reads the whole body, up to `maxBodyBytes`.
 fetch : Request {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
-fetch request =
+fetch outgoing =
     limit = currentConfig().maxBodyBytes
-    send request { response ->
+    send outgoing { response ->
         body = collect response.body limit [] 0
         Reply { url = response.url, status = response.status, headers = response.headers, body = body }
     }
 
 -- Requests and helpers
 
-url : String ->{Fail Error} Url
-url raw =
+parseUrl : String ->{Fail Error} Url
+parseUrl raw =
     case Url.parse raw of
         Just parsed -> parsed
         Nothing -> failWith (InvalidUrl raw)
 
-get : Url -> Request e
-get target = Request { method = "GET", url = target, headers = [], body = Empty }
+-- A request with `method` to `target` and no headers or body yet.
+request : String -> String -> Request e
+request method target = Request { method = method, url = target, headers = [], body = Empty }
 
-post : Url -> Body e -> Request e
-post target body = Request { method = "POST", url = target, headers = [], body = body }
+-- Sends a GET and reads the whole body; any status is a reply.
+get : String ->{Http, Fail Error} Reply
+get target = fetch (request "GET" target)
+
+-- Sends a POST with `body` and reads the whole response body; any status is a
+-- reply.
+post : String -> Body {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
+post target body = fetch (withBody body (request "POST" target))
 
 withHeader : String -> String -> Request e -> Request e
-withHeader name value request = { request | headers = Http.setHeader name value request.headers }
+withHeader name value outgoing = { outgoing | headers = Http.setHeader name value outgoing.headers }
 
 -- Sends the body gzip-compressed, which few servers accept unasked.
 compressRequest : Request e -> Request e
-compressRequest request =
-    { request | headers = Http.setHeader "Content-Encoding" "gzip" request.headers, body = GZip.encoding request.body }
+compressRequest outgoing =
+    { outgoing | headers = Http.setHeader "Content-Encoding" "gzip" outgoing.headers, body = GZip.encoding outgoing.body }
+
+withBody : Body e -> Request e -> Request e
+withBody body outgoing = { outgoing | body = body }
 
 withBearer : String -> Request e -> Request e
-withBearer token request = withHeader "Authorization" ("Bearer " ++ token) request
+withBearer token outgoing = withHeader "Authorization" ("Bearer " ++ token) outgoing
 
 -- Fails with `BadStatus` unless the status is 2xx.
-expectSuccess : Reply ->{Fail Unexpected} Reply
+expectSuccess : Reply ->{Fail Error} Reply
 expectSuccess reply =
-    if reply.status >= 200 && reply.status < 300 then reply else Fail.fail (BadStatus reply)
+    if reply.status >= 200 && reply.status < 300 then reply else failWith (BadStatus reply)
 
-attempt : (() ->{Fail Error | e} a) ->{e} Result Error a
-attempt action = Fail.attempt action
+getBytes : String ->{Http, Fail Error} Bytes
+getBytes raw = (expectSuccess (get raw)).body
 
-attemptUnexpected : (() ->{Fail Unexpected | e} a) ->{e} Result Unexpected a
-attemptUnexpected action = Fail.attempt action
-
-successful : Reply ->{Fail Unexpected} Bytes
-successful reply = (expectSuccess reply).body
-
-getBytes : String ->{Http, Fail Error, Fail Unexpected} Bytes
-getBytes raw = successful (fetch (get (url raw)))
-
-getText : String ->{Http, Fail Error, Fail Unexpected} String
+getText : String ->{Http, Fail Error} String
 getText raw = Bytes.toStringLossy (getBytes raw)
 
 withDefaultHeader : String -> String -> Request e -> Request e
-withDefaultHeader name value request =
-    if Http.hasHeader name request.headers then request else withHeader name value request
+withDefaultHeader name value outgoing =
+    if Http.hasHeader name outgoing.headers then outgoing else withHeader name value outgoing
 
 -- Decodes a 2xx JSON response as it streams. Another status fails with its
 -- buffered reply.
-decodeReply : Decode a => Type a -> Int -> Response {Fail Error, Fail Unexpected | s} ->{Fail Error, Fail Unexpected | s} a
+decodeReply : Decode a => Type a -> Int -> Response {Fail Error | s} ->{Fail Error | s} a
 decodeReply witness limit response =
     if response.status >= 200 && response.status < 300 then
         (decoded, left, _) = Reader.limitedRemaining response.body limit { body -> Json.read witness body }
@@ -563,18 +565,18 @@ decodeReply witness limit response =
             Ok value -> value
             Err problem ->
                 if left == 0 && Reader.atEnd response.body == False then failWith (Protocol Http.BodyTooLarge)
-                else Fail.fail (BadBody problem)
+                else failWith (BadBody problem)
     else
         body = collect response.body limit [] 0
-        Fail.fail (BadStatus (Reply { url = response.url, status = response.status, headers = response.headers, body = body }))
+        failWith (BadStatus (Reply { url = response.url, status = response.status, headers = response.headers, body = body }))
 
-getJson : Decode a => Type a -> String ->{Http, Fail Error, Fail Unexpected} a
+getJson : Decode a => Type a -> String ->{Http, Fail Error} a
 getJson witness raw =
     limit = currentConfig().maxBodyBytes
-    request = withDefaultHeader "Accept" "application/json" (get (url raw))
-    send request { response -> decodeReply witness limit response }
+    outgoing = withDefaultHeader "Accept" "application/json" (request "GET" raw)
+    send outgoing { response -> decodeReply witness limit response }
 
-postJson : (Encode b, Decode a) => Type a -> String -> b ->{Http, Fail Error, Fail Unexpected} a
+postJson : (Encode b, Decode a) => Type a -> String -> b ->{Http, Fail Error} a
 postJson witness raw value =
     limit = currentConfig().maxBodyBytes
     body = StreamBody { output ->
@@ -582,5 +584,5 @@ postJson witness raw value =
             Ok _ -> ()
             Err problem -> failWith (Protocol (Http.InvalidMessage problem.message))
     }
-    request = withDefaultHeader "Accept" "application/json" (withDefaultHeader "Content-Type" "application/json" (post (url raw) body))
-    send request { response -> decodeReply witness limit response }
+    outgoing = withDefaultHeader "Accept" "application/json" (withDefaultHeader "Content-Type" "application/json" (withBody body (request "POST" raw)))
+    send outgoing { response -> decodeReply witness limit response }

@@ -13,17 +13,18 @@ steps = ["/a", "/a", "/a", "/kill", "/a", "/closing", "/a", "/large", "/a", "/sm
 -- Reads one byte of the body and leaves the rest to the client.
 peek : String ->{Client.Http, Fail Client.Error} String
 peek path =
-    Client.send (Client.get (Client.url path)) { response ->
+    Client.send (Client.request "GET" path) { response ->
         show response.status ++ " " ++ Bytes.toStringLossy (Reader.readUpTo response.body 1)
     }
 
 main() =
     case IO.args() of
         [base] ->
-            config = { Client.defaultConfig | baseUrl = Url.parse base }
-            print (Client.attempt {
-                    Client.run config {
-                        List.each { path -> print (path ++ " " ++ peek path) } steps
+            print (Fail.attempt {
+                    Client.run {
+                        Client.configure { config -> { config | baseUrl = Url.parse base } } {
+                            List.each { path -> print (path ++ " " ++ peek path) } steps
+                        }
                     }
             })
         _ -> IO.exit 2

@@ -10,6 +10,10 @@ import String
 import Url
 import Writer
 
+-- The handler also performs `Fail Net.Error`, so this names the error it takes.
+attemptClient : (() ->{Fail Client.Error | e} a) ->{e} Result Client.Error a
+attemptClient action = Fail.attempt action
+
 -- Forwards each request body to the upstream URL as it arrives, and answers
 -- with the upstream reply.
 main() =
@@ -17,14 +21,15 @@ main() =
         [raw, upstream] ->
             case String.toInt raw of
                 Just port ->
-                    config = { Client.defaultConfig | baseUrl = Url.parse upstream }
                     print (Async.run {
                             stop = Async.channel 1
                             Http.Server.serve (Http.Server.defaultConfig port) stop { request ->
-                                outcome = Client.attempt {
-                                    Client.run config {
-                                        forwarded = StreamBody { w -> Writer.copy request.body w }
-                                        Client.fetch (Client.post (Client.url request.target) forwarded)
+                                outcome = attemptClient {
+                                    Client.run {
+                                        Client.configure { config -> { config | baseUrl = Url.parse upstream } } {
+                                            forwarded = StreamBody { w -> Writer.copy request.body w }
+                                            Client.post request.target forwarded
+                                        }
                                     }
                                 }
                                 case outcome of

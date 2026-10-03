@@ -18,9 +18,9 @@ numbers = Stream.unfold 0 { n -> if n < 200000 then Just (n, n + 1) else Nothing
 -- The second argument names a file to upload.
 requests : String ->{Client.Http, Fail Client.Error, IO, Fail IO.Error} ()
 requests file =
-    print (Client.attemptUnexpected { Client.getText "/text" })
-    print (Client.attemptUnexpected { Client.getJson @(List Int) "/json" })
-    print (case Client.attemptUnexpected { Client.getText "/missing" } of
+    print (attemptClient { Client.getText "/text" })
+    print (attemptClient { Client.getJson @(List Int) "/json" })
+    print (case attemptClient { Client.getText "/missing" } of
             Err (Client.BadStatus reply) -> "status " ++ show reply.status ++ " " ++ Bytes.toStringLossy reply.body
             _ -> "unexpected"
     )
@@ -29,20 +29,22 @@ requests file =
             Ok _ -> ()
             Err problem -> Fail.fail (Client.Protocol (Http.InvalidMessage problem.message))
     }
-    print (Bytes.toStringLossy (Client.fetch (Client.post (Client.url "/count") generated)).body)
-    print (Bytes.toStringLossy (Client.fetch (Client.post (Client.url "/file") (Http.fileBody file))).body)
-    roundTrip = Client.compressRequest (Client.post (Client.url "/gzip") (BytesBody (Bytes.fromString "round trip")))
+    print (Bytes.toStringLossy (Client.post "/count" generated).body)
+    print (Bytes.toStringLossy (Client.post "/file" (Http.fileBody file)).body)
+    roundTrip = Client.request "POST" "/gzip" |> Client.withBody (BytesBody (Bytes.fromString "round trip")) |> Client.compressRequest
     print (Bytes.toStringLossy (Client.fetch roundTrip).body)
-    print (Client.attempt { Client.configure { c -> { c | readTimeoutMs = 200 } } { Client.fetch (Client.get (Client.url "/slow")) } }
+    print (attemptClient { Client.configure { c -> { c | readTimeoutMs = 200 } } { Client.get "/slow" } }
             |> Result.map { _ -> "" }
     )
 
 attemptIO : (() ->{Fail IO.Error | e} a) ->{e} Result IO.Error a
 attemptIO action = Fail.attempt action
 
+attemptClient : (() ->{Fail Client.Error | e} a) ->{e} Result Client.Error a
+attemptClient action = Fail.attempt action
+
 main() =
     case IO.args() of
         [base, file] ->
-            config = { Client.defaultConfig | baseUrl = Url.parse base }
-            print (attemptIO { Client.attempt { Client.run config { requests file } } })
+            print (attemptIO { attemptClient { Client.run { Client.configure { c -> { c | baseUrl = Url.parse base } } { requests file } } } })
         _ -> IO.exit 2
