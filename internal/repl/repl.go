@@ -53,6 +53,8 @@ type Options struct {
 	// editor that reads the process's stdin in place of RunWith's reader;
 	// the writer must be that terminal's stdout.
 	Interactive bool
+	// Color marks unhandled failures with terminal colors.
+	Color bool
 	// lineEditor replaces the terminal editor of an Interactive session.
 	lineEditor func(out *tailWriter, cancel func()) lineEditor
 }
@@ -72,6 +74,7 @@ type Session struct {
 	ioctx      *eval.IOContext
 	evalExec   atomic.Pointer[nativehost.Executor]
 	interrupts <-chan struct{}
+	color      bool
 
 	// graph holds every module the session has resolved, the bundled prelude
 	// closure included; prompt is the resolver scope prompts and imports
@@ -152,6 +155,7 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 		stage:      stage,
 		installed:  preludeDefs,
 		promptDefs: map[string]core.Def{},
+		color:      opts.Color,
 	}
 }
 
@@ -799,9 +803,13 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		diag.Render(s.out, errs)
 		return inputDone
 	}
-	ty, inferErrs := s.ck.Expr(e)
+	ty, effects, inferErrs := s.ck.ExprEffects(e)
 	if len(inferErrs) > 0 {
 		diag.Render(s.out, inferErrs)
+		return inputDone
+	}
+	if _, errs := s.promptEffects(effects, e.Span()); len(errs) > 0 {
+		diag.Render(s.out, errs)
 		return inputDone
 	}
 	// The displayed type is the pre-defaulting one — free variables print
@@ -814,7 +822,9 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		diag.Render(s.out, elabErrs)
 		return inputDone
 	}
-	display := elaborate.Represent(coreExpr, s.ck, "")
+	row, _ := s.ck.Sub.Apply(effects).(types.Row)
+	fails, _ := s.promptEffects(row, e.Span())
+	display := elaborate.PromptOutcome(coreExpr, row, fails, s.ck, "")
 	for i := range aux {
 		s.env.DefineWorker(&aux[i])
 	}
@@ -835,8 +845,45 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		fmt.Fprintf(s.out, "runtime error: %v\n", err)
 		return inputDone
 	}
-	fmt.Fprintf(s.out, "%s : %s\n", v.(string), shownTy)
+	outcome := v.(string)
+	if rest, failed := strings.CutPrefix(outcome, elaborate.PromptFailure); failed {
+		s.unhandled(rest)
+		return inputDone
+	}
+	fmt.Fprintf(s.out, "%s : %s\n", strings.TrimPrefix(outcome, elaborate.PromptValue), shownTy)
 	return inputDone
+}
+
+// promptEffects sorts the effects a prompt expression performs: IO is
+// ambient, and each Fail application is handled for this input alone, so its
+// failure prints rather than escaping. Anything else has no handler here.
+func (s *Session) promptEffects(effects types.Type, at source.Span) ([]types.Type, []diag.Error) {
+	row, ok := s.ck.Sub.Apply(effects).(types.Row)
+	if !ok {
+		return nil, nil
+	}
+	var fails []types.Type
+	var errs []diag.Error
+	for _, label := range row.Labels {
+		switch {
+		case label.Scoped, types.SurfaceName(label.Name) == "IO":
+		case label.Name == "Fail.Fail" && len(label.Args) == 1:
+			fails = append(fails, label.Args[0])
+		default:
+			errs = append(errs, diag.Errorf(at, "UNHANDLED EFFECT",
+				"This performs `%s`, and nothing at the prompt handles it. Run it inside\na handler, such as the one its library provides.", strings.Trim(types.Show(types.Row{Labels: []types.EffLabel{label}}), "{}")))
+		}
+	}
+	return fails, errs
+}
+
+// unhandled reports a failure no handler caught, in red on a terminal.
+func (s *Session) unhandled(text string) {
+	line := "Unhandled Error: " + text
+	if s.color {
+		line = "\x1b[31m" + line + "\x1b[0m"
+	}
+	fmt.Fprintln(s.out, line)
 }
 
 func (s *Session) evalDisplay(display core.Expr) (value eval.Value, err error) {

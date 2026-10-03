@@ -1,0 +1,16 @@
+import Fail exposing (Fail)
+import State exposing (State)
+Fail.fail "plain"
+type Opaque = Opaque
+Fail.fail Opaque
+failCount : Int ->{Fail Int} a
+failCount n = Fail.fail n
+failName : String ->{Fail String} a
+failName name = Fail.fail name
+pick : Bool ->{Fail Int, Fail String} Int
+pick flag = if flag then failCount 7 else failName "seven"
+pick True
+pick False
+Fail.attempt { Fail.fail "handled" }
+State.get()
+1 + 1

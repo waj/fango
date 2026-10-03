@@ -60,3 +60,56 @@ func attemptReportDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 			Clauses: []core.HandlerClause{{Op: fail.Ops[0], Params: []string{"_primary"}, ParamTypes: []types.Type{fields[0]}, SuppressedParam: "_suppressed", SuppressedType: fields[1], ResultType: action.Ret, Body: ctor(resultADT, errIndex, resultTy, report)}},
 			Return:  &core.ReturnClause{Param: "_value", Body: ctor(resultADT, okIndex, resultTy, ref("_value", action.Ret))}}}
 }
+
+// Tags that begin a PromptOutcome string.
+const (
+	PromptValue   = "v"
+	PromptFailure = "f"
+)
+
+// PromptOutcome renders a prompt expression as one String that says whether it
+// finished: PromptValue and the value's representation, or PromptFailure and
+// the representation and type of a failure nothing handled. Each Fail
+// instance in fails gets its own abort handler, so a failure ends only this
+// expression. A String crosses back from the native worker unchanged.
+func PromptOutcome(e core.Expr, row types.Row, fails []types.Type, ck *infer.Checker, owner string) core.Expr {
+	str := ck.B.String
+	lit := func(text string) core.Expr { return &core.StringLit{Val: text, Ty: str} }
+	concat := func(parts ...core.Expr) core.Expr {
+		out := parts[len(parts)-1]
+		for i := len(parts) - 2; i >= 0; i-- {
+			out = &core.NativeCall{Name: "Basics.++", Module: "Basics", Ty: str, Args: []core.Expr{parts[i], out}}
+		}
+		return out
+	}
+	body := concat(lit(PromptValue), Represent(e, ck, owner))
+	if len(fails) == 0 {
+		return body
+	}
+	fail := ck.Effects["Fail.Fail"]
+	remaining := row
+	for _, arg := range fails {
+		remaining = withoutLabel(remaining, fail.Unique, arg)
+		scope := ck.Sup.FreshScope()
+		ev := core.EffectInstance{Unique: fail.Unique, Name: fail.Name, Args: []types.Type{arg}, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Exit}}
+		shown := Represent(&core.VarRef{Name: "_failure", Local: true, Ty: arg}, ck, owner)
+		clause := core.HandlerClause{Op: fail.Ops[0], Params: []string{"_failure"}, ParamTypes: []types.Type{arg}, ResultType: str,
+			Body: concat(lit(PromptFailure), shown, lit(" : "+types.Show(arg)))}
+		body = &core.Handle{Body: body, Effect: ev, Scope: scope, Ty: str, Control: rowControl(remaining, ck), Clauses: []core.HandlerClause{clause}}
+	}
+	return body
+}
+
+// withoutLabel removes one application of an effect from a row.
+func withoutLabel(row types.Row, unique int, arg types.Type) types.Row {
+	out := types.Row{Tail: row.Tail}
+	removed := false
+	for _, label := range row.Labels {
+		if !removed && label.Unique == unique && len(label.Args) == 1 && types.Equal(label.Args[0], arg) {
+			removed = true
+			continue
+		}
+		out.Labels = append(out.Labels, label)
+	}
+	return out
+}

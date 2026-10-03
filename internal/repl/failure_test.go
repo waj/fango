@@ -65,3 +65,20 @@ good
 		t.Fatalf("failure report staging or rollback failed:\n%s", got)
 	}
 }
+
+// A terminal session marks an unhandled failure in red; the line itself is
+// the one a plain session prints.
+func TestUnhandledFailureColor(t *testing.T) {
+	for _, color := range []bool{false, true} {
+		var out strings.Builder
+		RunWith(strings.NewReader("import Fail\nFail.fail \"boom\"\n:quit\n"), &out, Options{Color: color, DisableCache: true})
+		line := `Unhandled Error: "boom" : String`
+		want := line
+		if color {
+			want = "\x1b[31m" + line + "\x1b[0m"
+		}
+		if !strings.Contains(out.String(), want+"\n") {
+			t.Fatalf("color %v: want %q in:\n%s", color, want, out.String())
+		}
+	}
+}

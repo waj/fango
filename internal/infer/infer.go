@@ -1355,6 +1355,18 @@ func (ck *Checker) Expr(e ast.Expr) (types.Type, []diag.Error) {
 // with an empty effect row — the rule that makes "no IO during compilation" a
 // consequence of the effect system rather than a convention.
 func (ck *Checker) ExprWhere(e ast.Expr, allowEffects bool) (types.Type, []diag.Error) {
+	ty, _, errs := ck.exprWhere(e, allowEffects)
+	return ty, errs
+}
+
+// ExprEffects is Expr that also returns the effect row the expression
+// performs, as a type to apply the substitution to once elaboration has
+// defaulted it. The prompt decides which of those effects it handles.
+func (ck *Checker) ExprEffects(e ast.Expr) (types.Type, types.Type, []diag.Error) {
+	return ck.exprWhere(e, true)
+}
+
+func (ck *Checker) exprWhere(e ast.Expr, allowEffects bool) (types.Type, types.Type, []diag.Error) {
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	ty := g.expr(e)
 	var preds []types.Pred // the typeclass seam: always empty in the MVP
@@ -1393,7 +1405,7 @@ func (ck *Checker) ExprWhere(e ast.Expr, allowEffects bool) (types.Type, []diag.
 				"Compile-time code runs inside the compiler, so it must be pure, but\nthis performs `%s`.", types.SurfaceName(row.Labels[0].Name)))
 		}
 	}
-	return ty, append(errs, es...)
+	return ty, g.ambient, append(errs, es...)
 }
 
 type predObligation struct {

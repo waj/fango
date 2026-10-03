@@ -31,6 +31,8 @@ func cmdRepl(args []string, stdout, stderr io.Writer) int {
 	// Line editing needs the process's own terminal on both ends; piped or
 	// redirected sessions read plain lines.
 	opts.Interactive = stdout == io.Writer(os.Stdout) && isTerminal(os.Stdin) && isTerminal(os.Stdout)
+	// https://no-color.org: any non-empty value turns colors off.
+	opts.Color = opts.Interactive && os.Getenv("NO_COLOR") == ""
 	repl.RunWith(os.Stdin, stdout, opts)
 	return 0
 }

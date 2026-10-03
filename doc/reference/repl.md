@@ -74,6 +74,21 @@ Effectful expressions run directly. Ordinary effectful declarations such as
 `x = print 1` are rejected. Effectful function definitions are accepted and
 execute only when explicitly applied.
 
+An expression may perform IO and any number of `Fail` applications. The
+prompt handles each `Fail` for that input alone: a failure ends the input and
+prints its value and type instead of a result, through `Show` when the type has
+an instance and as `<value : T>` otherwise:
+
+```text
+> Client.run { Client.getText "relative" }
+Unhandled Error: InvalidUrl "relative" : Error
+```
+
+In a terminal the line is red, unless `NO_COLOR` is set. Any other effect the
+expression performs, such as `Http` or `State Int`, has no handler at the
+prompt; checking reports `UNHANDLED EFFECT` and nothing runs. Run such code
+inside its handler, as in `Client.run { … }`.
+
 Supported commands are:
 
 ```text

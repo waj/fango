@@ -23,6 +23,12 @@ Both backends share observable formatting and the
 [self tail-loop predicate](backend.md#self-tail-call-loops). The differential suite
 checks agreement. Native call forms use the [persistent worker](backend.md#interpreter-native-worker).
 
+A prompt expression's checked effect row decides how it runs. IO is ambient;
+each `Fail` application gets an abort handler around the input, keyed by its
+type argument, and any other effect is an `UNHANDLED EFFECT` before
+elaboration. The observed expression evaluates to one tagged String, value or
+failure, because only simple values return from the native worker.
+
 Print is ordinary Display-constrained Fango over display and IO.write. Tooling
 evaluates an observed expression once. The REPL echoes a result through available
 Show evidence, the representation, so a String result is quoted; a program whose

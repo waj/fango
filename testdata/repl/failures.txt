@@ -1,0 +1,22 @@
+Fango 0.1 — :help for commands
+> loaded Failure
+loaded Fail
+> loaded State
+> Unhandled Error: "plain" : String
+> Opaque : Opaque
+> Unhandled Error: <value : Opaque> : Opaque
+> | | failCount : Int ->{Fail Int} a
+| | failName : String ->{Fail String} a
+| | pick : Bool ->{Fail Int, Fail String} Int
+Unhandled Error: 7 : Int
+> Unhandled Error: "seven" : String
+> Err "handled" : Result String a
+> -- UNHANDLED EFFECT ------------------------------------- <repl>
+
+This performs `State a`, and nothing at the prompt handles it. Run it inside
+a handler, such as the one its library provides.
+
+1| State.get()
+   ^^^^^^^^^^^
+> 2 : Num a => a
+> 
