@@ -239,15 +239,16 @@ value.
 
 ## Handler clauses and abort routing
 
-A handler handles one effect and must contain a clause group for every
-operation of that effect. Adjacent repetitions of an operation form one
-source-ordered, exhaustive, non-redundant pattern group; a noncontiguous repeat
-is a duplicate-clause error. An optional adjacent `return` group matches the
-handled computation's normal result under the same rules. Clauses accept full
-argument patterns and may vary in indentation like `case` branches; the
-formatter aligns them. `resume value`
-continues from a resumptive operation. An abort clause instead returns the
-handler answer directly and has no resume binding:
+A handler handles one or more effect applications and must contain a clause
+group for every operation of each. Adjacent repetitions of an operation form
+one source-ordered, exhaustive, non-redundant pattern group; a noncontiguous
+repeat is a duplicate-clause error unless each group carries a
+[signature](#operation-signatures) naming a different application. An
+optional `return` group, written once, matches the handled computation's
+normal result under the same rules. Clauses accept full argument patterns and
+may vary in indentation like `case` branches; the formatter aligns them.
+`resume value` continues from a resumptive operation. An abort clause instead
+returns the handler answer directly and has no resume binding:
 
 ```fango
 attempt action =
@@ -264,10 +265,43 @@ bypasses the handler's `return` clause; normal completion runs `return` once.
 An abort raised by an abort clause or return clause propagates outward rather
 than re-entering that activation.
 
-Handler clauses execute outside their own activation. They may use an enclosing
-handler, including another handler of the same effect. A function annotation
-does not need to expose effects discharged by those enclosing handlers;
-unhandled effects in clauses must still be permitted by the annotation.
+Handler clauses execute outside their own activation, and outside every
+application it handles. They may use an enclosing handler, including another
+handler of the same effect; a sibling application of the same handler is
+never reachable from a clause. A function annotation does not need to expose
+effects discharged by those enclosing handlers; unhandled effects in clauses
+must still be permitted by the annotation.
+
+### Several applications in one handler
+
+One handler may cover several applications, of one effect or of different
+effects. Signed groups name their applications; a group without a signature
+belongs to its effect's inferred application, or completes the effect's only
+signed one. Once an effect has several applications in a handler, every one
+of its clauses needs a signature saying which it serves, or the clause is a
+`MISSING OPERATION SIGNATURE`. Two groups for the same operation and
+application are a `DUPLICATE HANDLER CLAUSE`:
+
+```fango
+load action =
+    handle action() on
+        fail : ParseError -> a
+        fail (ParseError line) -> Err ("bad syntax at line " ++ show line)
+
+        fail : IoError -> a
+        fail (IoError reason) -> Err ("cannot read: " ++ reason)
+
+        return config -> Ok config
+```
+
+Each application is covered independently: every operation of its effect
+needs a group, exhaustive and non-redundant. Each abort unwinds to the clause
+of its own application; the `return` group is shared. The applications must
+share a discipline: combining abort-only and resumptive applications in one
+handler is a `MIXED HANDLER DISCIPLINE` error until that stage lands. Inside
+the subject every handled application is in scope, so an operation whose type
+does not say which application it means is an `AMBIGUOUS EFFECT`; a typed
+helper names the one intended.
 
 ## Operation signatures
 
@@ -329,6 +363,27 @@ handled body. Every operation path must use `resume value with nextState`;
 ordinary handlers continue to use `resume value`. The value and next-state
 expressions evaluate left to right exactly once, and the state is committed
 only after both finish successfully. The `return` clause sees the final state.
+
+The cell belongs to the whole handler. When one handler covers
+[several applications](#several-applications-in-one-handler), every clause
+sees snapshots of the same cell and every commit updates it, so `State Int`
+and an `Emit` effect can share one context:
+
+```fango
+collect action =
+    handle action()
+    with context = Context { count = 0, messages = [] } on
+        get : () -> Int
+        get () -> resume context.count with context
+
+        put : Int -> ()
+        put n -> resume () with { context | count = n }
+
+        emit message ->
+            resume () with { context | messages = [message | context.messages] }
+
+        return value -> Collected { value = value, count = context.count, messages = context.messages }
+```
 
 State snapshots and commits are individually synchronized to publish complete
 values. The clause runs between them without an operation-wide lock: concurrent

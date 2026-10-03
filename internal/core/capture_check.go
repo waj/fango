@@ -387,7 +387,9 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			initial = a.expr(e.State.Initial, env, evidence)
 		}
 		innerEvidence := cloneCaptureEvidence(evidence)
-		innerEvidence[e.Effect.Key()] = append(innerEvidence[e.Effect.Key()], e.Effect.Captures)
+		for _, ev := range e.Effects {
+			innerEvidence[ev.Key()] = append(innerEvidence[ev.Key()], ev.Captures)
+		}
 		body := a.expr(e.Body, env, innerEvidence)
 		result := body
 		result.uses = types.UnionCaptures(initial.uses, result.uses)

@@ -264,8 +264,10 @@ func (ck *Checker) MarkEffectScoped(name string) bool {
 	}
 	eff.Scoped = true
 	for _, info := range ck.HandleInfos {
-		if info.Effect.Unique == eff.Unique {
-			info.Scoped = true
+		for _, label := range info.Effects {
+			if label.Unique == eff.Unique {
+				info.Scoped = true
+			}
 		}
 	}
 	return true
@@ -395,7 +397,9 @@ type DeclInfo struct {
 }
 
 type HandlerClauseInfo struct {
-	Op         *types.EffectOp
+	Op *types.EffectOp
+	// Effect indexes HandlerInfo.Effects: the application this group serves.
+	Effect     int
 	ParamTypes []types.Type
 	OpResult   types.Type
 	LocalVars  []*types.TVar
@@ -403,7 +407,9 @@ type HandlerClauseInfo struct {
 }
 
 type HandlerInfo struct {
-	Effect        types.EffLabel
+	// Effects are the applications one handler activation handles. They
+	// share its scope, permission, and state cell.
+	Effects       []types.EffLabel
 	Residual      types.Row
 	Scope         types.ScopeID
 	Scoped        bool
@@ -1946,29 +1952,124 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	if len(e.Clauses) == 0 {
 		return result
 	}
-	first := g.ck.Operations[e.Clauses[0].Op]
-	if first == nil {
-		g.errs = append(g.errs, diag.Errorf(e.Clauses[0].OpSpan, "UNKNOWN OPERATION", "I don't know an operation named `%s`.", e.Clauses[0].Op))
-		g.expr(e.Body)
-		return result
-	}
-	if first.Owner == g.ck.IO {
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "BUILTIN IO HANDLING NOT READY", "Handlers for builtin IO are staged until polymorphic print evidence is available."))
-	}
-
 	residualVar := g.ck.Sup.FreshVar(types.RowVar)
 	residual := types.Row{Tail: residualVar}
-	labelArgs := make([]types.Type, len(first.Owner.Params))
-	for i := range labelArgs {
-		labelArgs[i] = g.ck.Sup.FreshVar(types.General)
-	}
-	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs, Abort: first.Abort}
 	savedAmbient := g.ambient
 	var stateTy types.Type
 	if e.State != nil {
 		stateTy = g.expr(e.State.Initial)
 	}
-	info := &HandlerInfo{Effect: label, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, StateType: stateTy, Permission: NewHandlerPermission(g.ck.Sup, "handler "+types.SurfaceName(label.Name))}
+
+	// Group the clauses into the applications one activation handles. A
+	// signed group names its application outright. Unsigned groups of one
+	// effect share that effect's inferred application, or complete its only
+	// signed one; with several signed applications of an effect, every one
+	// of its clauses must say which it serves.
+	type application struct {
+		owner  *types.EffectInfo
+		label  types.EffLabel
+		signed bool
+		key    types.EffectKey // signed applications only
+	}
+	var apps []application
+	clauseApp := make([]int, len(e.Clauses))
+	clauseOps := make([]*types.EffectOp, len(e.Clauses))
+	signedCount := map[*types.EffectInfo]int{}
+	inferredApp := map[*types.EffectInfo]int{}
+	scoped := e.State != nil
+	broken := false
+	ioReported := false
+	for i := range e.Clauses {
+		cl := &e.Clauses[i]
+		clauseApp[i] = -1
+		op := g.ck.Operations[cl.Op]
+		if op == nil {
+			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "UNKNOWN OPERATION", "I don't know an operation named `%s`.", cl.Op))
+			broken = true
+			continue
+		}
+		clauseOps[i] = op
+		if op.Owner == g.ck.IO && !ioReported {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "BUILTIN IO HANDLING NOT READY", "Handlers for builtin IO are staged until polymorphic print evidence is available."))
+			ioReported = true
+		}
+		scoped = scoped || op.Owner.Scoped
+		if cl.Signature == nil {
+			continue
+		}
+		args := g.operationSignature(cl, op)
+		if args == nil {
+			broken = true
+			clauseOps[i] = nil
+			continue
+		}
+		key := types.AppliedEffectKey(op.Owner.Unique, args)
+		idx := -1
+		for j, a := range apps {
+			if a.signed && a.key == key {
+				idx = j
+			}
+		}
+		if idx < 0 {
+			apps = append(apps, application{owner: op.Owner, signed: true, key: key,
+				label: types.EffLabel{Unique: op.Owner.Unique, Name: op.Owner.Name, Args: args, Abort: op.Abort}})
+			idx = len(apps) - 1
+			signedCount[op.Owner]++
+		}
+		clauseApp[i] = idx
+	}
+	for i := range e.Clauses {
+		op := clauseOps[i]
+		if op == nil || clauseApp[i] >= 0 {
+			continue
+		}
+		switch signedCount[op.Owner] {
+		case 0:
+			idx, ok := inferredApp[op.Owner]
+			if !ok {
+				labelArgs := make([]types.Type, len(op.Owner.Params))
+				for j := range labelArgs {
+					labelArgs[j] = g.ck.Sup.FreshVar(types.General)
+				}
+				apps = append(apps, application{owner: op.Owner,
+					label: types.EffLabel{Unique: op.Owner.Unique, Name: op.Owner.Name, Args: labelArgs, Abort: op.Abort}})
+				idx = len(apps) - 1
+				inferredApp[op.Owner] = idx
+			}
+			clauseApp[i] = idx
+		case 1:
+			for j, a := range apps {
+				if a.signed && a.owner == op.Owner {
+					clauseApp[i] = j
+				}
+			}
+		default:
+			g.errs = append(g.errs, diag.Errorf(e.Clauses[i].OpSpan, "MISSING OPERATION SIGNATURE",
+				"This handler selects several `%s` applications, so every `%s` clause needs a signature saying which one it serves.",
+				types.SurfaceName(op.Owner.Name), types.SurfaceName(op.Owner.Name)))
+			broken = true
+			clauseOps[i] = nil
+		}
+	}
+	if len(apps) == 0 {
+		g.expr(e.Body)
+		return result
+	}
+	labels := make([]types.EffLabel, len(apps))
+	names := make([]string, len(apps))
+	anyAbort, anyResumptive := false, false
+	for i, a := range apps {
+		labels[i] = a.label
+		names[i] = types.SurfaceName(a.label.Name)
+		anyAbort = anyAbort || a.label.Abort
+		anyResumptive = anyResumptive || !a.label.Abort
+	}
+	if anyAbort && anyResumptive {
+		g.errs = append(g.errs, diag.Errorf(e.Sp, "MIXED HANDLER DISCIPLINE",
+			"This handler combines abort-only and resumptive effect applications, which is not supported yet.\nHandle them in nested handlers for now."))
+	}
+	info := &HandlerInfo{Effects: labels, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: scoped, Result: result, StateType: stateTy,
+		Permission: NewHandlerPermission(g.ck.Sup, "handler "+strings.Join(names, " "))}
 	outer := g.scopeOuterTypes()
 	savedSink := g.clauseEffects
 	g.clauseEffects = nil
@@ -1977,20 +2078,22 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	// annotated effects. Nested handlers must check their clauses against that
 	// lexical budget, not just the declaration's outermost row. This handler's
 	// own clauses remain outside its activation.
-	g.ambient = info.Permission.Within(types.Row{Labels: []types.EffLabel{label}, Tail: residualVar})
+	g.ambient = info.Permission.Within(types.Row{Labels: labels, Tail: residualVar})
 	savedAnnotation := g.annotationAmbient
 	if savedAnnotation != nil {
 		bodyAnnotation := *savedAnnotation
 		bodyAnnotation.Labels = append([]types.EffLabel(nil), savedAnnotation.Labels...)
-		found := false
-		for i, existing := range bodyAnnotation.Labels {
-			if types.EffectLabelKey(existing) == types.EffectLabelKey(label) {
-				bodyAnnotation.Labels[i], found = label, true
-				break
+		for _, label := range labels {
+			found := false
+			for i, existing := range bodyAnnotation.Labels {
+				if types.EffectLabelKey(existing) == types.EffectLabelKey(label) {
+					bodyAnnotation.Labels[i], found = label, true
+					break
+				}
 			}
-		}
-		if !found {
-			bodyAnnotation.Labels = append(bodyAnnotation.Labels, label)
+			if !found {
+				bodyAnnotation.Labels = append(bodyAnnotation.Labels, label)
+			}
 		}
 		bodyAnnotation = info.Permission.Within(bodyAnnotation)
 		g.annotationAmbient = &bodyAnnotation
@@ -2007,20 +2110,25 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	}
 	g.ambient = clauseAmbient
 	g.ck.ScopeSpans[info.Scope] = e.Sp
-	seen := map[string]bool{}
+	type clauseKey struct {
+		app int
+		op  string
+	}
+	seen := map[clauseKey]bool{}
 	for i := range e.Clauses {
 		cl := &e.Clauses[i]
-		op := g.ck.Operations[cl.Op]
-		if op == nil {
-			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "UNKNOWN OPERATION", "I don't know an operation named `%s`.", cl.Op))
+		op := clauseOps[i]
+		if op == nil || clauseApp[i] < 0 {
 			continue
 		}
-		if op.Owner != first.Owner {
-			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "MIXED HANDLER EFFECTS", "All clauses in a handler must belong to `%s`.", first.Owner.Name))
-			continue
-		}
-		if seen[op.Name] {
-			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "DUPLICATE HANDLER CLAUSE", "The operation `%s` is handled more than once.", op.Name))
+		app := clauseApp[i]
+		label := labels[app]
+		if seen[clauseKey{app, op.Name}] {
+			hint := ""
+			if signedCount[op.Owner] > 0 {
+				hint = " Groups of one operation for different applications each need a signature."
+			}
+			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "DUPLICATE HANDLER CLAUSE", "The operation `%s` is handled more than once.%s", op.Name, hint))
 			continue
 		}
 		var resumeID types.ResumeID
@@ -2028,7 +2136,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.ck.ResumeGen++
 			resumeID = g.ck.ResumeGen
 		}
-		seen[op.Name] = true
+		seen[clauseKey{app, op.Name}] = true
 		inst, localVars := g.instantiateOperationClause(op)
 		paramTys, opResult := peelOperation(inst, op.Arity)
 		cur := inst
@@ -2041,15 +2149,6 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			for j, a := range last.Eff.Labels[0].Args {
 				if j < len(label.Args) {
 					g.cs = append(g.cs, Constraint{Left: a, Right: label.Args[j], Span: cl.OpSpan, Why: Why{Kind: WhyEffectMismatch}})
-				}
-			}
-		}
-		if cl.Signature != nil {
-			// The signature names the handled application outright; the
-			// clauses and subject must agree with it.
-			for j, a := range g.operationSignature(cl, op) {
-				if j < len(label.Args) {
-					g.cs = append(g.cs, Constraint{Left: a, Right: label.Args[j], Span: cl.SigSpan, Why: Why{Kind: WhyEffectMismatch}})
 				}
 			}
 		}
@@ -2112,7 +2211,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 				}
 			}
 		}
-		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, LocalVars: localVars, ResumeID: resumeID})
+		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, Effect: app, ParamTypes: paramTys, OpResult: opResult, LocalVars: localVars, ResumeID: resumeID})
 		if len(localVars) != 0 {
 			roots := append([]types.Type(nil), outer...)
 			if stateTy != nil {
@@ -2124,9 +2223,18 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		}
 	}
 	g.ambient = clauseAmbient
-	for _, op := range first.Owner.Ops {
-		if !seen[op.Name] {
-			g.errs = append(g.errs, diag.Errorf(e.Sp, "INCOMPLETE HANDLER", "The handler is missing a clause for `%s`.", op.Name))
+	if !broken {
+		for a, app := range apps {
+			for _, op := range app.owner.Ops {
+				if seen[clauseKey{a, op.Name}] {
+					continue
+				}
+				where := ""
+				if len(apps) > 1 {
+					where = " for `" + g.showLabel(app.label) + "`"
+				}
+				g.errs = append(g.errs, diag.Errorf(e.Sp, "INCOMPLETE HANDLER", "The handler is missing a clause for `%s`%s.", op.Name, where))
+			}
 		}
 	}
 	g.clauseEffects = nil
@@ -2157,13 +2265,27 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	} else {
 		g.cs = append(g.cs, Constraint{Left: bodyTy, Right: result, Span: e.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
 	}
-	// Only the handled label is removed. Any residual effects from the body,
+	// Only the handled labels are removed. Any residual effects from the body,
 	// clauses, or return clause compose into the surrounding expression.
 	g.ambient, g.clauseEffects = savedAmbient, savedSink
 	g.scopeObligations = append(g.scopeObligations, Constraint{Scope: &ScopeBoundary{Effect: info.Permission, Result: result, Residual: residual, Outer: outer}, Span: e.Span()})
 	g.performs(residual, e.Span(), false)
 	g.ck.HandleInfos[e] = info
 	return result
+}
+
+// showLabel spells an effect application for a diagnostic.
+func (g *generator) showLabel(label types.EffLabel) string {
+	pr := types.NewPrinter()
+	parts := []string{types.SurfaceName(label.Name)}
+	for _, a := range label.Args {
+		shown := pr.Type(a)
+		if strings.Contains(shown, " ") {
+			shown = "(" + shown + ")"
+		}
+		parts = append(parts, shown)
+	}
+	return strings.Join(parts, " ")
 }
 
 func peelOperation(t types.Type, n int) ([]types.Type, types.Type) {

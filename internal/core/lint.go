@@ -806,7 +806,24 @@ func (l *linter) expr(e Expr, where string) {
 		delete(l.localTypes, e.Resource)
 	case *Handle:
 		l.control(e.Control, where)
-		l.effectInstance(e.Effect, where)
+		if len(e.Effects) == 0 {
+			l.errorf("%s: handler handles no effect application", where)
+		}
+		instanceKeys := map[types.EffectKey]bool{}
+		anyScoped := false
+		for _, ev := range e.Effects {
+			l.effectInstance(ev, where)
+			if instanceKeys[ev.Key()] {
+				l.errorf("%s: handler names the application `%s` twice", where, ev.Name)
+			}
+			instanceKeys[ev.Key()] = true
+			if !types.EqualCaptures(ev.Captures, types.ScopeCapture(e.Scope)) {
+				l.errorf("%s: handler evidence does not name its scope identity", where)
+			}
+			if eff := l.effects[ev.Unique]; eff != nil {
+				anyScoped = anyScoped || eff.Scoped
+			}
+		}
 		if e.State != nil {
 			if e.State.Name == "" || e.State.Ty == nil || e.State.Initial == nil {
 				l.errorf("%s: parameterized handler has incomplete state metadata", where)
@@ -821,27 +838,37 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: handler has invalid or reused scope identity %d", where, e.Scope)
 		}
 		l.scopeIDs[e.Scope] = true
-		if !types.EqualCaptures(e.Effect.Captures, types.ScopeCapture(e.Scope)) {
-			l.errorf("%s: handler evidence does not name its scope identity", where)
-		}
-		if eff := l.effects[e.Effect.Unique]; eff != nil && e.Scoped != (eff.Scoped || e.State != nil) {
-			l.errorf("%s: handler scoped policy disagrees with effect `%s`", where, eff.Name)
+		if e.Scoped != (anyScoped || e.State != nil) {
+			l.errorf("%s: handler scoped policy disagrees with its effects", where)
 		}
 		l.activeScopes[e.Scope] = true
-		l.evidence[e.Effect.Key()]++
-		l.evidenceCaptures[e.Effect.Key()] = append(l.evidenceCaptures[e.Effect.Key()], e.Effect.Captures)
+		for _, ev := range e.Effects {
+			l.evidence[ev.Key()]++
+			l.evidenceCaptures[ev.Key()] = append(l.evidenceCaptures[ev.Key()], ev.Captures)
+		}
 		l.expr(e.Body, where)
-		l.evidence[e.Effect.Key()]--
-		l.evidenceCaptures[e.Effect.Key()] = l.evidenceCaptures[e.Effect.Key()][:len(l.evidenceCaptures[e.Effect.Key()])-1]
+		for _, ev := range e.Effects {
+			l.evidence[ev.Key()]--
+			l.evidenceCaptures[ev.Key()] = l.evidenceCaptures[ev.Key()][:len(l.evidenceCaptures[ev.Key()])-1]
+		}
 		delete(l.activeScopes, e.Scope)
-		seen := map[string]bool{}
+		type clauseKey struct {
+			effect int
+			op     string
+		}
+		seen := map[clauseKey]bool{}
 		for _, c := range e.Clauses {
+			if c.Effect < 0 || c.Effect >= len(e.Effects) {
+				l.errorf("%s: handler clause names no application of this handler", where)
+				continue
+			}
+			instance := e.Effects[c.Effect]
 			report := l.defName == types.FailAttemptReportName && l.intrinsics[types.FailAttemptReportName]
 			if report != (c.SuppressedParam != "") || (c.SuppressedParam == "") != (c.SuppressedType == nil) {
 				l.errorf("%s: missing or misplaced suppressed failure binding", where)
 			}
 			if c.SuppressedParam != "" {
-				valid := report && c.Op != nil && c.Op.Abort && e.Effect.Name == "Fail.Fail"
+				valid := report && c.Op != nil && c.Op.Abort && instance.Name == "Fail.Fail"
 				list, ok := c.SuppressedType.(*types.TCon)
 				valid = valid && ok && list.Name == "List.List" && len(list.Args) == 1
 				if valid {
@@ -857,7 +884,7 @@ func (l *linter) expr(e Expr, where string) {
 				l.scope[c.SuppressedParam] = true
 				l.localTypes[c.SuppressedParam] = c.SuppressedType
 			}
-			if c.Op == nil || c.Op.Owner.Unique != e.Effect.Unique {
+			if c.Op == nil || c.Op.Owner.Unique != instance.Unique {
 				l.errorf("%s: handler clause has wrong effect", where)
 				continue
 			}
@@ -865,10 +892,10 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: handler clause operation `%s` is not declared by its effect", where, c.Op.Name)
 				continue
 			}
-			if seen[c.Op.Name] {
+			if seen[clauseKey{c.Effect, c.Op.Name}] {
 				l.errorf("%s: duplicate handler clause for `%s`", where, c.Op.Name)
 			}
-			seen[c.Op.Name] = true
+			seen[clauseKey{c.Effect, c.Op.Name}] = true
 			if !c.Op.Abort && len(c.LocalVars) != len(c.Op.LocalVars) {
 				l.errorf("%s: handler clause `%s` operation-local binder arity mismatch", where, c.Op.Name)
 			}
@@ -883,7 +910,7 @@ func (l *linter) expr(e Expr, where string) {
 				addedLocalVars = append(addedLocalVars, v.ID)
 				localTypes[i] = v
 			}
-			wantParams, opResult := l.operationTypes(c.Op, e.Effect, localTypes...)
+			wantParams, opResult := l.operationTypes(c.Op, instance, localTypes...)
 			if len(c.Params) != len(c.Op.RuntimeParamTypes()) || len(c.ParamTypes) != len(c.Op.RuntimeParamTypes()) {
 				l.errorf("%s: handler clause `%s` arity mismatch", where, c.Op.Name)
 			}
@@ -960,10 +987,12 @@ func (l *linter) expr(e Expr, where string) {
 				delete(l.localTypes, e.State.Name)
 			}
 		}
-		if eff := l.effects[e.Effect.Unique]; eff != nil {
-			for _, op := range eff.Ops {
-				if !seen[op.Name] {
-					l.errorf("%s: handler is missing a clause for `%s`", where, op.Name)
+		for i, ev := range e.Effects {
+			if eff := l.effects[ev.Unique]; eff != nil {
+				for _, op := range eff.Ops {
+					if !seen[clauseKey{i, op.Name}] {
+						l.errorf("%s: handler is missing a clause for `%s`", where, op.Name)
+					}
 				}
 			}
 		}

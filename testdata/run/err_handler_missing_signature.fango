@@ -1,0 +1,13 @@
+import State exposing (State, get, put)
+
+-- With several `State` applications selected, every `State` clause must say
+-- which one it serves.
+both action =
+    handle action() with cell = 0 on
+        get : () -> Int
+        get () -> resume cell with cell
+        get : () -> String
+        get () -> resume "" with cell
+        put _ -> resume () with cell
+
+main() = print (both { get() })

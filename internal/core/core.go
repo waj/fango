@@ -209,12 +209,15 @@ type HandlerClause struct {
 	SuppressedParam string
 	SuppressedType  types.Type
 	Op              *types.EffectOp
-	ResumeID        types.ResumeID
-	Params          []string
-	ParamTypes      []types.Type
-	ResultType      types.Type
-	LocalVars       []*types.TVar // rigid operation-local binders scoped to this clause
-	Body            Expr
+	// Effect indexes the handler's Effects: the application this clause
+	// serves. Clauses of one activation may serve different applications.
+	Effect     int
+	ResumeID   types.ResumeID
+	Params     []string
+	ParamTypes []types.Type
+	ResultType types.Type
+	LocalVars  []*types.TVar // rigid operation-local binders scoped to this clause
+	Body       Expr
 }
 type ReturnClause struct {
 	Param string
@@ -226,9 +229,12 @@ type HandlerState struct {
 	Ty      types.Type
 }
 type Handle struct {
-	Body    Expr
-	State   *HandlerState
-	Effect  EffectInstance
+	Body  Expr
+	State *HandlerState
+	// Effects are the applications one activation handles. They share the
+	// Scope identity and the State cell; each has its own evidence key. A
+	// clause names its application by index.
+	Effects []EffectInstance
 	Scope   types.ScopeID
 	Scoped  bool
 	Clauses []HandlerClause
@@ -627,4 +633,18 @@ func PeelFun(t types.Type, n int) ([]types.Type, types.Type) {
 		t = fn.Ret
 	}
 	return args, t
+}
+
+// ClauseEffect is the application a handler clause serves.
+func (h *Handle) ClauseEffect(c *HandlerClause) EffectInstance { return h.Effects[c.Effect] }
+
+// HandlesAbort reports whether any of the handler's applications is
+// abort-only, in which case the activation consumes its body's exits.
+func (h *Handle) HandlesAbort() bool {
+	for _, c := range h.Clauses {
+		if c.Op != nil && c.Op.Abort {
+			return true
+		}
+	}
+	return false
 }

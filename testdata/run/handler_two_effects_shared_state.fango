@@ -1,0 +1,30 @@
+import List exposing (List)
+import State exposing (State, get, put)
+
+effect Emit
+    emit : String -> ()
+
+type Context = { count : Int, messages : List String }
+type Collected a = { value : a, count : Int, messages : List String } deriving (Show)
+
+-- `State Int` and `Emit` share one cell: every clause sees the same
+-- snapshot, and the return clause sees the final context.
+collect action =
+    handle action()
+    with context = Context { count = 0, messages = [] } on
+        get : () -> Int
+        get () -> resume context.count with context
+
+        put : Int -> ()
+        put n ->
+            resume () with { context | count = n }
+
+        emit message ->
+            resume () with
+                { context | messages = [message | context.messages] }
+
+        return value ->
+            Collected { value = value, count = context.count, messages = context.messages }
+
+main() =
+    print (collect { emit "start"; put (get() + 2); emit "end"; put (get() * 10); get() })

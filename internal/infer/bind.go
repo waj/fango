@@ -23,8 +23,10 @@ import (
 // distinct, and the innermost one is the evidence elaboration will capture.
 func boundHandler(bind []*HandlerInfo, label types.EffLabel) *HandlerInfo {
 	for i := len(bind) - 1; i >= 0; i-- {
-		if sameOrUnresolvedEffect(bind[i].Effect, label) {
-			return bind[i]
+		for _, handled := range bind[i].Effects {
+			if sameOrUnresolvedEffect(handled, label) {
+				return bind[i]
+			}
 		}
 	}
 	return nil
@@ -129,10 +131,10 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 			adapted.Labels = append(adapted.Labels, l)
 			continue
 		}
-		if info.Effect.Abort {
+		if l.Abort {
 			return diag.Errorf(c.Span, "BOUND ABORT OPERATION",
 				"This closure performs `%s`, an abort-only effect, and the position it goes to\ndoes not allow that effect. Binding it to the handler whose subject holds it\nwould be the only way to accept it, and an abort cannot be bound.\n\nAn abort unwinds to its own handler activation, so a bound abort called after\nthat activation finished would unwind to a target nothing awaits. Keep `%s`\nin this arrow's row, or handle it where it is performed.",
-				types.SurfaceName(info.Effect.Name), types.SurfaceName(info.Effect.Name)), true
+				types.SurfaceName(l.Name), types.SurfaceName(l.Name)), true
 		}
 		row := info.Permission.Within(clauseRow(info, sub))
 		for _, cl := range row.Labels {

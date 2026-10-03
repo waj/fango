@@ -31,7 +31,7 @@ func TestDeferredAbortEvidenceIsSuppliedWhenClosureIsInvoked(t *testing.T) {
 		actual := formal
 		actual.Captures = types.ScopeCapture(types.ScopeID(i + 1))
 		call := &core.App{CalleeKind: core.Value, Callee: &core.VarRef{Name: "callback", Local: true, Ty: fn}, Args: []core.Expr{&core.UnitLit{Ty: b.Unit}}, Ty: b.String, Row: &core.RowArgument{Effects: []core.EffectInstance{actual}}}
-		handle := &core.Handle{Scope: types.ScopeID(i + 1), Effect: actual, Body: call, Ty: b.String, Clauses: []core.HandlerClause{{Op: op, Params: []string{"error"}, ParamTypes: []types.Type{b.String}, ResultType: b.String, Body: &core.StringLit{Val: answer, Ty: b.String}}}}
+		handle := &core.Handle{Scope: types.ScopeID(i + 1), Effects: []core.EffectInstance{actual}, Body: call, Ty: b.String, Clauses: []core.HandlerClause{{Op: op, Params: []string{"error"}, ParamTypes: []types.Type{b.String}, ResultType: b.String, Body: &core.StringLit{Val: answer, Ty: b.String}}}}
 		got, err := in.eval(handle, &Frame{vars: map[string]Value{"callback": closure}})
 		if err != nil || got != answer {
 			t.Fatalf("invocation %d: %v, %v", i, got, err)

@@ -82,7 +82,7 @@ func ExprControl(e Expr) types.Control {
 		if e.State != nil {
 			parts = append(parts, ExprControl(e.State.Initial))
 		}
-		if len(e.Clauses) == 0 || e.Clauses[0].Op == nil || !e.Clauses[0].Op.Abort {
+		if !e.HandlesAbort() {
 			// Resumptive evidence may select an Exit ABI member. Abort-only body
 			// exits are instead consumed by this boundary.
 			parts = append(parts, ExprControl(e.Body))

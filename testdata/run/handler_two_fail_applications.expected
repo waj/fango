@@ -1,0 +1,5 @@
+Ok 42
+Err "bad syntax at line 7"
+Err "cannot read: disk"
+escalated: io net
+finished

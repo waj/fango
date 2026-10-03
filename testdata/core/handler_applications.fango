@@ -1,0 +1,25 @@
+effect Fail error
+    abort fail : error -> value
+
+effect Emit
+    emit : String -> ()
+
+type A = A
+type B = B
+
+-- One activation, two abort applications: both instances share the scope.
+either action =
+    handle action() on
+        fail : A -> a
+        fail A -> 1
+        fail : B -> a
+        fail B -> 2
+        return n -> n
+
+-- A resumptive effect beside a state cell shared by two applications.
+counted action =
+    handle action() with count = 0 on
+        emit _ -> resume () with count + 1
+        return value -> count
+
+main = counted { either { emit "x"; if True then fail A else 0 } }

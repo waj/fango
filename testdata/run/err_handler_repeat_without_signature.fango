@@ -1,0 +1,14 @@
+effect Fail error
+    abort fail : error -> value
+
+type A = A
+type B = B
+
+-- A repeated operation needs a signature on every group.
+attempt action =
+    handle action() on
+        fail A -> 0
+        fail : B -> a
+        fail B -> 1
+
+main() = print (attempt { fail A })

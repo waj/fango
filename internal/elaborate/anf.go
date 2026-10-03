@@ -53,7 +53,7 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		if e.State != nil {
 			state = &core.HandlerState{Name: e.State.Name, Initial: el.anf(e.State.Initial), Ty: e.State.Ty}
 		}
-		return &core.Handle{Body: el.anf(e.Body), State: state, Effect: e.Effect, Scope: e.Scope, Scoped: e.Scoped, Clauses: clauses, Return: ret, Ty: e.Ty, Control: e.Control}
+		return &core.Handle{Body: el.anf(e.Body), State: state, Effects: e.Effects, Scope: e.Scope, Scoped: e.Scoped, Clauses: clauses, Return: ret, Ty: e.Ty, Control: e.Control}
 	case *core.Bracket:
 		// Each slot is emitted as statements inside the scope, so each
 		// normalizes in its own region: a hoist out of the release would run

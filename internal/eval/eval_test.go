@@ -462,7 +462,7 @@ func TestCleanupScopeRecordsSuppressedReleaseFailures(t *testing.T) {
 		Acquire: &core.IntLit{Val: 0, Ty: it}, Release: raise(3, ut),
 		Body: inner, Ty: it, Control: types.Control{Transport: types.Exit}}
 	handled := &core.Handle{
-		Body: outer, Effect: ev, Scope: 1, Ty: it,
+		Body: outer, Effects: []core.EffectInstance{ev}, Scope: 1, Ty: it,
 		Clauses: []core.HandlerClause{{Op: op, Params: []string{"code"}, ParamTypes: []types.Type{it},
 			ResultType: it, Body: &core.VarRef{Name: "code", Local: true, Ty: it}}},
 	}

@@ -1133,7 +1133,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 			clauseBody = el.matchPatternRows(patterns, bodies, spans, occs, cl.OpSpan, "handler clause")
 		}
 		el.popScope(pushed)
-		clauses[i] = core.HandlerClause{Op: ci.Op, ResumeID: ci.ResumeID, Params: params, ParamTypes: pts,
+		clauses[i] = core.HandlerClause{Op: ci.Op, Effect: ci.Effect, ResumeID: ci.ResumeID, Params: params, ParamTypes: pts,
 			ResultType: el.zonkDefault(ci.OpResult), LocalVars: ci.LocalVars, Body: clauseBody}
 	}
 	var ret *core.ReturnClause
@@ -1171,21 +1171,31 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		ret = &core.ReturnClause{Param: name, Body: retBody}
 	}
 	// An activation uses its clauses' transport, independently of its caller.
+	// Every application it handles shares that transport, its scope identity,
+	// and its state cell; each has its own evidence key.
 	var control types.Control
 	for _, clause := range clauses {
 		control = types.JoinControl(control, core.ExprControl(clause.Body))
 	}
-	if info.Effect.Abort {
+	anyAbort := false
+	for _, label := range info.Effects {
+		anyAbort = anyAbort || label.Abort
+	}
+	if anyAbort {
 		control = types.Control{Transport: types.Exit}
 	}
-	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name, Captures: types.ScopeCapture(info.Scope), Control: control}
-	for _, a := range info.Effect.Args {
-		inst.Args = append(inst.Args, el.zonkDefault(a))
+	insts := make([]core.EffectInstance, len(info.Effects))
+	for i, label := range info.Effects {
+		inst := core.EffectInstance{Unique: label.Unique, Name: label.Name, Captures: types.ScopeCapture(info.Scope), Control: control}
+		for _, a := range label.Args {
+			inst.Args = append(inst.Args, el.zonkDefault(a))
+		}
+		insts[i] = inst
 	}
-	el.pushEvidence([]core.EffectInstance{inst})
+	el.pushEvidence(insts)
 	body := el.expr(e.Body)
 	body = el.adaptFunctionValue(body, el.zonkDefault(info.BodyResult))
-	el.popEvidence([]core.EffectInstance{inst})
+	el.popEvidence(insts)
 	var state *core.HandlerState
 	if e.State != nil {
 		state = &core.HandlerState{Name: e.State.Name, Initial: el.expr(e.State.Initial), Ty: el.zonkDefault(info.StateType)}
@@ -1199,7 +1209,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	// consumes its own body exits, so only the residual row tells which of
 	// that body's exits continue outward.
 	resultControl := core.ExprControl(body)
-	if info.Effect.Abort {
+	if anyAbort {
 		resultControl = rowControl(residual, el.ck)
 	}
 	for _, clause := range clauses {
@@ -1208,7 +1218,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	if ret != nil {
 		resultControl = types.JoinControl(resultControl, core.ExprControl(ret.Body))
 	}
-	return &core.Handle{Body: body, State: state, Effect: inst, Scope: info.Scope, Scoped: info.Scoped, Clauses: clauses, Return: ret, Ty: ty, Control: resultControl}
+	return &core.Handle{Body: body, State: state, Effects: insts, Scope: info.Scope, Scoped: info.Scoped, Clauses: clauses, Return: ret, Ty: ty, Control: resultControl}
 }
 
 func hasRuntimeVars(s types.Scheme) bool {

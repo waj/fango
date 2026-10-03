@@ -297,6 +297,10 @@ together with the reference.
 
 #### MH4 Several applications in one handler, uniform discipline
 
+DONE. See [several applications](reference/effects.md#several-applications-in-one-handler).
+Until MH5, combining abort-only and resumptive applications reports
+`MIXED HANDLER DISCIPLINE`.
+
 Core `Handle` carries several effect instances with one scope and one cell;
 each clause names its instance. Lint checks clause ownership, coverage, and
 duplicates per instance. The checker builds one application per group,

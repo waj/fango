@@ -52,10 +52,20 @@ channels, panic sentinels, or continuation objects.
 
 ## Handler activations and state
 
-Every activation has a compiler ScopeID as well as its nominal effect identity.
-Core evidence names the activation or an abstract capture variable supplied by
-a caller. Nested handlers of the same effect are distinct capabilities. Scope
-identities erase at runtime; they are not liveness flags.
+Every activation has a compiler ScopeID as well as its nominal effect
+identities. One activation may handle several effect applications: Core
+`Handle` carries one `EffectInstance` per application, all naming the same
+scope capture, and each clause indexes the instance it serves. Lint checks
+coverage, duplicates, and operation types per instance. Core evidence names
+the activation or an abstract capture variable supplied by a caller. Nested
+handlers of the same effect are distinct capabilities. Scope identities erase
+at runtime; they are not liveness flags.
+
+Runtime evidence stays per application: the interpreter installs one entry per
+instance, and the Go backend emits one record, one origin, and, for aborts, one
+exit target per instance. The entries of one activation share its frame, its
+outer evidence, and its state cell, and an exit is accepted by the activation
+that owns the entry it names. Clauses are found by instance and operation.
 
 A parameterized handler owns one mutable cell. Its initializer runs once before
 evidence installation. Clauses see immutable snapshots; the body does not. A

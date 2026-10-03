@@ -17,10 +17,14 @@ func (g *gen) evidenceFamily(ev core.EffectInstance, value goast.Expr, actual ty
 // The factory is recursive only as a Go value: each call builds one activation
 // view, and its Rebuild closure calls the same factory with rebased dependencies.
 // State and immutable lexical values stay captured by the factory itself.
-func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, state *handlerState) (goast.Expr, goast.Expr) {
+func (g *gen) forkableHandlerEvidence(e *core.Handle, label int, mode types.Transport, state *handlerState) (goast.Expr, goast.Expr) {
+	inst := e.Effects[label]
 	free := map[types.EffectKey]core.EffectInstance{}
 	rows := map[types.CaptureVar]bool{}
 	for _, clause := range e.Clauses {
+		if clause.Effect != label {
+			continue
+		}
 		for id, ev := range core.FreeEvidence(clause.Body) {
 			free[id] = ev
 		}
@@ -47,24 +51,29 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 		serial := g.tmp
 		g.tmp++
 		name := fmt.Sprintf("t_fixedEvidence%d", serial)
-		typ, record := g.handlerEvidence(e, mode, state)
+		typ, record := g.handlerEvidence(e, label, mode, state)
 		literal := record.(*goast.UnaryExpr).X.(*goast.CompositeLit)
 		operations := map[string]*goast.FuncLit{}
-		for i, clause := range e.Clauses {
+		slot := 0
+		for _, clause := range e.Clauses {
+			if clause.Effect != label {
+				continue
+			}
 			count := 0
 			core.Inspect(clause.Body, func(core.Expr) { count++ })
 			if len(clause.LocalVars) == 0 && count <= 16 {
-				field := literal.Elts[i].(*goast.KeyValueExpr)
+				field := literal.Elts[slot].(*goast.KeyValueExpr)
 				operations[field.Key.(*goast.Ident).Name] = field.Value.(*goast.FuncLit)
 			}
+			slot++
 		}
 		if g.fixedOperations == nil {
-			g.fixedOperations = map[*core.Handle]map[string]*goast.FuncLit{}
+			g.fixedOperations = map[activationLabel]map[string]*goast.FuncLit{}
 		}
-		g.fixedOperations[e] = operations
-		literal.Elts = append(literal.Elts, &goast.KeyValueExpr{Key: ident("Origin"), Value: g.evidenceOrigin(e.Effect)})
+		g.fixedOperations[activationLabel{e, label}] = operations
+		literal.Elts = append(literal.Elts, &goast.KeyValueExpr{Key: ident("Origin"), Value: g.evidenceOrigin(inst)})
 		stmts := []goast.Stmt{
-			varDeclStmt(name, typ, g.completeEvidence(e.Effect, record, mode)),
+			varDeclStmt(name, typ, g.completeEvidence(inst, record, mode)),
 			&goast.AssignStmt{Lhs: []goast.Expr{&goast.SelectorExpr{X: selector(name, "Origin"), Sel: ident("Fixed")}}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{selector(name, "Binding")}},
 		}
 		if state != nil {
@@ -107,7 +116,7 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 		forkArgs = append(forkArgs, callExpr(selector(fork, "Value"), ident(name)))
 		restoreRows = append(restoreRows, g.pushRow(id, ident(name)))
 	}
-	st, record := g.handlerEvidence(e, mode, state)
+	st, record := g.handlerEvidence(e, label, mode, state)
 	for _, restore := range restoreRows {
 		restore()
 	}
@@ -118,10 +127,10 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 	literal := record.(*goast.UnaryExpr).X.(*goast.CompositeLit)
 	literal.Elts = append(literal.Elts, &goast.KeyValueExpr{Key: ident("Origin"), Value: ident(origin)})
 	originType := &goast.StarExpr{X: selector("fangort", "EvidenceOrigin")}
-	originValue := g.evidenceOrigin(e.Effect)
+	originValue := g.evidenceOrigin(inst)
 	rebuild := funcLitParams([]paramSpec{{name: fork, typ: &goast.StarExpr{X: selector("fangort", "EvidenceFork")}}}, selector("fangort", "EvidenceFamily"), []goast.Stmt{
 		varDeclStmt(forked, st, callExpr(ident(builder), forkArgs...)),
-		returnStmt(g.evidenceFamily(e.Effect, ident(forked), mode)),
+		returnStmt(g.evidenceFamily(inst, ident(forked), mode)),
 	})
 	// Publishing the activation publishes its own cell and, transitively,
 	// every captured dependency; a rebuilt view's parameters name the forked
@@ -138,7 +147,7 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 	}
 	factory := funcLitParams(params, st, []goast.Stmt{
 		varDeclStmt(origin, originType, originValue),
-		varDeclStmt(result, st, g.completeEvidence(e.Effect, record, mode)),
+		varDeclStmt(result, st, g.completeEvidence(inst, record, mode)),
 		&goast.AssignStmt{Lhs: []goast.Expr{selector(origin, "Rebuild")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{rebuild}},
 		&goast.AssignStmt{Lhs: []goast.Expr{selector(origin, "Share")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{&goast.FuncLit{Type: &goast.FuncType{Params: &goast.FieldList{}}, Body: &goast.BlockStmt{List: shareBody}}}},
 		returnStmt(ident(result)),

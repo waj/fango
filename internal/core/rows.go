@@ -148,7 +148,9 @@ func CheckRowEvidence(p *Prog) []error {
 				return false
 			case *Handle:
 				inner := maps.Clone(effects)
-				inner[e.Effect.Key()] = e.Effect
+				for _, ev := range e.Effects {
+					inner[ev.Key()] = ev
+				}
 				visit(e.Body, rows, inner, where)
 				for _, clause := range e.Clauses {
 					visit(clause.Body, rows, effects, where)

@@ -99,9 +99,13 @@ func (g *gen) callbackMinimum(lam *core.Lambda) types.Transport {
 			case *core.Perform:
 				check(e.Effect)
 			case *core.Handle:
-				bound[e.Effect.Unique]++
+				for _, ev := range e.Effects {
+					bound[ev.Unique]++
+				}
 				visit(e.Body)
-				bound[e.Effect.Unique]--
+				for _, ev := range e.Effects {
+					bound[ev.Unique]--
+				}
 				for _, clause := range e.Clauses {
 					visit(clause.Body)
 				}

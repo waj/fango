@@ -333,14 +333,14 @@ type directOperation struct {
 	fixed *goast.FuncLit
 }
 
-func (g *gen) recordDirectActivation(name string, e *core.Handle) {
+func (g *gen) recordDirectActivation(name string, e *core.Handle, label int) {
 	operations := map[string]directOperation{}
 	for _, c := range e.Clauses {
-		if len(c.LocalVars) > 0 || c.Op.Abort || c.Op.Native != nil {
+		if c.Effect != label || len(c.LocalVars) > 0 || c.Op.Abort || c.Op.Native != nil {
 			continue
 		}
 		slot := "Op_" + linkName(c.Op.Name)
-		operations[slot] = directOperation{void: g.isUnit(c.Op.ResultType), fixed: g.fixedOperations[e][slot]}
+		operations[slot] = directOperation{void: g.isUnit(c.Op.ResultType), fixed: g.fixedOperations[activationLabel{e, label}][slot]}
 	}
 	if g.directActivations == nil {
 		g.directActivations = map[string]map[string]directOperation{}

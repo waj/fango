@@ -164,7 +164,11 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(seq %s %s %s)", pr.Type(e.Ty), dumpExpr(e.First, pr), dumpExpr(e.Then, pr))
 	case *Handle:
 		var b strings.Builder
-		fmt.Fprintf(&b, "(handle %s %s", dumpEffect(e.Effect, pr), dumpExpr(e.Body, pr))
+		effects := make([]string, len(e.Effects))
+		for i, ev := range e.Effects {
+			effects[i] = dumpEffect(ev, pr)
+		}
+		fmt.Fprintf(&b, "(handle %s %s", strings.Join(effects, " "), dumpExpr(e.Body, pr))
 		if e.State != nil {
 			fmt.Fprintf(&b, " (state %s %s %s)", e.State.Name, pr.Type(e.State.Ty), dumpExpr(e.State.Initial, pr))
 		}
@@ -172,7 +176,11 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			if c.SuppressedParam != "" {
 				fmt.Fprintf(&b, " (suppressed %s %s)", c.SuppressedParam, pr.Type(c.SuppressedType))
 			}
-			fmt.Fprintf(&b, " (%s (%s) %s)", c.Op.Name, strings.Join(c.Params, " "), dumpExpr(c.Body, pr))
+			label := ""
+			if len(e.Effects) > 1 {
+				label = fmt.Sprintf("%d/", c.Effect)
+			}
+			fmt.Fprintf(&b, " (%s%s (%s) %s)", label, c.Op.Name, strings.Join(c.Params, " "), dumpExpr(c.Body, pr))
 		}
 		if e.Return != nil {
 			fmt.Fprintf(&b, " (return %s %s)", e.Return.Param, dumpExpr(e.Return.Body, pr))

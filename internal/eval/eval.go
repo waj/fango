@@ -253,6 +253,7 @@ type evidence struct {
 	rowEffect string
 	rowArgs   []*fangort.TypeDescriptor
 	handler   *core.Handle
+	label     int // index into handler.Effects: the application this entry serves
 	frame     *Frame
 	outer     map[types.EffectKey]*evidence
 	state     *fangort.HandlerState[Value]
@@ -804,13 +805,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			if e.Op.Abort {
 				return nil, fmt.Errorf("eval: abort-only operation `%s` reached Perform", e.Op.Name)
 			}
-			var clause *core.HandlerClause
-			for i := range ev.handler.Clauses {
-				if ev.handler.Clauses[i].Op.Name == e.Op.Name {
-					clause = &ev.handler.Clauses[i]
-					break
-				}
-			}
+			clause := ev.clause(e.Op.Name)
 			if clause == nil {
 				return nil, fmt.Errorf("eval: handler missing operation `%s`", e.Op.Name)
 			}
@@ -933,37 +928,45 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return state, nil
 			}
 		}
+		// One activation serves every application of the handler: the
+		// entries share the frame, the outer evidence, and the state cell,
+		// and differ only in the application they answer.
 		outer := cloneEvidence(in.evidence)
-		in.evidence[e.Effect.Key()] = &evidence{handler: e, frame: fr, outer: outer, state: fangort.NewHandlerState(state)}
-		installed := in.evidence[e.Effect.Key()]
-		for _, arg := range e.Effect.Args {
-			descriptor, err := in.typeDescriptor(arg, fr)
-			if err != nil {
-				in.evidence = outer
-				return nil, err
+		cell := fangort.NewHandlerState(state)
+		installed := make([]*evidence, len(e.Effects))
+		for i, inst := range e.Effects {
+			entry := &evidence{handler: e, label: i, frame: fr, outer: outer, state: cell}
+			for _, arg := range inst.Args {
+				descriptor, err := in.typeDescriptor(arg, fr)
+				if err != nil {
+					in.evidence = outer
+					return nil, err
+				}
+				entry.typeArgs = append(entry.typeArgs, descriptor)
 			}
-			installed.typeArgs = append(installed.typeArgs, descriptor)
+			installEvidenceOrigin(entry)
+			in.evidence[inst.Key()] = entry
+			installed[i] = entry
 		}
-		installEvidenceOrigin(installed)
 		v, err := in.eval(e.Body, fr)
 		in.evidence = outer
 		if err != nil {
 			return nil, err
 		}
 		if exit, ok := asExit(v); ok {
-			if exit.Target != installed {
-				return v, nil
-			}
-			var clause *core.HandlerClause
-			for i := range e.Clauses {
-				// By name, as an operation finds its clause: a prompt level's
-				// input reaches the worker in a payload of its own, so its
-				// operations are not the handler's pointers.
-				if e.Clauses[i].Op.Name == exit.Op.Name {
-					clause = &e.Clauses[i]
-					break
+			var target *evidence
+			for _, entry := range installed {
+				if exit.Target == entry {
+					target = entry
 				}
 			}
+			if target == nil {
+				return v, nil
+			}
+			// By name, as an operation finds its clause: a prompt level's
+			// input reaches the worker in a payload of its own, so its
+			// operations are not the handler's pointers.
+			clause := target.clause(exit.Op.Name)
 			if clause == nil || !clause.Op.Abort {
 				return nil, fmt.Errorf("eval: abort target missing clause `%s`", exit.Op.Name)
 			}
@@ -972,21 +975,21 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				vars[clause.SuppressedParam] = failureList(snapshotFailure(exit).Suppressed())
 			}
 			if e.State != nil {
-				vars[e.State.Name] = installed.state.Snapshot()
+				vars[e.State.Name] = cell.Snapshot()
 			}
 			for i, p := range clause.Params {
 				if p != "_" && p != "()" {
 					vars[p] = exit.Payload[i]
 				}
 			}
-			return in.eval(clause.Body, &Frame{parent: installed.frame, vars: vars})
+			return in.eval(clause.Body, &Frame{parent: target.frame, vars: vars})
 		}
 		if e.Return == nil {
 			return v, nil
 		}
 		vars := map[string]Value{}
 		if e.State != nil {
-			vars[e.State.Name] = installed.state.Snapshot()
+			vars[e.State.Name] = cell.Snapshot()
 		}
 		if e.Return.Param != "_" && e.Return.Param != "()" {
 			vars[e.Return.Param] = v
@@ -1488,3 +1491,19 @@ const (
 	listNilIndex  = 0
 	listConsIndex = 1
 )
+
+// clause finds the handler clause this evidence entry's application has for
+// an operation, by name: a prompt level's input reaches the worker in a
+// payload of its own, so its operations are not the handler's pointers.
+func (ev *evidence) clause(op string) *core.HandlerClause {
+	for i := range ev.handler.Clauses {
+		c := &ev.handler.Clauses[i]
+		if c.Effect == ev.label && c.Op.Name == op {
+			return c
+		}
+	}
+	return nil
+}
+
+// instance is the effect application this evidence entry serves.
+func (ev *evidence) instance() core.EffectInstance { return ev.handler.Effects[ev.label] }

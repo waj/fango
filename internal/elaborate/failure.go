@@ -56,7 +56,7 @@ func attemptReportDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	body := &core.App{CalleeKind: core.Value, Callee: ref("_action", action), Args: []core.Expr{&core.UnitLit{Ty: ck.B.Unit}}, EvidenceArgs: []core.EffectInstance{ev}, Ty: action.Ret, Control: types.FunctionControl(action)}
 	control := core.ArrowControl(ty, 1)
 	return core.Def{Name: name, Owner: symbolOwner(name), Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_action"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture()}, Control: control,
-		Body: &core.Handle{Body: body, Effect: ev, Scope: scope, Ty: result, Control: control,
+		Body: &core.Handle{Body: body, Effects: []core.EffectInstance{ev}, Scope: scope, Ty: result, Control: control,
 			Clauses: []core.HandlerClause{{Op: fail.Ops[0], Params: []string{"_primary"}, ParamTypes: []types.Type{fields[0]}, SuppressedParam: "_suppressed", SuppressedType: fields[1], ResultType: action.Ret, Body: ctor(resultADT, errIndex, resultTy, report)}},
 			Return:  &core.ReturnClause{Param: "_value", Body: ctor(resultADT, okIndex, resultTy, ref("_value", action.Ret))}}}
 }
@@ -95,7 +95,7 @@ func PromptOutcome(e core.Expr, row types.Row, fails []types.Type, ck *infer.Che
 		shown := Represent(&core.VarRef{Name: "_failure", Local: true, Ty: arg}, ck, owner)
 		clause := core.HandlerClause{Op: fail.Ops[0], Params: []string{"_failure"}, ParamTypes: []types.Type{arg}, ResultType: str,
 			Body: concat(lit(PromptFailure), shown, lit(" : "+types.Show(arg)))}
-		body = &core.Handle{Body: body, Effect: ev, Scope: scope, Ty: str, Control: rowControl(remaining, ck), Clauses: []core.HandlerClause{clause}}
+		body = &core.Handle{Body: body, Effects: []core.EffectInstance{ev}, Scope: scope, Ty: str, Control: rowControl(remaining, ck), Clauses: []core.HandlerClause{clause}}
 	}
 	return body
 }

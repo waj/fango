@@ -1,0 +1,30 @@
+import State exposing (State, get, put)
+
+type Pair = { number : Int, label : String } deriving (Show)
+
+-- Two applications of a multi-operation effect need a signature per
+-- operation and application. Both run against one cell.
+both action =
+    handle action() with cell = Pair { number = 1, label = "a" } on
+        get : () -> Int
+        get () -> resume cell.number with cell
+        put : Int -> ()
+        put n -> resume () with { cell | number = n }
+
+        get : () -> String
+        get () -> resume cell.label with cell
+        put : String -> ()
+        put s -> resume () with { cell | label = s }
+
+        return value -> (value, cell)
+
+-- Inside the subject both applications are in scope, so a bare `get()`
+-- would be ambiguous; typed helpers name the one they mean.
+getNumber : () ->{State Int} Int
+getNumber() = get()
+
+getLabel : () ->{State String} String
+getLabel() = get()
+
+main() =
+    print (both { put (getNumber() + 1); put (getLabel() ++ "b"); put (getNumber() + 1); getLabel() ++ "!" })

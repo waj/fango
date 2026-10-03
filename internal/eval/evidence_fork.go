@@ -7,13 +7,19 @@ import (
 )
 
 func installEvidenceOrigin(ev *evidence) {
-	ev.origin = &fangort.EvidenceOrigin{Name: ev.handler.Effect.Name, Arguments: ev.typeArgs}
-	if len(ev.handler.Clauses) > 0 && ev.handler.Clauses[0].Op.Abort {
-		return
-	}
+	ev.origin = &fangort.EvidenceOrigin{Name: ev.instance().Name, Arguments: ev.typeArgs}
+	// Only this entry's application matters here: an abort application has
+	// no rebuild path, and a resumptive one republishes the dependencies of
+	// its own clauses. The cell is shared, so publishing it once is enough.
 	deps := map[types.EffectKey]core.EffectInstance{}
 	rows := map[types.CaptureVar]bool{}
 	for _, clause := range ev.handler.Clauses {
+		if clause.Effect != ev.label {
+			continue
+		}
+		if clause.Op.Abort {
+			return
+		}
 		for id, dependency := range core.FreeEvidence(clause.Body) {
 			deps[id] = dependency
 		}

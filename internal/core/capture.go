@@ -38,7 +38,9 @@ func SubstituteCaptureVars(e Expr, m map[types.CaptureVar]types.CaptureSet, cont
 			sub(&x.Effect)
 
 		case *Handle:
-			sub(&x.Effect)
+			for i := range x.Effects {
+				sub(&x.Effects[i])
+			}
 		case *App:
 			for i := range x.EvidenceArgs {
 				sub(&x.EvidenceArgs[i])

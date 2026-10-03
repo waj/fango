@@ -182,7 +182,10 @@ func (r rewriter) expr(e Expr) Expr {
 	case *Handle:
 		n := *e
 		n.Ty = r.typ(e.Ty)
-		n.Effect = r.effect(e.Effect)
+		n.Effects = make([]EffectInstance, len(e.Effects))
+		for i, ev := range e.Effects {
+			n.Effects[i] = r.effect(ev)
+		}
 		n.Body = r.expr(e.Body)
 		if e.State != nil {
 			n.State = &HandlerState{Name: e.State.Name, Initial: r.expr(e.State.Initial), Ty: r.typ(e.State.Ty)}

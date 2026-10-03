@@ -1,0 +1,43 @@
+import Result exposing (Result(..))
+
+effect Fail error
+    abort fail : error -> value
+
+type ParseError = ParseError Int
+type IoError = IoError String
+
+-- One handler covers both `Fail` applications. Each abort unwinds to the
+-- clause of its own application; the shared `return` runs once on success.
+load : (() ->{Fail ParseError, Fail IoError | e} a) ->{e} Result String a
+load action =
+    handle action() on
+        fail : ParseError -> a
+        fail (ParseError line) -> Err ("bad syntax at line " ++ show line)
+
+        fail : IoError -> a
+        fail (IoError reason) -> Err ("cannot read: " ++ reason)
+
+        return config -> Ok config
+
+-- An abort raised inside a clause propagates to an enclosing handler, never
+-- to the sibling application of the same activation.
+escalate : (() ->{Fail ParseError, Fail IoError | e} a) ->{Fail String | e} a
+escalate action =
+    handle action() on
+        fail : ParseError -> a
+        fail (ParseError line) -> fail ("parse " ++ show line)
+        fail : IoError -> a
+        fail (IoError reason) -> fail ("io " ++ reason)
+
+catchText : (() ->{Fail String | e} a) ->{e} String
+catchText action =
+    handle action() on
+        fail message -> "escalated: " ++ message
+        return _ -> "finished"
+
+main() =
+    print (load { 42 })
+    print (load { if True then fail (ParseError 7) else 0 })
+    print (load { if True then fail (IoError "disk") else 0 })
+    print (catchText { load { escalate { if True then fail (IoError "net") else 0 } } })
+    print (catchText { load { escalate { 1 } } })

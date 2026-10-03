@@ -171,7 +171,9 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[t
 			return false
 		case *core.Handle:
 			inner := maps.Clone(evidence)
-			inner[e.Effect.Key()] = e.Effect
+			for _, ev := range e.Effects {
+				inner[ev.Key()] = ev
+			}
 			bindExpressionRows(e.Body, current, inner, ck)
 			for _, clause := range e.Clauses {
 				bindExpressionRows(clause.Body, current, evidence, ck)

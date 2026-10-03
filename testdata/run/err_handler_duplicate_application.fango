@@ -1,0 +1,12 @@
+effect Fail error
+    abort fail : error -> value
+
+-- Two signed groups naming the same application are a duplicate clause.
+attempt action =
+    handle action() on
+        fail : String -> a
+        fail message -> 0
+        fail : String -> b
+        fail _ -> 1
+
+main() = print (attempt { fail "x" })

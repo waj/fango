@@ -25,9 +25,13 @@ func FreeEvidence(expr Expr) map[types.EffectKey]EffectInstance {
 				}
 				return false
 			case *Handle:
-				bound[e.Effect.Key()]++
+				for _, ev := range e.Effects {
+					bound[ev.Key()]++
+				}
 				visit(e.Body)
-				bound[e.Effect.Key()]--
+				for _, ev := range e.Effects {
+					bound[ev.Key()]--
+				}
 				for _, clause := range e.Clauses {
 					visit(clause.Body)
 				}

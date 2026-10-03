@@ -15,9 +15,9 @@ func resumeFixture(body func(*types.Builtins) Expr) (*Prog, *types.Builtins) {
 		ParamTypes: []types.Type{b.Unit}, ResultType: b.Int}
 	eff.Ops = []*types.EffectOp{op}
 	h := &Handle{
-		Body:   &IntLit{Val: 0, Ty: b.Int},
-		Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(1)},
-		Scope:  1,
+		Body:    &IntLit{Val: 0, Ty: b.Int},
+		Effects: []EffectInstance{EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(1)}},
+		Scope:   1,
 		Clauses: []HandlerClause{{Op: op, ResumeID: 1, Params: []string{"()"},
 			ParamTypes: []types.Type{b.Unit}, ResultType: b.Int, Body: body(b)}},
 		Ty: b.Int,
@@ -84,7 +84,7 @@ func TestLintChecksExitControlContractAndDescriptor(t *testing.T) {
 	ev := EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(1), Control: types.Control{Transport: types.Exit}}
 	exit := &ControlExit{Effect: ev, Op: op, Payload: []Expr{&IntLit{Val: 7, Ty: b.Int}}, Ty: b.Int}
 	h := &Handle{
-		Body: exit, Effect: ev, Scope: 1, Ty: b.Int,
+		Body: exit, Effects: []EffectInstance{ev}, Scope: 1, Ty: b.Int,
 		Clauses: []HandlerClause{{Op: op, Params: []string{"x"}, ParamTypes: []types.Type{b.Int}, ResultType: b.Int,
 			Body: &IntLit{Val: 0, Ty: b.Int}}},
 	}
@@ -168,7 +168,7 @@ func scopedCaptureFixture(capturing bool) (*Prog, *types.Builtins) {
 			Op: op, Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)},
 			Args: []Expr{&UnitLit{Ty: b.Unit}}, Ty: b.Int}}
 	}
-	h := &Handle{Body: body, Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)},
+	h := &Handle{Body: body, Effects: []EffectInstance{EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)}},
 		Scope: scope, Scoped: true, Ty: fn,
 		Clauses: []HandlerClause{{Op: op, ResumeID: 1, Params: []string{"()"}, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int,
 			Body: &ResumeTail{Owner: 1, Value: &IntLit{Val: 1, Ty: b.Int}, ClauseResult: fn}}}}
@@ -206,7 +206,7 @@ func TestCaptureSummaryPropagatesThroughWorker(t *testing.T) {
 		Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)},
 		Args:   []Expr{&UnitLit{Ty: b.Unit}}, Ty: b.Int}}
 	call := &App{CalleeKind: Worker, Callee: &VarRef{Name: "id", Ty: idTy}, Args: []Expr{callback}, Ty: fn}
-	h := &Handle{Body: call, Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)},
+	h := &Handle{Body: call, Effects: []EffectInstance{EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)}},
 		Scope: scope, Scoped: true, Ty: fn, Clauses: []HandlerClause{{Op: op, ResumeID: 1, Params: []string{"()"},
 			ParamTypes: []types.Type{b.Unit}, ResultType: b.Int,
 			Body: &ResumeTail{Owner: 1, Value: &IntLit{Val: 1, Ty: b.Int}, ClauseResult: fn}}}}
@@ -236,11 +236,11 @@ func TestLintAllowsRuntimeManagedStoredResources(t *testing.T) {
 		Args:   []Expr{&UnitLit{Ty: b.Unit}}, Ty: b.Int}}
 	storeCall := &Perform{Op: put, Effect: EffectInstance{Unique: store.Unique, Name: store.Name, Captures: types.ScopeCapture(outerScope)},
 		Args: []Expr{callback}, Ty: b.Unit}
-	inner := &Handle{Body: storeCall, Effect: EffectInstance{Unique: borrow.Unique, Name: borrow.Name, Captures: types.ScopeCapture(innerScope)},
+	inner := &Handle{Body: storeCall, Effects: []EffectInstance{EffectInstance{Unique: borrow.Unique, Name: borrow.Name, Captures: types.ScopeCapture(innerScope)}},
 		Scope: innerScope, Scoped: true, Ty: b.Unit, Clauses: []HandlerClause{{Op: read, ResumeID: 1, Params: []string{"()"},
 			ParamTypes: []types.Type{b.Unit}, ResultType: b.Int,
 			Body: &ResumeTail{Owner: 1, Value: &IntLit{Val: 1, Ty: b.Int}, ClauseResult: b.Unit}}}}
-	outer := &Handle{Body: inner, Effect: EffectInstance{Unique: store.Unique, Name: store.Name, Captures: types.ScopeCapture(outerScope)},
+	outer := &Handle{Body: inner, Effects: []EffectInstance{EffectInstance{Unique: store.Unique, Name: store.Name, Captures: types.ScopeCapture(outerScope)}},
 		Scope: outerScope, Ty: b.Unit, Clauses: []HandlerClause{{Op: put, ResumeID: 2, Params: []string{"f"},
 			ParamTypes: []types.Type{fn}, ResultType: b.Unit,
 			Body: &ResumeTail{Owner: 2, Value: &UnitLit{Ty: b.Unit}, ClauseResult: b.Unit}}}}
@@ -341,5 +341,31 @@ func TestCleanupScopeResultRetainsItsResource(t *testing.T) {
 	}
 	if len(def.ResultCaptures.Vars) == 0 {
 		t.Fatalf("result captures = %v, want the callback captures retained", def.ResultCaptures)
+	}
+}
+
+func TestLintChecksHandlerApplications(t *testing.T) {
+	valid := func(b *types.Builtins) Expr {
+		return &ResumeTail{Owner: 1, Value: &IntLit{Val: 1, Ty: b.Int}, ClauseResult: b.Int}
+	}
+	p, b := resumeFixture(valid)
+	h := p.Defs[0].Body.(*Handle)
+	if got := lintText(p, b); got != "" {
+		t.Fatalf("Lint rejected valid handler:\n%s", got)
+	}
+
+	// A clause must name one of the activation's applications.
+	h.Clauses[0].Effect = 1
+	if got := lintText(p, b); !strings.Contains(got, "names no application") {
+		t.Fatalf("Lint errors = %q, want clause application error", got)
+	}
+	h.Clauses[0].Effect = 0
+
+	// Two instances of one activation must be distinct applications, and
+	// each needs its own clauses.
+	h.Effects = append(h.Effects, h.Effects[0])
+	got := lintText(p, b)
+	if !strings.Contains(got, "twice") || !strings.Contains(got, "missing a clause") {
+		t.Fatalf("Lint errors = %q, want duplicate application and missing clause errors", got)
 	}
 }
