@@ -1,0 +1,6 @@
+(module
+  (effect Fail (params error) (abort-op fail (-> error value)))
+  (effect Clock (params mode) (op tick (-> () Int)))
+  (def load (params path) (handle (app (var parse) (var path)) (clause fail (signature (-> ParseError a)) (patterns (pctor ParseError (pvar line))) (app (ctor Err) (var line))) (return config (app (ctor Ok) (var config)))))
+  (def simulated (params action) (handle (app (var action) (unit)) (clause tick (signature (-> () (effects (Clock Simulation)) Int)) (params ()) (app (resume) (int 0)))))
+  (def qualified (params action) (handle (app (var action) (unit)) (clause-group Fail.fail (signature (-> String a)) (equation (patterns (pstring "")) (int 0)) (equation (patterns _) (int 1))) (clause tick (signature (-> () (effects (Clock Wall)) Int)) (params ()) (app (resume) (int 1))))))

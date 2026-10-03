@@ -457,14 +457,18 @@ func DumpExpr(e Expr) string {
 			fmt.Fprintf(&b, " (state %s %s)", e.State.Name, DumpExpr(e.State.Initial))
 		}
 		for _, clause := range e.Clauses {
+			sig := ""
+			if clause.Signature != nil {
+				sig = fmt.Sprintf(" (signature %s%s)", dumpPreds(clause.Signature.Preds), DumpTypeExpr(clause.Signature.Type))
+			}
 			if len(clause.Equations) > 0 {
-				fmt.Fprintf(&b, " (clause-group %s", clause.Op)
+				fmt.Fprintf(&b, " (clause-group %s%s", clause.Op, sig)
 				for _, eq := range clause.Equations {
 					fmt.Fprintf(&b, " (equation %s %s)", dumpEquationParams(eq.Params), DumpExpr(eq.Body))
 				}
 				b.WriteString(")")
 			} else {
-				fmt.Fprintf(&b, " (clause %s", clause.Op)
+				fmt.Fprintf(&b, " (clause %s%s", clause.Op, sig)
 				if p := dumpPatternParams(clause.Params); p != "" {
 					fmt.Fprintf(&b, " %s", p)
 				}

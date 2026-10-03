@@ -1,0 +1,24 @@
+wrongOp action =
+    handle action() on
+        fail : String -> a
+        return value -> value
+
+returnSigned action =
+    handle action() on
+        return : Int
+        return value -> value
+
+twoSignatures action =
+    handle action() on
+        fail : String -> a
+        tick : () -> Int
+        tick () -> resume 0
+
+constrained action =
+    handle action() on
+        fail : Show e => e -> a
+        fail e -> e
+
+trailing action =
+    handle action() on
+        fail : String -> a

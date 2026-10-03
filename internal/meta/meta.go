@@ -296,6 +296,10 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 		n.Clauses = make([]ast.HandleClause, len(e.Clauses))
 		for i, c := range e.Clauses {
 			nc := c
+			if c.Signature != nil {
+				sig := *c.Signature
+				nc.Signature = &sig
+			}
 			nc.Params = copyPatterns(c.Params)
 			nc.Equations = copyEquations(c.Equations, rec)
 			nc.Body = rec(c.Body)
@@ -523,6 +527,11 @@ func FillSpans(e ast.Expr, sp source.Span) {
 		}
 		for i := range e.Clauses {
 			c := &e.Clauses[i]
+			fill(&c.OpSpan)
+			if c.Signature != nil {
+				fill(&c.SigSpan)
+				fill(&c.Signature.Sp)
+			}
 			for _, param := range c.Params {
 				fillPatternSpans(param, sp)
 			}

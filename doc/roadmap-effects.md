@@ -146,7 +146,8 @@ operation's own type as its effect declaration writes it, specialized to the
 application being handled. It follows the effect-block convention rather than
 the function-equation one: it describes the handled operation, not the clause
 below it, so its result is the operation's result while the clause returns the
-handler answer. Clauses retain `->`:
+handler answer. Clauses retain `->`. The single-application form is
+[implemented](reference/effects.md#operation-signatures):
 
 ```fango
 load path =
@@ -274,12 +275,16 @@ labels keep no rebuild path, preserving the runtime rejection.
 
 #### MH2 Formatter prints grouped handler clauses
 
+DONE.
+
 The formatter prints only the first row of a clause group or `return` group,
 so a handler with grouped equations falls back to verbatim and the grouped
 parse fixture is skipped by the idempotence test. Print every row, place
 comments before `return`, and cover the grouped fixture in format tests.
 
 #### MH3 Operation signatures in `on` blocks, single application
+
+DONE. See [operation signatures](reference/effects.md#operation-signatures).
 
 Parse `op : Type` lines, attach each to the group it heads, print them with a
 blank line before non-leading signatures, and tokenize them in the TextMate

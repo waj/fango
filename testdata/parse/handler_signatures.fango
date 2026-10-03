@@ -1,0 +1,32 @@
+-- An operation signature heads a clause group. It is the operation's declared
+-- type specialized to the handled application; the group's clauses follow it.
+effect Fail error
+    abort fail : error -> value
+
+effect Clock mode
+    tick : () -> Int
+
+load path =
+    handle
+        parse path
+    on
+        fail : ParseError -> a
+        fail (ParseError line) -> Err line
+
+        return config -> Ok config
+
+-- The row form selects a parameter the inputs and result never mention.
+simulated action =
+    handle action() on
+        tick : () ->{Clock Simulation} Int
+        tick () -> resume 0
+
+-- A qualified operation may carry a signature, and a signed group may hold
+-- several rows. Blank lines between groups are optional.
+qualified action =
+    handle action() on
+        Fail.fail : String -> a
+        Fail.fail "" -> 0
+        Fail.fail _ -> 1
+        tick : () ->{Clock Wall} Int
+        tick () -> resume 1

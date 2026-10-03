@@ -1,0 +1,37 @@
+import Result exposing (Result(..))
+import Fail exposing (Fail, fail)
+import State exposing (State, get, put)
+
+effect Clock mode
+    tick : () -> Int
+
+type Simulation = Simulation
+
+-- Without the signature this handler would handle any `Fail e`; the
+-- signature fixes `Fail String`, so the callback's row says so.
+attemptText action =
+    handle action() on
+        fail : String -> a
+        fail message -> Err ("failed: " ++ message)
+        return value -> Ok value
+
+-- The literal `0` is numeric-polymorphic; the signatures fix `State Int`.
+counted action =
+    handle action() with current = 0 on
+        get : () -> Int
+        get () -> resume current with current
+        put : Int -> ()
+        put next -> resume () with next
+        return value -> (value, current)
+
+-- `mode` appears in neither inputs nor result, so only the row names it.
+simulated action =
+    handle action() on
+        tick : () ->{Clock Simulation} Int
+        tick () -> resume 42
+
+main() =
+    print (counted { attemptText { if get() > 0 then fail "boom" else 1 } })
+    print (counted { put 3; attemptText { if get() > 0 then fail "boom" else 1 } })
+    print (counted { put (get() + 5); get() })
+    print (simulated { tick() + 1 })

@@ -1,0 +1,11 @@
+effect Fail error
+    abort fail : error -> value
+
+-- The signature may fix `error`, but `value` belongs to each call of `fail`.
+attempt action =
+    handle action() on
+        fail : String -> Int
+        fail message -> 0
+        return value -> 1
+
+main() = print (attempt { fail "x" })

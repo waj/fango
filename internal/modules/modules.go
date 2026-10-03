@@ -2070,6 +2070,7 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		for i := range e.Clauses {
 			c := &e.Clauses[i]
 			c.Op = r.qualified(c.Op, r.ops, "op", c.OpSpan)
+			r.typeAnn(c.Signature)
 			if len(c.Equations) > 0 {
 				for _, eq := range c.Equations {
 					ls := copySet(locals)

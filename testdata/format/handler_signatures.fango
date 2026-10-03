@@ -1,0 +1,24 @@
+-- A signature heads its group; the formatter sets each group after the first
+-- apart with one blank line and keeps comments above a signature.
+effect Fail error
+    abort fail : error -> value
+
+effect Clock mode
+    tick : () -> Int
+
+load path =
+    handle
+      parse path
+    on
+      fail : ParseError -> a
+      fail (ParseError line) ->
+          Err line
+      -- The second group.
+      fail : IoError -> a
+      fail (IoError reason) -> Err reason
+      return config -> Ok config
+
+simulated action =
+    handle action() on
+        tick : () ->{Clock Simulation} Int
+        tick () -> resume 0

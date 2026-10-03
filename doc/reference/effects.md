@@ -269,6 +269,46 @@ handler, including another handler of the same effect. A function annotation
 does not need to expose effects discharged by those enclosing handlers;
 unhandled effects in clauses must still be permitted by the annotation.
 
+## Operation signatures
+
+A clause group may be headed by the operation's signature, written as the
+effect declaration writes it and specialized to the handled application:
+
+```fango
+attemptText action =
+    handle action() on
+        fail : String -> a
+        fail message -> Err ("failed: " ++ message)
+        return value -> Ok value
+```
+
+The signature describes the handled operation, not the clause below it: its
+result is the operation's result, while the clause still returns the handler
+answer. It may fix only the declaring effect's parameters, and must fix every
+one to a closed type; here it selects `Fail String` where the clause alone
+would leave the error type open. The operation's own type variables stay
+variables and may take any name, since a type variable in a signature is
+always fresh. Instantiating one, or writing a shape the declaration does not
+have, is an `OPERATION SIGNATURE MISMATCH`; leaving a parameter open is an
+`INCOMPLETE OPERATION SIGNATURE`.
+
+The effect row is optional. When written, it belongs to the innermost arrow
+and is exactly the declaring effect's application, which is how a parameter
+absent from the operation's inputs and result is selected:
+
+```fango
+simulated action =
+    handle action() on
+        tick : () ->{Clock Simulation} Int
+        tick () -> resume 42
+```
+
+That row identifies the handled application; it does not describe the
+effects the clause performs. A signature must be followed directly by a
+clause for the same operation, has no class context, and `return` takes
+none. A qualified operation may carry a signature. The formatter sets each
+signed group after the first apart with one blank line.
+
 ## Stateful handlers
 
 A parameterized handler inserts `with snapshot = initial` between its subject

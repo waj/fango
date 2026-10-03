@@ -137,6 +137,16 @@ async function main() {
     assert(!handlerScopeAt(handler.indexOf("state")).some(scope => scope.startsWith("keyword.")));
     assert(handlerScopeAt(handler.lastIndexOf("on")).includes("keyword.control.fango"));
   }
+  // An operation signature heads a handler clause group; it reads like an
+  // effect declaration line, and a qualified operation may carry one.
+  for (const line of ["        fail : ParseError -> a", "        Fail.fail : IoError -> a", "        tick : () ->{Clock Simulation} Int"]) {
+    const tokens = grammar.tokenizeLine(line).tokens;
+    const scopeAt = index => tokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+    const head = line.indexOf(line.trimStart()[0]);
+    assert(scopeAt(head).includes("entity.name.function.fango"));
+    assert(scopeAt(line.indexOf(":")).includes("keyword.operator.type-annotation.fango"));
+    assert(scopeAt(line.indexOf("->") + 1).includes("keyword.operator.arrow.fango") || scopeAt(line.indexOf("->")).some(s => s.startsWith("keyword.operator")));
+  }
   const ownLine = grammar.tokenizeLine('    on').tokens;
   assert(ownLine.find(t => t.startIndex <= 4 && t.endIndex > 4).scopes.includes("keyword.control.fango"));
   const binding = grammar.tokenizeLine('    with x = 1').tokens;

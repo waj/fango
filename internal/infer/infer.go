@@ -2044,6 +2044,15 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 				}
 			}
 		}
+		if cl.Signature != nil {
+			// The signature names the handled application outright; the
+			// clauses and subject must agree with it.
+			for j, a := range g.operationSignature(cl, op) {
+				if j < len(label.Args) {
+					g.cs = append(g.cs, Constraint{Left: a, Right: label.Args[j], Span: cl.SigSpan, Why: Why{Kind: WhyEffectMismatch}})
+				}
+			}
+		}
 		if len(cl.Params) != op.Arity {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "HANDLER ARITY", "The operation `%s` takes %d argument(s), but this clause has %d.", op.Name, op.Arity, len(cl.Params)))
 		}

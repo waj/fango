@@ -1,0 +1,29 @@
+effect Fail error
+    abort fail : error -> value
+
+effect Clock mode
+    tick : () -> Int
+
+type Simulation = Simulation
+type Outcome a = Failed String | Done a
+
+-- A signature fixes the handled application where the clauses alone would
+-- leave it polymorphic, and the subject's row follows it.
+attemptText action =
+    handle action() on
+        fail : String -> a
+        fail message -> Failed message
+        return value -> Done value
+
+-- The row form names a parameter the inputs and result never mention.
+simulated action =
+    handle action() on
+        tick : () ->{Clock Simulation} Int
+        tick () -> resume 42
+
+-- A signature may use any names for the operation's own variables.
+anyName action =
+    handle action() on
+        fail : Int -> whatever
+        fail code -> code
+        return _ -> 0

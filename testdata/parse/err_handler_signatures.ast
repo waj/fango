@@ -1,0 +1,36 @@
+(module)
+-- errors --
+-- SYNTAX PROBLEM ----------------- err_handler_signatures.fango
+
+The signature for `fail` must be followed by a clause for `fail`, not `return`.
+
+3|         fail : String -> a
+           ^^^^^^^^^^^^^^^^^^
+
+-- SYNTAX PROBLEM ----------------- err_handler_signatures.fango
+
+A `return` clause has no signature: it matches the handled result.
+
+8|         return : Int
+           ^^^^^^
+
+-- SYNTAX PROBLEM ----------------- err_handler_signatures.fango
+
+The signature for `fail` must be followed by a clause for `fail`, not `tick`.
+
+13|         fail : String -> a
+            ^^^^^^^^^^^^^^^^^^
+
+-- SYNTAX PROBLEM ----------------- err_handler_signatures.fango
+
+An operation signature has no class context: operation-local constraints are not supported.
+
+19|         fail : Show e => e -> a
+                   ^^^^^^
+
+-- UNFINISHED PROGRAM ------------- err_handler_signatures.fango
+
+I expect a clause for `fail` after its signature.
+
+24|         fail : String -> a
+                             ^

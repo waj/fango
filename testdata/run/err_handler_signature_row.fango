@@ -1,0 +1,16 @@
+effect Clock mode
+    tick : () -> Int
+
+effect Other
+    other : () -> ()
+
+type Simulation = Simulation
+
+-- The row of a signature identifies the handled application; it cannot
+-- describe what the clause performs.
+simulated action =
+    handle action() on
+        tick : () ->{Clock Simulation, Other} Int
+        tick () -> resume 0
+
+main() = print (simulated { tick() })

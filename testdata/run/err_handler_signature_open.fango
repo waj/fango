@@ -1,0 +1,11 @@
+effect Fail error
+    abort fail : error -> value
+
+-- A variable in a signature is fresh, so `e` names no application.
+attempt action =
+    handle action() on
+        fail : e -> a
+        fail _ -> 0
+        return _ -> 1
+
+main() = print (attempt { fail "x" })

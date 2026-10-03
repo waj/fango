@@ -237,7 +237,7 @@
       }
     },
     "annotation": {
-      "begin": "^(\\s*)([a-z][A-Za-z0-9_]*)\\s*(:)",
+      "begin": "^(\\s*)((?:[A-Z][A-Za-z0-9_]*\\.)*[a-z][A-Za-z0-9_]*)\\s*(:)",
       "end": "$",
       "beginCaptures": {
         "2": { "name": "entity.name.function.fango" },

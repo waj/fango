@@ -330,7 +330,19 @@ func (p *printer) renderHandle(h *ast.Handle, ind int) bool {
 	}
 
 	clauseInd := ind + Indent
-	for _, cl := range h.Clauses {
+	for i, cl := range h.Clauses {
+		if cl.Signature != nil {
+			// A signature heads a clause group; a blank line sets each
+			// group after the first apart.
+			if i > 0 {
+				p.blank()
+			}
+			if !p.placeBefore(cl.SigSpan.Start, clauseInd) {
+				return false
+			}
+			p.start(clauseInd)
+			p.emit(cl.Op + " : " + annotationText(cl.Signature))
+		}
 		rows := cl.Equations
 		if len(rows) == 0 {
 			rows = []ast.Equation{{Params: cl.Params, Body: cl.Body, NameSpan: cl.OpSpan}}

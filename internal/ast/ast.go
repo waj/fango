@@ -347,8 +347,13 @@ type HandlerState struct {
 // HandleClause is one operation clause, `print s -> …`. Params bind the
 // operation's arguments; `resume` is in scope in the body.
 type HandleClause struct {
-	Op        string
-	OpSpan    source.Span
+	Op     string
+	OpSpan source.Span
+	// Signature is the optional `op : Type` line heading this clause group:
+	// the operation's declared type specialized to the handled application.
+	// SigSpan runs from that line's operation name through its type.
+	Signature *TypeAnn
+	SigSpan   source.Span
 	Params    []Pattern
 	Equations []Equation
 	Body      Expr

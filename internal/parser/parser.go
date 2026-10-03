@@ -2026,6 +2026,11 @@ func (p *parser) parseHandle() ast.Expr {
 	defer p.lay.pop()
 	result := &ast.Handle{Body: body, State: state, Sp: h.Span}
 	lastClause := ""
+	// An operation signature line, `op : Type`, heads the clause group that
+	// follows it. It is held here until that group's first clause arrives.
+	var pendingSig *ast.TypeAnn
+	var pendingSigOp string
+	var pendingSigSpan source.Span
 	for {
 		p.stmtStart = p.pos
 		op := p.peekInExpr()
@@ -2045,6 +2050,42 @@ func (p *parser) parseHandle() ast.Expr {
 		} else {
 			p.next()
 			opName, opSpan = op.Text, op.Span
+		}
+		if pendingSig != nil && opName != pendingSigOp {
+			p.errorAt(pendingSigSpan, "SYNTAX PROBLEM", "The signature for `"+pendingSigOp+"` must be followed by a clause for `"+pendingSigOp+"`, not `"+opName+"`.")
+			return nil
+		}
+		if p.peekInExpr().Kind == token.COLON {
+			colon := p.next()
+			if opName == "return" {
+				p.errorAt(opSpan, "SYNTAX PROBLEM", "A `return` clause has no signature: it matches the handled result.")
+				return nil
+			}
+			if pendingSig != nil {
+				p.errorAt(pendingSigSpan, "SYNTAX PROBLEM", "The signature for `"+opName+"` must be followed by a clause for `"+opName+"`, not another signature.")
+				return nil
+			}
+			preds := p.parseContext()
+			te := p.parseTypeExpr()
+			if te == nil {
+				return nil
+			}
+			if len(preds) > 0 {
+				p.errorAt(preds[0].Sp, "SYNTAX PROBLEM", "An operation signature has no class context: operation-local constraints are not supported.")
+				return nil
+			}
+			pendingSig = &ast.TypeAnn{Type: te, Sp: colon.Span.Merge(te.Span())}
+			pendingSigOp, pendingSigSpan = opName, opSpan.Merge(te.Span())
+			lastClause = ""
+			if p.peek().Kind == token.EOF {
+				p.errorAt(p.prevSpan(), TitleUnexpectedEOF, "I expect a clause for `"+opName+"` after its signature.")
+				return nil
+			}
+			if !p.branchBoundaryAt(len(p.lay.stack) - 1) {
+				p.errorAt(pendingSigSpan, "SYNTAX PROBLEM", "The signature for `"+opName+"` must be followed by a clause for `"+opName+"`.")
+				return nil
+			}
+			continue
 		}
 		params := p.parseClauseParams()
 		arrow := p.peekInExpr()
@@ -2084,7 +2125,12 @@ func (p *parser) parseHandle() ast.Expr {
 					prev.Equations = append(prev.Equations, ast.Equation{Params: params, Body: clauseBody, NameSpan: opSpan})
 				}
 			} else {
-				result.Clauses = append(result.Clauses, ast.HandleClause{Op: opName, OpSpan: opSpan, Params: params, Body: clauseBody})
+				cl := ast.HandleClause{Op: opName, OpSpan: opSpan, Params: params, Body: clauseBody}
+				if pendingSig != nil {
+					cl.Signature, cl.SigSpan = pendingSig, pendingSigSpan
+					pendingSig = nil
+				}
+				result.Clauses = append(result.Clauses, cl)
 			}
 		}
 		lastClause = opName
@@ -3026,6 +3072,10 @@ func (p *parser) branchBoundaryAt(i int) bool {
 			}
 		} else {
 			q.next()
+		}
+		// An operation signature, `op : Type`, heads a clause group.
+		if c := q.peek(); c.Kind == token.COLON && c.Pos().Line == t.Pos().Line {
+			return len(q.errs) == 0
 		}
 		q.parseClauseParams()
 	}
