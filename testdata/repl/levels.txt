@@ -1,0 +1,79 @@
+Fango 0.1 — :help for commands
+> loaded State
+> loaded Bytes
+loaded Char
+loaded Failure
+loaded Fail
+loaded Iterator
+loaded Runtime.Local
+loaded Runtime.Scope
+loaded Async
+loaded File
+loaded Net
+loaded Stream
+loaded Reader
+loaded String
+loaded Encoding
+loaded Json.Field
+loaded Text.Builder
+loaded Text.Reader
+loaded Json.Pull
+loaded Url
+loaded Writer
+loaded Http
+loaded Http.Wire
+loaded Http.Server
+loaded Http.GZip
+loaded Text.Writer
+loaded Json
+loaded Http.Client
+> > > > no handler level to end
+> 1> 10 : Int
+1> () : ()
+1> 15 : Int
+1> -- UNHANDLED EFFECT ------------------------------------- <repl>
+
+This performs `Http`, and nothing at the prompt handles it. Run it inside
+a handler, or install one for the inputs that follow with `with`.
+
+1| Client.getText "http://example.com/"
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1> <value : StateResult Int ()> : StateResult Int ()
+> answer : a -> Result b Bytes
+> 1> 2> "ok" : String
+2> Unhandled Error: InvalidUrl "relative" : Error
+2> 1  with Client.stub answer
+   provides {Http}
+2  with Client.configure { c -> { c | userAgent = "levels" } }
+   provides {Http}
+2> 1> > r : Reader {local scope}
+1> reader : Reader {local scope}
+1> "hello" : String
+1> > -- NAMING ERROR ----------------------------------------- <repl>
+
+I don't know a value named `reader`.
+
+1| reader
+   ^^^^^^
+> | | pair : Int -> ((Int, Int) ->{e} a) ->{e} a
+| | skip : (() -> a) -> Int
+5 : Int
+> | | Stop : effect
+> | | | | | runStop : (() ->{Stop | e} a) ->{e} Maybe a
+> 1> a : Int
+b : Int
+2> total : Int
+2> kept : Int
+2> 12 : Int
+2> Nothing : Maybe () (left 2 levels)
+> 7 : Int
+> -- NAMING ERROR ----------------------------------------- <repl>
+
+I don't know a value named `total`.
+
+1| total
+   ^^^^^
+> 1> n : Int
+2> () : ()
+2> 
+<value : StateResult Int ()> : StateResult Int ()

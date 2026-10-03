@@ -157,3 +157,34 @@ func TestTailWriter(t *testing.T) {
 		t.Errorf("tail = %q, output = %q", got, sink.String())
 	}
 }
+
+// Ctrl-D ends the innermost handler level, and the prompt shows how many are
+// installed; with none left it leaves the session.
+func TestEditorCtrlDEndsLevels(t *testing.T) {
+	eof := func(*scriptedEditor) inputLine { return inputLine{err: io.EOF} }
+	ed, out := runScripted(t,
+		typed("import State"),
+		typed("with State.run 1"),
+		typed("with State.run 2"),
+		typed("State.get()"),
+		eof,
+		typed("State.get()"),
+		eof,
+		typed("41 + 1"),
+		eof,
+		typed("unreachable"),
+	)
+	var prompts []string
+	for _, req := range ed.requests {
+		prompts = append(prompts, req.prompt)
+	}
+	if got, want := strings.Join(prompts, ""), "> > 1> 2> 2> 1> 1> > > "; got != want {
+		t.Errorf("prompts = %q, want %q", got, want)
+	}
+	if !strings.Contains(out, "2 : Int") || !strings.Contains(out, "1 : Int") || !strings.Contains(out, "42 : ") {
+		t.Fatalf("levels through the editor (%q):\n%s", prompts, out)
+	}
+	if len(ed.lines) != 1 {
+		t.Errorf("Ctrl-D with no level installed did not leave the session")
+	}
+}

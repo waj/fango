@@ -12,6 +12,8 @@ I don't know a value named `y`.
    ^
 > commands:
   :type <expr>   show an expression's type without evaluating
+  :with          list the handler levels installed with `with`
+  :end           end the innermost handler level (also Ctrl-D)
   :help          this message
-  :quit          leave the REPL (also Ctrl-D)
+  :quit          end every level and leave the REPL
 > 

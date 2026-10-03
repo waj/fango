@@ -41,6 +41,13 @@ type Source struct {
 // Host is the interpreter session observed by a native call.
 type Host = fangort.SessionHost
 
+// LevelHost is a session that runs prompt levels in the worker: each step of
+// a level reaches it, and it answers with the next input to evaluate there,
+// or nil to end the level.
+type LevelHost interface {
+	ForwardLevel(depth int, entered bool, value any, err error) (*execcodec.Payload, []string)
+}
+
 type ExitError = fangort.ExitError
 
 type wireValue = nativewire.Value
@@ -289,6 +296,29 @@ func (e *Executor) exchange(ctx context.Context, host Host, request message, lab
 			e.reply(message{Kind: "host_reply", Data: []byte(host.WorkingDirectory())})
 		case "host_exit":
 			e.reply(message{Kind: "host_reply"})
+		case "host_level":
+			levels, ok := host.(LevelHost)
+			if !ok {
+				e.reply(message{Kind: "host_reply"})
+				continue
+			}
+			var value any
+			var stepErr error
+			if m.Error != "" {
+				stepErr = errors.New(m.Error)
+			} else if !m.Bool {
+				value, stepErr = decodeValue(m.Value)
+			}
+			payload, binders := levels.ForwardLevel(m.Code, m.Bool, value, stepErr)
+			reply := message{Kind: "host_reply", Values: binders}
+			if payload != nil {
+				data, err := execcodec.Encode(payload)
+				if err != nil {
+					reply.Error = err.Error()
+				}
+				reply.Data = data
+			}
+			e.reply(reply)
 		case "result":
 			if m.Error != "" {
 				return nil, errors.New(m.Error)

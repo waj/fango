@@ -1,0 +1,14 @@
+{-# no-prelude #-}
+module Runtime.Prompt exposing (level)
+
+{- The prompt's handler levels.
+
+A `with` typed at the prompt applies its head to a callback whose body is
+`level binders`, where `binders` packs the callback's pattern variables as
+nested pairs. The REPL's evaluator answers that call by running the prompt's
+following inputs inside the handlers around it, until the level ends; then the
+callback returns and the head finishes. A compiled program has no prompt, so
+there the call fails. -}
+
+level : a -> ()
+level = native "fangort.PromptLevel($1)"

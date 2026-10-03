@@ -231,24 +231,12 @@ func Run(functions map[string]any, installHost func(fangort.NativeHost)) {
 	defer signal.Stop(interrupts)
 	stopped := make(chan struct{})
 	defer close(stopped)
-	active := struct {
-		sync.Mutex
-		cancel      context.CancelFunc
-		interrupted bool
-	}{}
+	active := &activeContexts{}
 	go func() {
 		for {
 			select {
 			case <-interrupts:
-				active.Lock()
-				cancel, already := active.cancel, active.interrupted
-				if cancel != nil {
-					active.interrupted = true
-				}
-				active.Unlock()
-				if cancel != nil && !already {
-					cancel()
-				}
+				active.interrupt()
 			case <-stopped:
 				return
 			}
@@ -278,14 +266,9 @@ func Run(functions map[string]any, installHost func(fangort.NativeHost)) {
 			response = invoke(functions, request.Name, request.Args)
 		case "execute":
 			ctx, cancel := context.WithCancel(context.Background())
-			active.Lock()
-			active.cancel = cancel
-			active.interrupted = false
-			active.Unlock()
-			response = execute(ctx, request.Data, env, caller, host)
-			active.Lock()
-			active.cancel = nil
-			active.Unlock()
+			active.push(cancel)
+			response = execute(ctx, request.Data, env, caller, host, active)
+			active.pop()
 			cancel()
 		default:
 			panic("unknown request " + request.Kind)
@@ -296,7 +279,7 @@ func Run(functions map[string]any, installHost func(fangort.NativeHost)) {
 	}
 }
 
-func execute(ctx context.Context, data []byte, env *eval.Env, caller *directCaller, host *proxy) (result nativewire.Message) {
+func execute(ctx context.Context, data []byte, env *eval.Env, caller *directCaller, host *proxy, active *activeContexts) (result nativewire.Message) {
 	host.setExecutionContext(ctx)
 	defer host.setExecutionContext(nil)
 	result.Kind = "result"
@@ -315,6 +298,7 @@ func execute(ctx context.Context, data []byte, env *eval.Env, caller *directCall
 	}
 	ioctx := eval.NewIOContext(strings.NewReader(""), io.Discard)
 	ioctx.Natives = caller
+	ioctx.Levels = &workerLevels{host: host, active: active, outer: ctx}
 	ioctx.Args = host.Arguments()
 	ioctx.Dir = host.WorkingDirectory()
 	if payload.Force != "" {
@@ -333,4 +317,84 @@ func execute(ctx context.Context, data []byte, env *eval.Env, caller *directCall
 		result.Error = err.Error()
 	}
 	return
+}
+
+// activeContexts are the evaluations in progress, innermost last: an
+// execution, then each input of a prompt level running inside it. An
+// interrupt cancels only the innermost, so it stops the input and leaves its
+// levels running.
+type activeContexts struct {
+	sync.Mutex
+	cancels     []context.CancelFunc
+	interrupted bool
+}
+
+func (a *activeContexts) push(cancel context.CancelFunc) {
+	a.Lock()
+	a.cancels = append(a.cancels, cancel)
+	a.interrupted = false
+	a.Unlock()
+}
+
+func (a *activeContexts) pop() {
+	a.Lock()
+	a.cancels = a.cancels[:len(a.cancels)-1]
+	a.interrupted = false
+	a.Unlock()
+}
+
+func (a *activeContexts) interrupt() {
+	a.Lock()
+	var cancel context.CancelFunc
+	if n := len(a.cancels); n > 0 && !a.interrupted {
+		cancel = a.cancels[n-1]
+		a.interrupted = true
+	}
+	a.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// workerLevels runs prompt levels in the worker: each step goes to the
+// interpreter, whose reply is the level's next input.
+type workerLevels struct {
+	host   *proxy
+	active *activeContexts
+	outer  context.Context
+	// inputs holds, by depth, the cancel of the input each level is
+	// evaluating. The input that installed a level keeps running as its
+	// head, so it stays until a shallower step.
+	inputs []context.CancelFunc
+}
+
+func (w *workerLevels) LevelStep(depth int, entered bool, value eval.Value, err error) eval.LevelRequest {
+	// A step at this depth means its input finished, and any deeper level
+	// has ended with it.
+	for len(w.inputs) > depth-1 && !entered || len(w.inputs) > depth {
+		last := len(w.inputs) - 1
+		w.inputs[last]()
+		w.inputs = w.inputs[:last]
+		w.active.pop()
+	}
+	m := nativewire.Message{Kind: "host_level", Code: depth, Bool: entered}
+	if err != nil {
+		m.Error = err.Error()
+	} else if !entered {
+		m.Value = encode(reflect.ValueOf(value))
+	}
+	reply := w.host.request(m)
+	if len(reply.Data) == 0 {
+		w.host.setExecutionContext(w.outer)
+		return eval.LevelRequest{}
+	}
+	payload, decodeErr := execcodec.Decode(reply.Data)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.inputs = append(w.inputs, cancel)
+	w.active.push(cancel)
+	w.host.setExecutionContext(ctx)
+	return eval.LevelRequest{Ctx: ctx, Expr: payload.Expr, Program: payload.Program, Binders: reply.Values, Effects: payload.Effects}
 }

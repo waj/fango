@@ -1,6 +1,6 @@
 # REPL
 
-Persistent prompt scope, imports, transactions, redefinition, commands, and line editing.
+Persistent prompt scope, imports, transactions, redefinition, handler levels, commands, and line editing.
 
 [Reference index](../reference.md).
 
@@ -87,14 +87,17 @@ Unhandled Error: InvalidUrl "relative" : Error
 In a terminal the line is red, unless `NO_COLOR` is set. Any other effect the
 expression performs, such as `Http` or `State Int`, has no handler at the
 prompt; checking reports `UNHANDLED EFFECT` and nothing runs. Run such code
-inside its handler, as in `Client.run { … }`.
+inside its handler, as in `Client.run { … }`, or install the handler as a
+[level](#handler-levels).
 
 Supported commands are:
 
 ```text
 :type <expr>   show a type without evaluating
+:with          list the installed handler levels
+:end           end the innermost handler level (Ctrl-D also does)
 :help          show command help
-:quit, :q      leave the REPL (Ctrl-D also exits)
+:quit, :q      end every level and leave the REPL
 ```
 
 Ctrl-C clears a partial prompt input. During evaluation it cancels the host
@@ -108,6 +111,67 @@ compiler polling into those loops.
 
 `:reload` is not implemented; a module edited on disk after it was imported is
 not re-read in the same session.
+
+## Handler levels
+
+A [`with` item](syntax.md#with-items) typed at the prompt installs a handler
+level: the rest of the session is the item's callback, so every later input
+runs inside the head's handlers until the level ends. The prompt shows how many
+levels are installed:
+
+```text
+> import Http.Client as Client
+> with Client.run
+1> with Client.configure { c -> { c | readTimeoutMs = 2000 } }
+2> Client.getText "https://example.com/status"
+"ok" : String
+2> :end
+1> :end
+>
+```
+
+The head runs once, so what it holds lasts for the level: `with Client.run`
+keeps its connection pool across inputs, and `with State.run 0` its state. An
+input may perform what any level's callback may, besides IO and `Fail`; when
+several levels grant the same effect, one whose type arguments already agree is
+used, and otherwise the innermost. `:with` lists each level's item, the effects
+its callback may perform, and its binders.
+
+`with patterns <- head` binds the callback's parameters for the inputs that
+follow, echoing their types. A scoped runner may head a level: its scoped
+values stay usable until the level ends.
+
+```text
+> with reader <- Reader.withBytes (Bytes.fromString "hello world")
+reader : Reader {local scope}
+1> Bytes.toStringLossy (Reader.readUpTo reader 5)
+"hello" : String
+```
+
+A value definition that uses a level's binders, directly or through another
+such definition, belongs to that level and goes away with it; a name it
+replaced comes back. Other declarations are unaffected by levels, and a type,
+class, instance, or effect declaration may not use a level's binders.
+
+`:end` or Ctrl-D ends the innermost level: its callback returns, the head
+finishes, and its result prints unless it is Unit. Ctrl-D with no level left
+leaves the session; `:quit` and the end of piped input end every level first,
+innermost first. Ending a level runs the head's cleanup, such as closing
+`Client.run`'s connections.
+
+Each input handles its own failures, so a failing input leaves the levels in
+place, and Ctrl-C stops only the running input. An abort that escapes an input
+toward an installed handler ends the levels it passes through; the handler's
+result prints with how many levels ended:
+
+```text
+2> stop ()
+Nothing : Maybe () (left 2 levels)
+>
+```
+
+A head that returns without calling its callback installs nothing; its result
+prints like an expression's.
 
 ## Line editing
 

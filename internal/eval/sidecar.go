@@ -59,8 +59,10 @@ func unwrapBoundary(key string, n *types.NativeInfo, args, wire []Value) error {
 		if wrapper == nil || i >= len(args) {
 			continue
 		}
+		// By name: a prompt level keeps values across worker payloads, each
+		// decoded with constructors of its own.
 		cv, ok := args[i].(*CtorVal)
-		if !ok || cv.Ctor != wrapper || len(cv.Fields) != 1 {
+		if !ok || cv.Ctor.Name != wrapper.Name || len(cv.Fields) != 1 {
 			return fmt.Errorf("eval: native %s argument %d is not a %s value", key, i+1, types.SurfaceName(wrapper.Name))
 		}
 		wire[i] = cv.Fields[0]

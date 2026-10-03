@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/waj/fango/internal/ast"
@@ -75,6 +76,15 @@ type Session struct {
 	evalExec   atomic.Pointer[nativehost.Executor]
 	interrupts <-chan struct{}
 	color      bool
+
+	// levels are the handler levels installed with `with`, outermost first;
+	// undo records what their names replaced.
+	levels      []*level
+	levelIO     *eval.ChannelLevels
+	undo        []savedName
+	levelsReady bool
+	cancelMu    sync.Mutex
+	cancelInput context.CancelFunc
 
 	// graph holds every module the session has resolved, the bundled prelude
 	// closure included; prompt is the resolver scope prompts and imports
@@ -200,6 +210,7 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 		if executor := s.evalExec.Load(); executor != nil {
 			executor.Interrupt()
 		}
+		s.cancelCurrent()
 	}
 	signal.Notify(signals, os.Interrupt)
 	defer signal.Stop(signals)
@@ -242,6 +253,9 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 	}
 	for {
 		req := lineRequest{prompt: "> "}
+		if len(s.levels) > 0 {
+			req.prompt = fmt.Sprintf("%d> ", len(s.levels))
+		}
 		if buf.Len() > 0 {
 			req.prompt = "| "
 			// Continuation lines start at the previous line's indentation.
@@ -263,6 +277,13 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 		if err != nil && len(line) == 0 {
 			fmt.Fprintln(out)
 			flush()
+			// Ctrl-D in the editor ends one handler level; the end of
+			// piped input ends them all.
+			if ed != nil && len(s.levels) > 0 {
+				s.endLevel()
+				continue
+			}
+			s.endAll()
 			return
 		}
 		line = strings.TrimSuffix(line, "\n")
@@ -315,12 +336,19 @@ const (
 func (s *Session) command(cmd string) (quit bool) {
 	switch {
 	case cmd == ":quit" || cmd == ":q":
+		s.endAll()
 		return true
+	case cmd == ":end":
+		s.endLevel()
+	case cmd == ":with":
+		s.listLevels()
 	case cmd == ":help":
 		fmt.Fprint(s.out, `commands:
   :type <expr>   show an expression's type without evaluating
+  :with          list the handler levels installed with `+"`with`"+`
+  :end           end the innermost handler level (also Ctrl-D)
   :help          this message
-  :quit          leave the REPL (also Ctrl-D)
+  :quit          end every level and leave the REPL
 `)
 	case strings.HasPrefix(cmd, ":type "):
 		s.typeOf(strings.TrimPrefix(cmd, ":type "))
@@ -345,7 +373,9 @@ func (s *Session) parsesComplete(text string) bool {
 		return true // hopeless input: let flush render it
 	}
 	var errs []diag.Error
-	if isDecl(toks) {
+	if parser.IsWithInput(toks) {
+		_, _, _, errs = parser.ParseWithInput(toks, f)
+	} else if isDecl(toks) {
 		_, errs = parser.Parse(toks, f)
 	} else {
 		_, errs = parser.ParseExprInput(toks, f)
@@ -362,6 +392,9 @@ func (s *Session) input(text string, force bool) inputResult {
 	if len(lexErrs) > 0 {
 		diag.Render(s.out, lexErrs)
 		return inputDone
+	}
+	if parser.IsWithInput(toks) {
+		return s.levelInput(text, toks, f, force)
 	}
 	if isDecl(toks) {
 		return s.declInput(toks, f, force)
@@ -454,9 +487,19 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	}
 	// Names reach the checker canonical, exactly as a module's do: the
 	// resolver binds what this input declares and rewrites what it uses.
+	var prior savedName
+	if vd, ok := m.Decls[0].(*ast.ValueDecl); ok {
+		prior = s.snapshot(-1, vd.Name)
+	}
 	if errs := s.prompt.Decl(m.Decls[0]); len(errs) > 0 {
 		restore()
 		diag.Render(s.out, errs)
+		return inputDone
+	}
+	owner := s.owner(m.Decls[0])
+	if _, ok := m.Decls[0].(*ast.ValueDecl); !ok && owner >= 0 {
+		restore()
+		diag.Render(s.out, []diag.Error{diag.Errorf(toks[0].Span, "LEVEL NAME", "Only value definitions may use a handler level's names, since they go away\nwith the level.")})
 		return inputDone
 	}
 	if cl, ok := m.Decls[0].(*ast.ClassDecl); ok {
@@ -578,6 +621,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		diag.Render(s.out, errs)
 		return inputDone
 	}
+	s.defined(vd.Name, owner, prior)
 	if redefining {
 		s.gen++
 	}
@@ -828,35 +872,15 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	for i := range aux {
 		s.env.DefineWorker(&aux[i])
 	}
-	if s.exec != nil {
-		s.evalExec.Store(s.exec)
-	} else if bundled, bundledErr := nativehost.Bundled(); bundledErr == nil {
-		s.evalExec.Store(bundled)
-	}
-	v, err := s.evalDisplay(display)
-	s.evalExec.Store(nil)
-	if s.interrupts != nil {
-		select {
-		case <-s.interrupts:
-		default:
-		}
-	}
-	if err != nil {
-		fmt.Fprintf(s.out, "runtime error: %v\n", err)
-		return inputDone
-	}
-	outcome := v.(string)
-	if rest, failed := strings.CutPrefix(outcome, elaborate.PromptFailure); failed {
-		s.unhandled(rest)
-		return inputDone
-	}
-	fmt.Fprintf(s.out, "%s : %s\n", strings.TrimPrefix(outcome, elaborate.PromptValue), shownTy)
+	reply, _ := s.evaluate(display)
+	s.settle(reply, shownTy)
 	return inputDone
 }
 
 // promptEffects sorts the effects a prompt expression performs: IO is
 // ambient, and each Fail application is handled for this input alone, so its
-// failure prints rather than escaping. Anything else has no handler here.
+// failure prints rather than escaping. An installed level may grant others;
+// anything else has no handler here.
 func (s *Session) promptEffects(effects types.Type, at source.Span) ([]types.Type, []diag.Error) {
 	row, ok := s.ck.Sub.Apply(effects).(types.Row)
 	if !ok {
@@ -864,14 +888,40 @@ func (s *Session) promptEffects(effects types.Type, at source.Span) ([]types.Typ
 	}
 	var fails []types.Type
 	var errs []diag.Error
+	allowed := s.allowed()
 	for _, label := range row.Labels {
 		switch {
 		case label.Scoped, types.SurfaceName(label.Name) == "IO":
 		case label.Name == "Fail.Fail" && len(label.Args) == 1:
-			fails = append(fails, label.Args[0])
+			fails = append(fails, s.ck.Sub.Apply(label.Args[0]))
 		default:
+			var candidates []types.EffLabel
+			for _, granted := range allowed {
+				if granted.Unique == label.Unique && len(granted.Args) == len(label.Args) {
+					candidates = append(candidates, granted)
+				}
+			}
+			// Several levels may grant the effect. One whose arguments
+			// already agree is the one meant; otherwise the innermost, whose
+			// handler is the one that answers.
+			if len(candidates) > 1 {
+				var exact []types.EffLabel
+				for _, granted := range candidates {
+					if types.Equal(s.ck.Sub.Apply(types.Row{Labels: []types.EffLabel{granted}}), s.ck.Sub.Apply(types.Row{Labels: []types.EffLabel{label}})) {
+						exact = append(exact, granted)
+					}
+				}
+				if len(exact) > 0 {
+					candidates = exact
+				}
+			}
+			if len(candidates) > 0 {
+				errs = append(errs, s.unifyLabel(label, candidates[len(candidates)-1], at)...)
+				errs = append(errs, s.settlePreds(at)...)
+				continue
+			}
 			errs = append(errs, diag.Errorf(at, "UNHANDLED EFFECT",
-				"This performs `%s`, and nothing at the prompt handles it. Run it inside\na handler, such as the one its library provides.", strings.Trim(types.Show(types.Row{Labels: []types.EffLabel{label}}), "{}")))
+				"This performs `%s`, and nothing at the prompt handles it. Run it inside\na handler, or install one for the inputs that follow with `with`.", strings.Trim(types.Show(types.Row{Labels: []types.EffLabel{label}}), "{}")))
 		}
 	}
 	return fails, errs
@@ -886,13 +936,13 @@ func (s *Session) unhandled(text string) {
 	fmt.Fprintln(s.out, line)
 }
 
-func (s *Session) evalDisplay(display core.Expr) (value eval.Value, err error) {
+func (s *Session) evalDisplay(ctx context.Context, display core.Expr) (value eval.Value, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("%v", recovered)
 		}
 	}()
-	return eval.EvalIO(context.Background(), display, s.env, s.ioctx)
+	return eval.EvalIO(ctx, display, s.env, s.ioctx)
 }
 
 func (s *Session) activeExecutionDefs() []core.Def {

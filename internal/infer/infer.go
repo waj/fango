@@ -85,6 +85,7 @@ func (e *Env) Lookup(name string) (types.Scheme, bool) {
 
 func (e *Env) Bind(name string, s types.Scheme) { e.vars[name] = s }
 func (e *Env) Has(name string) bool             { _, ok := e.vars[name]; return ok }
+func (e *Env) Unbind(name string)               { delete(e.vars, name) }
 
 // Names returns the bound names in sorted order, so a caller that scans the
 // environment does deterministic work.

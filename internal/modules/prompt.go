@@ -64,6 +64,22 @@ func (p *Prompt) Expr(e ast.Expr) []diag.Error {
 	return p.r.errs
 }
 
+// Value reports what a prompt value name resolves to, so a prompt level can
+// put it back when its own definitions go away.
+func (p *Prompt) Value(name string) (string, bool) {
+	canonical, ok := p.r.vals[name]
+	return canonical, ok
+}
+
+// SetValue binds name to canonical, or unbinds it when ok is false.
+func (p *Prompt) SetValue(name, canonical string, ok bool) {
+	if ok {
+		p.r.vals[name] = canonical
+	} else {
+		delete(p.r.vals, name)
+	}
+}
+
 // Checkpoint returns a function restoring the scope as it is now, so a
 // prompt input that fails after resolution leaves no name behind.
 func (p *Prompt) Checkpoint() func() {

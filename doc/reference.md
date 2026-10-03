@@ -31,6 +31,7 @@ The bundled library is experimental and versioned with the compiler.
 | Http.Client | [HTTP/1.1 client](reference/library-http-client.md) |
 | Fail, Failure, State, Random, Runtime.Local | [Effect APIs](reference/library-effects.md) |
 | Runtime.Scope | [Cleanup scopes](reference/resources.md) |
+| Runtime.Prompt | [REPL handler levels](reference/repl.md#handler-levels) |
 | Async | [Tasks, handlers, cancellation, and channels](reference/library-async.md) |
 | Runtime.Native | [Native Go sidecars](reference/native.md) |
 | Json | [Streaming parsing and encoding](reference/library-json.md) |

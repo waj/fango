@@ -17,6 +17,9 @@ type Payload struct {
 	Program *core.Prog
 	Expr    core.Expr
 	Force   string
+	// Effects are what a prompt level grants its input, beyond the evidence
+	// its callback's own body needed.
+	Effects []core.EffectInstance
 }
 
 func Encode(p *Payload) ([]byte, error) { return objectcodec.Encode(p) }

@@ -18,6 +18,10 @@ const (
 	FailureArgumentCountName = "Failure.argumentCount"
 	FailureSuppressedName    = "Failure.suppressed"
 	FailAttemptReportName    = "Fail.attemptReport"
+
+	// PromptLevelName is answered by the REPL's evaluator, which runs the
+	// prompt's inputs inside the handlers around the call.
+	PromptLevelName = "Runtime.Prompt.level"
 )
 
 // RuntimeEvidenceEffect reports whether a row label needs runtime evidence.

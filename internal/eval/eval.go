@@ -126,6 +126,65 @@ type IOContext struct {
 	// Natives selects a sidecar caller for this evaluator. Nil uses the shared
 	// bundled caller lazily.
 	Natives NativeCaller
+	// Levels connects prompt levels to the REPL; nil outside the REPL.
+	Levels LevelHost
+}
+
+// LevelHost connects a prompt level to the REPL. A level is a call to
+// Runtime.Prompt.level inside a with's callback: it runs the REPL's inputs
+// with the evidence in effect at the call until the REPL ends it.
+type LevelHost interface {
+	// LevelStep reports that a level was entered, or how its last input
+	// ended, and waits for the next input. A nil Expr ends the level.
+	LevelStep(depth int, entered bool, value Value, err error) LevelRequest
+}
+
+// ChannelLevels is the REPL's side of its levels: inputs go out on Requests
+// and answers come back on Replies, whether the level runs in this process
+// or in the native worker.
+type ChannelLevels struct {
+	Requests chan LevelRequest
+	Replies  chan LevelReply
+}
+
+func (c *ChannelLevels) LevelStep(depth int, entered bool, value Value, err error) LevelRequest {
+	c.Replies <- LevelReply{Depth: depth, Entered: entered, Value: value, Err: err}
+	return <-c.Requests
+}
+
+type LevelRequest struct {
+	Ctx  context.Context
+	Expr core.Expr // nil ends the innermost level
+	// Program carries the session's definitions to a worker evaluator.
+	Program *core.Prog
+	// Binders names the level's packed binders, on its first input.
+	Binders []string
+	// Effects are the effects the levels grant the input. A callback can
+	// reach some of them only through its residual row, so the level looks
+	// them up there.
+	Effects []core.EffectInstance
+}
+
+// ForwardLevel serves a level running in the native worker: the worker's
+// step reaches the REPL through Levels, and the next input goes back as a
+// payload, nil to end the level.
+func (c *IOContext) ForwardLevel(depth int, entered bool, value any, err error) (*execcodec.Payload, []string) {
+	req := c.Levels.LevelStep(depth, entered, value, err)
+	if req.Expr == nil {
+		return nil, nil
+	}
+	return &execcodec.Payload{Program: req.Program, Expr: req.Expr, Effects: req.Effects}, req.Binders
+}
+
+// LevelReply answers a request. Depth is the level whose evaluator replied,
+// 0 for the session's own evaluation, so a reply from a shallower level than
+// the request's says the levels between them ended. Entered announces a new
+// level.
+type LevelReply struct {
+	Depth   int
+	Entered bool
+	Value   Value
+	Err     error
 }
 
 // NativeCaller is the runtime sidecar seam. The compiler-hosted evaluator can
@@ -371,6 +430,13 @@ type interp struct {
 	// "Compile-time metaprogramming").
 	compileTime bool
 	budget      int
+
+	// levelDepth is the prompt level this evaluator runs inputs for, and
+	// levelBase the evidence that level gave them. A level's callback may
+	// drop outer evidence its own body never needed, so a nested level
+	// starts from this.
+	levelDepth int
+	levelBase  map[types.EffectKey]*evidence
 }
 
 const pollEvery = 4096
@@ -413,6 +479,95 @@ func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (Value
 		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Expr: e})
 	}
 	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}}).eval(e, nil)
+}
+
+// promptLevel serves the prompt's inputs inside the handlers in effect here,
+// until the session ends the level. An abort that escapes an input is aimed
+// at a handler outside it, so it ends the level too, travelling outward.
+func (in *interp) promptLevel(binders Value, fr *Frame) (Value, error) {
+	host := in.ioctx.Levels
+	depth := in.levelDepth + 1
+	req := host.LevelStep(depth, true, nil, nil)
+	for req.Expr != nil {
+		if req.Program != nil {
+			in.env.DefineProg(req.Program)
+		}
+		packed := binders
+		for i, name := range req.Binders {
+			v := packed
+			if i < len(req.Binders)-1 {
+				pair := packed.(*CtorVal)
+				v, packed = pair.Fields[0], pair.Fields[1]
+			}
+			in.env.DefineValue(name, nil, v)
+		}
+		v, err := in.levelInput(req, depth, fr)
+		if err == nil {
+			if _, ok := asExit(v); ok {
+				return v, nil
+			}
+		}
+		req = host.LevelStep(depth, false, v, err)
+	}
+	return struct{}{}, nil
+}
+
+func (in *interp) levelInput(req LevelRequest, depth int, fr *Frame) (v Value, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("%v", recovered)
+		}
+	}()
+	evidence, err := in.levelEvidence(req.Effects, fr)
+	if err != nil {
+		return nil, err
+	}
+	child := &interp{ctx: req.Ctx, env: in.env, out: in.out, ioctx: in.ioctx, evidence: evidence, levelDepth: depth, levelBase: evidence}
+	return child.eval(req.Expr, nil)
+}
+
+// Program is every definition the environment holds, as a worker
+// evaluation receives them.
+func (e *Env) Program() *core.Prog { return e.program() }
+
+// DefineValue binds name to an already computed value, as a prompt level
+// binds its callback's parameters.
+func (e *Env) DefineValue(name string, ty types.Type, v Value) {
+	ready := make(chan struct{})
+	close(ready)
+	e.cells[name] = &Cell{Body: &core.UnitLit{Ty: ty}, ready: ready, memo: v, forced: true}
+	delete(e.workers, name)
+	delete(e.defs, name)
+}
+
+// Binding is what an Env holds for one name, so a prompt level can put back
+// what its own definitions replaced.
+type Binding struct {
+	name   string
+	cell   *Cell
+	worker *core.Def
+	def    core.Def
+	hasDef bool
+}
+
+func (e *Env) Binding(name string) Binding {
+	def, hasDef := e.defs[name]
+	return Binding{name: name, cell: e.cells[name], worker: e.workers[name], def: def, hasDef: hasDef}
+}
+
+func (e *Env) Restore(b Binding) {
+	delete(e.cells, b.name)
+	delete(e.workers, b.name)
+	delete(e.defs, b.name)
+	if b.cell != nil {
+		e.cells[b.name] = b.cell
+	}
+	if b.worker != nil {
+		e.workers[b.name] = b.worker
+	}
+	if b.hasDef {
+		e.defs[b.name] = b.def
+	}
 }
 
 // EvalOutcome exposes the interpreter's control protocol to compiler tests and
@@ -588,6 +743,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return v, nil
 			}
 			args[i] = v
+		}
+		if in.ioctx.Levels != nil && e.Name == types.PromptLevelName && !in.compileTime {
+			return in.promptLevel(args[0], fr)
 		}
 		if !in.compileTime && in.ioctx.Natives != nil {
 			executor := in.ioctx.Natives
@@ -798,7 +956,10 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			var clause *core.HandlerClause
 			for i := range e.Clauses {
-				if e.Clauses[i].Op == exit.Op {
+				// By name, as an operation finds its clause: a prompt level's
+				// input reaches the worker in a payload of its own, so its
+				// operations are not the handler's pointers.
+				if e.Clauses[i].Op.Name == exit.Op.Name {
 					clause = &e.Clauses[i]
 					break
 				}

@@ -5,6 +5,7 @@ package natives
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -124,6 +125,10 @@ var Table = func() map[string]Spec {
 	}}
 	t["Encoding.utf8MatchAt"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.Utf8MatchAt(args[0].(fangort.Bytes), args[1].(int64), args[2].(string)), nil
+	}}
+	// The REPL's evaluator answers Runtime.Prompt.level before the table.
+	t["Runtime.Prompt.level"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
+		return nil, errors.New("Runtime.Prompt.level runs only inside a prompt level")
 	}}
 	t["IO.lineText"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return lineText(args[0].(string)), nil

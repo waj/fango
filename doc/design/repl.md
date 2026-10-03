@@ -1,6 +1,6 @@
 # Interpreter and REPL
 
-Core evaluation, persistent prompt state, imports, generations, and transaction boundaries.
+Core evaluation, persistent prompt state, imports, generations, transaction boundaries, and handler levels.
 
 [Design index](../design.md). Source and checks: [Evaluator](../../internal/eval/eval.go), [Session](../../internal/repl/repl.go), [REPL tests](../../internal/repl/repl_test.go), [Failure tests](../../internal/repl/failure_test.go).
 
@@ -82,6 +82,49 @@ Visibility merges per owner and expands the prompt's set. Sidecar imports
 rebuild the worker's module set. An increment records the operator table in
 effect when it was resolved; a later increment may widen it without changing
 how an accepted input was read.
+
+## Handler levels
+
+A [level](../reference/repl.md#handler-levels) needs the head's handlers to stay
+active while the prompt reads more input, but handlers here are synchronous Go
+calls with no capturable continuation. So the session parks a running
+evaluation instead: it checks `head { patterns -> Runtime.Prompt.level binders }`,
+where `binders` packs the patterns' variables as nested pairs, and the evaluator
+answers that native call by serving inputs from inside it. The call is a
+templated native rather than an intrinsic, since only the REPL's evaluator ever
+reaches it; compiled code panics.
+
+The checker's type for the callback lambda gives the level its granted row and
+its binders' types, after elaboration's defaulting. Later inputs are checked
+against those: a label an input performs must match a granted one, which
+unifies their arguments. Binders become prompt values whose cells the
+evaluator fills, from the packed value, with the level's first input.
+
+The session keeps one request and reply channel pair. The bottom level runs in
+a goroutine, deeper levels in the evaluation parked at the level above, and
+each reply carries the depth that produced it. A reply from a shallower level
+than the request's means an abort escaped the input and unwound the levels
+between, and it answers the outermost of them. An input evaluates in a child
+interpreter whose evidence is what the level gave its own input, overridden by
+what is in effect at the native call, plus granted effects the callback holds
+only in a residual row: a callback with a pure body keeps no evidence of its
+own for the effects it was granted.
+
+In the native worker, a parked level is a sequence of `host_level` requests.
+Each reports a step, an entry or an input's outcome, and its reply carries the
+next input as a payload, or ends the level. The host serves them within the
+running exchange, so its lock is never taken twice. Each input is decoded from
+its own payload, so a value can outlive the payload that created it: handler
+clauses and native wrapper arguments are matched by name, as operations already
+were, rather than by pointer. The worker keeps its contexts as a stack and
+interrupts only the innermost, and the host never cancels an exchange's
+context, which would drop the connection and every level with it.
+
+Ending a level puts back what its names replaced. A level-local definition, one
+whose declaration refers to a level's names, is recorded with what its name
+meant before. If a shallower level or the session redefines the name, the
+record moves to that owner or is dropped, so ending a level never undoes a
+later definition outside it.
 
 ## Transactions and staging
 

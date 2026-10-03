@@ -83,5 +83,9 @@ changes no declaration a live session has already accepted.
   explicit checkpoint in such loops.
 - Add transcript coverage for reload, cross-generation errors, handler
   interaction, and recovery after failures.
+- Decide whether leaving many [handler levels](reference/repl.md#handler-levels)
+  needs something faster than one Ctrl-D or `:end` per level, once levels have
+  seen use. `:type` does not yet show which of an expression's effects the
+  installed levels handle.
 
 - Add interactive line editing and persistent history.

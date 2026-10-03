@@ -131,6 +131,16 @@ const (
 
 // RowEvidence projects a representation whose nominal type and availability
 // have been proved by Core. A mismatch is an internal compiler invariant.
+// HasRowEvidence reports whether row or its tail binds the effect.
+func HasRowEvidence(row *EvidenceRow, name string, args ...*TypeDescriptor) bool {
+	for ; row != nil; row = row.tail {
+		if _, ok := row.find(name, args); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func RowEvidence[T any](row *EvidenceRow, name string, mode EvidenceMode, args ...*TypeDescriptor) T {
 	for row != nil {
 		if family, ok := row.find(name, args); ok {

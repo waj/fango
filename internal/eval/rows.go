@@ -80,3 +80,37 @@ func (in *interp) plainClosure(lam *core.Lambda, fr *Frame) *Closure {
 	return &Closure{Param: lam.Param, Body: lam.Body, Env: fr, Evidence: in.closureEvidence(lam), effectParams: lam.EffectParams,
 		control: types.FunctionControl(lam.Ty.(*types.TFun)), rowParam: lam.RowParam, rowEffects: lam.RowEffects}
 }
+
+// levelEvidence is the evidence a prompt level gives its inputs: what the
+// enclosing level gave its own input, overridden by what is in effect at
+// Runtime.Prompt.level, plus the granted effects the callback holds only in a
+// residual row, innermost frame first.
+func (in *interp) levelEvidence(effects []core.EffectInstance, fr *Frame) (map[types.EffectKey]*evidence, error) {
+	out := cloneEvidence(in.levelBase)
+	for key, ev := range in.evidence {
+		out[key] = ev
+	}
+	for _, effect := range effects {
+		if out[effect.Key()] != nil {
+			continue
+		}
+		args := make([]*fangort.TypeDescriptor, len(effect.Args))
+		for i, arg := range effect.Args {
+			var err error
+			if args[i], err = in.typeDescriptor(arg, fr); err != nil {
+				return nil, err
+			}
+		}
+		name := strconv.Itoa(effect.Unique)
+	frames:
+		for frame := fr; frame != nil; frame = frame.parent {
+			for _, row := range frame.rows {
+				if fangort.HasRowEvidence(row, name, args...) {
+					out[effect.Key()] = &evidence{row: row, rowEffect: name, rowArgs: args}
+					break frames
+				}
+			}
+		}
+	}
+	return out, nil
+}

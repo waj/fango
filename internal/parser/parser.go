@@ -100,6 +100,25 @@ func ParseExprInput(toks []token.Token, f *source.File) (ast.Expr, []diag.Error)
 	return e, p.errs
 }
 
+// IsWithInput reports whether a prompt input is a `with` item: `with` and the
+// start of a head, and no `=` that would make it a definition named `with`.
+func IsWithInput(toks []token.Token) bool {
+	return len(toks) > 1 && withItemStart(toks, 0) && !hasStatementEqual(toks, 1, 0)
+}
+
+// ParseWithInput parses a `with` item typed at the prompt, where the rest of
+// the block is the rest of the session: it returns the item's binder patterns,
+// if any, and its head.
+func ParseWithInput(toks []token.Token, f *source.File) (*ast.WithSugar, []ast.Pattern, ast.Expr, []diag.Error) {
+	p := &parser{f: f, toks: toks, stmtStart: -1}
+	p.lay.push(ctxDecl, 0)
+	w, params, head := p.parseWithHead()
+	if t := p.peek(); head != nil && t.Kind != token.EOF && len(p.errs) == 0 {
+		p.errorAt(t.Span, "SYNTAX PROBLEM", "I parsed a complete `with` item but then ran into this.")
+	}
+	return w, params, head, p.errs
+}
+
 func isScopedPragma(text string) bool {
 	fields := strings.Fields(text)
 	return len(fields) > 0 && fields[0] == "scoped"
