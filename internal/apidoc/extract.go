@@ -396,6 +396,8 @@ func (x *extractor) typeDecl(d *ast.TypeDecl) {
 
 // typeSignature renders a type declaration with exactly the representation
 // its exporter publishes: constructors or fields only when they are exported.
+// Two or more of them go one to a line, as fango fmt lays out a declaration
+// written across lines.
 func (x *extractor) typeSignature(canonical string, member *owned, ctors, fields []string) string {
 	adt := x.adt(canonical)
 	if adt == nil {
@@ -408,7 +410,10 @@ func (x *extractor) typeSignature(canonical string, member *owned, ctors, fields
 				parts = append(parts, field.Signature)
 			}
 		}
-		return member.Signature + " = { " + strings.Join(parts, ", ") + " }"
+		if len(parts) == 1 {
+			return member.Signature + " = { " + parts[0] + " }"
+		}
+		return member.Signature + " =\n" + memberIndent + "{ " + strings.Join(parts, "\n"+memberIndent+", ") + "\n" + memberIndent + "}"
 	}
 	if len(ctors) == 0 {
 		return member.Signature
@@ -426,8 +431,15 @@ func (x *extractor) typeSignature(canonical string, member *owned, ctors, fields
 		}
 		parts = append(parts, text)
 	}
-	return member.Signature + " = " + strings.Join(parts, " | ")
+	if len(parts) == 1 {
+		return member.Signature + " = " + parts[0]
+	}
+	return member.Signature + "\n" + memberIndent + "= " + strings.Join(parts, "\n"+memberIndent+"| ")
 }
+
+// memberIndent indents a type's constructors or fields under its head, as
+// format.Indent does.
+const memberIndent = "    "
 
 // module documents one module's public interface: owned declarations under
 // their own IDs, and re-exports pointing at their owners.

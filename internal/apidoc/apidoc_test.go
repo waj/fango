@@ -157,10 +157,10 @@ func TestExtractDeclarations(t *testing.T) {
 		id, kind, name, signature, docs, parent string
 		line                                    int
 	}{
-		{"type:Shapes.Shape", "type", "Shape", "type Shape = Circle Float | Square Float", "A shape.", "", 16},
+		{"type:Shapes.Shape", "type", "Shape", "type Shape\n    = Circle Float\n    | Square Float", "A shape.", "", 16},
 		{"constructor:Shapes.Circle", "constructor", "Circle", "Circle : Float -> Shape", "A circle by radius.", "type:Shapes.Shape", 18},
 		{"constructor:Shapes.Square", "constructor", "Square", "Square : Float -> Shape", "A square by side.", "type:Shapes.Shape", 20},
-		{"type:Shapes.Point", "type", "Point", "type Point = { x : Float, y : Float }", "A point.", "", 24},
+		{"type:Shapes.Point", "type", "Point", "type Point =\n    { x : Float\n    , y : Float\n    }", "A point.", "", 24},
 		{"field:Shapes.Point.x", "field", "x", "x : Float", "Horizontal.", "type:Shapes.Point", 27},
 		{"field:Shapes.Point.y", "field", "y", "y : Float", "", "type:Shapes.Point", 28},
 		// Members sharing their type's line have no documentation of their own.

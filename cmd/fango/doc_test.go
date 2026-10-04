@@ -89,7 +89,7 @@ func TestDocModuleFilter(t *testing.T) {
 		t.Fatalf("Maybe declarations = %v, want %v", ids, want)
 	}
 	typ := declaration(t, doc, "type:Maybe.Maybe")
-	if typ.Signature != "type Maybe a = Nothing | Just a" || !slices.Contains(typ.Instances, "Ord a => Ord (Maybe a)") {
+	if typ.Signature != "type Maybe a\n    = Nothing\n    | Just a" || !slices.Contains(typ.Instances, "Ord a => Ord (Maybe a)") {
 		t.Fatalf("Maybe type = %+v", typ)
 	}
 	just := declaration(t, doc, "constructor:Maybe.Just")
@@ -181,8 +181,10 @@ func TestDocWholeLibrary(t *testing.T) {
 		// Scoped runners keep the pragma that binds their callback row.
 		"value:Reader.withBytes": "{-# scoped s #-}\nwithBytes : Bytes -> (Reader s ->{s} a) -> a",
 		// Opaque types show no representation.
-		"type:Dict.Dict":         "type Dict k v",
-		"type:Http.Header":       "type Header = { name : String, value : String }",
+		"type:Dict.Dict": "type Dict k v",
+		// Two or more members go one to a line, as fango fmt lays them out.
+		"type:Http.Header":       "type Header =\n    { name : String\n    , value : String\n    }",
+		"type:Http.Version":      "type Version = Http11",
 		"field:Http.Header.name": "name : String",
 	} {
 		if got := declaration(t, doc, id).Signature; got != sig {
@@ -203,7 +205,7 @@ func TestDocWholeLibrary(t *testing.T) {
 		t.Errorf("Eq instances = %v", d.Instances)
 	}
 	// Re-exports point at their owner and reuse its signature.
-	if d := declaration(t, doc, "type:Json.Value"); d.TargetID != "type:Json.Pull.Value" || !strings.HasPrefix(d.Signature, "type Value = Null |") {
+	if d := declaration(t, doc, "type:Json.Value"); d.TargetID != "type:Json.Pull.Value" || !strings.HasPrefix(d.Signature, "type Value\n    = Null\n    |") {
 		t.Errorf("Json.Value = %+v", d)
 	}
 	if d := declaration(t, doc, "constructor:Json.Null"); d.TargetID != "constructor:Json.Pull.Null" || d.ParentID != "type:Json.Value" {
