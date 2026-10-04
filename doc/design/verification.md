@@ -67,6 +67,9 @@ The HTTP server example's socket client sends a write-side EOF only for the
 truncated-body case. Complete requests are framed by HTTP, and rejected requests
 can close the peer before a client half-close; response parsing and body reads
 check their outcomes without racing that shutdown.
+Socket server tests allow 30 seconds for startup under parallel compilation
+load, stop waiting when the child exits, and include its captured output on
+startup failure. Later connections and request IO retain their shorter deadlines.
 
 Runnable fixtures share one generated Go project: each entry has its own package,
 shared dependencies are emitted once and asserted byte-identical across consumers,

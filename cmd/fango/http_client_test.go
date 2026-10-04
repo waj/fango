@@ -133,11 +133,7 @@ func TestHTTPProxyStreamsRequestBody(t *testing.T) {
 	defer upstream.Close()
 	port := unusedTCPPort(t)
 	cmd := exec.Command(cliCompiledBinary(t, filepath.Join("testdata", "http_proxy.fango")), fmt.Sprint(port), upstream.URL)
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	dialEcho(t, port).Close()
+	startTCPServer(t, cmd, port).Close()
 
 	body := bytes.Repeat([]byte("x"), 8<<20)
 	response, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d/upload", port), "application/octet-stream", bytes.NewReader(body))

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net"
 	"os/exec"
@@ -16,18 +17,8 @@ func TestEchoExample(t *testing.T) {
 
 	path := filepath.Join("..", "..", "examples", "echo.fango")
 	port := unusedTCPPort(t)
-	var output bytes.Buffer
 	cmd := exec.Command(cliCompiledBinary(t, path), strconv.Itoa(port))
-	cmd.Stdout, cmd.Stderr = &output, &output
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
-
-	connection := dialEcho(t, port)
+	connection := startTCPServer(t, cmd, port)
 	echo(t, connection, "hello\nsecond line\r\n")
 	if err := connection.Close(); err != nil {
 		t.Fatal(err)
@@ -37,6 +28,53 @@ func TestEchoExample(t *testing.T) {
 	connection = dialEcho(t, port)
 	defer connection.Close()
 	echo(t, connection, "another client\n")
+}
+
+// startTCPServer allows startup to contend with parallel compiler tests while
+// still reporting an exited server immediately. Only Wait's completion makes
+// it safe to read the output buffer written by os/exec's copying goroutine.
+func startTCPServer(t *testing.T, cmd *exec.Cmd, port int) net.Conn {
+	t.Helper()
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-done
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	dialer := net.Dialer{Timeout: 100 * time.Millisecond}
+	for {
+		select {
+		case <-done:
+			t.Fatalf("server at %s exited before accepting connections: %v\n%s", address, waitErr, &output)
+		default:
+		}
+		connection, err := dialer.DialContext(ctx, "tcp", address)
+		if err == nil {
+			return connection
+		}
+		select {
+		case <-done:
+			t.Fatalf("server at %s exited before accepting connections: %v\n%s", address, waitErr, &output)
+		case <-ctx.Done():
+			_ = cmd.Process.Kill()
+			<-done
+			t.Fatalf("waiting for server at %s: %v (last dial: %v)\n%s", address, ctx.Err(), err, &output)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 func unusedTCPPort(t *testing.T) int {
