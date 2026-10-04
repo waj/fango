@@ -18,6 +18,9 @@ and GHC 9.10.3/Aeson 2.2.4.1 (`-O2`, default RTS), under light background load.
 Fango takes about 1.12× the Go control's time with declaration-order keys and
 1.43× with reversed keys, and about 57% and 76% of Aeson's. Replace this table
 when a change moves these numbers; [History](#history) keeps the earlier rounds.
+The [500 MB fixture](#larger-fixture), remeasured at `de20b2c` on 2026-10-04,
+takes 3.072 s in Fango versus 2.643 s in Go (1.16×), with median peak RSS
+of 907.3 MB versus 1,719.2 MB.
 
 ## Running the comparison
 
@@ -510,12 +513,39 @@ wall-time percentages for GC or disk IO.
 
 ### Larger fixture
 
-A single 500,000,417-byte run completed with all checksums correct in 53.137 s
+Seven fresh measured processes per implementation, after one warmup each,
+remeasured the same 500,000,417-byte declaration-order fixture on 2026-10-04
+at `de20b2c`, on the macOS ARM64 host with Go 1.26.7 and default runtime
+settings. Implementation order rotates; generation and compilation are excluded,
+and no builds or tests ran during samples. All checksums match for the complete
+755,492-record typed result. The input SHA-256 is
+`7258b1f44ab8e0f780a38346333ec99ed1eefe84acdb2ea6347ae881e25ca066`.
+
+| Implementation | Median whole-process wall time | Sample range | Median peak RSS |
+| --- | ---: | ---: | ---: |
+| Plain Go, `encoding/json` | 2.643 s | 2.588–2.749 s | 1,719.2 MB |
+| Fango, derived `Json.Decode` | 3.072 s | 3.053–3.229 s | 907.3 MB |
+
+Fango takes 1.16× Go's time and about 53% of its peak RSS. Raw samples,
+checksums, settings, binary hashes, and exported sources are retained in
+`/tmp/fango-json-500mb-20261004`, produced with:
+
+```sh
+nix develop -c go run ./benchmarks/jsoncompare \
+  -out /tmp/fango-json-500mb-20261004 \
+  -input /tmp/fango-json-lowering-large-input-20260930/input.json -runs 7
+```
+
+The earlier single run completed with all checksums correct in 53.137 s
 (1.26 GB peak RSS); the Go control took 2.719 s (1.72 GB peak RSS). This larger
 sample predates immediate-application lowering. The original
 Fango run was interrupted at 172.339 s before decoding finished, so it provides
-no completed-run speedup ratio. Retaining the complete decoded document still
-has substantial memory cost.
+no completed-run speedup ratio. The new Fango median is about 17.3× faster
+than the completed historical run (94.2% less time), and the observed gap with
+Go shrinks from 19.5× to 1.16×. These are separate sessions, rather than paired
+old/new binary measurements; the new seven-run comparison establishes the
+current gap with Go. Retaining the complete decoded document still has
+substantial memory cost.
 
 ### Timing gate status
 
