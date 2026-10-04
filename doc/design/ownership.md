@@ -1,7 +1,7 @@
 # Resources and evidence
 
 [Design index](../design.md). Public rules: [cleanup scopes](../reference/resources.md),
-[effects](../reference/effects.md), and [tasks](../reference/library-async.md).
+[effects](../reference/effects.md), and [tasks](../../stdlib/Async.fango).
 
 ## Runtime resources
 

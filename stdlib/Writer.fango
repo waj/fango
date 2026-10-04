@@ -12,7 +12,8 @@ import List exposing (List)
 import Reader exposing (Reader)
 import Runtime.Local
 
--- A byte writer whose operations perform `e`.
+-- A byte writer whose operations perform `e`. Its fields are operations,
+-- called by projection, as `writer.flush()`; they are not module functions.
 type Writer e =
     {
       -- Accepts bytes for eventual writing.
@@ -53,7 +54,8 @@ over sink size action =
     }
 
 -- Runs `action` with a writer that keeps everything written in memory, and
--- answers the result with those bytes. Its `flush` does nothing. With no
+-- answers the result with those bytes, once `action` completes. Its `flush`
+-- does nothing. With no
 -- other effects in the callback, the call is pure.
 --
 -- ```fango

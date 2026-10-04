@@ -9,7 +9,9 @@
 -- Parsing rejects invalid UTF-8, malformed escapes, trailing input, and
 -- nesting deeper than 256 arrays or objects. An error is reported at the
 -- start of the offending token, whatever the input's buffering; a missing
--- field after its object, and a duplicate one at its value.
+-- field after its object, and a duplicate one at its value. Malformed or
+-- incomplete encoded input is reported at the first offending sequence,
+-- which is left unconsumed.
 module Json.Pull exposing
     ( Decode(..), Error(..), Number, Pull, Scan, ScanStep(..), Token(..)
     , Value(..)
@@ -47,7 +49,9 @@ type Error =
       -- The one-based column, counted in bytes.
     , column : Int
       -- Where in the document, as slash-separated keys and indices, for a
-      -- failure inside a decoded record, list, or value.
+      -- failure inside a decoded record, list, or value. An error found while
+      -- scanning lookahead can come before its field or element is entered;
+      -- typed arrays enter the index before scanning the element.
     , path : String
     }
     deriving (Eq, Show)
@@ -111,11 +115,12 @@ effect Pull
     markToken : Scan -> ()
     -- Consumes an array's separator or closing bracket and answers whether
     -- another element follows, leaving that element unscanned. `first` says
-    -- whether no element has been read yet.
+    -- whether no element has been read yet. It honors a token already
+    -- obtained by `peek`.
     nextElement : Bool -> Bool
     -- Consumes an object's separator, key, and colon and answers the key, or
     -- consumes the closing brace and answers `Nothing`. `first` says whether no
-    -- member has been read yet.
+    -- member has been read yet. It honors a token already obtained by `peek`.
     nextKey : Bool -> Maybe String
     -- Consumes a scalar and answers it as a string, or a message after
     -- consuming a token of another type.
@@ -127,7 +132,8 @@ effect Pull
     -- consuming a token of another type or a number out of range.
     decodedFloat : () -> Result String Float
     -- A speculative scan at the current position, or `Nothing` while a `peek`
-    -- token is pending. It consumes nothing.
+    -- token is pending. It consumes nothing, and abandoning it unrun consumes
+    -- nothing either.
     bufferedScan : () -> Maybe Scan
     -- A scan at the current position that also carries pending lookahead. It
     -- consumes nothing.
@@ -137,7 +143,9 @@ effect Pull
     numberTail : Scan -> TextReader.Window -> NumberRun -> (String, Scan)
     integerTail : Scan -> IntegerRun -> (Result String Int, Scan)
     -- Publishes the position a completed scan reached, consuming up to it. Call
-    -- it right away, before other parser operations.
+    -- it right away, before other parser operations. A suspension may already
+    -- have published a prefix; publishing the final position settles the
+    -- rest. The reader is committed at the next refill, `at`, or scope exit.
     acceptScan : Scan -> ()
     enter : String -> ()
     enterIndex : Int -> ()
@@ -149,7 +157,9 @@ effect Pull
 class Decode a
     -- Starts a pure buffered scan of one value at `cursor`. `Ok` is the value
     -- and the position after it; `Err` suspends work that `runScan` will
-    -- run, and is not a JSON error. Creating either consumes nothing.
+    -- run, and is not a JSON error. Creating either consumes nothing, refills
+    -- nothing, and performs no consumer effects; `Ok` keeps the nesting
+    -- allowance `decodeValue` would.
     scanValue : Scan -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan)
 
 -- One segment of the error path: an object key, or an element index.
@@ -569,6 +579,10 @@ type ScanStep a
 
 -- Every typed value enters the same resumable parser, including when a
 -- custom token consumer has left lookahead pending.
+
+-- Decodes the next value as `a`: starts `scanValue` at the cursor, runs any
+-- suspended work, and publishes the final position. Calling it for a child
+-- runs that child's one parser.
 decodeValue : Decode a => () ->{Pull, Fail Error} a
 decodeValue() =
     start = currentScan()
@@ -576,7 +590,8 @@ decodeValue() =
     acceptScan rest
     value
 
--- Runs suspended scan work until it answers a value and position, or fails.
+-- Runs suspended scan work until it answers a value and position, or fails
+-- with a JSON or source failure.
 runScan : Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan) ->{Pull, Fail Error} (a, Scan)
 runScan result = case result of
     Ok value -> value
@@ -1021,8 +1036,9 @@ tokenScan cursor = case fastWhite cursor.window cursor.line cursor.column of
 
 -- Runs `action` with the `Pull` effect over a byte reader, decoding UTF-8.
 -- On return, normally or with `Err`, the reader is positioned after the last
--- token scanned, `peek` lookahead included; inside, it may lag behind, so
--- advance it only after the scope.
+-- token scanned, `peek` lookahead included, as it is when an unrelated
+-- effect leaves the scope; inside, it may lag behind, so advance it only
+-- after the scope.
 --
 -- ```fango
 -- import Bytes

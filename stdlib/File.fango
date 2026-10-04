@@ -6,7 +6,8 @@
 -- exits, however it exits. A failed open raises before anything is acquired.
 -- A failed close after a successful callback is the scope's failure; after a
 -- failed one it is recorded beside it. A handle that escapes its scope
--- reports a closed-resource error when used.
+-- reports a closed-resource error when used. Closing a handle interrupts a
+-- blocked read on it.
 --
 -- The whole-file and directory operations need no handle and answer a
 -- `Result`; a missing path is an `Err` of kind `NotFound`. Relative paths

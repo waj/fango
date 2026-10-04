@@ -80,7 +80,7 @@ restString = native
 fromChar : Char -> String
 fromChar = native
 
--- The characters joined in list order.
+-- The characters joined in list order, allocated once.
 --
 -- ```fango
 -- import String
@@ -91,7 +91,7 @@ fromChar = native
 fromList : List Char -> String
 fromList = native "fangort.StringFromList($1)"
 
--- The strings joined in list order.
+-- The strings joined in list order, allocated once.
 --
 -- ```fango
 -- import String
@@ -236,7 +236,8 @@ toIntHelp text index size negative acc =
 
 -- The integer the whole text spells: an optional `+` or `-` sign followed by
 -- base-10 digits. Any other character, an empty digit sequence, and a value
--- outside the signed 64-bit range answer `Nothing`.
+-- outside the signed 64-bit range answer `Nothing`. The most negative `Int`
+-- parses.
 --
 -- ```fango
 -- import String
@@ -245,6 +246,7 @@ toIntHelp text index size negative acc =
 -- String.toInt "-42" == Just (-42)
 -- String.toInt "4 2" == Nothing
 -- String.toInt "9223372036854775808" == Nothing
+-- String.toInt "-9223372036854775808" == Just (-9223372036854775807 - 1)
 -- ```
 toInt : String -> Maybe Int
 toInt text =
@@ -269,7 +271,8 @@ toFloatNative = native
 -- optional fraction with digits on both sides of `.`, and an optional
 -- decimal exponent. Whitespace, `NaN`, infinities, hexadecimal, `.5`, and
 -- `1.` answer `Nothing`, as do values that overflow, or that are nonzero and
--- underflow to zero.
+-- underflow to zero. Every other finite value parses, negative zero and
+-- subnormal values included.
 --
 -- ```fango
 -- import String

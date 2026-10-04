@@ -32,8 +32,8 @@ entropySeed = native
 
 -- Answers every draw from a deterministic generator started at `seed`, so
 -- the same seed produces the same draws, in the interpreter and in compiled
--- programs alike. The generator is a 31-bit linear congruential one: it is
--- modulo-biased and not suitable for cryptography. Nested runs keep separate
+-- programs alike. The generator is a 31-bit linear congruential one with
+-- glibc's constants: it is modulo-biased and not suitable for cryptography. Nested runs keep separate
 -- sequences.
 --
 -- ```fango

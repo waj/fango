@@ -55,12 +55,10 @@ semantic tokens. Non-VS Code client configuration can be documented when tested.
 ## API documentation
 
 [`fango doc`](reference/commands.md#api-documentation) is implemented, and
-every bundled module is documented in source under the
+every bundled module is documented in source, with no separate library
+reference pages, under the
 [verification gate](design/verification.md#differential-fixtures-and-examples).
 
-- Replace the library reference topics with links to the generated reference
-  once the website renders it, keeping in the reference only what the
-  generated pages cannot say, such as cross-module guides.
 - Decide how to document a user's own modules: which modules a local source
   root publishes, and how paths are reported outside the repository.
 - Many IO, network, and task operations have no natural `Bool` assertion.
@@ -102,7 +100,7 @@ changes no declaration a live session has already accepted.
 - Decide dependency invalidation and whether removed declarations remain
   addressable by existing closures only.
 - Extend interruption coverage if CPU loops gain automatic checkpoints;
-  current [cancellation](reference/library-async.md#cancellation) requires an
+  current [cancellation](../stdlib/Async.fango) requires an
   explicit checkpoint in such loops.
 - Add transcript coverage for reload, cross-generation errors, handler
   interaction, and recovery after failures.

@@ -90,7 +90,8 @@ dialTimeout = native
 
 -- Connects and completes a TLS handshake within `millis` milliseconds,
 -- verifying the certificate for the host against the system roots plus those
--- in the PEM file at `roots`, unless it is "".
+-- in the PEM file at `roots`, unless it is "". It sends `host` for SNI. The
+-- connection then reads and writes plaintext like any other.
 dialTls : String -> Int -> Int -> String ->{IO} Result Error Connection
 dialTls = native
 

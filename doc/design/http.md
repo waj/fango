@@ -1,6 +1,6 @@
 # HTTP over streams
 
-[Design index](../design.md). The [HTTP reference](../reference/library-http.md)
+[Design index](../design.md). The [Http module](../../stdlib/Http.fango)
 owns the API and observable framing rules.
 
 `Http` holds the types both directions share. `Http.Wire` holds the framing

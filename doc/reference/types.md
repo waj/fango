@@ -16,7 +16,7 @@ bump counts = { counts | lines = counts.lines + 1 }
 
 Record fields may carry [typed attributes](metaprogramming.md#attributes)
 before their names or after their types. Consumers such as
-[JSON derivation](library-json.md#typed-values) interpret this metadata; it does
+[JSON derivation](../../stdlib/Json.fango) interpret this metadata; it does
 not change the record's Fango field names or types.
 
 A record literal provides every declared field exactly once; source field order
@@ -156,6 +156,7 @@ three elements; four or more is a `TUPLE TOO BIG` error pointing at nominal
 records, whose fields have names. `(e)` with no comma stays an ordinary
 grouped expression, type, or pattern, and `()` remains Unit. Like bracket
 syntax, tuple syntax selects the bundled types directly and needs no import.
+Printed types and diagnostics spell them the same way, as `(Int, String)`.
 
 A class context is told apart from a tuple type by its `=>`, so
 `(Eq a, Show a) => (a, a) -> String` reads the way it looks.

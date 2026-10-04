@@ -21,9 +21,9 @@ tests live in [CLI tests](../cmd/fango/e2e_test.go).
 
 - Add the unimplemented grep-lite performance comparison against Go.
 - **Parallel downloader or multi-file word count:** a consumer for the current
-  [Async tasks](reference/library-async.md), cancellation, and network/process
+  [Async tasks](../stdlib/Async.fango), cancellation, and network/process
   APIs. Downloads need cancellation-aware blocking IO; CPU work can use native
-  tasks or bounded [parallel mapping](reference/library-async.md#pure-parallel-mapping).
+  tasks or bounded [parallel mapping](../stdlib/Async.fango).
 
 ## Delivery requirements
 

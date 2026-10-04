@@ -126,7 +126,8 @@ mapHelp fn values acc =
         [] -> acc
         [value | rest] -> mapHelp fn rest [fn value | acc]
 
--- Applies `fn` to every element, first to last, keeping their order.
+-- Applies `fn` to every element, first to last, keeping their order. It runs
+-- in constant stack.
 --
 -- ```fango
 -- List.map { n -> n * 10 } [1, 2, 3] == [10, 20, 30]
@@ -145,7 +146,7 @@ filterHelp keep values acc =
                 filterHelp keep rest acc
 
 -- The elements for which `keep` answers `True`, in their original order.
--- `keep` runs once per element, first to last.
+-- `keep` runs once per element, first to last. It runs in constant stack.
 --
 -- ```fango
 -- List.filter { n -> n > 1 } [3, 1, 2] == [3, 2]

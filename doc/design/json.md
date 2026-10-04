@@ -157,4 +157,4 @@ field options are ordinary `Json.FieldOption` values in each `Meta.Field`
 attribute collection. `Json.Field` interprets and validates options for
 both derivers; the compiler has no JSON-specific schema fields or rules. Both interpreter and Go compilation see
 the same generated syntax tree. The observable format and errors are in the
-[JSON reference](../reference/library-json.md).
+[Json module documentation](../../stdlib/Json.fango).

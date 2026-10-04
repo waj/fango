@@ -1,9 +1,9 @@
 # Roadmap: HTTP client
 
-The HTTP/1.1 [client](reference/library-http-client.md) with TLS, gzip,
+The HTTP/1.1 [client](../stdlib/Http/Client.fango) with TLS, gzip,
 redirects, and connection reuse, the shared
-[bodies and errors](reference/library-http.md), and
-[URLs](reference/library-url.md) are implemented; the
+[bodies and errors](../stdlib/Http.fango), and
+[URLs](../stdlib/Url.fango) are implemented; the
 [HTTP design](design/http.md#the-client-transport) explains the client's
 transport effect. This document tracks what remains: mocking, and the open
 questions below. The [HTTP roadmap](roadmap-io.md) tracks the remaining server
@@ -56,21 +56,21 @@ follow allocation order, not that order.
 
 ### HC1 Module split
 
-DONE. See the [HTTP reference](reference/library-http.md) and the
+DONE. See the [Http module](../stdlib/Http.fango) and the
 [HTTP design](design/http.md).
 
 ### HC8 Runner-handled effects in scoped callbacks
 
 DONE. See [scoped callbacks](reference/functions.md#scoped-callbacks) and the
-[server reference](reference/library-http.md#server).
+[server module](../stdlib/Http/Server.fango).
 
 ### HC6 URL
 
-DONE. See the [URL reference](reference/library-url.md).
+DONE. See the [Url module](../stdlib/Url.fango).
 
 ### HC2 Client core over plain HTTP
 
-DONE. See the [client reference](reference/library-http-client.md) and the
+DONE. See the [client module](../stdlib/Http/Client.fango) and the
 [HTTP design](design/http.md#the-client-transport).
 
 ### HC3 Mock
@@ -81,23 +81,23 @@ that use Route handlers as the mock, check the requests they receive, and run
 
 ### HC4 TLS
 
-DONE. See [configuration](reference/library-http-client.md#configuration) and
-[Net](reference/library-io.md#net). TLS for the server stays deferred.
+DONE. See [configuration](../stdlib/Http/Client.fango) and
+[Net](../stdlib/Net.fango). TLS for the server stays deferred.
 
 ### HC5 Redirects and keep-alive
 
 #### HC5a Redirects
 
-DONE. See [redirects](reference/library-http-client.md#redirects).
+DONE. See [redirects](../stdlib/Http/Client.fango).
 
 #### HC5b Keep-alive
 
-DONE. See [running requests](reference/library-http-client.md#running-requests).
+DONE. See [running requests](../stdlib/Http/Client.fango).
 
 ### HC7 GZip
 
-DONE. See [client compression](reference/library-http-client.md#compression)
-and [server GZip](reference/library-http.md#routing-and-gzip).
+DONE. See [client compression](../stdlib/Http/Client.fango)
+and [server GZip](../stdlib/Http/GZip.fango).
 
 ## Open questions
 

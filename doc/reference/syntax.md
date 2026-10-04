@@ -232,9 +232,8 @@ So `(.)`, `($)`, and `(<$>)` are unavailable, while `(<+>)`, `(|>)`, `(>>=)`,
 and `(:::)` are all ordinary names.
 
 `@` immediately followed by an uppercase type name or `(` begins a
-[type witness](library-json.md#type-witnesses) instead of an operator.
-Other `@` runs retain ordinary operator parsing. Thus `x @ y` is an operator
-application and `@Person` is a witness.
+[type witness](#type-witnesses) instead of an operator. Other `@` runs retain
+ordinary operator parsing, so `x @ y` is an operator application.
 
 Operator characters group greedily: the longest run is one operator. So
 `a<-b` is the operator `<-` rather than `a < -b`, and `x =-1` is the operator
@@ -263,9 +262,16 @@ parentheses.
 Operators are declared at the top level, in a class, or in an instance —
 never in a function body, where a fixity would have no home.
 
+### Type witnesses
+
+A type witness is a value of the singleton
+[`Basics.Type a`](../../stdlib/Basics.fango) that selects a type a call could
+not otherwise determine, as in `Json.parse @Person text`. The type after `@`
+must be closed and fully applied, as in `@Person` and `@(List Person)`.
+
 ## Regular expression literals
 
-`/pattern/` constructs an opaque [`Regex`](library-regex.md) value. A completed
+`/pattern/` constructs an opaque [`Regex`](../../stdlib/Regex.fango) value. A completed
 literal with an invalid Go regex reports `INVALID REGEX` during checking.
 
 An opening slash is recognized at the beginning of input, after ASCII

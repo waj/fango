@@ -323,7 +323,7 @@ the extension's npm dependencies before loading it from a local symlink.
 Go to Definition follows values, functions, operators, types, constructors,
 effect operations, imported modules, local binders, and nominal record fields
 across local modules and the bundled library, including types in
-[type witnesses](library-json.md#type-witnesses) and names in attribute
+[type witnesses](syntax.md#type-witnesses) and names in attribute
 expressions and their quoted code. Hover shows a named symbol's type where one
 is available. A contiguous group of `--` or `{- … -}` comments immediately above
 a declaration appears below its type as Markdown, with the delimiters stripped

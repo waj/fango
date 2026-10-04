@@ -1,6 +1,8 @@
 {-# no-prelude #-}
 -- Regular expressions, with the syntax and semantics of Go's `regexp`
--- package (RE2): matching runs in time linear in the input.
+-- package (RE2): matching runs in time linear in the input, search is
+-- leftmost-first, and lookaround and backreferences are not supported.
+-- There is no callback replacement, byte input, or mutable configuration.
 --
 -- A literal such as `/[a-z]+/` or `/(?i)hello/` needs no import and is
 -- checked by the compiler; compiled programs build each literal once at

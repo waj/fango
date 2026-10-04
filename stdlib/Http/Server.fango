@@ -103,7 +103,9 @@ readHead reader lineLimit headersLimit bodyLimit =
 -- body was read to its end. Request lines, header blocks, and bodies have
 -- separate byte limits. The parser requires an HTTP/1.1 request line and one
 -- `Host` field, and accepts one `Content-Length` or `Transfer-Encoding:
--- chunked`; anything else raises `Http.Protocol.invalid`. A response whose
+-- chunked`; anything else raises `Http.Protocol.invalid`. Chunk trailers
+-- count against the header limit, and a fixed-length body that ends early
+-- fails with `Malformed` when the consumer reads past what arrived. A response whose
 -- body reads the request must be written inside `action`.
 {-# scoped s #-}
 withRequest : Int -> Int -> Int -> Reader e -> (Request s ->{s} a) ->{Protocol | e} Maybe (a, Bool)
@@ -133,7 +135,8 @@ writeChecked method output response =
 -- Checks a response and writes it as the answer to a request with `method`.
 -- The server supplies `Content-Length` for empty, byte, and sized bodies and
 -- chunked encoding for streams; a `HEAD` request gets only the head. Every
--- check runs before the first byte is written.
+-- check runs before the first byte is written. A `HEAD` response includes a
+-- sized body's length but runs no body.
 writeResponse : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} ()
 writeResponse method output response =
     checkResponse response
@@ -324,7 +327,8 @@ runListener config stop listener process =
 -- raise `Protocol`: before the head is written the server answers with the
 -- error's status, and afterwards it closes the connection, so
 -- `Http.Server.Route.dispatch` and `Http.abortBody` need no handler of their
--- own. Handle application errors inside the handler.
+-- own. A handler of type `Request e ->{e} Response e` also fits. Handle
+-- application errors inside the handler.
 {-# scoped s #-}
 serve : Config -> Channel () -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{Async Net.Error, IO, Fail Net.Error | e} ()
 serve config stop handler =

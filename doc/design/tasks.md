@@ -1,7 +1,7 @@
 # Native tasks and explicit streams
 
-[Design index](../design.md). [Async](../reference/library-async.md)
-and [stream semantics](../reference/library-streams.md) own the public contract.
+[Design index](../design.md). [Async](../../stdlib/Async.fango)
+and [stream semantics](../../stdlib/Stream.fango) own the public contract.
 
 ## Library state and traversal
 
@@ -31,7 +31,7 @@ and future sends. A channel has no owning runner. File and socket wrappers
 serialize complete reads, allow close to interrupt blocking reads, and reject
 later operations on closed handles. Socket writes are serialized separately.
 
-The [Async API](../reference/library-async.md) uses these primitives. Its Fango
+The [Async API](../../stdlib/Async.fango) uses these primitives. Its Fango
 implementation installs child failure and cancellation boundaries before invoking
 the user's callback. `AsyncLaunch` owns the concurrent call and seals the complete
 `Result err value` under one native type index; `AsyncRebase` reconstructs its

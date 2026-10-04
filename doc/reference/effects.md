@@ -407,8 +407,51 @@ clause cannot protect that implicit read. For atomic updates, keep state in an
 explicit reference and protect its read and write together, or serialize calls
 to the handler.
 
-Children inherit resumptive handler activations and their state cells; see the
-[Async contract](library-async.md#handler-inheritance-and-aborts).
+Children inherit resumptive handler activations and their state cells; see
+[handlers in tasks](#handlers-in-tasks).
+
+## Handlers in tasks
+
+A task started with [`Async.spawn`](../../stdlib/Async.fango) inherits the
+resumptive handler activations around it, and their state cells. Individual
+snapshots and commits publish complete values; handlers own any locking needed
+for atomic compound operations, and concurrent read-modify-write operations may
+lose updates. Install a handler inside the task when independent state is
+wanted. A parent's handler return clause does not transform task results. When
+one handler covers [several applications](#several-applications-in-one-handler),
+a task inherits its resumptive applications and the one cell they share; its
+abort applications still have to be handled inside the task.
+
+A task runs against a fresh `Fail err` handler for its scope's failure type,
+and every other abort effect must be handled inside the task. A directly known
+unsupported abort or local scoped permission is rejected with `ASYNC BOUNDARY`.
+Dependencies hidden in inherited handlers or generic rows are checked at
+runtime when preparing the task's evidence, before its callback executes.
+Unsupported dependencies fail with `Async: cannot inherit abort handler …;
+handle it inside the task`; a mismatched failure type reports `Async:
+incompatible inherited handler …`. These diagnostics terminate execution; they
+are not application `Err` values. Merely installing a local abort handler does
+not change an inherited handler's lexical dependency: install that handler
+inside the task too.
+
+For example, a task may catch an arbitrary abort locally:
+
+```fango
+effect Stop
+    abort stop : String -> value
+
+localJob() =
+    handle stop "finished early" on
+        stop reason -> reason
+```
+
+`spawn localJob` succeeds with the ordinary String value. An outer `Stop`
+handler cannot be unwound from the task, and `await` never invokes it later.
+
+Closures, partial applications, functions, native handles, and references may
+cross the task boundary. Effects are never queued for replay at an observation
+site: `Async.await` performs a new `Fail.fail` in the observer when it reads a
+failed result, and an ordinary `Err` a task returns is a successful value.
 
 ## Resume discipline
 
@@ -444,7 +487,7 @@ with `HANDLER BINDING EFFECTS`; the local permission is never erased to claim
 purity. Ordinary closures that retain the nominal effect in their row still
 receive an interpretation at invocation.
 
-The scoped [Reader and Writer constructors](library-readers.md) discharge their
+The scoped [Reader and Writer constructors](../../stdlib/Reader.fango) discharge their
 private buffer permissions while preserving source, sink, and consumer effects.
 
 Handlers remain synchronous: a resumptive clause finishes with its owning tail

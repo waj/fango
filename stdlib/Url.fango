@@ -310,7 +310,8 @@ hostText : String -> String
 hostText host = if String.contains ":" host then "[" ++ host ++ "]" else host
 
 -- The text of a URL. For anything `parse` accepted it is the input, except
--- that the scheme and host are lowercased and an empty port is dropped.
+-- that the scheme and host are lowercased, an empty port is dropped, and an
+-- IPv6 host regains its brackets.
 --
 -- ```fango
 -- import Url

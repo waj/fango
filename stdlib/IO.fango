@@ -149,7 +149,8 @@ readLine file =
     if raw == "" then Nothing else Just ({ text = lineText raw, ending = lineEnding raw })
 
 -- Writes the text exactly as given, with no newline or buffering of its
--- own. Writes to one handle do not interleave.
+-- own. Writes to one handle do not interleave. Writing to `stdin` fails with
+-- kind `Other`.
 write : Handle -> String ->{IO, Fail Error} ()
 write file text = fromResult (writeHandle file text)
 
@@ -165,7 +166,7 @@ readBytes file count =
         data = fromResult (readHandleBytes file count)
         if Bytes.length data == 0 then Nothing else Just data
 
--- Writes all the bytes.
+-- Writes all the bytes. Writing to `stdin` fails with kind `Other`.
 writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
 writeBytes file data = fromResult (writeHandleBytes file data)
 

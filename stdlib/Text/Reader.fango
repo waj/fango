@@ -10,7 +10,10 @@
 -- so a failure, a short exact read, or an overflow consumes nothing.
 --
 -- While a text reader is in use, advance its parent only through it. Leaving
--- the scope keeps every unconsumed parent byte, lookahead included. Limits
+-- the scope keeps every unconsumed parent byte, lookahead included. Only the
+-- requested prefix is decoded, so malformed text further ahead does not stop
+-- an earlier valid read; a refill may still have grown the parent's buffer.
+-- Limits
 -- count characters; the byte reader may still prefetch larger chunks, so put
 -- a byte-framed body in `Reader.limited` first. The `Window` operations let a
 -- scanner inspect buffered text without consuming it, and commit what it used.
@@ -50,8 +53,8 @@ type Reader e = Reader (Input e)
 type Buffer = EmptyBuffer | Buffered Encoding Bytes.Bytes Int
 -- An immutable snapshot of a reader's buffered bytes and a position in it.
 -- Inspecting one never refills or consumes; positions derived from it count
--- bytes from the snapshot's start. An empty window does not mean the source
--- has ended.
+-- bytes from the snapshot's start, as are decoding error offsets. An empty
+-- window does not mean the source has ended.
 type Window = { buffer : Buffer, index : Int }
 
 -- The three distinct answers to a delimited read.
@@ -244,6 +247,9 @@ peekWindow snapshot =
 -- Scanners read most characters through here, so the ASCII path stays a
 -- short sequence of small calls the Go backend inlines; every other byte
 -- leaves for the decoding path in a separate function.
+
+-- The character at the position, its encoded width, and the window advanced
+-- past it, or `Nothing` at the end of the window.
 readWindow : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
 readWindow snapshot =
     case snapshot.buffer of
@@ -274,14 +280,20 @@ asciiAt snapshot =
             Nothing -> -1
             Just code -> if code < 128 then code else -2
 
--- Advance past the one-byte character asciiAt answered at this position. The
--- caller has already inspected it, so the advance repeats no check.
+-- Advances one byte past a character `asciiAt` just answered a code for. It
+-- checks nothing, so used anywhere else the next read may report a
+-- malformed sequence.
 skipAscii : Window -> Window
 skipAscii snapshot = { snapshot | index = snapshot.index + 1 }
 
 -- An exact encoded prefix of valid text can be compared in bulk without
--- decoding each scalar or materializing the source substring. A mismatch,
--- short buffer, or unrepresentable requested text leaves the view unchanged.
+-- decoding each scalar or materializing the source substring.
+
+-- The position after `text` when its encoding occurs at the position, or
+-- `Nothing` on a mismatch, too few buffered bytes, or text the encoding
+-- cannot represent. Empty text matches at once. Only the matched bytes are
+-- validated, so a refusal does not diagnose malformed input; use a
+-- character read for that.
 matchWindow : Window -> String -> Maybe Window
 matchWindow snapshot text =
     if text == "" then Just snapshot
@@ -331,8 +343,10 @@ windowText start end =
         EmptyBuffer -> Ok ""
         Buffered encoding bytes _ -> Encoding.decode encoding (Bytes.slice start.index end.index bytes)
 
--- Publish only the newly consumed prefix. Derived positions from one window
--- may be committed repeatedly, in increasing order, on their original reader.
+-- Consumes the reader up to the position, counting only bytes not already
+-- committed, so committing the same or an earlier position does nothing.
+-- Abandoning a window consumes nothing. Do not advance the reader any other
+-- way while using its windows.
 commitWindow : Reader e -> Window ->{e} ()
 commitWindow (Reader input) snapshot =
     case snapshot.buffer of
@@ -341,9 +355,12 @@ commitWindow (Reader input) snapshot =
             width = base + snapshot.index - input.position()
             if width > 0 then input.consume width else ()
 
--- Reconcile consumption before growing the parent buffer. A False result is
--- proof of source EOF, unlike an empty immutable window. Incomplete scalars
--- remain in the parent and can be completed by the next chunk.
+-- Commits through the position, refills the parent, and answers
+-- `(fresh, grew)`. `fresh` starts at position zero over the remaining and new
+-- bytes, and later scanning and commits must use it; `grew` is `False` only
+-- at the end of the source. An incomplete character stays for the next
+-- chunk. Old windows stay valid for inspection and `windowText`. A source
+-- failure propagates with the committed prefix consumed.
 refillWindow : Reader e -> Window ->{e} (Window, Bool)
 refillWindow reader snapshot =
     commitWindow reader snapshot
@@ -461,7 +478,8 @@ until input delimiter delimiterLength limit count offset reverse =
 
 -- Reads up to `delimiter`, consuming it without answering it. `limit` counts
 -- the characters of the run and delimiter together; a limit of zero or less
--- always overflows. A delimiter may span source chunks.
+-- always overflows, and an empty delimiter is found at once when it is
+-- positive. A delimiter may span source chunks.
 --
 -- ```fango
 -- import Fail

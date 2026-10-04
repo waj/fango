@@ -91,7 +91,7 @@ Equality is List's derived `Eq` instance, so it remains structural even for
 identical list pointers and a list containing NaN does not compare equal to itself.
 `ListMap` builds an unpublished spine in a forward pass, invoking callbacks in
 source order, then publishes the complete result. Public complexity belongs in
-[collections](../reference/library-collections.md#list).
+[collections](../../stdlib/List.fango).
 
 Dict is an ordinary opaque Fango [weight-balanced tree](../../stdlib/Dict.fango)
 with cached subtree sizes.
@@ -130,7 +130,7 @@ language boundary once per byte.
 Operations crossing a list come in pairs over one implementation, because
 generated code holds a `List[int64]` or a `List[Bytes]` where the interpreter
 holds the same list with its elements erased. Public contracts belong in
-[byte sequences](../reference/library-bytes.md).
+[byte sequences](../../stdlib/Bytes.fango).
 
 ## Module emission and build cache
 
@@ -429,7 +429,7 @@ sidecars, residual effects, and process-observing natives.
 
 ## Regex literals
 
-[Regex](../reference/library-regex.md) is an ordinary bundled nominal wrapper
+[Regex](../../stdlib/Regex.fango) is an ordinary bundled nominal wrapper
 with one private `Runtime.Native.Any` field containing an immutable Go
 `*regexp.Regexp`. Its sidecar uses the existing scalar/opaque-wrapper ABI.
 Private compilation outcomes, match batches, and split batches stay on the Go

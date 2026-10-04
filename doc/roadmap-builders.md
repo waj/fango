@@ -3,7 +3,7 @@
 This is a proposal, not a description of current Fango syntax or APIs. It
 explains a small source-level translation that would let a library offer
 generator notation without restoring compiler-generated coroutine machines.
-The [current Stream](reference/library-streams.md) has an explicit state and
+The [current Stream](../stdlib/Stream.fango) has an explicit state and
 step function; the [current handlers](reference/effects.md#resume-discipline)
 cannot retain a resume for the next pull. The [synchronous foundation](design/effects.md)
 remains the architecture for ordinary calls and effects.
@@ -321,7 +321,7 @@ The producer holds closures, not a suspended stack. A resource acquired inside
 one `Defer` action must be released before that action returns an `Emit`, unless
 the resource is explicitly retained and checked by its own existing API.
 Acquisition and cleanup for the whole traversal remain around the consumer,
-as with [current streams](reference/library-streams.md). Stopping early does
+as with [current streams](../stdlib/Stream.fango). Stopping early does
 not run an implicit producer finalizer. Handler evidence captured by a
 deferred closure must still satisfy the current effect and scope rules.
 

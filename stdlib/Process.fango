@@ -1,5 +1,6 @@
 {-# no-prelude #-}
--- The running program's arguments and exit status.
+-- The running program's arguments and exit status. The prelude does not
+-- expose it; import `Process`.
 module Process exposing (args, exit)
 
 import Basics exposing (..)
@@ -12,7 +13,8 @@ argCount = native
 argAt : Int ->{IO} String
 argAt = native
 
--- Ends the program at once with the given status.
+-- Ends the program at once with the given status. In the interpreter or the
+-- REPL it ends the program without ending the session.
 exit : Int ->{IO} ()
 exit = native
 

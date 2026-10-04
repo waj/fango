@@ -14,6 +14,12 @@
 -- Reading consumes tokens as needed, and a typed decoder builds no
 -- intermediate `Value`. Custom decoders and token-level parsing live in
 -- `Json.Pull`.
+--
+-- `Error`, `Decode`, `Value`, `Number`, and `FieldOption` are re-exported from
+-- `Json.Pull` and `Json.Field`. `Decode` is exposed without its method; a
+-- handwritten instance imports `Decode(..)` from `Json.Pull`. A duplicate
+-- declared key or a missing required field is a decoding error, and a nested
+-- `Maybe` cannot tell an outer `Nothing` from an inner one.
 module Json exposing
     ( Decode, Emit(..), Encode(..), Error(..), FieldOption(..), Number
     , Value(..)
@@ -77,7 +83,7 @@ parseBytes _ input =
 parse : Decode a => Type a -> String -> Result Error a
 parse witness text = parseBytes witness (Bytes.fromString text)
 
--- `parse` from a byte reader, which may be any source. It reads only what
+-- `parse` from a byte reader, decoding UTF-8, which may be any source. It reads only what
 -- the document needs and has the reader's effects.
 read : Decode a => Type a -> Reader e ->{e} Result Error a
 read _ reader =

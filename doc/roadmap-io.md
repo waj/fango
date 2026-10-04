@@ -1,13 +1,13 @@
 # Roadmap: HTTP and a concurrent server
 
-[HTTP/1.1 framing, the concurrent server, routing, and streaming GZip](reference/library-http.md)
-are implemented over the existing [stream interfaces](reference/library-readers.md)
-and [socket layer](reference/library-io.md#net). Memory fixtures and loopback
+[HTTP/1.1 framing, the concurrent server, routing, and streaming GZip](../stdlib/Http.fango)
+are implemented over the existing [stream interfaces](../stdlib/Reader.fango)
+and [socket layer](../stdlib/Net.fango). Memory fixtures and loopback
 checks cover malformed framing, truncated bodies, oversized headers, chunked
 requests, keep-alive, simultaneous clients, and GZip.
 
 Server-side TLS and HTTP/2 are deferred; the
-[client](reference/library-http-client.md) supports TLS. A policy for request bodies that an application
+[client](../stdlib/Http/Client.fango) supports TLS. A policy for request bodies that an application
 leaves unread is also deferred: the current server closes a connection when
 its handler leaves the request body incomplete. A future API may expose a
 deliberate drain policy.

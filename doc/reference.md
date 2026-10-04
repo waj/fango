@@ -14,33 +14,29 @@ unfinished work. Use `rg -n '^#{1,3} ' doc/reference` to list topic headings.
 
 ## Bundled standard library
 
-The bundled library is experimental and versioned with the compiler.
-[Prelude](reference/modules.md#prelude-and-implicit-dependencies) defines the default scope.
+The bundled library is experimental and versioned with the compiler. It
+documents itself: the comments in its sources are its API reference, which
+[`fango doc --stdlib`](reference/commands.md#api-documentation) extracts and
+editor hover shows. [Prelude](reference/modules.md#prelude-and-implicit-dependencies)
+defines the default scope.
 
-| API | Reference |
+| Area | Modules |
 | --- | --- |
-| List (literal and pattern syntax: [Lists](reference/types.md#lists)), Range, Maybe, Tuple, Dict, Result | [Collections](reference/library-collections.md) |
-| String, Char, Basics integer helpers | [Text and numeric helpers](reference/library-text.md) |
-| Regex | [Regular expressions](reference/library-regex.md) |
-| Bytes | [Byte sequences](reference/library-bytes.md) |
-| Reader, Writer, Bytes.Source, Bytes.Sink | [Buffered readers and writers](reference/library-readers.md) |
-| Encoding, Text.Reader, Text.Writer, Text.Builder | [Encodings and text I/O](reference/library-text-io.md) |
-| IO, Console, Process, File, Net | [Handles, console, process, files, sockets, and structured errors](reference/library-io.md) |
-| Url | [URLs](reference/library-url.md) |
-| Http, Http.Wire, Http.Server, Http.Server.Route, Http.GZip | [HTTP/1.1 server and middleware](reference/library-http.md) |
-| Http.Client | [HTTP/1.1 client](reference/library-http-client.md) |
-| Fail, Failure, State, Random, Runtime.Local | [Effect APIs](reference/library-effects.md) |
-| Runtime.Scope | [Cleanup scopes](reference/resources.md) |
-| Runtime.Prompt | [REPL handler levels](reference/repl.md#handler-levels) |
-| Async | [Tasks, handlers, cancellation, and channels](reference/library-async.md) |
-| Runtime.Native | [Native Go sidecars](reference/native.md) |
-| Json | [Streaming parsing and encoding](reference/library-json.md) |
-| Json.Pull | [Pull parser and custom decoders](reference/library-json-pull.md) |
-| Meta, Derive | [Metaprogramming](reference/metaprogramming.md) |
-
-### Streams and cursors
-
-[Stream and Iterator](reference/library-streams.md) — explicit state, traversal, and composition.
+| Classes, operators, and integer helpers | [Basics](../stdlib/Basics.fango) |
+| Collections and results (list syntax: [Lists](reference/types.md#lists)) | [List](../stdlib/List.fango), [Range](../stdlib/Range.fango), [Maybe](../stdlib/Maybe.fango), [Tuple](../stdlib/Tuple.fango), [Dict](../stdlib/Dict.fango), [Result](../stdlib/Result.fango) |
+| Streams and cursors | [Stream](../stdlib/Stream.fango), [Iterator](../stdlib/Iterator.fango) |
+| Text | [String](../stdlib/String.fango), [Char](../stdlib/Char.fango), [Regex](../stdlib/Regex.fango), [Encoding](../stdlib/Encoding.fango), [Text.Builder](../stdlib/Text/Builder.fango) |
+| Bytes and buffered IO | [Bytes](../stdlib/Bytes.fango), [Reader](../stdlib/Reader.fango), [Writer](../stdlib/Writer.fango), [Text.Reader](../stdlib/Text/Reader.fango), [Text.Writer](../stdlib/Text/Writer.fango) |
+| Handles, console, process, files, and sockets | [IO](../stdlib/IO.fango), [Console](../stdlib/Console.fango), [Process](../stdlib/Process.fango), [File](../stdlib/File.fango), [Net](../stdlib/Net.fango) |
+| URLs and HTTP | [Url](../stdlib/Url.fango), [Http](../stdlib/Http.fango), [Http.Wire](../stdlib/Http/Wire.fango), [Http.Server](../stdlib/Http/Server.fango), [Http.Server.Route](../stdlib/Http/Server/Route.fango), [Http.GZip](../stdlib/Http/GZip.fango), [Http.Client](../stdlib/Http/Client.fango) |
+| Effects | [Fail](../stdlib/Fail.fango), [Failure](../stdlib/Failure.fango), [State](../stdlib/State.fango), [Random](../stdlib/Random.fango), [Runtime.Local](../stdlib/Runtime/Local.fango) |
+| Cleanup scopes ([guide](reference/resources.md)) | [Runtime.Scope](../stdlib/Runtime/Scope.fango) |
+| Tasks and channels ([handlers in tasks](reference/effects.md#handlers-in-tasks)) | [Async](../stdlib/Async.fango) |
+| JSON | [Json](../stdlib/Json.fango), [Json.Field](../stdlib/Json/Field.fango), [Json.Pull](../stdlib/Json/Pull.fango) |
+| Metaprogramming ([guide](reference/metaprogramming.md)) | [Meta](../stdlib/Meta.fango), [Derive](../stdlib/Derive.fango) |
+| Native sidecars ([guide](reference/native.md)) | [Runtime.Native](../stdlib/Runtime/Native.fango) |
+| REPL handler levels ([guide](reference/repl.md#handler-levels)) | [Runtime.Prompt](../stdlib/Runtime/Prompt.fango) |
+| Default scope ([rules](reference/modules.md#prelude-and-implicit-dependencies)) | [Prelude](../stdlib/Prelude.fango) |
 
 ## Native Go sidecars
 

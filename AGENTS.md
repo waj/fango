@@ -6,7 +6,8 @@ fallback when Python is absent from the shell.
 
 Before architectural or implementation work, read the `doc/design.md` and
 `doc/roadmap.md` entry pages, then follow only task-relevant topic links.
-For user-visible changes, consult the relevant `doc/reference.md` topics.
+For user-visible changes, consult the relevant `doc/reference.md` topics; for
+standard-library changes, the module's own source comments.
 Search headings with `rg` before reading whole topic files.
 
 Update documentation with the implementation: reference owns behavior and
@@ -19,6 +20,18 @@ and update links. Promote completed roadmap work into design/reference, then
 remove its roadmap entry or mark it `DONE` under the milestone rules below.
 Do not add implementation diaries or completed plan files; Git history is the
 archive.
+
+The standard library documents itself. The leading comments in
+`stdlib/**/*.fango` are its API reference, which `fango doc --stdlib`
+extracts; there are no separate library pages under `doc/`. Change a
+declaration's comment together with its behavior, and document every new
+module and public declaration, its constructors, fields, methods, and
+operations included: `fango doc --stdlib --strict` must stay clean. Examples
+are fenced `fango` blocks whose non-binding lines are `Bool` assertions; the
+test suite runs them under both backends, so keep them true. `doc/reference`
+covers the language and tooling and links to library modules by source path
+rather than restating their API. Comment conventions are in
+`doc/reference/commands.md` under "API documentation".
 
 Roadmap milestone IDs, numbers, and titles are stable identifiers. Do not rename,
 renumber, or repurpose existing stages unless the user explicitly requests it.

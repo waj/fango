@@ -25,7 +25,8 @@ type Pair a b
     = Pair a b
     deriving (Eq, Ord)
 
--- Three values, written `(a, b, c)`.
+-- Three values, written `(a, b, c)`. There are no accessors; match
+-- `(a, b, c)` to reach its components.
 type Triple a b c
     -- The triple of its components; `Triple a b c` is `(a, b, c)`.
     = Triple a b c

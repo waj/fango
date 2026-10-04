@@ -36,7 +36,7 @@ results are validated, and an invalid UTF-8 string or non-scalar rune panics at
 the native boundary. Unit parameters are omitted from
 the Go function and a Unit result is represented by no Go result.
 
-The bundled [`Bytes`](library-bytes.md) also crosses, as a plain `[]byte`, in
+The bundled [`Bytes`](../../stdlib/Bytes.fango) also crosses, as a plain `[]byte`, in
 compiler-bundled sidecars only; a user sidecar naming it is a `NATIVE ABI`
 error. It is not validated on the way out the way String and Char are, because
 `Bytes` has no well-formedness contract — that is the point of it. A native
@@ -108,7 +108,7 @@ natives; ordinary Fango effect handlers can wrap them.
 
 Storage keeps its typed payload alive but does not extend the lifetime of any
 external resource it references. Native resource operations check validity at
-runtime. [Async](library-async.md) callbacks may share native handles and
+runtime. [Async](../../stdlib/Async.fango) callbacks may share native handles and
 functions.
 Native code must honor its declaration and may not invoke opaque Fango payloads.
 
@@ -146,7 +146,7 @@ system host returns a background context. A native operation may derive a contex
 for work owned and drained by that evaluation, as the Async root does. This does
 not grant permission to retain the process-global host itself.
 
-Concurrent Fango invocation uses the checked [Async boundary](library-async.md).
+Concurrent Fango invocation uses the checked [Async boundary](../../stdlib/Async.fango).
 Arbitrary native background callbacks are not supported.
 
 ## Build and interpreter lifecycle

@@ -124,7 +124,8 @@ found at = if at < 0 then Nothing else Just at
 -- boundary once per byte.
 
 -- The first index at which `needle` occurs, or `Nothing`. The empty needle
--- occurs at index 0 of every sequence.
+-- occurs at index 0 of every sequence. The scan runs natively and allocates
+-- nothing per match.
 --
 -- ```fango
 -- import Bytes
@@ -136,9 +137,9 @@ found at = if at < 0 then Nothing else Just at
 indexOf : Bytes -> Bytes -> Maybe Int
 indexOf needle bytes = found (indexOfRaw needle bytes)
 
--- `indexOf` beginning at a clamped index `start`. Resuming where an earlier
--- search stopped keeps repeated searches over a growing buffer linear in its
--- size.
+-- `indexOf` beginning at a clamped index `start`, where the empty needle
+-- occurs. Resuming where an earlier search stopped keeps repeated searches
+-- over a growing buffer linear in its size.
 --
 -- ```fango
 -- import Bytes

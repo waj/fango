@@ -3,16 +3,16 @@
 The coroutine direction below is deferred by the
 [synchronous effect design](design/effects.md). It describes a historical
 proposal, not the current compiler. Current reader and task behavior belongs in
-[readers](reference/library-readers.md) and [Async](reference/library-async.md).
+[readers](../stdlib/Reader.fango) and [Async](../stdlib/Async.fango).
 
 This document retains unfinished general effect-language work and the
 historical owned-coroutine proposal. The
-[Async reference](reference/library-async.md) owns current task behavior. The
+[Async documentation](../stdlib/Async.fango) owns current task behavior. The
 [main roadmap](roadmap.md) is the navigation entry point.
 
 Everything proposed here remains unimplemented. Implemented behavior belongs
 to [effects](reference/effects.md), [resources](reference/resources.md), and
-[streams](reference/library-streams.md); implemented architecture belongs to
+[streams](../stdlib/Stream.fango); implemented architecture belongs to
 [effect execution](design/effects.md), [machines](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/machines.md), and
 [ownership](design/ownership.md). Promote durable results there when a stage
 lands, then remove that completed work or mark its stage DONE under the
@@ -74,7 +74,7 @@ is safe, and safe sequential advancement does not prove safe goroutine transfer.
 The native work is split into typed values, scoped requests, shared/transferable
 capabilities, and concurrent invocation/runtime safety. This sequence belongs
 to the historical coroutine proposal. The current [native task architecture](design/tasks.md)
-and [Async API](reference/library-async.md) use a different execution boundary.
+and [Async API](../stdlib/Async.fango) use a different execution boundary.
 
 Keep Direct and Exit fast paths. Select explicit Machine execution only where
 control requires it; do not require a scheduler, goroutine, or channel for a
@@ -159,7 +159,7 @@ These are not automatically prerequisites for the first coroutine milestone:
   [native closure invocation boundary](design/tasks.md#async-runtime-foundation).
 - **Row-kinded effect parameters.** Unlike row-indexed ADTs, effect headers
   currently fix parameters to value kind. Generalizing them is not required by
-  the current [Async API](reference/library-async.md), which uses native task
+  the current [Async API](../stdlib/Async.fango), which uses native task
   invocation rather than hidden scoped work budgets.
   Invalid use of an effect parameter as both an ordinary type and a row
   reports a kind mismatch; declaration acceptance alone does not establish

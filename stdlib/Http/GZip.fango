@@ -76,9 +76,9 @@ refillFrom decoder input =
         checkStatus decoder (decoderPush decoder chunk)
         if Bytes.length (decoderPending decoder) > before then True else refillFrom decoder input
 
--- A reader of the gzip-decoded content of `input`. A corrupt or truncated
--- stream raises `Malformed`, and more than `limit` decoded bytes
--- `BodyTooLarge`.
+-- A reader of the gzip-decoded content of `input`, reading concatenated gzip
+-- members as one stream. A corrupt or truncated stream raises `Malformed`,
+-- and more than `limit` decoded bytes `BodyTooLarge`.
 decoding : Int -> Reader {Protocol | e} -> Reader {Protocol | e}
 decoding limit input =
     decoder = newDecoder limit
@@ -89,7 +89,7 @@ decoding limit input =
         }
 
 -- A body that sends `body` gzip-compressed. Its length is not known in
--- advance, so it streams.
+-- advance, so it streams. An empty body stays empty.
 encoding : Body e -> Body e
 encoding body =
     case body of
@@ -97,7 +97,9 @@ encoding body =
         _ -> StreamBody (compressBody body)
 
 -- Decodes request bodies sent with `Content-Encoding: gzip`, up to `limit`
--- decoded bytes, before `handler` sees them. Another content coding gets 415.
+-- decoded bytes, before `handler` sees them; the decoded request loses its
+-- `Content-Encoding` and `Content-Length` headers. `identity` passes through
+-- unchanged, and another content coding gets 415.
 decodeRequests : Int -> (Request {Protocol | e} ->{Protocol | e} Response {Protocol | e}) -> Request {Protocol | e} ->{Protocol | e} Response {Protocol | e}
 decodeRequests limit handler request =
     case Http.getHeader "content-encoding" request.headers of
@@ -158,7 +160,7 @@ hasToken wanted tokens =
         [token | rest] ->
             if Http.equalAscii wanted (String.trim token) then True else hasToken wanted rest
 
--- Whether the request's `Accept-Encoding` headers accept gzip, honouring
+-- Whether the request's `Accept-Encoding` headers accept gzip, honoring
 -- quality values and the `*` wildcard.
 --
 -- ```fango

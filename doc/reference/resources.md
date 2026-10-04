@@ -87,6 +87,8 @@ A resource or a closure referring to it may outlive its acquiring scope. This
 does not keep the resource open: bracket release still runs at scope exit.
 Native resource operations validate the handle and report use after close.
 The compiler does not infer resource retention or non-escape contracts.
+Consume a stream backed by a resource inside that resource's cleanup scope,
+and have each task construct its own scoped buffered readers and writers.
 
 ## Resource types
 

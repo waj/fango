@@ -9,7 +9,11 @@
 -- parent body, which can observe and handle the failure. Cancellation is
 -- cooperative: sleeps, channel transfers, and task waits respond to it, but
 -- CPU loops need `checkpoint`, and blocking IO is not interrupted except by
--- the cancellation-aware `Net` operations.
+-- the cancellation-aware `Net` operations. `cancelled`, `cancel`, `close`,
+-- and `cancelScope` still work after a scope is cancelled; `checkpoint`,
+-- `sleep`, channel transfers, and task waits leave it. The rules for
+-- handlers a task inherits are in the language reference, under "Handlers
+-- in tasks".
 module Async exposing
     ( Async, Channel, Outcome(..), Task
     , await, awaitResult, cancel, cancelScope, cancelled, channel, checkpoint
@@ -210,7 +214,8 @@ wait (Task task) =
 
 -- Waits for the task to finish and answers how it ended, without failing.
 -- Observing a task marks its failure as handled; repeated observations
--- answer the same result. Cancelling the waiting task interrupts the wait.
+-- answer the same result. Cancelling the waiting task interrupts the wait
+-- without observing the task's result.
 awaitResult : Task err value ->{Async err} Outcome (Result err value)
 awaitResult (Task task) =
     owner = active()
@@ -303,8 +308,8 @@ close ch =
     closeChannel ch
 
 -- Applies a pure function to every element in parallel, keeping their order.
--- It uses at most one worker per available processor and needs no task
--- scope.
+-- It uses at most `GOMAXPROCS` workers per call and needs no task scope. An
+-- empty list never calls the function.
 --
 -- ```fango
 -- import Async

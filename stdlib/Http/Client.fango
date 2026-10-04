@@ -44,10 +44,14 @@ type Request e =
       -- The URL, parsed when the request is sent.
     , url : String
       -- The request's own headers, which replace same-named configured ones.
+      -- Setting a client-managed header, here or in `Config.headers`, fails
+      -- with `Protocol (InvalidMessage …)`.
       -- `Host`, `Content-Length`, `Transfer-Encoding`, and `Connection` are
       -- the client's to write.
     , headers : List Header
-      -- The body. It runs between the client's writes, with the caller's
+      -- The body. An `Empty` body sends no framing headers for GET, HEAD,
+      -- OPTIONS, TRACE, and DELETE, and `Content-Length: 0` otherwise. It
+      -- runs between the client's writes, with the caller's
       -- effects, so a large payload is produced while it is sent.
     , body : Body e
     }
@@ -88,7 +92,8 @@ type Error
     = InvalidUrl String
     -- Connecting, reading, or writing failed, including TLS verification.
     | Transport Net.Error
-    -- A connect, read, or write wait exceeded its timeout.
+    -- A connect, read, or write wait exceeded its timeout. It is never
+    -- reported as a `Transport` failure of kind `TimedOut`.
     | Timeout
     -- The exchange broke HTTP framing, in either direction.
     | Protocol Http.Error
@@ -107,9 +112,14 @@ type Config =
       baseUrl : Maybe Url
       -- Headers sent with every request; a request's own replace them.
     , headers : List Header
-      -- The `User-Agent` header.
+      -- The `User-Agent` header. It and, with `decompress`,
+      -- `Accept-Encoding: gzip` come first; `headers` replace them, and a
+      -- request's own headers replace both.
     , userAgent : String
       -- Whether to ask for gzip responses and decode them as they stream.
+      -- HEAD, 204, and 304 responses and other content codings are left
+      -- alone, and a configuration or request that sets `Accept-Encoding`
+      -- itself gets the body as sent.
     , decompress : Bool
       -- How long connecting, including a TLS handshake, may take, in
       -- milliseconds.
@@ -120,11 +130,14 @@ type Config =
     , writeTimeoutMs : Int
       -- The largest status line and header block, in bytes.
     , maxHeaderBytes : Int
-      -- The largest body read into memory, in bytes.
+      -- The largest body read into memory, in decoded bytes. A `send`
+      -- callback reading the stream itself has no limit.
     , maxBodyBytes : Int
       -- How many redirects to follow; zero returns redirects as they are.
     , maxRedirects : Int
       -- A PEM file of certificate authorities trusted besides the system's.
+      -- `https` sends the host for SNI and verifies its certificate against
+      -- both.
     , caFile : Maybe String
     }
 
@@ -215,7 +228,10 @@ socketRelease connection reusable =
 -- to 60 s, until `run` returns; tasks that inherit the handler share them. A
 -- request that fails on a reused connection before any response arrives is
 -- retried once on a new one when it is idempotent and its body can be sent
--- again.
+-- again. A connection is reused only when its response was read to the end,
+-- both sides spoke HTTP/1.1, neither sent `Connection: close`, and the body
+-- was framed by length or chunks; an unread body is drained if at most
+-- 64 KiB remain, and otherwise the connection closes.
 run : (() ->{Http | e} a) ->{IO | e} a
 run action =
     pool = Net.newPool 8 60000
@@ -561,11 +577,16 @@ exchange config outgoing target crossOrigin hops fresh action =
 -- Sends `request` and streams the response to `action`, which may read the
 -- body only while it runs; a value that does not depend on the reader can
 -- leave. Redirects (301, 302, 303, 307, 308) are followed first, up to
--- `maxRedirects`: a 303, or a 301 or 302 answering other than GET or HEAD,
--- continues as a GET; credentials are dropped once a redirect leaves the
--- original origin; and a redirect from `https` to another scheme, or one
--- needing a stream body again, is returned as it is. Any status is a normal
--- response.
+-- `maxRedirects`. `Location` resolves against the current URL. A 303, or a
+-- 301 or 302 answering other than GET or HEAD, continues as a GET (a HEAD
+-- stays HEAD) without a body; other redirects repeat the method and body.
+-- Credentials are dropped once a redirect leaves the original origin, and a
+-- redirect without a usable `Location`, from `https` to another scheme, or
+-- needing a stream body again is returned as it is. Interim 1xx responses
+-- are skipped, `101` fails with `Unsupported`, HTTP/1.0 status lines are
+-- accepted, and a body that ends early fails with `Malformed` when read. A
+-- request body that fails partway closes the connection, and its failure
+-- reaches the caller unchanged. Any status is a normal response.
 {-# scoped s #-}
 send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
 send outgoing action =
@@ -690,7 +711,8 @@ decodeReply witness limit response =
         body = collect response.body limit [] 0
         failWith (BadStatus (Reply { url = response.url, status = response.status, headers = response.headers, body = body }))
 
--- Sends a GET asking for JSON and decodes a 2xx body as it streams,
+-- Sends a GET with `Accept: application/json`, unless the request sets it,
+-- and decodes a 2xx body within `maxBodyBytes` as it streams,
 -- failing with `BadStatus` for another status and `BadBody` for a body that
 -- does not decode.
 --
@@ -711,7 +733,9 @@ getJson witness raw =
     outgoing = withDefaultHeader "Accept" "application/json" (request "GET" raw)
     send outgoing { response -> decodeReply witness limit response }
 
--- Sends `value` as a JSON POST, streamed as it is encoded, and decodes a 2xx
+-- Sends `value` as a chunked JSON POST with `Content-Type: application/json`,
+-- streamed as it is encoded; an encoding failure is
+-- `Protocol (InvalidMessage …)`. It decodes a 2xx
 -- JSON response like `getJson`.
 postJson : (Encode b, Decode a) => Type a -> String -> b ->{Http, Fail Error} a
 postJson witness raw value =

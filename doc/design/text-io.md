@@ -2,8 +2,8 @@
 
 [Encoding](../../stdlib/Encoding.fango), [Text.Reader](../../stdlib/Text/Reader.fango),
 and [Text.Writer](../../stdlib/Text/Writer.fango) layer text over the existing
-byte interfaces. Their observable contracts are in the
-[text I/O reference](../reference/library-text-io.md).
+byte interfaces. Their observable contracts are in those modules'
+documentation comments.
 
 Encoding selection belongs to an adapter, not the byte buffer. Byte readers
 continue to frame files and protocols without knowing whether their payload

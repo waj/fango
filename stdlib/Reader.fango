@@ -16,7 +16,8 @@ import Runtime.Local
 import Stream exposing (Stream)
 
 -- A byte reader whose operations perform `e`. The three fields are its
--- primitives; the module's functions build reads from them.
+-- primitives, called by projection, as `reader.refill()`; the module's
+-- functions build reads from them.
 type Reader e =
     {
       -- The bytes in hand, without consuming them.

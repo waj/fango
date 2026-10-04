@@ -18,7 +18,7 @@ retained historical comparisons. Improve private bulk List construction only
 when measurements justify it, preserving immutable published nodes. Add task
 combinators when concrete applications need them, using the existing closure
 invocation boundary. Cancellation-aware socket IO is implemented through
-[Net](reference/library-io.md#net).
+[Net](../stdlib/Net.fango).
 
 ## JSON and generated-code performance
 
@@ -93,11 +93,11 @@ for otherwise unavailable semantics or measured performance needs.
 
 ## HTTP and a concurrent server
 
-[HTTP/1.1 framing and the concurrent server](reference/library-http.md) are
-implemented over [buffered readers and writers](reference/library-readers.md),
-[Net](reference/library-io.md#net), and [Async](reference/library-async.md).
+[HTTP/1.1 framing and the concurrent server](../stdlib/Http.fango) are
+implemented over [buffered readers and writers](../stdlib/Reader.fango),
+[Net](../stdlib/Net.fango), and [Async](../stdlib/Async.fango).
 [HTTP follow-up work](roadmap-io.md) tracks transport acceptance coverage and
-future protocol variants. The [HTTP client](reference/library-http-client.md)
+future protocol variants. The [HTTP client](../stdlib/Http/Client.fango)
 is implemented; the [HTTP client roadmap](roadmap-http-client.md) covers
 mocking.
 
@@ -191,7 +191,7 @@ designed against the current [task architecture](design/tasks.md) when needed.
 DONE
 
 Type witnesses and their use in JSON decoding are specified in the
-[JSON reference](reference/library-json.md#type-witnesses). A compile-time
+[syntax reference](reference/syntax.md#type-witnesses). A compile-time
 conversion from `Type a` to `Meta.TypeRepr` remains a separate future feature.
 
 ## Longer-term candidates

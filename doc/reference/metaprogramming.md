@@ -121,7 +121,7 @@ The compiler permits repeated attributes. Their consumers decide whether
 particular combinations and attachment sites are valid. `Meta.failAt` reports
 `COMPILE-TIME FAILURE` at the individual expression's attachment site, including
 when several expressions share a tag. JSON's rules are in the
-[JSON reference](library-json.md#typed-values). Unconsumed, well-typed options do
+[Json module documentation](../../stdlib/Json.fango). Unconsumed, well-typed options do
 not receive consumer-specific validation.
 
 Metadata and source handles cannot reach runtime code. Attaching metadata to a

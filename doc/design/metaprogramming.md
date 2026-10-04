@@ -143,4 +143,4 @@ Json.Encode and Json.Decode exercise reflection and quotes without declaration
 generation. Derivers emit specialized field and constructor code. The JSON
 scanner, pull protocol, and emitter live in Fango; the existing buffered
 Reader and Writer primitives provide byte I/O. The wire format and field
-attributes are specified in [JSON](../reference/library-json.md).
+attributes are specified in [JSON](../../stdlib/Json.fango).
