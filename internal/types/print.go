@@ -28,13 +28,31 @@ type Printer struct {
 	// TypeName spells a type constructor's canonical name. Nil uses its
 	// surface name.
 	TypeName func(canonical string) string
+	// Ref, when set, receives each type, class, and effect name as printed,
+	// with its canonical name, and returns the text to print instead.
+	Ref func(canonical, text string) string
+}
+
+func (p *Printer) ref(canonical, text string) string {
+	if p.Ref != nil {
+		return p.Ref(canonical, text)
+	}
+	return text
+}
+
+func (p *Printer) label(l EffLabel) string {
+	text := p.ref(l.Name, SurfaceName(l.Name))
+	for _, a := range l.Args {
+		text += " " + p.atom(a)
+	}
+	return text
 }
 
 func (p *Printer) typeName(name string) string {
 	if p.TypeName != nil {
-		return p.TypeName(name)
+		return p.ref(name, p.TypeName(name))
 	}
-	return SurfaceName(name)
+	return p.ref(name, SurfaceName(name))
 }
 
 func NewPrinter() *Printer {
@@ -90,10 +108,7 @@ func (p *Printer) render(t Type) string {
 		if showEff {
 			parts := make([]string, len(t.Eff.Labels))
 			for i, l := range t.Eff.Labels {
-				parts[i] = SurfaceName(l.Name)
-				for _, a := range l.Args {
-					parts[i] += " " + p.atom(a)
-				}
+				parts[i] = p.label(l)
 			}
 			inside := strings.Join(parts, ", ")
 			if v, ok := t.Eff.Tail.(*TVar); ok && p.shownRow(v) {
@@ -115,10 +130,7 @@ func (p *Printer) render(t Type) string {
 func (p *Printer) rowText(r Row) string {
 	parts := make([]string, len(r.Labels))
 	for i, l := range r.Labels {
-		parts[i] = SurfaceName(l.Name)
-		for _, a := range l.Args {
-			parts[i] += " " + p.atom(a)
-		}
+		parts[i] = p.label(l)
 	}
 	inside := strings.Join(parts, ", ")
 	if r.Tail != nil {
@@ -218,7 +230,7 @@ func Show(t Type) string { return NewPrinter().Type(t) }
 // applied to a type that is parenthesized when an application would otherwise
 // read as two arguments, as in `Eq (List a)`.
 func (p *Printer) Pred(class string, t Type) string {
-	return SurfaceName(class) + " " + p.atom(t)
+	return p.ref(class, SurfaceName(class)) + " " + p.atom(t)
 }
 
 // ShowPred renders one constraint with a fresh printer.

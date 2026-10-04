@@ -148,6 +148,25 @@ func TestDocWholeLibrary(t *testing.T) {
 			if d.Signature == "" || d.Source.Line < 1 || !strings.HasPrefix(d.ID, d.Kind+":"+m.Name+".") {
 				t.Errorf("incomplete declaration %+v", d)
 			}
+			text := ""
+			for _, part := range d.SignatureParts {
+				text += part.Text
+			}
+			if d.SignatureParts != nil && text != d.Signature {
+				t.Errorf("%s parts spell %q, signature %q", d.ID, text, d.Signature)
+			}
+			if d.InstanceParts != nil && len(d.InstanceParts) != len(d.Instances) {
+				t.Errorf("%s has %d instance parts for %d instances", d.ID, len(d.InstanceParts), len(d.Instances))
+			}
+			for i, parts := range d.InstanceParts {
+				text := ""
+				for _, part := range parts {
+					text += part.Text
+				}
+				if i < len(d.Instances) && text != d.Instances[i] {
+					t.Errorf("%s instance parts spell %q, instance %q", d.ID, text, d.Instances[i])
+				}
+			}
 		}
 	}
 	if !slices.Equal(names, want) || !slices.Contains(names, "Http.Server.Route") || !slices.Contains(names, "Runtime.Native") {
@@ -169,6 +188,10 @@ func TestDocWholeLibrary(t *testing.T) {
 		if got := declaration(t, doc, id).Signature; got != sig {
 			t.Errorf("%s signature = %q, want %q", id, got, sig)
 		}
+	}
+	// Names link to their defining declarations, across modules that share them.
+	if parts := declaration(t, doc, "constructor:Http.Client.Transport").SignatureParts; len(parts) != 4 || parts[1] != (apidoc.Part{Text: "Error", TargetID: "type:Net.Error"}) || parts[3] != (apidoc.Part{Text: "Error", TargetID: "type:Http.Client.Error"}) {
+		t.Errorf("Transport parts = %+v", parts)
 	}
 	if d := declaration(t, doc, "value:Basics.|>"); d.Fixity != "infixl 0" {
 		t.Errorf("(|>) fixity = %q", d.Fixity)

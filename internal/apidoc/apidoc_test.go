@@ -1,6 +1,7 @@
 package apidoc
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -193,6 +194,58 @@ func TestExtractDeclarations(t *testing.T) {
 	// another loaded type (Meta.Shape here) is qualified.
 	if d := find(t, doc, "class:Shapes.Measure"); !slices.Equal(d.Instances, []string{"Measure Shapes.Shape"}) {
 		t.Errorf("Measure instances = %v", d.Instances)
+	}
+}
+
+func TestExtractSignatureParts(t *testing.T) {
+	doc, _ := extract(t)
+	for id, want := range map[string]string{
+		// Types, classes, and effects link to their declarations; type
+		// variables, parameters, and the declared name itself do not.
+		"value:Shapes.area":         `["area : ",{"text":"Shape","targetId":"type:Shapes.Shape"}," -> Float"]`,
+		"value:Shapes.logged":       `["logged : ",{"text":"Measure","targetId":"class:Shapes.Measure"}," a => a ->{",{"text":"Log","targetId":"effect:Shapes.Log"},"} Int"]`,
+		"constructor:Shapes.Circle": `["Circle : Float -> ",{"text":"Shape","targetId":"type:Shapes.Shape"}]`,
+		// A re-export links the owner's declarations.
+		"value:Facade.area": `["area : ",{"text":"Shape","targetId":"type:Shapes.Shape"}," -> Float"]`,
+		"type:Shapes.Shape": `null`,
+		"value:Shapes.<+>":  `null`,
+	} {
+		d := find(t, doc, id)
+		var buf strings.Builder
+		encoder := json.NewEncoder(&buf)
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(d.SignatureParts); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSpace(buf.String()); got != want {
+			t.Errorf("%s parts = %s\nwant %s", id, got, want)
+		}
+		text := ""
+		for _, part := range d.SignatureParts {
+			text += part.Text
+		}
+		if d.SignatureParts != nil && text != d.Signature {
+			t.Errorf("%s parts spell %q, signature %q", id, text, d.Signature)
+		}
+	}
+}
+
+func TestExtractInstanceParts(t *testing.T) {
+	doc, _ := extract(t)
+	for id, want := range map[string]string{
+		// A line without declared names is one plain part.
+		"type:Shapes.Shape": `[[{"text":"Eq","targetId":"class:Basics.Eq"}," ",{"text":"Shape","targetId":"type:Shapes.Shape"}],[{"text":"Measure","targetId":"class:Shapes.Measure"}," ",{"text":"Shape","targetId":"type:Shapes.Shape"}]]`,
+		// A qualified name links as a whole.
+		"class:Shapes.Measure": `[[{"text":"Measure","targetId":"class:Shapes.Measure"}," ",{"text":"Shapes.Shape","targetId":"type:Shapes.Shape"}]]`,
+	} {
+		d := find(t, doc, id)
+		got, err := json.Marshal(d.InstanceParts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Errorf("%s instance parts = %s\nwant %s", id, got, want)
+		}
 	}
 }
 

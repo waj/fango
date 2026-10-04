@@ -1,6 +1,8 @@
 package apidoc
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -49,16 +51,54 @@ type Location struct {
 }
 
 type Declaration struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Kind          string   `json:"kind"`
-	Signature     string   `json:"signature"`
-	Documentation string   `json:"documentation"`
-	Source        Location `json:"source"`
-	ParentID      string   `json:"parentId,omitempty"`
-	TargetID      string   `json:"targetId,omitempty"`
-	Fixity        string   `json:"fixity,omitempty"`
-	Instances     []string `json:"instances,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Signature string `json:"signature"`
+	// SignatureParts is Signature split around the names it refers to, when
+	// it refers to any declarations.
+	SignatureParts []Part   `json:"signatureParts,omitempty"`
+	Documentation  string   `json:"documentation"`
+	Source         Location `json:"source"`
+	ParentID       string   `json:"parentId,omitempty"`
+	TargetID       string   `json:"targetId,omitempty"`
+	Fixity         string   `json:"fixity,omitempty"`
+	Instances      []string `json:"instances,omitempty"`
+	// InstanceParts splits each of Instances as SignatureParts does
+	// Signature, when any of them refers to a declaration.
+	InstanceParts [][]Part `json:"instanceParts,omitempty"`
+}
+
+// Part is one run of a signature: plain text, or a type, class, or effect
+// name with the ID of its declaration. Plain text encodes as a JSON string.
+type Part struct {
+	Text     string `json:"text"`
+	TargetID string `json:"targetId,omitempty"`
+}
+
+// MarshalJSON leaves HTML characters unescaped, as the document's encoder
+// does, since a signature's arrows are full of them.
+func (p Part) MarshalJSON() ([]byte, error) {
+	var out bytes.Buffer
+	encoder := json.NewEncoder(&out)
+	encoder.SetEscapeHTML(false)
+	var err error
+	if p.TargetID == "" {
+		err = encoder.Encode(p.Text)
+	} else {
+		type part Part
+		err = encoder.Encode(part(p))
+	}
+	return bytes.TrimSuffix(out.Bytes(), []byte("\n")), err
+}
+
+func (p *Part) UnmarshalJSON(data []byte) error {
+	*p = Part{}
+	if len(data) > 0 && data[0] == '"' {
+		return json.Unmarshal(data, &p.Text)
+	}
+	type part Part
+	return json.Unmarshal(data, (*part)(p))
 }
 
 // Missing is one public declaration, or a module, without documentation.
@@ -134,6 +174,78 @@ func Extract(result *check.Result, options Options) (*Document, []Missing) {
 	return doc, missing
 }
 
+// Marks around a name in a signature under construction:
+// refOpen canonical refName text refClose. Source names never contain them.
+const (
+	refOpen  = "\x01"
+	refName  = "\x02"
+	refClose = "\x03"
+)
+
+// printer marks the names it prints, for parts to resolve once every
+// declaration is known.
+func (x *extractor) printer() *types.Printer {
+	p := types.NewPrinter()
+	p.Ref = func(canonical, text string) string { return refOpen + canonical + refName + text + refClose }
+	return p
+}
+
+// unmark strips the marks from a rendered text.
+func unmark(marked string) string {
+	var plain strings.Builder
+	for {
+		before, rest, ok := strings.Cut(marked, refOpen)
+		plain.WriteString(before)
+		if !ok {
+			return plain.String()
+		}
+		_, rest, _ = strings.Cut(rest, refName)
+		name, rest, _ := strings.Cut(rest, refClose)
+		plain.WriteString(name)
+		marked = rest
+	}
+}
+
+// parts strips the marks from a signature, returning the plain signature and,
+// when a marked name has a declaration, its parts.
+func (x *extractor) parts(marked string) (string, []Part) {
+	var plain strings.Builder
+	var parts []Part
+	linked := false
+	text := func(s string) {
+		plain.WriteString(s)
+		if s == "" {
+			return
+		}
+		if n := len(parts); n > 0 && parts[n-1].TargetID == "" {
+			parts[n-1].Text += s
+		} else {
+			parts = append(parts, Part{Text: s})
+		}
+	}
+	for {
+		before, rest, ok := strings.Cut(marked, refOpen)
+		text(before)
+		if !ok {
+			break
+		}
+		canonical, rest, _ := strings.Cut(rest, refName)
+		name, rest, _ := strings.Cut(rest, refClose)
+		marked = rest
+		if owner := x.types[canonical]; owner != nil {
+			plain.WriteString(name)
+			parts = append(parts, Part{Text: name, TargetID: owner.id})
+			linked = true
+		} else {
+			text(name)
+		}
+	}
+	if !linked {
+		parts = nil
+	}
+	return plain.String(), parts
+}
+
 func (x *extractor) location(sp source.Span) Location {
 	return Location{Path: x.path(sp.File), Line: sp.StartPos().Line}
 }
@@ -177,7 +289,7 @@ func (x *extractor) collect(m modules.ResolvedModule) {
 			}
 			sig := ""
 			if sch, ok := ck.Env.Lookup(d.Name); ok {
-				sig = ScopedSignature(d.Name, sch, types.NewPrinter())
+				sig = ScopedSignature(d.Name, sch, x.printer())
 			}
 			x.values[d.Name] = &owned{id: KindValue + ":" + d.Name, Declaration: Declaration{Kind: KindValue, Name: ast.Spelling(types.SurfaceName(d.Name)),
 				Signature: sig, Documentation: x.leading(anchor), Source: x.location(anchor), Fixity: x.fixity(d.Name)}}
@@ -185,7 +297,7 @@ func (x *extractor) collect(m modules.ResolvedModule) {
 			for _, b := range patternBinders(d.Pattern) {
 				sig := ""
 				if sch, ok := ck.Env.Lookup(b.Name); ok {
-					sig = Signature(b.Name, sch, types.NewPrinter())
+					sig = Signature(b.Name, sch, x.printer())
 				}
 				x.values[b.Name] = &owned{id: KindValue + ":" + b.Name, Declaration: Declaration{Kind: KindValue, Name: types.SurfaceName(b.Name),
 					Signature: sig, Documentation: x.leading(b.Sp), Source: x.location(b.Sp)}}
@@ -195,7 +307,7 @@ func (x *extractor) collect(m modules.ResolvedModule) {
 		case *ast.ClassDecl:
 			x.types[d.Name] = &owned{id: KindClass + ":" + d.Name, Declaration: Declaration{Kind: KindClass, Name: types.SurfaceName(d.Name),
 				Signature: Head("class", d.Name, []ast.Param{d.Param}), Documentation: x.leading(d.NameSpan), Source: x.location(d.NameSpan),
-				Instances: instancesOf(ck, func(i *infer.InstanceInfo) bool { return i.Class.Name == d.Name }, nil, x.qualify)}}
+				Instances: instancesOf(ck, func(i *infer.InstanceInfo) bool { return i.Class.Name == d.Name }, nil, x.qualify, x.printer, unmark)}}
 			var param *types.TVar
 			if class := ck.Classes[d.Name]; class != nil {
 				param = class.Param
@@ -203,7 +315,7 @@ func (x *extractor) collect(m modules.ResolvedModule) {
 			for _, method := range d.Methods {
 				sig := ""
 				if sch, ok := ck.Env.Lookup(method.Name); ok {
-					p := types.NewPrinter()
+					p := x.printer()
 					if param != nil {
 						p.Bind(param, d.Param.Name)
 					}
@@ -219,7 +331,7 @@ func (x *extractor) collect(m modules.ResolvedModule) {
 			for _, op := range d.Ops {
 				sig := ""
 				if info := ck.Operations[op.Name]; info != nil {
-					p := types.NewPrinter()
+					p := x.printer()
 					if effect != nil {
 						bindParams(p, effect.Params, d.Params)
 					}
@@ -246,7 +358,7 @@ func (x *extractor) typeDecl(d *ast.TypeDecl) {
 	ck := x.ck
 	adt := x.adt(d.Name)
 	printer := func() *types.Printer {
-		p := types.NewPrinter()
+		p := x.printer()
 		if adt != nil {
 			bindParams(p, adt.Params, d.Params)
 		}
@@ -257,7 +369,7 @@ func (x *extractor) typeDecl(d *ast.TypeDecl) {
 		instances = instancesOf(ck, func(i *infer.InstanceInfo) bool {
 			tc, ok := i.Head.(*types.TCon)
 			return ok && tc.Unique == adt.Con.Unique
-		}, d.Params, nil)
+		}, d.Params, nil, x.printer, unmark)
 	}
 	x.types[d.Name] = &owned{id: KindType + ":" + d.Name, params: d.Params, Declaration: Declaration{Kind: KindType, Name: types.SurfaceName(d.Name),
 		Signature: Head("type", d.Name, d.Params), Documentation: x.leading(d.NameSpan, d.Attributes...), Source: x.location(d.NameSpan),
@@ -301,7 +413,7 @@ func (x *extractor) typeSignature(canonical string, member *owned, ctors, fields
 	if len(ctors) == 0 {
 		return member.Signature
 	}
-	p := types.NewPrinter()
+	p := x.printer()
 	bindParams(p, adt.Params, member.params)
 	parts := make([]string, 0, len(ctors))
 	for _, info := range adt.Ctors {
@@ -336,6 +448,22 @@ func (x *extractor) module(m modules.ResolvedModule) (Module, []Missing) {
 			return
 		}
 		d := member.Declaration
+		d.Signature, d.SignatureParts = x.parts(d.Signature)
+		if len(d.Instances) > 0 {
+			instances, parts, linked := make([]string, len(d.Instances)), make([][]Part, len(d.Instances)), false
+			for i, marked := range d.Instances {
+				instances[i], parts[i] = x.parts(marked)
+				if parts[i] == nil {
+					parts[i] = []Part{{Text: instances[i]}}
+				} else {
+					linked = true
+				}
+			}
+			d.Instances = instances
+			if linked {
+				d.InstanceParts = parts
+			}
+		}
 		d.ID = d.Kind + ":" + m.Name + "." + local
 		if member.parent != "" {
 			parent := types.SurfaceName(member.parent)

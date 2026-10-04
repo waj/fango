@@ -73,17 +73,18 @@ func instanceHead(instance *infer.InstanceInfo, p *types.Printer) string {
 	return context + " => " + head
 }
 
-// instancesOf collects the rendered heads of instances accepted by keep,
-// sorted and without repeats. When params are given, a head applying the
-// documented type to variables names them after its declared parameters.
-func instancesOf(ck *infer.Checker, keep func(*infer.InstanceInfo) bool, params []ast.Param, typeName func(string) string) []string {
+// instancesOf collects the heads of instances accepted by keep, rendered by
+// printers from fresh, sorted by their text and without repeats. When params
+// are given, a head applying the documented type to variables names them
+// after its declared parameters. text spells a rendered head.
+func instancesOf(ck *infer.Checker, keep func(*infer.InstanceInfo) bool, params []ast.Param, typeName func(string) string, fresh func() *types.Printer, text func(string) string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, instance := range ck.Instances {
 		if instance.Class == nil || !keep(instance) {
 			continue
 		}
-		p := types.NewPrinter()
+		p := fresh()
 		p.TypeName = typeName
 		if tc, ok := instance.Head.(*types.TCon); ok && len(params) > 0 {
 			for i, arg := range tc.Args {
@@ -93,12 +94,12 @@ func instancesOf(ck *infer.Checker, keep func(*infer.InstanceInfo) bool, params 
 			}
 		}
 		head := instanceHead(instance, p)
-		if !seen[head] {
-			seen[head] = true
+		if !seen[text(head)] {
+			seen[text(head)] = true
 			out = append(out, head)
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(a, b int) bool { return text(out[a]) < text(out[b]) })
 	return out
 }
 
