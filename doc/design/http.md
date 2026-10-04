@@ -78,6 +78,12 @@ byte level that state lives in `Reader.over` in the caller, for exactly one
 exchange. The cost is that a handler wrapping the client sees bytes, not
 requests, and that HTTP/1.1 framing sits above the effect.
 
+The stale-connection retry handlers enclose construction of the request
+writer and response source, so transport failures from their captured callbacks
+reach those handlers.
+A local cell records the first nonempty response chunk; after that point,
+header, body, and callback failures propagate without replaying the request.
+
 The `run` handler keeps no state: a `Socket` handle carries the live
 connection. Each operation returns a `Result`, and the caller's code raises it,
 so a failure reaches the caller's own `attempt` rather than the handler outside

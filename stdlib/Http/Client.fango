@@ -27,6 +27,7 @@ import Maybe exposing (Maybe(..))
 import Net
 import Reader exposing (Reader(..))
 import Result exposing (Result(..))
+import Runtime.Local
 import Runtime.Scope
 import String
 import Url exposing (Url)
@@ -228,7 +229,9 @@ socketRelease connection reusable =
 -- to 60 s, until `run` returns; tasks that inherit the handler share them. A
 -- request that fails on a reused connection before any response arrives is
 -- retried once on a new one when it is idempotent and its body can be sent
--- again. A connection is reused only when its response was read to the end,
+-- again. Once any response bytes arrive, failures propagate without retry,
+-- including an incomplete head or body. A connection is reused only when its
+-- response was read to the end,
 -- both sides spoke HTTP/1.1, neither sent `Connection: close`, and the body
 -- was framed by length or chunks; an unread body is drained if at most
 -- 64 KiB remain, and otherwise the connection closes.
@@ -545,21 +548,32 @@ exchange config outgoing target crossOrigin hops fresh action =
         -- A reused connection the server already closed fails before any
         -- response byte; such a request starts over on a new connection.
         stale = reused connection && retryable outgoing
-        output = Writer
-            { emit = { bytes -> fromResult (transmit connection bytes config.writeTimeoutMs) }
-            , flush = { () }
-            }
         written = attempt {
+            output = Writer
+                { emit = { bytes -> fromResult (transmit connection bytes config.writeTimeoutMs) }
+                , flush = { () }
+                }
             Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (outgoing.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
                 wireHeaders outgoing.body framed True
         }
         case written of
             Err error -> if stale then Retry else failWith error
             Ok _ ->
-                (step, reusable) = Reader.over (Source { pull = { fromResult (receive connection 65536 config.readTimeoutMs) } }) { input ->
-                    case attempt { protocol { readHead input config.maxHeaderBytes } } of
-                        Err error -> if stale then (Retry, False) else failWith error
-                        Ok head ->
+                (step, reusable) = Runtime.Local.run False { started ->
+                    outcome = attempt {
+                        -- The source must be created inside attempt: its
+                        -- captured Fail handler also handles transport errors.
+                        Reader.over (Source
+                            { pull = {
+                                chunk = fromResult (receive connection 65536 config.readTimeoutMs)
+                                case chunk of
+                                    Just bytes -> if Bytes.length bytes > 0 then started.write True else ()
+                                    Nothing -> ()
+                                chunk
+                              }
+                            }
+                        ) { input ->
+                            head = protocol { readHead input config.maxHeaderBytes }
                             protocol {
                                 responseBody target (outgoing.method == "HEAD") decode config.maxHeaderBytes head input { response ->
                                     next = if config.maxRedirects > 0 then redirection outgoing target response.status response.headers else Nothing
@@ -569,6 +583,11 @@ exchange config outgoing target crossOrigin hops fresh action =
                                         Nothing -> Done (action response)
                                 }
                             }
+                        }
+                    }
+                    case outcome of
+                        Err error -> if stale && started.read() == False then (Retry, False) else failWith error
+                        Ok result -> result
                 }
                 ignore (release connection reusable)
                 step

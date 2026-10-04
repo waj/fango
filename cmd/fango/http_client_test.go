@@ -191,7 +191,21 @@ func TestHTTPClientKeepAlive(t *testing.T) {
 		}
 		buffered.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nk")
 		buffered.Flush()
-		conn.Close()
+		// Keep the socket alive through the pool's liveness probe, then
+		// close when the next request arrives. This forces the retry path
+		// instead of racing the pool's detection of an already closed peer.
+		defer conn.Close()
+		// Reset rather than send EOF so the reader raises a transport error.
+		if err := conn.(*net.TCPConn).SetLinger(0); err != nil {
+			t.Error(err)
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		for {
+			line, err := buffered.ReadString('\n')
+			if err != nil || line == "\r\n" {
+				break
+			}
+		}
 	})
 	mux.HandleFunc("/closing", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "close")
@@ -224,5 +238,43 @@ func TestHTTPClientKeepAlive(t *testing.T) {
 	// one for the rest, /small being drained.
 	if got := connections.Load(); got != 4 {
 		t.Fatalf("%d connections, want 4", got)
+	}
+}
+
+// Once a reused connection has returned response bytes, an incomplete head
+// must fail without replaying the request on a new connection.
+func TestHTTPClientDoesNotRetryPartialResponse(t *testing.T) {
+	t.Parallel()
+	var connections atomic.Int64
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/kill" {
+			io.WriteString(w, "a")
+			return
+		}
+		conn, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		buffered.WriteString("HTTP/1.1 200 OK\r\n")
+		buffered.Flush()
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+	out, err := exec.Command(cliCompiledBinary(t, filepath.Join("testdata", "http_keepalive.fango")), server.URL).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.HasPrefix(string(out), "/a 200 a\n/a 200 a\n/a 200 a\nErr (Protocol (Malformed ") {
+		t.Fatalf("expected incomplete response failure after three requests, got:\n%s", out)
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("%d connections, want 1: partial response was retried", got)
 	}
 }
