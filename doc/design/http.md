@@ -39,6 +39,11 @@ persistence, and the worker lifetime. It accepts several connections using
 `Async` tasks. Cancellation-aware `Net` operations close blocking sockets when
 their task is cancelled; listener stop prevents new accepts, then active tasks
 are given a grace period before cancellation.
+Each worker installs connection, buffer, protocol, and Fail handlers inside its
+task. Connection errors are recovered there; a fatal accept error is sent to
+the server's event channel. The listener scope coordinates shutdown and joins
+its workers before the caller raises the selected Net error. Ordinary task
+completion carries no server failure policy; see [tasks](tasks.md#async-runtime-foundation).
 
 `Http.Server.Route` and `Http.GZip` are ordinary handlers over `Request` and
 `Response`. They do not change the server's application error contract. The

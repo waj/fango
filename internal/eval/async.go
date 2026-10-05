@@ -81,13 +81,7 @@ func (in *interp) asyncLaunch(e *core.AsyncLaunch, fr *Frame) (Value, error) {
 		if outcome.Ctor.Name == e.CancelledCtor.Name {
 			return fangort.AsyncCompletion{Cancelled: true}
 		}
-		r := outcome.Fields[0].(*CtorVal)
-		completion := fangort.AsyncCompletion{Value: fangort.PackNativeValue(Value(r))}
-		if r.Ctor.Name == e.ErrCtor.Name {
-			completion.Failed = true
-			completion.Failure = fangort.PackNativeValue(r.Fields[0])
-		}
-		return completion
+		return fangort.AsyncCompletion{Value: fangort.PackNativeValue(outcome.Fields[0])}
 	})
 	return &CtorVal{Ctor: e.TaskCtor, Fields: []Value{task}}, nil
 }

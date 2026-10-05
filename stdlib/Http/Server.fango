@@ -237,7 +237,7 @@ respond method output response =
         False
 
 {-# scoped s #-}
-serveConnection : Config -> Net.Connection -> (Request s ->{s} Response s) ->{Async Net.Error, IO, Fail Net.Error, Protocol | e} ()
+serveConnection : Config -> Net.Connection -> (Request s ->{s} Response s) ->{Async, IO, Fail Net.Error, Protocol | e} ()
 serveConnection config connection handler =
     source = Net.sourceAsync connection
     sink = Net.sinkAsync connection
@@ -264,49 +264,67 @@ serveConnection config connection handler =
         }
     }
 
-worker : Net.Listener -> Channel (Maybe Net.Error) -> (Net.Connection ->{Async Net.Error, IO, Fail Net.Error | e} ()) ->{Async Net.Error, IO | e} ()
-worker listener events process =
-    outcome = attempt {
-        Net.acceptAsync listener { connection ->
-            ignored = attempt { process connection }
-            ()
+-- Each worker installs its own connection, buffer, protocol, and Fail
+-- handlers. Only a fatal accept error leaves this runner; its task captures
+-- that error and reports it through the server's shutdown channel.
+{-# scoped s #-}
+worker : Config -> Net.Listener -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{Async, IO, Fail Net.Error} ()
+worker config listener handler =
+    loop() =
+        outcome = attempt {
+            Net.acceptAsync listener { connection ->
+                ignored = attempt {
+                    handle serveConnection config connection handler on
+                        Http.invalid _ -> ()
+                }
+                ()
+            }
         }
-    }
-    case outcome of
-        Ok _ -> worker listener events process
-        Err error ->
-            if Net.listenerStopped listener then ()
-            else ignore (Async.send events (Just error))
+        case outcome of
+            Ok _ -> loop()
+            Err error ->
+                if Net.listenerStopped listener then ()
+                else Fail.fail error
+    loop()
 
-spawnWorkers : Int -> Net.Listener -> Channel (Maybe Net.Error) -> (Net.Connection ->{Async Net.Error, IO, Fail Net.Error | e} ()) ->{Async Net.Error, IO | e} List (Task Net.Error ())
-spawnWorkers count listener events process =
-    if count <= 0 then []
-    else [ Async.spawn { worker listener events process }
-         | spawnWorkers (count - 1) listener events process
-         ]
-
-awaitWorkers : List (Task Net.Error ()) ->{Async Net.Error} ()
+awaitWorkers : List (Task ()) ->{Async} ()
 awaitWorkers tasks =
     case tasks of
         [] -> ()
         [task | rest] ->
-            ignore (Async.awaitResult task)
+            ignore (Async.awaitOutcome task)
             awaitWorkers rest
 
-cancelWorkers : List (Task Net.Error ()) ->{Async Net.Error} ()
+cancelWorkers : List (Task ()) ->{Async} ()
 cancelWorkers tasks = List.each Async.cancel tasks
 
-runListener : Config -> Channel () -> Net.Listener -> (Net.Connection ->{Async Net.Error, IO, Fail Net.Error | e} ()) ->{Async Net.Error, IO, Fail Net.Error | e} ()
-runListener config stop listener process =
-    Async.within {
+cancelStoppedWorkers : Result Net.Error () -> List (Task ()) ->{Async} ()
+cancelStoppedWorkers stopped tasks =
+    case stopped of
+        Err _ -> cancelWorkers tasks
+        Ok _ -> ()
+
+listenerResult : Result Net.Error () -> Maybe (Maybe Net.Error) -> Result Net.Error ()
+listenerResult stopped first =
+    case stopped of
+        Err error -> Err error
+        Ok _ ->
+            case first of
+                Just (Just error) -> Err error
+                _ -> Ok ()
+
+runListener : Config -> Channel () -> Net.Listener -> (Channel (Maybe Net.Error) ->{Async, IO} List (Task ())) ->{Async, IO, Fail Net.Error} ()
+runListener config stop listener startWorkers =
+    result = Async.within {
         events = Async.channel (config.workers + 1)
         watcher = Async.spawn {
             ignore (Async.receive stop)
             ignore (Async.send events Nothing)
         }
-        tasks = spawnWorkers config.workers listener events process
+        tasks = startWorkers events
         first = Async.receive events
-        fromResult (Net.stopListener listener)
+        stopped = Net.stopListener listener
+        cancelStoppedWorkers stopped tasks
         Async.cancel watcher
         timer = Async.spawn {
             Async.sleep config.shutdownGraceMs
@@ -314,12 +332,11 @@ runListener config stop listener process =
         }
         awaitWorkers tasks
         Async.cancel timer
-        ignore (Async.awaitResult timer)
-        ignore (Async.awaitResult watcher)
-        case first of
-            Just (Just error) -> Fail.fail error
-            _ -> ()
+        ignore (Async.awaitOutcome timer)
+        ignore (Async.awaitOutcome watcher)
+        listenerResult stopped first
     }
+    fromResult result
 
 -- Serves `handler` on `config.port` until a value arrives on `stop`, then
 -- closes the listener, waits up to `shutdownGraceMs` for active connections,
@@ -328,13 +345,26 @@ runListener config stop listener process =
 -- error's status, and afterwards it closes the connection, so
 -- `Http.Server.Route.dispatch` and `Http.abortBody` need no handler of their
 -- own. A handler of type `Request e ->{e} Response e` also fits. Handle
--- application errors inside the handler.
+-- application errors inside the handler. Connection failures are recovered
+-- inside workers and do not stop unrelated connections. Fatal accept errors
+-- trigger coordinated shutdown through the server's event channel; `serve`
+-- raises the selected Net error in the caller after its workers are joined.
 {-# scoped s #-}
-serve : Config -> Channel () -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{Async Net.Error, IO, Fail Net.Error | e} ()
+serve : Config -> Channel () -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{Async, IO, Fail Net.Error} ()
 serve config stop handler =
     Net.withListener config.port { listener ->
-        process connection =
-            handle serveConnection config connection handler on
-                Http.invalid _ -> ()
-        runListener config stop listener process
+        startWorkers : Channel (Maybe Net.Error) ->{Async, IO} List (Task ())
+        startWorkers events =
+            loop remaining =
+                if remaining <= 0 then []
+                else
+                    task = Async.spawn {
+                        result = attempt { worker config listener handler }
+                        case result of
+                            Err error -> ignore (Async.send events (Just error))
+                            Ok _ -> ()
+                    }
+                    [task | loop (remaining - 1)]
+            loop config.workers
+        runListener config stop listener startWorkers
     }

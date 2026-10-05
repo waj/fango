@@ -418,8 +418,11 @@ Children inherit resumptive handler activations and their state cells; see
 A callback's residual effects remain requirements of the call to
 [`Async.spawn`](../../stdlib/Async.fango), including `IO`. These effects are
 accounted for at launch even if the task is never awaited; awaiting does not
-provide handlers for the child's execution. The child scope supplies its own
-`Async err` and `Fail err` boundaries.
+provide handlers for the child's execution. The child installs its own nullary
+Async and cancellation boundaries without
+adding permissions to the callback's declared row. Application Fail and custom
+abort effects must be handled inside the callback, for example with
+[`Async.spawnAttempt`](../../stdlib/Async.fango).
 
 A task started with [`Async.spawn`](../../stdlib/Async.fango) inherits the
 resumptive handler activations around it, and their state cells. Individual
@@ -431,17 +434,17 @@ one handler covers [several applications](#several-applications-in-one-handler),
 a task inherits its resumptive applications and the one cell they share; its
 abort applications still have to be handled inside the task.
 
-A task runs against a fresh `Fail err` handler for its scope's failure type,
-and every other abort effect must be handled inside the task. A directly known
-unsupported abort or local scoped permission is rejected with `ASYNC BOUNDARY`.
-Dependencies hidden in inherited handlers or generic rows are checked at
-runtime when preparing the task's evidence, before its callback executes.
-Unsupported dependencies fail with `Async: cannot inherit abort handler …;
-handle it inside the task`; a mismatched failure type reports `Async:
-incompatible inherited handler …`. These diagnostics terminate execution; they
-are not application `Err` values. Merely installing a local abort handler does
-not change an inherited handler's lexical dependency: install that handler
-inside the task too.
+A directly known escaping abort, including Fail, or a local scoped permission
+is rejected with `ASYNC BOUNDARY`: handle the abort or install the scoped handler
+inside the task. Dependencies hidden in inherited handlers or generic rows are
+checked at runtime when preparing the task's evidence, before its callback
+executes. Polymorphic launch helpers therefore have runtime safety, not a promise
+of compile-time rejection. Unsupported dependencies fail with `Async: cannot
+inherit abort handler …; handle it inside the task`; incompatible evidence
+reports `Async: incompatible inherited handler …`. These diagnostics terminate
+execution; they are not application Err values or cancellation. A same-typed
+local Fail handler does not change an inherited handler's lexical dependency:
+install that handler inside the task too.
 
 For example, a task may catch an arbitrary abort locally:
 
@@ -459,8 +462,24 @@ handler cannot be unwound from the task, and `await` never invokes it later.
 
 Closures, partial applications, functions, native handles, and references may
 cross the task boundary. Effects are never queued for replay at an observation
-site: `Async.await` performs a new `Fail.fail` in the observer when it reads a
-failed result, and an ordinary `Err` a task returns is a successful value.
+site. A returned Err is an ordinary value: it does not cancel siblings, fail the
+root, or gain a handled flag when observed. `Fail.fromResult (Async.await task)`
+explicitly raises its error in the observer's goroutine. Ignoring a Result or
+its task handle does not change scope policy.
+
+`Async.run`, `Async.runOutcome`, and `Async.within` do not handle or grant Fail.
+A root-body abort caught outside the runner cancels and joins its children
+before reaching the handler. Catching it inside the body lets that body continue without leaving
+the lifetime boundary. For a body returning Int and performing `Fail String`,
+`Fail.attempt { Async.runOutcome body }` has type `Result String (Async.Outcome Int)`,
+while `Async.runOutcome { Fail.attempt body }` has type
+`Async.Outcome (Result String Int)`. The same handler-placement rule applies to
+nested `within` scopes.
+
+Task inheritance does not extend native resource lifetimes. Keep the joining
+Async scope inside the scope acquiring a shared resource, or acquire the
+resource inside the child. Scoped Reader/Writer permissions still prevent
+transferring their local buffers; see [resources](resources.md).
 
 ## Resume discipline
 

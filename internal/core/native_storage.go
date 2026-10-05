@@ -3,11 +3,17 @@ package core
 import "github.com/waj/fango/internal/types"
 
 func (l *linter) nativeStorageWrapper(wrapper *types.CtorInfo) bool {
+	return l.nativeOpaqueWrapper(wrapper, 1, true)
+}
+
+// nativeOpaqueWrapper verifies both indexed storage and the nullary scope
+// representation; a scope carries no payload type index.
+func (l *linter) nativeOpaqueWrapper(wrapper *types.CtorInfo, parameters int, indexed bool) bool {
 	if wrapper == nil || wrapper.Result == nil {
 		return false
 	}
 	adt := l.adts[wrapper.Result.Unique]
-	if adt == nil || !adt.Resource || !adt.NativeIndexed || len(adt.Params) != 1 || adt.IsRecord() || len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 || len(wrapper.Fields) != 1 {
+	if adt == nil || !adt.Resource || adt.NativeIndexed != indexed || len(adt.Params) != parameters || adt.IsRecord() || len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 || len(wrapper.Fields) != 1 {
 		return false
 	}
 	field, ok := adt.Ctors[0].Fields[0].(*types.TCon)

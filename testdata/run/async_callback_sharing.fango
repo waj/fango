@@ -3,18 +3,18 @@ import Async
 makeTask text = Async.spawn { text }
 
 main() =
-    print (Async.run {
+    print (Async.runOutcome {
             task = Async.spawn {
                 print "Hola"
                 "Chau"
             }
             Async.await task
     })
-    print (Async.run {
+    print (Async.runOutcome {
             task = makeTask "captured"
             Async.await task
     })
-    print (Async.run {
+    print (Async.runOutcome {
             task = Async.spawn { print "unit" }
             Async.await task
     })

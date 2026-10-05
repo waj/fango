@@ -22,7 +22,7 @@ main() =
         [raw, upstream] ->
             case String.toInt raw of
                 Just port ->
-                    print (Async.run {
+                    print (Fail.attempt { Async.runOutcome {
                             stop = Async.channel 1
                             Http.Server.serve (Http.Server.defaultConfig port) stop { request ->
                                 outcome = attemptClient {
@@ -37,6 +37,6 @@ main() =
                                     Ok reply -> Http.Server.Response { status = reply.status, headers = [], body = BytesBody reply.body }
                                     Err error -> Http.Server.Response { status = 502, headers = [], body = BytesBody (Bytes.fromString (show error)) }
                             }
-                    })
+                    } })
                 Nothing -> Process.exit 2
         _ -> Process.exit 2

@@ -1,0 +1,9 @@
+Completed 42
+Completed (Err NotFound, Err TimedOut)
+Completed (Err NotFound)
+Completed (Err NotFound)
+Err TimedOut
+Completed (Completed (Just 7))
+Completed ("stable", "stable")
+Err NotFound
+Completed 123

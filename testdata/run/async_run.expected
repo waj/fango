@@ -1,0 +1,6 @@
+cancel cleanup
+after cancellation
+abort cleanup
+Err "root failed"
+body
+joined

@@ -1,0 +1,48 @@
+import Async
+import Fail
+import Result exposing (Result(..))
+import Runtime.Scope
+
+blocked ready gate label () = Runtime.Scope.finally {
+        ignore (Async.send ready ())
+        Async.receive gate
+    } { print label }
+
+main() =
+    print (Fail.attempt { Async.runOutcome {
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            ignore (Async.spawn (blocked ready gate "root child cleaned"))
+            ignore (Async.receive ready)
+            Fail.fail "root failed"
+            1
+    } })
+    print (Async.runOutcome {
+            outerGate = Async.channel 0
+            sibling = Async.spawn { Async.receive outerGate }
+            result = Fail.attempt { Async.within {
+                    ready = Async.channel 0
+                    gate : Async.Channel Int
+                    gate = Async.channel 0
+                    ignore (Async.spawn (blocked ready gate "nested child cleaned"))
+                    ignore (Async.receive ready)
+                    Fail.fail "nested failed"
+                    1
+            } }
+            print result
+            ignore (Async.send outerGate 9)
+            Async.await sibling
+    })
+    print (Async.runOutcome {
+            gate = Async.channel 0
+            child = Async.spawn { Async.receive gate }
+            result = Fail.attempt { Fail.fail "caught inside"; 1 }
+            print result
+            ignore (Async.send gate 3)
+            Async.await child
+    })
+    print (Async.runOutcome { Async.within {
+            result = Fail.attempt { Fail.fail "nested catch"; 1 }
+            result
+    } })

@@ -1,3 +1,4 @@
+import Fail
 import Process
 import Async
 import Bytes
@@ -18,9 +19,9 @@ main() =
         [raw] ->
             case String.toInt raw of
                 Just port ->
-                    print (Async.run {
+                    print (Fail.attempt { Async.runOutcome {
                             stop = Async.channel 1
                             Http.Server.serve (Http.Server.defaultConfig port) stop respond
-                    })
+                    } })
                 Nothing -> Process.exit 2
         _ -> Process.exit 2

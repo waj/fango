@@ -10,7 +10,7 @@ effect Http
 
 type Config = { database : Int, http : Int }
 type Job = Fetch Int
-type Ticket = Completed Int | Running (Async.Task String Int)
+type Ticket = Completed Int | Running (Async.Task Int)
 
 effect Scheduling
     submit : Job -> Ticket
@@ -36,8 +36,8 @@ serial config action =
                 Completed value -> value
                 Running _ -> -999)
 
-parallel : Config -> (() ->{Scheduling, IO | e} a) ->{IO | e} Async.Outcome (Result String a)
-parallel config action = Async.run ({ _ ->
+parallel : Config -> (() ->{Scheduling, IO | e} a) ->{IO | e} Async.Outcome a
+parallel config action = Async.runOutcome ({ _ ->
     handle action() on
         submit input -> resume (Running (interpret config ({ _ -> Async.spawn ({ _ -> job input }) })))
         await ticket ->

@@ -1,5 +1,5 @@
 import Async
 
 main() =
-    r = Async.run { Async.spawn { print "Hola" } }
+    r = Async.runOutcome { Async.spawn { print "Hola" } }
     print "DONE"

@@ -1,0 +1,3 @@
+import Async
+
+main() = Async.run { "value" }

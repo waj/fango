@@ -8,56 +8,51 @@ import (
 	"time"
 )
 
-func TestAsyncFailureOrderAndDrain(t *testing.T) {
-	for _, bodyFails := range []bool{false, true} {
-		root := NewAsyncScope(nil)
-		gates := []chan struct{}{make(chan struct{}), make(chan struct{})}
-		tasks := make([]*AsyncTask, 2)
-		for i := range tasks {
-			tasks[i] = SpawnAsync(root, func(*AsyncScope) AsyncCompletion {
-				<-gates[i]
-				return AsyncCompletion{Failed: true, Failure: i}
-			})
-		}
-		close(gates[1])
-		<-tasks[1].done // completion order must not determine the reported failure
-		joined := make(chan AsyncCompletion, 1)
-		body := AsyncCompletion{Value: "body"}
-		if bodyFails {
-			body = AsyncCompletion{Failed: true, Failure: 42}
-		}
-		go func() { joined <- root.Finish(body) }()
-		select {
-		case <-joined:
-			t.Fatal("returned before child cleanup")
-		default:
-		}
-		close(gates[0])
-		got := <-joined
-		want := 0
-		if bodyFails {
-			want = 42
-		}
-		if !got.Failed || got.Failure != want {
-			t.Fatalf("got %+v, want failure %d", got, want)
-		}
+// Completion stores data without applying a scope-wide error policy. Finish
+// must still drain every ignored child before the parent publishes its value.
+func TestAsyncValuesAndDrain(t *testing.T) {
+	root := NewAsyncScope(nil)
+	release := make(chan struct{})
+	child := SpawnAsync(root, func(*AsyncScope) AsyncCompletion {
+		<-release
+		return AsyncCompletion{Value: "Err missing"}
+	})
+	joined := make(chan AsyncCompletion, 1)
+	go func() { joined <- root.Finish(AsyncCompletion{Value: "body"}) }()
+	select {
+	case <-joined:
+		t.Fatal("returned before child cleanup")
+	default:
+	}
+	close(release)
+	if got := <-joined; got.Cancelled || got.Value != "body" {
+		t.Fatalf("child value changed parent result: %+v", got)
+	}
+	if got := child.Wait(); got.Cancelled || got.Value != "Err missing" {
+		t.Fatalf("lost child value: %+v", got)
 	}
 }
 
 func TestAsyncObservationAndStableResults(t *testing.T) {
 	root := NewAsyncScope(nil)
-	task := SpawnAsync(root, func(*AsyncScope) AsyncCompletion { return AsyncCompletion{Failed: true, Failure: "handled"} })
-	for range 3 {
-		got := task.Wait()
-		if !got.Failed || got.Failure != "handled" {
-			t.Fatalf("unstable result: %+v", got)
-		}
-		task.Cancel()
+	task := SpawnAsync(root, func(*AsyncScope) AsyncCompletion { return AsyncCompletion{Value: "Err handled"} })
+	var observers sync.WaitGroup
+	for range 16 {
+		observers.Go(func() {
+			for range 3 {
+				got := task.Wait()
+				if got.Cancelled || got.Value != "Err handled" {
+					t.Errorf("unstable result: %+v", got)
+				}
+				task.Cancel()
+			}
+		})
 	}
-	if got := root.Finish(AsyncCompletion{Value: 7}); got.Failed || got.Cancelled || got.Value != 7 {
-		t.Fatalf("observed failure escaped: %+v", got)
+	observers.Wait()
+	if got := root.Finish(AsyncCompletion{Value: 7}); got.Cancelled || got.Value != 7 {
+		t.Fatalf("observation changed parent: %+v", got)
 	}
-	if got := task.Wait(); !got.Failed {
+	if got := task.Wait(); got.Cancelled || got.Value != "Err handled" {
 		t.Fatalf("handle lost result after runner: %+v", got)
 	}
 }
@@ -83,27 +78,34 @@ func TestAsyncIndividualCancellationAndWaitCancellation(t *testing.T) {
 	if got := child.Wait(); !got.Cancelled {
 		t.Fatalf("child not cancelled: %+v", got)
 	}
-	if got := root.Finish(AsyncCompletion{Value: 1}); got.Cancelled || got.Failed || got.Value != 1 {
+	if got := root.Finish(AsyncCompletion{Value: 1}); got.Cancelled || got.Value != 1 {
 		t.Fatalf("child cancellation propagated to parent: %+v", got)
 	}
 }
 
-func TestAsyncFailureCancelsSiblings(t *testing.T) {
+func TestAsyncReturnedErrorsAndCompletedValuesLeaveSiblingsRunning(t *testing.T) {
 	root := NewAsyncScope(nil)
-	ready := make(chan struct{})
+	ready, release := make(chan struct{}), make(chan struct{})
 	sibling := SpawnAsync(root, func(s *AsyncScope) AsyncCompletion {
 		close(ready)
-		<-s.Context().Done()
-		return AsyncCompletion{Cancelled: true}
+		<-release
+		return AsyncCompletion{Value: !s.Cancelled()}
 	})
 	<-ready
-	SpawnAsync(root, func(*AsyncScope) AsyncCompletion { return AsyncCompletion{Failed: true, Failure: "boom"} })
-	got := root.Finish(AsyncCompletion{Value: 0})
-	if !got.Failed || got.Failure != "boom" {
-		t.Fatalf("missing unobserved failure: %+v", got)
+	task := SpawnAsync(root, func(*AsyncScope) AsyncCompletion { return AsyncCompletion{Value: "Err boom"} })
+	task.Wait()
+	completed := NewAsyncValue("Err completed")
+	PublishAsyncValue(root, completed)
+	completed.Wait()
+	if sibling.scope.Cancelled() {
+		t.Fatal("returned data cancelled a sibling")
 	}
-	if !sibling.Wait().Cancelled {
-		t.Fatal("sibling not cancelled")
+	close(release)
+	if got := root.Finish(AsyncCompletion{Value: 0}); got.Cancelled || got.Value != 0 {
+		t.Fatalf("ignored error changed parent: %+v", got)
+	}
+	if sibling.Wait().Value != true {
+		t.Fatal("sibling was cancelled")
 	}
 }
 

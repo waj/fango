@@ -1,7 +1,7 @@
 import Async exposing (Async, Task)
 import Fail exposing (Fail)
 
-submit : (() ->{Async String, IO, Fail String | e} a) ->{Async String | e} Task String a
+submit : (() ->{IO | e} a) ->{Async | e} Task a
 submit body = Async.spawn body
 
-main() = ignore (Async.run { submit { print "child IO" } })
+main() = ignore (Async.runOutcome { submit { print "child IO" } })

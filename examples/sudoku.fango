@@ -4,10 +4,8 @@
 
 import Async exposing (Outcome(..))
 import Basics exposing (modBy, quotientBy)
-import Fail exposing (Fail)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
-import Result exposing (Result(..))
 import String
 
 type Choice = Solved | Dead | Pick Int (List Int)
@@ -126,8 +124,8 @@ parallelSolve board =
             List.each Async.cancel tasks
             result
 
-runSolve : List Int ->{IO} Outcome (Result String (Maybe (List Int)))
-runSolve board = Async.run { parallelSolve board }
+runSolve : List Int ->{IO} Outcome (Maybe (List Int))
+runSolve board = Async.runOutcome { parallelSolve board }
 
 printBoard board = printRows board 0 ""
 
@@ -144,7 +142,6 @@ printRows remaining count row =
 
 main() =
     case runSolve (digits puzzle) of
-        Completed (Ok (Just board)) -> printBoard board
-        Completed (Ok Nothing) -> print "No solution"
-        Completed (Err message) -> print message
+        Completed (Just board) -> printBoard board
+        Completed Nothing -> print "No solution"
         Cancelled -> print "Cancelled"

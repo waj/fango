@@ -32,10 +32,23 @@ func TestAsyncCoreProofs(t *testing.T) {
 			e.TaskCtor = &c
 		}},
 		{"wrong result constructor", "constructor role mismatch", func(_ *core.Prog, e *core.AsyncLaunch, _ *core.AsyncRebase) { e.CompletedCtor = e.CancelledCtor }},
+		{"changed result index", "outcome representation mismatch", func(_ *core.Prog, e *core.AsyncLaunch, _ *core.AsyncRebase) {
+			task := *e.Ty.(*types.TCon)
+			task.Args = []types.Type{e.ScopeCtor.Result}
+			e.Ty = &task
+		}},
+		{"forged scope index", "scope representation mismatch", func(_ *core.Prog, e *core.AsyncLaunch, _ *core.AsyncRebase) {
+			scope := *e.Call.Args[0].Type().(*types.TCon)
+			scope.Args = []types.Type{e.Call.Args[0].Type()}
+			e.Call.Args[0] = &core.VarRef{Name: "forged", Local: true, Ty: &scope}
+		}},
 		{"missing rebase intrinsic", "malformed Async rebase", func(p *core.Prog, _ *core.AsyncLaunch, _ *core.AsyncRebase) {
 			delete(p.Intrinsics, types.AsyncRebaseName)
 		}},
-		{"missing failure evidence", "matching child Async/Fail evidence", func(_ *core.Prog, _ *core.AsyncLaunch, e *core.AsyncRebase) { e.Call.EvidenceArgs = nil }},
+		{"missing cancellation evidence", "child Async/cancellation evidence", func(_ *core.Prog, _ *core.AsyncLaunch, e *core.AsyncRebase) { e.Call.EvidenceArgs = nil }},
+		{"duplicate child evidence", "child Async/cancellation evidence", func(_ *core.Prog, _ *core.AsyncLaunch, e *core.AsyncRebase) {
+			e.Call.EvidenceArgs = append(e.Call.EvidenceArgs, e.Call.EvidenceArgs[0])
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var diagnostics bytes.Buffer

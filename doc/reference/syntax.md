@@ -104,6 +104,18 @@ in `use (Just value) <- lookup`. Because the expansion is an ordinary named
 call, a [scoped runner](functions.md#scoped-callbacks) may head a `use` when
 it is applied to all of its other parameters.
 
+`use` preserves the runner's result rather than discarding it. A Unit-returning
+runner such as [`Async.run`](../../stdlib/Async.fango) can therefore head `main()`:
+
+```fango
+import Async
+
+main() =
+    use Async.run
+    task = Async.spawn { 42 }
+    print (Async.await task)
+```
+
 The callback reaches the end of the enclosing block, so the block, not the
 function, delimits a `use`. A binding's indented right-hand side, a branch, or
 a case arm ends it early:

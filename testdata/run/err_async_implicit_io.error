@@ -1,1 +1,1 @@
-() ->{IO, Async String} ()
+() ->{IO, Async} ()

@@ -1,4 +1,4 @@
-(Completed (Ok (0, 1)), 2)
-Completed (Ok ((0, 1), 2))
+(Completed (0, 1), 2)
+Completed ((0, 1), 2)
 42
 parent stopped

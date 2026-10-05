@@ -10,8 +10,8 @@ effect Apply
 main() = print (handle apply 42 ({ _ -> read() }) on
     apply value f -> resume (
             handle
-                case Async.run ({ _ -> Async.await (Async.spawn f) }) of
-                    Completed (Ok result) -> result
+                case Async.runOutcome ({ _ -> Async.await (Async.spawn f) }) of
+                    Completed result -> result
                     _ -> value
             on
                 read () -> resume value))

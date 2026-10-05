@@ -4,21 +4,18 @@ import Fail exposing (Fail)
 import Runtime.Scope
 
 job : () ->{Fail String} Int
-job () = Fail.fail "missing"
+job() = Fail.fail "missing"
 
 main() =
-    print (Async.run ({ _ -> Async.awaitResult (Async.spawn job) }))
-    print (Async.run ({ _ -> Fail.attempt ({ _ -> Async.await (Async.spawn job) }) }))
-    print (Async.run ({ _ -> Async.await (Async.spawn job) }))
-    print (Async.run ({ _ ->
-        ignore (Async.spawn job)
-        123 }))
-    print (Async.run ({ _ ->
-        task = Async.completed (Ok 42)
-        first = Async.await task
-        second = Async.await task
-        if first == second then first else Fail.fail "unstable" }))
-    print (Async.run ({ _ ->
-        Runtime.Scope.finally
-            ({ _ -> Async.await (Async.spawn job) })
-            ({ _ -> print "cleanup" }) }))
+    print (Async.runOutcome { Async.awaitOutcome (Async.spawnAttempt job) })
+    print (Async.runOutcome { Fail.attempt { Fail.fromResult (Async.await (Async.spawnAttempt job)) } })
+    print (Fail.attempt { Async.runOutcome { Fail.fromResult (Async.await (Async.spawnAttempt job)) } })
+    print (Async.runOutcome {
+            ignore (Async.spawnAttempt job)
+            123
+    })
+    print (Async.runOutcome {
+            task = Async.completed 42
+            (Async.await task, Async.await task)
+    })
+    print (Fail.attempt { Async.runOutcome { Runtime.Scope.finally job { print "cleanup" } } })

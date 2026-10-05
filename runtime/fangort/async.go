@@ -6,13 +6,11 @@ import (
 	"time"
 )
 
-// AsyncCompletion separates application failure from cooperative cancellation.
+// AsyncCompletion contains an ordinary value or cooperative cancellation.
 // Payloads are sealed by the compiler boundary; the runtime never interprets them.
 // A Go panic is not an AsyncCompletion and is deliberately not recovered here.
 type AsyncCompletion struct {
 	Value     any
-	Failure   any
-	Failed    bool
 	Cancelled bool
 }
 
@@ -30,11 +28,9 @@ type AsyncScope struct {
 }
 
 type AsyncTask struct {
-	scope    *AsyncScope
-	owner    *AsyncScope
-	done     chan struct{}
-	result   AsyncCompletion // published by closing done
-	observed bool            // guarded by owner.mu; detached completed tasks need no observation
+	scope  *AsyncScope
+	done   chan struct{}
+	result AsyncCompletion // published by closing done
 }
 
 func NewAsyncScope(parent *AsyncScope) *AsyncScope {
@@ -59,7 +55,7 @@ func (s *AsyncScope) Cancelled() bool          { return s.ctx.Err() != nil }
 // source cleanup before returning; Finish then drains all of that child's tasks.
 func SpawnAsync(owner *AsyncScope, body func(*AsyncScope) AsyncCompletion) *AsyncTask {
 	child := NewAsyncScope(owner)
-	task := &AsyncTask{owner: owner, scope: child, done: make(chan struct{})}
+	task := &AsyncTask{scope: child, done: make(chan struct{})}
 	owner.mu.Lock()
 	if owner.closing {
 		owner.mu.Unlock()
@@ -76,17 +72,6 @@ func SpawnAsync(owner *AsyncScope, body func(*AsyncScope) AsyncCompletion) *Asyn
 
 func (t *AsyncTask) publish(result AsyncCompletion) {
 	t.result = result
-	if result.Failed && t.owner != nil {
-		// A failure cancels siblings, but leaves the parent's body independent.
-		// The parent may observe and handle the failure.
-		t.owner.mu.Lock()
-		for _, sibling := range t.owner.children {
-			if sibling != t {
-				sibling.Cancel()
-			}
-		}
-		t.owner.mu.Unlock()
-	}
 	close(t.done)
 }
 
@@ -96,19 +81,10 @@ func (t *AsyncTask) Cancel() {
 	}
 }
 
-func (t *AsyncTask) observe() AsyncCompletion {
-	if t.owner != nil {
-		t.owner.mu.Lock()
-		t.observed = true
-		t.owner.mu.Unlock()
-	}
-	return t.result
-}
-
 // Wait is an observation independent of any source Async runner.
 func (t *AsyncTask) Wait() AsyncCompletion {
 	<-t.done
-	return t.observe()
+	return t.result
 }
 
 // Await stops waiting when the observer is cancelled. It does not observe the
@@ -126,24 +102,21 @@ func (t *AsyncTask) AwaitObserved(observer *AsyncScope) (AsyncCompletion, bool) 
 	}
 	select {
 	case <-t.done:
-		return t.observe(), true
+		return t.result, true
 	case <-observer.ctx.Done():
 		return AsyncCompletion{Cancelled: true}, false
 	}
 }
 
 // Finish is called once by a scope's owner after its body and cleanup finish.
-// Body failure wins; otherwise the earliest submitted, unobserved failed child
-// wins. All children finish before any result is returned.
+// All children finish before any result is returned; their values do not
+// change the scope outcome.
 func (s *AsyncScope) Finish(body AsyncCompletion) AsyncCompletion {
 	s.finishOnce.Do(func() {
 		s.completion = s.finish(body)
 		close(s.finished)
 	})
-	if body.Failed {
-		return body
-	}
-	if s.completion.Failed || s.completion.Cancelled {
+	if s.completion.Cancelled {
 		return s.completion
 	}
 	return body
@@ -159,24 +132,13 @@ func (s *AsyncScope) finish(body AsyncCompletion) AsyncCompletion {
 	s.closing = true
 	children := append([]*AsyncTask(nil), s.children...)
 	s.mu.Unlock()
-	if body.Failed || body.Cancelled {
+	if body.Cancelled {
 		s.Cancel()
 	}
 	for _, child := range children {
 		<-child.done
 	}
-	s.mu.Lock()
-	if !body.Failed {
-		for _, child := range children {
-			if child.result.Failed && !child.observed {
-				child.observed = true
-				body = AsyncCompletion{Failed: true, Failure: child.result.Failure}
-				break
-			}
-		}
-	}
-	s.mu.Unlock()
-	if !body.Failed && s.Cancelled() {
+	if s.Cancelled() {
 		body = AsyncCompletion{Cancelled: true}
 	}
 	s.Cancel() // release the context link after choosing the stable result
@@ -208,10 +170,8 @@ func NewAsyncValue(value any) *AsyncTask {
 	return &AsyncTask{done: make(chan struct{}), result: AsyncCompletion{Value: value}}
 }
 
-func PublishAsyncValue(owner *AsyncScope, task *AsyncTask, failure any, failed bool) {
-	task.owner = owner
+func PublishAsyncValue(owner *AsyncScope, task *AsyncTask) {
 	result := task.result
-	result.Failure, result.Failed = failure, failed
 	owner.mu.Lock()
 	if owner.closing {
 		result = AsyncCompletion{Cancelled: true}

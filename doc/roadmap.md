@@ -101,6 +101,13 @@ future protocol variants. The [HTTP client](../stdlib/Http/Client.fango)
 is implemented; the [HTTP client roadmap](roadmap-http-client.md) covers
 mocking.
 
+## Async task results and failure policy
+
+Value-returning [tasks](design/tasks.md#async-runtime-foundation) and the checked
+[abort boundary](reference/effects.md#handlers-in-tasks) are implemented.
+[Task failure handling](roadmap-task-failures.md) tracks task selection and
+opt-in fail-fast combinators, with explicit groups conditional on a consumer.
+
 ## Addressing a specific handler
 
 Scoped activation binding is implemented; see the

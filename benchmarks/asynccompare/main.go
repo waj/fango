@@ -119,8 +119,15 @@ func run() error {
 			ending = "probe workers limit yielding =\n    case Async.Cooperative.run ({ _ -> runWorkers workers limit yielding }) of\n        Ok total -> total\n        Err _ -> -1\n"
 		}
 		source += "\n" + workload + "\n" + annotation + ending + "\nmain() = print (probe 16 20000 True)\n"
-		if module, err := os.ReadFile(filepath.Join(dir, "stdlib", "Async.fango")); err == nil && bytes.Contains(module, []byte("effect Async err")) {
+		if module, err := os.ReadFile(filepath.Join(dir, "stdlib", "Async.fango")); err == nil && bytes.Contains(module, []byte("type RawTask")) {
 			source = nativeWorkload
+			if !bytes.Contains(module, []byte("runOutcome :")) {
+				source = strings.ReplaceAll(source, "Async.runOutcome", "Async.run")
+			}
+			if bytes.Contains(module, []byte("effect Async err")) {
+				source = strings.ReplaceAll(source, "Async.Async}", "Async.Async String}")
+				source = strings.ReplaceAll(source, "Async.Completed value", "Async.Completed (Ok value)")
+			}
 		}
 		if err = os.Mkdir(filepath.Join(dir, "workload"), 0755); err != nil {
 			return err

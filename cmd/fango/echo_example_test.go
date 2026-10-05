@@ -49,6 +49,9 @@ func startTCPServer(t *testing.T, cmd *exec.Cmd, port int) net.Conn {
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		<-done
+		if t.Failed() {
+			t.Logf("server output:\n%s", &output)
+		}
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

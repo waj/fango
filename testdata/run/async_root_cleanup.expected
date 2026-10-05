@@ -1,0 +1,8 @@
+root child cleaned
+Err "root failed"
+nested child cleaned
+Err "nested failed"
+Completed (Just 9)
+Err "caught inside"
+Completed (Just 3)
+Completed (Err "nested catch")

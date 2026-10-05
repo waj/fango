@@ -1,0 +1,38 @@
+import Async
+import Fail
+import Runtime.Scope
+
+blocked ready gate label () = Runtime.Scope.finally {
+        ignore (Async.send ready ())
+        ignore (Async.receive gate)
+    } { print label }
+
+main() =
+    Async.run {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        ignore (Async.spawn (blocked ready gate "cancel cleanup"))
+        ignore (Async.receive ready)
+        Async.cancelScope()
+        Async.checkpoint()
+        print "unreachable"
+    }
+    print "after cancellation"
+    print (Fail.attempt {
+            use Async.run
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            ignore (Async.spawn (blocked ready gate "abort cleanup"))
+            ignore (Async.receive ready)
+            Fail.fail "root failed"
+    })
+    use Async.run
+    gate = Async.channel 0
+    ignore (Async.spawn {
+        ignore (Async.receive gate)
+        print "joined"
+    })
+    print "body"
+    ignore (Async.send gate ())

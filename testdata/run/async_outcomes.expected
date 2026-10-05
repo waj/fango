@@ -1,7 +1,7 @@
-Completed (Ok (Completed (Err "missing")))
-Completed (Ok (Err "missing"))
+Completed (Completed (Err "missing"))
 Completed (Err "missing")
-Completed (Err "missing")
-Completed (Ok 42)
+Err "missing"
+Completed 123
+Completed (42, 42)
 cleanup
-Completed (Err "missing")
+Err "missing"

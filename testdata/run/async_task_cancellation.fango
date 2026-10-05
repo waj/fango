@@ -3,21 +3,21 @@ import Fail
 import Result exposing (Result(..))
 
 effect Stop
-    abort stop : Async.Task String Int -> ()
+    abort stop : Async.Task Int -> ()
 
-waiter : Int -> () ->{Async.Async String} Int
+waiter : Int -> () ->{Async.Async} Int
 waiter value () =
     Async.sleep 60000
     value
 
 main() =
-    ignore (Async.run ({ _ ->
+    ignore (Async.runOutcome ({ _ ->
         child = Async.spawn (waiter 7)
         Async.cancel child
-        print (Async.awaitResult child)
-        print (Async.awaitResult child) }))
+        print (Async.awaitOutcome child)
+        print (Async.awaitOutcome child) }))
     handle
-        ignore (Async.run ({ _ ->
+        ignore (Async.runOutcome ({ _ ->
             child = Async.spawn (waiter 9)
             stop child }))
     on

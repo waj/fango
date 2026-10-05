@@ -1,5 +1,6 @@
 import Async
 import Bytes
+import Fail
 import Http exposing (Body(..))
 import Http.Server
 
@@ -11,9 +12,9 @@ hello request = Http.Server.Response
     }
 
 main() =
-    print (Async.run {
+    print (Fail.attempt { Async.runOutcome {
         stop = Async.channel 1
         ignore (Async.send stop ())
         config = Http.Server.defaultConfig 0
         Http.Server.serve { config | workers = 2 } stop hello
-    })
+    } })

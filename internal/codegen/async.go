@@ -38,7 +38,7 @@ func (g *gen) asyncLaunch(e *core.AsyncLaunch) goast.Expr {
 	call := e.Call
 	scopeTy := call.Args[0].Type()
 	outcomeTy := call.Ty.(*types.TCon)
-	resultTy := outcomeTy.Args[0].(*types.TCon)
+	resultTy := outcomeTy.Args[0]
 	ctorType := func(c *types.CtorInfo, args []types.Type) goast.Expr {
 		return &goast.StarExpr{X: indexExpr(g.ctorRef(c), g.goTypes(args))}
 	}
@@ -64,11 +64,8 @@ func (g *gen) asyncLaunch(e *core.AsyncLaunch) goast.Expr {
 		g.markOutcomeCall(invoke.(*goast.CallExpr), g.goType(call.Ty))
 		invoke = callExpr(selector("fangort", "RequireNormal"), invoke)
 	}
-	failed := binExpr(gotoken.EQL, selector("result", "Tag"), intLit(int64(e.ErrCtor.Index)))
-	failure := selector("result", representationField(g.adts[e.ErrCtor.Result.Unique], e.ErrCtor, 0))
 	success := []goast.Stmt{
 		varDeclStmt("result", g.goType(resultTy), selector("completed", "F0")),
-		ifStmt(failed, []goast.Stmt{returnStmt(completion(kv("Value", callExpr(selector("fangort", "PackNativeValue"), ident("result"))), kv("Failure", callExpr(selector("fangort", "PackNativeValue"), failure)), kv("Failed", ident("true"))))}, nil),
 		returnStmt(completion(kv("Value", callExpr(selector("fangort", "PackNativeValue"), ident("result"))))),
 	}
 	run := funcLitParams([]paramSpec{{name: "child", typ: &goast.StarExpr{X: selector("fangort", "AsyncScope")}}}, selector("fangort", "AsyncCompletion"), []goast.Stmt{

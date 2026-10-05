@@ -1,0 +1,7 @@
+import Async
+import Fail exposing (Fail)
+
+job : () ->{Fail String} Int
+job() = Fail.fail "unsupported"
+
+main() = ignore (Fail.attempt { Async.runOutcome { Async.spawn job } })

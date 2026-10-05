@@ -1,7 +1,7 @@
 import Async exposing (Async)
 
-business : () ->{Async String} ()
+business : () ->{Async} ()
 business() =
     ignore (Async.spawn { print "child IO" })
 
-main() = ignore (Async.run business)
+main() = ignore (Async.runOutcome business)

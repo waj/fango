@@ -1,0 +1,54 @@
+import Async exposing (Async, Outcome(..), Task)
+import Fail exposing (Fail)
+import Result exposing (Result(..))
+
+type DatabaseError = NotFound deriving (Eq, Show)
+type NetworkError = TimedOut deriving (Eq, Show)
+
+lookup : () ->{Fail DatabaseError} Int
+lookup() = Fail.fail NotFound
+fetch : () ->{Fail NetworkError} String
+fetch() = Fail.fail TimedOut
+
+-- No IO or error index is needed for an infallible business function.
+answer : () ->{Async} Int
+answer() = Async.await (Async.spawn { 42 })
+
+launch : (() ->{e} a) ->{Async | e} Task a
+launch action = Async.spawn action
+
+main() =
+    print (Async.runOutcome answer)
+    print (Async.runOutcome {
+            database = Async.spawnAttempt lookup
+            network = Async.spawn { Fail.attempt fetch }
+            (Async.await database, Async.await network)
+    })
+    print (Async.runOutcome {
+            gate = Async.channel 0
+            sibling = launch { Async.receive gate }
+            ignored = Async.spawnAttempt lookup
+            print (Async.awaitOutcome ignored)
+            print (Async.awaitOutcome ignored)
+            failed : Result NetworkError Int
+            failed = Err TimedOut
+            print (Async.await (Async.completed failed))
+            ignore (Async.send gate 7)
+            Async.awaitOutcome sibling
+    })
+    print (Async.runOutcome {
+            value = Async.completed "stable"
+            first = Async.spawn { Async.await value }
+            second = Async.spawn { Async.await value }
+            (Async.await first, Async.await second)
+    })
+    print (Fail.attempt { Async.runOutcome {
+            pending = Async.spawn { { n -> if n > 0 then n else Fail.fail NotFound } }
+            function = Async.await pending
+            function 0
+    } })
+    print (Async.runOutcome {
+            ignore (Async.spawn { Err NotFound })
+            ignore (Async.completed (Err TimedOut))
+            123
+    })

@@ -1,2 +1,2 @@
-(Just (Completed (Ok (0, 8, True))), True)
+(Just (Completed (0, 8, True)), True)
 (Nothing, True)

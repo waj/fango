@@ -1,0 +1,35 @@
+import Async
+import Runtime.Scope
+
+main() =
+    print (Async.runOutcome {
+            ready = Async.channel 0
+            gate = Async.channel 0
+            target = Async.spawn { Async.receive gate }
+            observer = Async.spawn {
+                ignore (Async.send ready ())
+                Async.await target
+            }
+            ignore (Async.receive ready)
+            Async.cancel observer
+            print (Async.awaitOutcome observer)
+            ignore (Async.send gate 11)
+            Async.await target
+    })
+    print (Async.runOutcome {
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            child = Async.spawn {
+                ignore (Async.spawn { Runtime.Scope.finally {
+                        ignore (Async.send ready ())
+                        Async.receive gate
+                    } { print "descendant cleaned" }
+                })
+                Async.receive gate
+            }
+            ignore (Async.receive ready)
+            Async.cancel child
+            print (Async.awaitOutcome child)
+            42
+    })

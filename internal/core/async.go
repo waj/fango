@@ -5,16 +5,16 @@ import "github.com/waj/fango/internal/types"
 // AsyncLaunch invokes Call in a fresh child scope. Call's argument supplies the
 // parent scope and is replaced with the child scope only at invocation.
 type AsyncLaunch struct {
-	Call                                                               *App
-	ScopeCtor, TaskCtor, CompletedCtor, CancelledCtor, OkCtor, ErrCtor *types.CtorInfo
-	Ty                                                                 types.Type
+	Call                                              *App
+	ScopeCtor, TaskCtor, CompletedCtor, CancelledCtor *types.CtorInfo
+	Ty                                                types.Type
 }
 
 func (*AsyncLaunch) isExpr()            {}
 func (e *AsyncLaunch) Type() types.Type { return e.Ty }
 
 // AsyncRebase rebuilds the invocation's residual evidence against its explicit
-// child Async and Fail boundaries before calling any user code.
+// child Async and cancellation boundaries before calling any user code.
 type AsyncRebase struct{ Call *App }
 
 func (*AsyncRebase) isExpr()            {}
@@ -27,7 +27,7 @@ func (l *linter) asyncLaunch(e *AsyncLaunch, where string) {
 	}
 	l.expr(e.Call, where)
 	scope, ok := e.Call.Args[0].Type().(*types.TCon)
-	if !ok || scope.Name != "Async.Scope" || len(scope.Args) != 1 || !l.nativeStorageWrapper(e.ScopeCtor) || e.ScopeCtor.Result.Unique != scope.Unique {
+	if !ok || scope.Name != "Async.Scope" || len(scope.Args) != 0 || !l.nativeOpaqueWrapper(e.ScopeCtor, 0, false) || e.ScopeCtor.Result.Unique != scope.Unique {
 		l.errorf("%s: Async scope representation mismatch", where)
 		return
 	}
@@ -41,21 +41,13 @@ func (l *linter) asyncLaunch(e *AsyncLaunch, where string) {
 		l.errorf("%s: Async outcome representation mismatch", where)
 		return
 	}
-	result, ok := task.Args[0].(*types.TCon)
-	if !ok || result.Name != "Result.Result" || len(result.Args) != 2 || !types.Equal(result.Args[0], scope.Args[0]) {
-		l.errorf("%s: Async failure index mismatch", where)
-		return
-	}
-	for index, c := range []*types.CtorInfo{e.CompletedCtor, e.CancelledCtor, e.OkCtor, e.ErrCtor} {
+	for index, c := range []*types.CtorInfo{e.CompletedCtor, e.CancelledCtor} {
 		if c == nil || c.Result == nil {
 			l.errorf("%s: missing Async result constructor", where)
 			continue
 		}
-		names := []string{"Async.Completed", "Async.Cancelled", "Result.Ok", "Result.Err"}
+		names := []string{"Async.Completed", "Async.Cancelled"}
 		owner := outcome.Unique
-		if index >= 2 {
-			owner = result.Unique
-		}
 		fields := 1
 		if index == 1 {
 			fields = 0
@@ -86,9 +78,9 @@ func (l *linter) asyncRebase(e *AsyncRebase, where string) {
 		found[ev.Name] = ev
 	}
 	a, aok := found["Async.Async"]
-	f, fok := found["Fail.Fail"]
-	if len(found) != 3 || found["Async.Cancellation"].Unique == 0 || !aok || !fok || len(a.Args) != 1 || len(f.Args) != 1 || !types.Equal(a.Args[0], f.Args[0]) {
-		l.errorf("%s: Async rebase requires matching child Async/Fail evidence", where)
+	c := found["Async.Cancellation"]
+	if len(e.Call.EvidenceArgs) != 2 || len(found) != 2 || c.Unique == 0 || len(c.Args) != 0 || !aok || len(a.Args) != 0 {
+		l.errorf("%s: Async rebase requires child Async/cancellation evidence", where)
 	}
 }
 

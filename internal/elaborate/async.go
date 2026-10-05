@@ -42,7 +42,7 @@ func (el *elab) asyncIntrinsic(e ast.Expr, name string, args []ast.Expr, head as
 		return &core.AsyncRebase{Call: call}
 	}
 	ctor := func(name string) *types.CtorInfo { return el.ck.Ctors[name] }
-	return &core.AsyncLaunch{Call: call, Ty: el.zonkDefault(el.ck.ExprTypes[e]), ScopeCtor: ctor("Async.Scope"), TaskCtor: ctor("Async.RawTask"), CompletedCtor: ctor("Async.Completed"), CancelledCtor: ctor("Async.Cancelled"), OkCtor: ctor("Result.Ok"), ErrCtor: ctor("Result.Err")}
+	return &core.AsyncLaunch{Call: call, Ty: el.zonkDefault(el.ck.ExprTypes[e]), ScopeCtor: ctor("Async.Scope"), TaskCtor: ctor("Async.RawTask"), CompletedCtor: ctor("Async.Completed"), CancelledCtor: ctor("Async.Cancelled")}
 }
 
 // Directly known unsupported aborts are source errors. Dependencies hidden in
@@ -58,7 +58,7 @@ func (el *elab) checkAsyncJob(job ast.Expr) {
 			continue
 		}
 		effect := el.ck.Effects[label.Name]
-		if effect != nil && len(effect.Ops) > 0 && effect.Ops[0].Abort && label.Name != "Fail.Fail" {
+		if effect != nil && len(effect.Ops) > 0 && effect.Ops[0].Abort {
 			el.errs = append(el.errs, diag.Errorf(job.Span(), "ASYNC BOUNDARY", "A task cannot inherit abort effect %s; handle it inside the task.", label.Name))
 		}
 	}

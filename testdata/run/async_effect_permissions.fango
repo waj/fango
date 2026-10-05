@@ -4,23 +4,23 @@ import Fail exposing (Fail)
 effect Lookup
     lookup : () -> Int
 
-spawnAny : (() ->{Async String, Fail String | e} a) ->{Async String | e} Task String a
+spawnAny : (() ->{e} a) ->{Async | e} Task a
 spawnAny body = Async.spawn body
 
-pureParent : () ->{Async String} Task String Int
+pureParent : () ->{Async} Task Int
 pureParent() = spawnAny { 42 }
 
-domainParent : () ->{Async String, Lookup} Task String Int
+domainParent : () ->{Async, Lookup} Task Int
 domainParent() = spawnAny { lookup() }
 
-ioParent : () ->{Async String, IO} ()
+ioParent : () ->{Async, IO} ()
 ioParent() = ignore (spawnAny { print "child IO" })
 
 main() =
-    print (Async.run {
+    print (Async.runOutcome {
             first = pureParent()
             second = handle domainParent() on
                 lookup () -> resume 7
             (Async.await first, Async.await second)
     })
-    ignore (Async.run ioParent)
+    Async.run ioParent

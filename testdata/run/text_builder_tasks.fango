@@ -12,12 +12,12 @@ extend base suffix = Builder.toString (List.foldl { _ builder -> Builder.append 
 
 main() =
     base = Builder.append Builder.empty "shared:"
-    outcome = Async.run { _ ->
+    outcome = Async.runOutcome { _ ->
         tasks = List.map { suffix -> Async.spawn { _ -> extend base suffix } } ["a", "b", "c", "d"]
         List.map { task -> Async.await task } tasks
     }
     case outcome of
-        Completed (Ok texts) ->
+        Completed texts ->
             print (List.map { text -> String.length text } texts)
             print (List.map { text -> String.slice 0 8 text } texts)
             print (Builder.toString base)

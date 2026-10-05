@@ -1,24 +1,21 @@
 {-# no-prelude #-}
 -- Concurrent tasks, cancellation, and channels.
 --
--- `run` starts a root scope in which tasks share a failure type `err`; tasks
--- spawned inside it run in parallel, and every scope waits for its children
--- before it completes. A child inherits the resumptive handlers around it,
--- sharing their state cells, but must handle abort effects other than
--- `Fail err` inside itself. A failed task cancels its siblings, but not the
--- parent body, which can observe and handle the failure. Cancellation is
--- cooperative: sleeps, channel transfers, and task waits respond to it, but
--- CPU loops need `checkpoint`, and blocking IO is not interrupted except by
--- the cancellation-aware `Net` operations. `cancelled`, `cancel`, `close`,
--- and `cancelScope` still work after a scope is cancelled; `checkpoint`,
--- `sleep`, channel transfers, and task waits leave it. The rules for
--- handlers a task inherits are in the language reference, under "Handlers
--- in tasks".
+-- `run` starts a root lifetime scope; every scope joins its children before
+-- completing. Tasks return ordinary values, including application Results.
+-- Returned errors do not cancel siblings or fail the root. Handle application
+-- aborts inside spawned callbacks; inherited resumptive handlers share their
+-- state cells. Root-body aborts cancel and drain children before propagating.
+-- Cancellation is cooperative: sleeps, channel transfers, and task waits
+-- respond to it, while CPU loops need `checkpoint`. Blocking IO is interrupted
+-- only by cancellation-aware APIs such as `Net`. `cancelled`, `cancel`, `close`,
+-- and `cancelScope` still work after cancellation; other Async operations leave
+-- the cancelled scope. See the language reference under "Handlers in tasks".
 module Async exposing
     ( Async, Channel, Outcome(..), Task
-    , await, awaitResult, cancel, cancelScope, cancelled, channel, checkpoint
-    , close, completed, contextToken, parMap, receive, run, send, sleep, spawn
-    , wait, within
+    , await, awaitOutcome, cancel, cancelScope, cancelled, channel, checkpoint
+    , close, completed, contextToken, parMap, receive, run, runOutcome, send
+    , sleep, spawn, spawnAttempt, wait, within
     )
 
 import Basics exposing (..)
@@ -31,16 +28,16 @@ import Runtime.Native
 import Runtime.Scope
 
 {-# resource #-}
-type Scope err = Scope Runtime.Native.Any
+type Scope = Scope Runtime.Native.Any
 
 type Context = Context Runtime.Native.Any
 
 {-# resource #-}
 type RawTask result = RawTask Runtime.Native.Any
 
--- A running or finished task that answers a `value` or fails with an `err`.
+-- A running or finished task that returns a `value`.
 -- A task handle may outlive the scope that started it.
-type Task err value = Task (RawTask (Result err value))
+type Task value = Task (RawTask value)
 
 -- A channel carrying values between tasks. It lives independently of the
 -- tasks that use it.
@@ -58,43 +55,41 @@ type Outcome value
     | Cancelled
     deriving (Eq, Show)
 
--- Running inside a task scope whose tasks fail with `err`. Only `run`
--- handles it.
-effect Async err
-    current : () -> Scope err
-    active : () -> Scope err
+-- Running inside a structured task scope. `run`, `runOutcome`, and `within`
+-- handle it.
+effect Async
+    current : () -> Scope
+    active : () -> Scope
 
 effect Cancellation
     abort stopTask : () -> value
 
-newRoot : () -> Scope err
+newRoot : () -> Scope
 newRoot = native
-childScope : Scope err -> Scope err
+childScope : Scope -> Scope
 childScope = native
-scopeContext : Scope err -> Context
+scopeContext : Scope -> Context
 scopeContext = native
 
 -- The current task's opaque cancellation context, for native sidecars that
 -- must interrupt a blocking operation when the task is cancelled.
-contextToken : () ->{Async err} Runtime.Native.Any
+contextToken : () ->{Async} Runtime.Native.Any
 contextToken() =
     case scopeContext current() of
         Context value -> value
-scopeCancelled : Scope err -> Bool
+scopeCancelled : Scope -> Bool
 scopeCancelled = native
-cancelOwner : Scope err -> ()
+cancelOwner : Scope -> ()
 cancelOwner = native
-finishScope : Scope err -> Int -> ()
+finishScope : Scope -> Int -> ()
 finishScope = native
-scopeStatus : Scope err -> Int
+scopeStatus : Scope -> Int
 scopeStatus = native
-scopeFailure : Scope err -> err
-scopeFailure = native
 
 -- The checked invocation boundaries retain source rows and sealed result indices.
-launch : Scope err -> (Scope err ->{IO | effects} Outcome (Result err value)) ->{effects} RawTask (Result err value)
+launch : Scope -> (Scope ->{IO | effects} Outcome value) ->{effects} RawTask value
 launch = native
-rebase : (() ->{Async err, IO, Fail err, Cancellation | effects} value) ->{Async err, IO, Fail err, Cancellation | effects} value
+rebase : (() ->{Async, IO, Cancellation | effects} value) ->{Async, IO, Cancellation | effects} value
 rebase = native
 supervise : (() ->{IO | effects} value) ->{IO | effects} value
 supervise = native
@@ -103,8 +98,6 @@ newCompleted : result -> RawTask result
 newCompleted = native
 completeSuccess : Context -> RawTask result -> ()
 completeSuccess = native
-completeFailure : Scope err -> RawTask result -> err -> ()
-completeFailure = native
 cancelTask : RawTask result -> ()
 cancelTask = native
 waitTask : RawTask result ->{IO} ()
@@ -139,119 +132,126 @@ enter owner body =
         active () -> if scopeCancelled owner then stopTask() else resume owner
 
 capture owner body =
-    handle Completed (Fail.attempt { enter owner body }) on
+    handle Completed (enter owner body) on
         stopTask () -> Cancelled
 
 status outcome =
     case outcome of
         Cancelled -> 2
-        Completed (Err _) -> 1
-        Completed (Ok _) -> 0
+        Completed _ -> 0
 
 finish owner outcome =
     finishScope owner (status outcome)
-    case outcome of
-        Completed (Err _) -> outcome
-        _ ->
-            case scopeStatus owner of
-                1 -> Completed (Err (scopeFailure owner))
-                2 -> Cancelled
-                _ -> outcome
+    if scopeStatus owner == 2 then Cancelled else outcome
 
--- Cleanup drains even when an unrelated outer abort leaves the body.
+-- Cleanup cancels and drains even when an outer abort leaves the body.
 runIn owner body =
     Runtime.Scope.bracket { () } { finishScope owner 2 } {
         outcome = capture owner body
         finish owner outcome
     }
 
--- Runs `body` in a new root scope and answers how it ended: completed with
--- its value or its failure, or cancelled. The scope waits for every task it
--- started. When the body succeeds, the earliest failure of a task nobody
--- observed becomes the scope's failure; a failure of the body itself wins.
-run : (() ->{Async err, IO, Fail err | effects} value) ->{IO | effects} Outcome (Result err value)
-run body = supervise { runIn newRoot() body }
+-- Runs a Unit-returning `body` in a new root scope, joining every child,
+-- including ignored handles. Returns Unit after completion or cancellation,
+-- so `use Async.run` fits a Unit-returning block such as `main()`.
+-- Application aborts leaving the body cancel and join its children before
+-- propagating. The caller must permit the body's residual effects; `run`
+-- introduces IO. Use `runOutcome` to inspect completion or cancellation.
+run : (() ->{Async | effects} ()) ->{IO | effects} ()
+run body = ignore (runOutcome body)
 
--- Runs `body` in a nested scope that waits for the tasks it starts before
--- returning. Its failure fails the caller; its cancellation cancels the
--- caller's scope.
-within : (() ->{Async err, Fail err | effects} value) ->{Async err, Fail err | effects} value
+-- Runs `body` in a new root scope, returning its value or cancellation after
+-- joining every child, including ignored handles. Application aborts leaving
+-- the body cancel and join its children before reaching their outer handler.
+-- The caller must permit the body's residual effects; `runOutcome` introduces IO.
+runOutcome : (() ->{Async | effects} value) ->{IO | effects} Outcome value
+runOutcome body = supervise { runIn newRoot() body }
+
+-- Runs `body` in a nested scope, joining its children before returning its
+-- value. An abort leaving the body cancels and drains those children before
+-- propagating; cancellation cancels the caller's scope.
+within : (() ->{Async | effects} value) ->{Async | effects} value
 within body =
     owner = active()
     outcome = runIn (childScope owner) body
     case outcome of
-        Completed result -> Fail.fromResult result
+        Completed value -> value
         Cancelled ->
             cancelOwner owner
             stopCurrent()
 
--- Starts `body` as a child task of the current scope and answers its handle
--- at once. The child catches its own `Fail err` locally; an ordinary `Err`
--- it returns is a successful value. The caller must permit the body's other
--- effects, including `IO`, even when it never awaits the task.
-spawn : (() ->{Async err, Fail err | effects} value) ->{Async err | effects} Task err value
+-- Starts `body` as a child task and returns its handle at once. The caller
+-- must permit all of the body's effects, including IO, even for ignored
+-- handles. Application aborts must be handled inside the callback; known
+-- escapes are rejected statically and hidden dependencies before user code
+-- runs. An ordinary returned Err is a value and does not cancel siblings.
+spawn : (() ->{effects} value) ->{Async | effects} Task value
 spawn body =
     owner = active()
     Task (launch owner { child -> runIn child { rebase body } })
 
--- A task that has already finished with `result`.
-completed : Result err value ->{Async err} Task err value
-completed result =
+-- Starts `action` with its named Fail application handled inside the child,
+-- returning a task whose value is a Result. Other abort dependencies still
+-- need local handling. An Err does not cancel siblings or fail the scope.
+spawnAttempt : (() ->{Fail error | effects} value) ->{Async | effects} Task (Result error value)
+spawnAttempt action = spawn { Fail.attempt action }
+
+-- A task already completed with `value`. An Err is ordinary data.
+completed : value ->{Async} Task value
+completed value =
     owner = active()
-    task = newCompleted result
-    case result of
-        Ok _ -> completeSuccess (scopeContext owner) task
-        Err error -> completeFailure owner task error
+    task = newCompleted value
+    completeSuccess (scopeContext owner) task
     Task task
 
 observe task = if taskStatus task == 2 then Cancelled else Completed (taskValue task)
 
 -- Waits, outside any task scope, for the task to finish and answers how it
 -- ended.
-wait : Task err value ->{IO} Outcome (Result err value)
+wait : Task value ->{IO} Outcome value
 wait (Task task) =
     waitTask task
     observe task
 
--- Waits for the task to finish and answers how it ended, without failing.
--- Observing a task marks its failure as handled; repeated observations
--- answer the same result. Cancelling the waiting task interrupts the wait
--- without observing the task's result.
-awaitResult : Task err value ->{Async err} Outcome (Result err value)
-awaitResult (Task task) =
+-- Waits for completion and returns the value or the child's cancellation.
+-- Repeated and concurrent observations see one stable outcome. Cancellation
+-- of the observer interrupts its own wait without cancelling the target.
+awaitOutcome : Task value ->{Async} Outcome value
+awaitOutcome (Task task) =
     owner = active()
     if waitTaskIn (scopeContext owner) task then
         observe task
     else
         stopCurrent()
 
--- Waits for the task and answers its value. A failed task fails the caller
--- with the same error; a cancelled one cancels the caller's scope.
-await : Task err value ->{Async err, Fail err} value
+-- Waits for the task's value. A cancelled child cancels the observing scope;
+-- use `awaitOutcome` to choose a different response. Returned Results remain
+-- ordinary values; use Fail.fromResult explicitly to raise an error here.
+await : Task value ->{Async} value
 await task =
-    case awaitResult task of
-        Completed result -> Fail.fromResult result
+    case awaitOutcome task of
+        Completed value -> value
         Cancelled ->
             cancelScope()
             stopCurrent()
 
 -- Requests the task's cancellation, and its children's. It does not cancel
 -- the caller.
-cancel : Task err value ->{Async err} ()
+cancel : Task value ->{Async} ()
 cancel (Task task) =
     ignore current()
     cancelTask task
 
 -- Requests cancellation of the current scope and its children.
-cancelScope : () ->{Async err} ()
+cancelScope : () ->{Async} ()
 cancelScope() = cancelOwner current()
 
 -- Whether the current scope has been cancelled.
-cancelled : () ->{Async err} Bool
+cancelled : () ->{Async} Bool
 cancelled() = scopeCancelled current()
 
 -- Called only after this scope is cancelled; active aborts to capture.
-stopCurrent : () ->{Async err} value
+stopCurrent : () ->{Async} value
 stopCurrent() =
     ignore active()
     stopCurrent()
@@ -259,19 +259,19 @@ stopCurrent() =
 -- Leaves the current task if it has been cancelled, running cleanup on the
 -- way; otherwise does nothing. Long computations call it to respond to
 -- cancellation.
-checkpoint : () ->{Async err} ()
+checkpoint : () ->{Async} ()
 checkpoint() = ignore active()
 
 -- Pauses the task for `milliseconds`, waking early when it is cancelled. A
 -- duration of zero or less is a checkpoint.
-sleep : Int ->{Async err} ()
+sleep : Int ->{Async} ()
 sleep milliseconds =
     owner = active()
     if sleepIn (scopeContext owner) milliseconds then () else checkpoint()
 
 -- A new channel buffering up to `capacity` values. Zero or less makes it
 -- unbuffered: each send waits for a receiver.
-channel : Int ->{Async err} Channel value
+channel : Int ->{Async} Channel value
 channel capacity =
     ignore active()
     result = newChannel()
@@ -280,7 +280,7 @@ channel capacity =
 
 -- Sends a value, waiting while the buffer is full. Answers `False` when the
 -- channel is closed, including while waiting.
-send : Channel value -> value ->{Async err} Bool
+send : Channel value -> value ->{Async} Bool
 send ch value =
     owner = active()
     sent = sendIn (scopeContext owner) ch value
@@ -291,7 +291,7 @@ send ch value =
 
 -- The next value, waiting while none is buffered, or `Nothing` once the
 -- channel is closed and drained.
-receive : Channel value ->{Async err} Maybe value
+receive : Channel value ->{Async} Maybe value
 receive ch =
     owner = active()
     result = receiveIn (scopeContext owner) ch
@@ -303,7 +303,7 @@ receive ch =
 
 -- Closes the channel, waking blocked senders and receivers. Closing it again
 -- does nothing.
-close : Channel value ->{Async err} ()
+close : Channel value ->{Async} ()
 close ch =
     ignore current()
     closeChannel ch

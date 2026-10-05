@@ -63,8 +63,9 @@ calls inside handlers but excluding latent lambda bodies. Handling an effect
 does not convert an Exit-family callback into a Direct value.
 Async callbacks retain their effect requirements. Known unsupported aborts and
 scoped local permissions are rejected at the spawn boundary; dependencies hidden
-inside inherited handlers are checked when rebuilding child evidence. Functions
-and native handles may be shared. See [tasks](tasks.md).
+inside inherited handlers or generic rows are checked when rebuilding child
+evidence, before user code runs. Fail is subject to the same abort restriction.
+Functions and native handles may be shared. See [tasks](tasks.md).
 
 ## Scoped callback rows
 
