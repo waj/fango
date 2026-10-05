@@ -426,7 +426,10 @@ func unresolvedEffectArgs(args []types.Type) bool {
 func containsEffectVariable(t types.Type) bool {
 	switch t := t.(type) {
 	case *types.TVar:
-		return true
+		// Annotation skolems are fixed identities, even though callers may
+		// later instantiate them with the same type. Only inference variables
+		// can still be solved to select another application in this row.
+		return !t.Rigid
 	case *types.TCon:
 		for _, arg := range t.Args {
 			if containsEffectVariable(arg) {

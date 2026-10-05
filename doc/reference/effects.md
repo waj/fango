@@ -60,9 +60,12 @@ both() =
 ```
 
 The same application cannot appear twice. When an argument still contains a
-type variable, inference treats occurrences of the same nominal effect as
-potentially overlapping and unifies their arguments. An incompatible overlap,
-such as `{Put a, Put Bool}` for an unknown `a`, reports `EFFECT MISMATCH`.
+flexible inference variable, inference treats occurrences of the same nominal
+effect as potentially overlapping and unifies their arguments. An incompatible
+overlap, such as `{Put a, Put Bool}` for an unknown `a`, reports `EFFECT MISMATCH`.
+Annotation type variables are fixed while checking a definition, so `Fail err1`
+and `Fail err2` can remain separate applications. A handler can translate one
+into the other, as in the [failure mapping fixture](../../testdata/run/map_fail.fango).
 
 The order of labels never chooses an application. An application whose
 argument is still unknown, met by a row holding several applications of its

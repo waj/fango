@@ -17,8 +17,9 @@ ordinary native calls. Empty declarations retain nominal identity, row inclusion
 and parameter checking without operation evidence slots.
 
 Rows contain distinct applied effect labels and an optional tail. Two fully
-resolved applications of one nominal effect may coexist. Occurrences whose
-arguments still contain type variables overlap until inference resolves them;
+resolved applications of one nominal effect may coexist, including applications
+fixed by rigid annotation variables. Occurrences whose arguments still contain
+flexible inference variables overlap until inference resolves them;
 the solver unifies their arguments and reconciles rows after the group is
 solved. An unresolved occurrence that could match several applications is
 never matched by label order: the solver retries its constraint after the

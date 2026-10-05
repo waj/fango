@@ -197,7 +197,38 @@ func TestAppliedEffectRowIdentityAndUnresolvedOverlap(t *testing.T) {
 		t.Fatalf("unresolved argument = %s", types.Show(sub.Apply(variable)))
 	}
 	rigid := sup.FreshRigid(types.General)
-	if m := reconcileRows(types.Row{Labels: []types.EffLabel{{Unique: u, Name: "Put", Args: []types.Type{rigid}}, boolean}}, Subst{}, b, sup); m == nil {
-		t.Fatal("overlapping rigid application accepted")
+	if m := reconcileRows(types.Row{Labels: []types.EffLabel{{Unique: u, Name: "Put", Args: []types.Type{rigid}}, boolean}}, Subst{}, b, sup); m != nil {
+		t.Fatalf("fixed rigid application rejected: %v", m)
+	}
+}
+
+func TestRigidEffectApplicationsKeepSeparateIdentities(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	u := sup.NextUnique()
+	a, z := sup.FreshRigid(types.General), sup.FreshRigid(types.General)
+	first := types.EffLabel{Unique: u, Name: "Put", Args: []types.Type{a}}
+	second := types.EffLabel{Unique: u, Name: "Put", Args: []types.Type{z}}
+	row := types.Row{Labels: []types.EffLabel{first, second}}
+	if m := reconcileRows(row, Subst{}, b, sup); m != nil {
+		t.Fatalf("distinct annotation variables rejected: %v", m)
+	}
+	if m := unifyRows(row, types.Row{Labels: []types.EffLabel{second, first}}, Subst{}, b, sup); m != nil {
+		t.Fatalf("reordered rigid applications rejected: %v", m)
+	}
+	if m := includeRows(types.Row{Labels: []types.EffLabel{first}}, row, Subst{}, b, sup); m != nil {
+		t.Fatalf("exact rigid application was ambiguous: %v", m)
+	}
+	if m := includeRows(types.Row{Labels: []types.EffLabel{first}}, types.Row{Labels: []types.EffLabel{second}}, Subst{}, b, sup); m == nil {
+		t.Fatal("unrelated rigid application supplied the required effect")
+	}
+	variable := sup.FreshVar(types.General)
+	unknown := types.EffLabel{Unique: u, Name: "Put", Args: []types.Type{variable}}
+	sub := Subst{}
+	if m := unifyRows(types.Row{Labels: []types.EffLabel{unknown}}, types.Row{Labels: []types.EffLabel{first}}, sub, b, sup); m != nil {
+		t.Fatalf("flexible argument could not resolve to a rigid application: %v", m)
+	}
+	if !types.Equal(sub.Apply(variable), a) {
+		t.Fatal("flexible argument did not resolve to the annotation variable")
 	}
 }

@@ -1,0 +1,25 @@
+import Fail exposing (Fail, fail)
+import Result exposing (Result(..))
+
+mapFail : (err1 -> err2) -> (() ->{Fail err1} value) ->{Fail err2} value
+mapFail f body =
+    handle body() on
+        fail error -> fail (f error)
+
+mapFailWithEffects : (err1 -> err2) -> (() ->{Fail err1 | e} value) ->{Fail err2 | e} value
+mapFailWithEffects f body =
+    handle body() on
+        fail error -> fail (f error)
+
+reject : () ->{Fail Int} Int
+reject() = fail 42
+
+accept : () ->{Fail Int} Int
+accept() = if True then 7 else fail 0
+
+main() =
+    print (Fail.attempt { mapFail show reject })
+    print (Fail.attempt { mapFail show accept })
+    print (Fail.attempt { mapFail { n -> n + 1 } reject })
+    print (Fail.attempt { mapFail show { mapFail { n -> n + 1 } reject } })
+    print (Fail.attempt { mapFailWithEffects show { print "body"; reject() } })

@@ -44,8 +44,11 @@ fresh expected types and covariant ADT row arguments get their own row views.
 For bounds sharing a tail, extra permitted labels need no equality, missing
 required labels can extend a flexible tail, and rigid tails cannot gain labels.
 Fully resolved applications of one nominal effect are distinct labels. An
-application containing a type variable can overlap another occurrence, so
-inference unifies their arguments before deciding whether the labels coincide.
+application containing a flexible inference variable can overlap another
+occurrence, so inference unifies their arguments before deciding whether the
+labels coincide.
+Rigid annotation variables give applications fixed identities and are not
+unified with other arguments merely because the nominal effect is the same.
 Identical applications collapse to one label; incompatible unresolved overlaps
 report an effect mismatch. Source annotations reject duplicate applications.
 Solve shapes before row bounds; never retag a named binding while widening a use.

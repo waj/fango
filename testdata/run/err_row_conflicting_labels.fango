@@ -1,5 +1,5 @@
--- `Ctx p` and `Ctx e` still overlap while their arguments are unknown.
--- The shared open row cannot assume they are distinct applications.
+-- `Ctx p` and `Ctx e` are distinct rigid applications. The shared open row
+-- cannot substitute the body's required application for the annotated one.
 
 effect Ctx e
     current : () -> e
