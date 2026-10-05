@@ -33,7 +33,9 @@ later operations on closed handles. Socket writes are serialized separately.
 
 The [Async API](../../stdlib/Async.fango) uses these primitives. Its Fango
 implementation installs child failure and cancellation boundaries before invoking
-the user's callback. `AsyncLaunch` owns the concurrent call and seals the complete
+the user's callback. The public spawn boundary supplies `Async err` and
+`Fail err` while propagating the callback's residual effects, including IO, to
+its caller. `AsyncLaunch` owns the concurrent call and seals the complete
 `Result err value` under one native type index; `AsyncRebase` reconstructs its
 inherited evidence. `ParallelMap` invokes pure callbacks with bounded concurrency
 and preserves order without exposing task handles.

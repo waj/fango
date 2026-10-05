@@ -1,0 +1,7 @@
+import Async exposing (Async, Task)
+import Fail exposing (Fail)
+
+submit : (() ->{Async String, IO, Fail String | e} a) ->{Async String | e} Task String a
+submit body = Async.spawn body
+
+main() = ignore (Async.run { submit { print "child IO" } })

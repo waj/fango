@@ -278,7 +278,7 @@ worker listener events process =
             if Net.listenerStopped listener then ()
             else ignore (Async.send events (Just error))
 
-spawnWorkers : Int -> Net.Listener -> Channel (Maybe Net.Error) -> (Net.Connection ->{Async Net.Error, IO, Fail Net.Error | e} ()) ->{Async Net.Error | e} List (Task Net.Error ())
+spawnWorkers : Int -> Net.Listener -> Channel (Maybe Net.Error) -> (Net.Connection ->{Async Net.Error, IO, Fail Net.Error | e} ()) ->{Async Net.Error, IO | e} List (Task Net.Error ())
 spawnWorkers count listener events process =
     if count <= 0 then []
     else [ Async.spawn { worker listener events process }

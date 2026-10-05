@@ -412,6 +412,12 @@ Children inherit resumptive handler activations and their state cells; see
 
 ## Handlers in tasks
 
+A callback's residual effects remain requirements of the call to
+[`Async.spawn`](../../stdlib/Async.fango), including `IO`. These effects are
+accounted for at launch even if the task is never awaited; awaiting does not
+provide handlers for the child's execution. The child scope supplies its own
+`Async err` and `Fail err` boundaries.
+
 A task started with [`Async.spawn`](../../stdlib/Async.fango) inherits the
 resumptive handler activations around it, and their state cells. Individual
 snapshots and commits publish complete values; handlers own any locking needed

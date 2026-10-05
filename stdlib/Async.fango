@@ -187,8 +187,9 @@ within body =
 
 -- Starts `body` as a child task of the current scope and answers its handle
 -- at once. The child catches its own `Fail err` locally; an ordinary `Err`
--- it returns is a successful value.
-spawn : (() ->{Async err, IO, Fail err | effects} value) ->{Async err | effects} Task err value
+-- it returns is a successful value. The caller must permit the body's other
+-- effects, including `IO`, even when it never awaits the task.
+spawn : (() ->{Async err, Fail err | effects} value) ->{Async err | effects} Task err value
 spawn body =
     owner = active()
     Task (launch owner { child -> runIn child { rebase body } })
