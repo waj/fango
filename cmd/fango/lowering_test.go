@@ -131,10 +131,26 @@ func TestAllocationSlope(t *testing.T) {
 }
 
 func TestOptimizedAndGeneralLoweringAgree(t *testing.T) {
+	testLoweringAgreement(t, "backend_lowering")
+}
+
+func TestClosedAsyncCallbackBodyIsShared(t *testing.T) {
+	files := emittedProject(t, filepath.Join("..", "..", "testdata", "run", "async_callback_sharing.fango"))
+	source := string(entryFile(t, files))
+	for _, literal := range []string{`"Hola"`, `"Chau"`, `"unit"`} {
+		if count := strings.Count(source, literal); count != 1 {
+			t.Errorf("callback body literal %s emitted %d times, want once:\n%s", literal, count, source)
+		}
+	}
+	testLoweringAgreement(t, "async_callback_sharing")
+}
+
+func testLoweringAgreement(t *testing.T, stem string) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("compiled lowering comparison")
 	}
-	source := filepath.Join("..", "..", "testdata", "run", "backend_lowering.fango")
+	source := filepath.Join("..", "..", "testdata", "run", stem+".fango")
 	var diagnostics bytes.Buffer
 	result, ok := checkGraph(source, &diagnostics, &compilationSession{noCache: true})
 	if !ok {
@@ -149,7 +165,7 @@ func TestOptimizedAndGeneralLoweringAgree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := os.ReadFile(filepath.Join("..", "..", "testdata", "run", "backend_lowering.expected"))
+	want, err := os.ReadFile(filepath.Join("..", "..", "testdata", "run", stem+".expected"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +187,7 @@ func TestOptimizedAndGeneralLoweringAgree(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		cmd := exec.Command("go", "run", "./entries/backend_lowering")
+		cmd := exec.Command("go", "run", "./entries/"+stem)
 		cmd.Dir = project
 		out, err := cmd.CombinedOutput()
 		if err != nil || !bytes.Equal(out, want) {

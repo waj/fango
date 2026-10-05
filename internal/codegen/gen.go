@@ -282,6 +282,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	decls = append(decls, g.regexDecls...)
 	decls = append(decls, g.descriptorDecls...)
 	decls = append(decls, g.callableDecls...)
+	decls = append(decls, g.sharedCallbackDecls...)
 	// Imports come from emission (fangort for prints, math for float
 	// specials), so they are prepended last — in a fixed order, for
 	// deterministic output.
@@ -331,6 +332,9 @@ type gen struct {
 	regexDecls      []goast.Decl
 	rowPreparation  *rowPreparation
 	forwarders      map[string]*core.Lambda
+
+	sharedCallbacks     map[sharedCallbackKey]string
+	sharedCallbackDecls []goast.Decl
 
 	// tyParamNames maps the rigid vars of the definition (or derived
 	// function) currently being emitted to their Go type-parameter names

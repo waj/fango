@@ -61,6 +61,14 @@ can be expanded at their call sites. Lambdas capturing evidence or residual rows
 keep their definition-site closure. Escaping values and partial application retain
 the structural Direct/Exit callable record described by the [backend](backend.md).
 
+Closed callbacks with a fixed Direct body share one module-local Go function
+across copies in enclosing transport families. Their Direct member names that
+function, and their Exit member calls it and supplies a nil exit. This applies
+to concrete callbacks with no invocation evidence parameters, captured evidence,
+rows, or local values; the argument and invocation row remain ordinary parameters.
+Callbacks with generic environments or additional local references retain their
+literal bodies. Effect-polymorphic bodies retain separate transport paths.
+
 ## Exit results
 
 Generated Exit workers, operation slots, and callback members return a normal

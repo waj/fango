@@ -1,0 +1,20 @@
+import Async
+
+makeTask text = Async.spawn { text }
+
+main() =
+    print (Async.run {
+            task = Async.spawn {
+                print "Hola"
+                "Chau"
+            }
+            Async.await task
+    })
+    print (Async.run {
+            task = makeTask "captured"
+            Async.await task
+    })
+    print (Async.run {
+            task = Async.spawn { print "unit" }
+            Async.await task
+    })
