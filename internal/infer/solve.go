@@ -84,10 +84,10 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 		}
 	}
 	bounds = ordinary
-	// Propagate explicit lower bounds before closing scoped rows. Otherwise
-	// an outer handler's upper bound can close a callback's residual row
-	// before a sibling constraint contributes (for example) Fail String.
-	if len(scopes) > 0 {
+	// Propagate explicit lower bounds before closing residual rows. Otherwise
+	// an outer call's upper bound can close a callback's residual row before
+	// a sibling constraint contributes a label already present on the call.
+	{
 		labels := func() int {
 			n := 0
 			for _, p := range bounds {
@@ -104,8 +104,19 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			for _, p := range bounds {
 				left, lok := sub.Apply(p.c.Left).(types.Row)
 				right, rok := sub.Apply(p.c.Right).(types.Row)
-				if !lok || !rok || len(left.Labels) == 0 || awaitsAmbient(p.c, sub) {
+				if !lok || !rok || len(left.Labels) == 0 {
 					continue
+				}
+				if awaitsAmbient(p.c, sub) {
+					// An unresolved application waits for the ambient row, but
+					// independent concrete labels can already propagate.
+					var resolved []types.EffLabel
+					for _, label := range left.Labels {
+						if !unresolvedEffectArgs(label.Args) {
+							resolved = append(resolved, label)
+						}
+					}
+					left.Labels = resolved
 				}
 				sub.trial(sup, func() *mismatch {
 					return includeRows(types.Row{Labels: left.Labels}, right, sub, bi, sup)

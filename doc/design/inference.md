@@ -49,6 +49,10 @@ inference unifies their arguments before deciding whether the labels coincide.
 Identical applications collapse to one label; incompatible unresolved overlaps
 report an effect mismatch. Source annotations reject duplicate applications.
 Solve shapes before row bounds; never retag a named binding while widening a use.
+Explicit label lower bounds propagate before upper bounds close flexible rows,
+including callback residuals whose labels also occur on the runner's outer arrow.
+Unresolved effect applications wait for the ambient row's other applications;
+independent concrete labels can propagate during that wait.
 
 A pure handler runner may still need a polymorphic transport contract. Infer
 this from controlled parameter types and executed call contracts, including
@@ -76,10 +80,9 @@ Each saturated source call allocates a rigid permission label from the session
 supply and extends the runner's residual row with it. Distinct allocations
 coexist in ordinary effect rows. Expected scoped callback types are available
 while checking lambda parameters, so nested scopes do not infer an outer
-reader's row from the inner reader. In constraint groups containing scopes,
-explicit label lower bounds propagate before fixed-tail upper bounds close
-flexible rows. Known record projections contribute their rows before closure,
-so a source effect cannot hide a later local-state or failure requirement.
+reader's row from the inner reader. Known record projections contribute their
+rows before closure, so a source effect cannot hide a later local-state or
+failure requirement.
 
 A persistent `ScopeBoundary` rejects its label anywhere in the solved result,
 residual effects, or outer environment types. Its structural walk includes

@@ -123,3 +123,37 @@ readAndPrint source =
 		}
 	}
 }
+
+func TestRunnerCallbackCanContributeOuterEffect(t *testing.T) {
+	const prefix = `effect Scheduling a
+    start : () -> ()
+
+schedule : (() ->{Scheduling a | e} b) ->{Scheduling a | e} b
+schedule body =
+    start()
+    body()
+run : (() ->{Scheduling a | e} b) ->{IO | e} b
+run body =
+    print "run"
+    handle body() on
+        start () -> resume ()
+child() = print "child"
+`
+	for _, callback := range []string{"{ _ -> print \"child\" }", "child"} {
+		t.Run(callback, func(t *testing.T) {
+			_, _, errs := check(t, prefix+"\nmain() =\n    pending = run { _ -> schedule "+callback+" }\n    print \"done\"")
+			if len(errs) != 0 {
+				t.Fatal(errs)
+			}
+		})
+	}
+	// Listing IO on the runner does not grant it to a closed callback row.
+	_, _, errs := check(t, prefix+`
+restricted : (() ->{Scheduling a} b) ->{IO} b
+restricted body = run body
+bad() = restricted { _ -> schedule child }
+`)
+	if len(errs) == 0 {
+		t.Fatal("accepted IO inside a closed callback row")
+	}
+}
