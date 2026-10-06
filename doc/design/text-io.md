@@ -87,11 +87,21 @@ output before building it. String.span slices at a validated byte boundary
 after scanning characters, avoiding a second scan of the unvisited suffix.
 
 `Text.Builder` is foundational, importing only Runtime.Native so Basics can
-declare builder-based Display methods without a cycle. Versions carry an
+declare builder-based Show and Display methods without a cycle. Versions carry an
 opaque buffer and byte length as an ordinary product, so appending allocates
-no version object. Both backends use shared runtime helpers. Integer and float
-rendering use bounded stack scratch rather than intermediate strings; float
-spelling shares the implementation used by Show.
+no version object. Storage and scalar formatting belong to its ordinary Go
+sidecar. Both backends call that sidecar; compile-time adapters import the same implementation. Integer
+and float rendering use bounded stack scratch rather than intermediate strings.
+String and Char literal appends size their escaped output and then write directly
+into reserved storage. Direct String conversions share the same formatting rules.
+
+Show instances append through `showTo` and, for constructor arguments,
+`showArgTo`. Derived instances, lists, tuples, and dictionaries thread the builder
+through their children. The String-returning methods default to an empty builder
+and one final copy, while scalar instances override `show` to avoid builder storage.
+The blanket Display instance delegates both methods to Show, preserving those
+fast paths. Bytes retains its byte-specific renderer and appends its resulting
+String.
 
 Each native buffer has fixed backing storage and an atomic append frontier.
 An append claims tail space with compare-and-swap only when the frontier equals
@@ -111,6 +121,6 @@ version's prefix and returns a stable immutable string.
 Growing fixed storage allocates a new buffer header as well as backing bytes.
 This trades a small object per growth for removing mutex operations; appending
 within available capacity allocates neither a header nor intermediate text.
-The focused storage benchmark in `runtime/fangort/text_builder_benchmark_test.go`
+The focused storage benchmark in `stdlib/Text/Builder_native_benchmark_test.go`
 compares the atomic implementation with mutex baselines; timings are manual
 measurements, outside correctness gates.

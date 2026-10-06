@@ -1,3 +1,5 @@
+import Text.Builder
+
 type Count = Count Int deriving (Show)
 unwrap count = case count of
     Count value -> value
@@ -17,6 +19,7 @@ next value =
 
 type Box a = Box a
 instance Show a => Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
     show box = case box of
         Box value -> "generic " ++ show value
 -- The structural constraint keeps render out of scalar specialization, so

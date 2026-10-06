@@ -122,9 +122,9 @@ a file or a socket hands the boundary an ordinary `[]byte`.
 A `List Int` would cost eight bytes per byte and forfeit `bytes.Index`, and an
 opaque handle table is not used: `Runtime.Native.Any` lets a scoped wrapper retain the
 Go object directly, and ordinary Go reachability collects it. Relaxing String
-to admit invalid UTF-8 would instead invalidate every String contract and the
-boundary validation protecting the Go side. Scanning is therefore a native
-over Go's `bytes.Index`, so a parser searching a block never crosses the
+to admit invalid UTF-8 would instead invalidate every String contract; native
+functions are responsible for preserving that invariant. Scanning is therefore
+a native over Go's `bytes.Index`, so a parser searching a block never crosses the
 language boundary once per byte.
 
 Operations crossing a list come in pairs over one implementation, because
@@ -347,7 +347,10 @@ typed AST expressions with precedence intact.
 
 Bundled and user call-form sidecars follow the same declaration correspondence,
 standard-library import restriction, and Unit-erased ABI over boundary values.
-Go compilation checks function bodies and types. Native effect operations
+Go compilation checks function bodies and types. String results pass through
+without
+UTF-8 validation in both backends: native implementations owe valid UTF-8.
+Char results retain their Unicode-scalar boundary check. Native effect operations
 supply a default only when no Fango handler handles them. Each sidecar's hash
 enters sources.json and edits or removals invalidate or prune generated
 packages.

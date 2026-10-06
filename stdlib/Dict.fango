@@ -19,6 +19,7 @@ module Dict exposing
 import Basics exposing (..)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
+import Text.Builder as Builder
 import Tuple exposing (Pair(..), Triple(..))
 
 -- A weight-balanced search tree, the shape Haskell's Data.Map uses. Every Bin
@@ -436,20 +437,19 @@ map transform dict =
             newRight = map transform right
             Bin count key newValue newLeft newRight
 
-showEntries : (Show k, Show v) => List (k, v) -> String
-showEntries entries =
+showEntries : (Show k, Show v) => Builder.Builder -> List (k, v) -> Builder.Builder
+showEntries built entries =
     case entries of
-        [] -> "]"
-        [entry] ->
-            case entry of
-                (key, value) -> show key ++ " = " ++ show value ++ "]"
-        [entry | rest] ->
-            case entry of
-                (key, value) -> show key ++ " = " ++ show value ++ ", " ++ showEntries rest
+        [] -> Builder.append "]" built
+        [(key, value) | rest] ->
+            next = showTo (Builder.append " = " (showTo built key)) value
+            case rest of
+                [] -> Builder.append "]" next
+                _ -> showEntries (Builder.append ", " next) rest
 
 instance (Show k, Show v) => Show (Dict k v)
-    show dict = "Dict [" ++ showEntries (toList dict)
-    showArg dict = "(" ++ show dict ++ ")"
+    showTo built dict = showEntries (Builder.append "Dict [" built) (toList dict)
+    showArgTo built dict = Builder.append ")" (showTo (Builder.append "(" built) dict)
 
 -- Equality compares entries in key order, never tree shape: the same entries
 -- inserted in different orders build differently shaped trees. Deriving Eq

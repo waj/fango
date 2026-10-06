@@ -1,3 +1,5 @@
+import Text.Builder
+
 -- A concrete specialization used to break a structural instance cycle by
 -- giving one head a base case. Instances for a constructed type are composed
 -- from their arguments' instances, which cannot consult such a head, so the
@@ -5,12 +7,15 @@
 type LeftBox a = LeftBox a
 type RightBox a = RightBox a
 instance Show (RightBox a) => Show (LeftBox a)
+    showTo built value = Text.Builder.append (show value) built
     show left = case left of
         LeftBox value -> show (RightBox value)
 instance Show (LeftBox a) => Show (RightBox a)
+    showTo built value = Text.Builder.append (show value) built
     show right = case right of
         RightBox value -> show (LeftBox value)
 instance Show (RightBox Bool)
+    showTo built value = Text.Builder.append (show value) built
     show value = "escape"
 
 main() = print (LeftBox True)

@@ -1,6 +1,9 @@
+import Text.Builder
+
 type Pair a b = Pair a b
 
 instance Show a => Show (Pair a a)
+    showTo built value = Text.Builder.append (show value) built
     show p = case p of
         Pair x y -> "twins " ++ show x ++ " " ++ show y
 

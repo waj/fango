@@ -31,19 +31,22 @@ func Crc32(text string) int64 {
 ## Boundary types
 
 The supported boundary types are `Int`/`int64`, `Float`/`float64`,
-`String`/`string`, `Char`/`rune`, `Bool`/`bool`, and Unit. String and Char
-results are validated, and an invalid UTF-8 string or non-scalar rune panics at
-the native boundary. Unit parameters are omitted from
+`String`/`string`, `Char`/`rune`, `Bool`/`bool`, and Unit. Native functions must
+return valid UTF-8 for String results;
+the compiler and interpreter trust that contract and do not scan those results.
+A non-scalar Char result panics at the native boundary. Unit parameters are
+omitted from
 the Go function and a Unit result is represented by no Go result.
 
 The bundled [`Bytes`](../../stdlib/Bytes.fango) also crosses, as a plain `[]byte`, in
 compiler-bundled sidecars only; a user sidecar naming it is a `NATIVE ABI`
-error. It is not validated on the way out the way String and Char are, because
-`Bytes` has no well-formedness contract — that is the point of it. A native
+error. It is passed through without validation and has no well-formedness
+contract. A native
 must answer storage nothing will write again, never a view into a buffer it
 reuses, because a `Bytes` never aliases what something else can change.
 
-The bundled `Runtime.Native.Any` crosses as Go `any`. It is intended only as the private
+The bundled `Runtime.Native.Any` crosses as Go `any`, including a nil interface.
+It is intended only as the private
 field of a nominal wrapper owned by a library with a Go sidecar. Its constructor
 is not exposed, and the type has no equality, display, pattern-matching, or wire
 format. The interpreter evaluates Core beside the sidecars, so the Go object

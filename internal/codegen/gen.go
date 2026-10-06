@@ -1169,7 +1169,7 @@ func (g *gen) unwrapBoundaryAt(wrapper *types.CtorInfo, ty types.Type, value goa
 	return &goast.SelectorExpr{X: asserted, Sel: ident(fieldName(0))}
 }
 
-// wrapBoundaryResult validates a scalar native result and rebuilds a wrapper
+// wrapBoundaryResult checks a Char native result and rebuilds a wrapper
 // around it when the declaration names one.
 func (g *gen) wrapBoundaryResult(n *types.NativeInfo, ty types.Type, result goast.Expr) goast.Expr {
 	scalar := ty
@@ -1185,9 +1185,6 @@ func (g *gen) wrapBoundaryResult(n *types.NativeInfo, ty types.Type, result goas
 
 func (g *gen) validatedScalar(name string, ty types.Type, result goast.Expr) goast.Expr {
 	switch g.unique(ty) {
-	case g.b.String.Unique:
-		g.usesFangort = true
-		result = callExpr(selector("fangort", "RequireValidString"), stringLit(name), result)
 	case g.b.Char.Unique:
 		g.usesFangort = true
 		result = callExpr(selector("fangort", "RequireValidChar"), stringLit(name), result)

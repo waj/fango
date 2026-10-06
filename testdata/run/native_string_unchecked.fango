@@ -1,0 +1,8 @@
+import String
+
+raw : () -> String
+raw = native
+
+-- The native deliberately violates its String contract. The boundary trusts
+-- its bytes; inspecting their length must not add a UTF-8 scan or panic.
+main() = print (String.byteLength raw())

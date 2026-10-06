@@ -1,14 +1,24 @@
+_instance_4261736963732e53686f77_4974656d7328243029_context_4261736963732e53686f7728243029_showTo : Show a => Builder -> Items a -> Builder
+_instance_4261736963732e53686f77_4974656d7328243029_context_4261736963732e53686f7728243029_showArgTo : Show a => Builder -> Items a -> Builder
 _instance_4261736963732e53686f77_4974656d7328243029_context_4261736963732e53686f7728243029_show : Show a => Items a -> String
 _instance_4261736963732e53686f77_4974656d7328243029_context_4261736963732e53686f7728243029_showArg : Show a => Items a -> String
+_instance_4261736963732e53686f77_4f707428243029_context_4261736963732e53686f7728243029_showTo : Show a => Builder -> Opt a -> Builder
+_instance_4261736963732e53686f77_4f707428243029_context_4261736963732e53686f7728243029_showArgTo : Show a => Builder -> Opt a -> Builder
 _instance_4261736963732e53686f77_4f707428243029_context_4261736963732e53686f7728243029_show : Show a => Opt a -> String
 _instance_4261736963732e53686f77_4f707428243029_context_4261736963732e53686f7728243029_showArg : Show a => Opt a -> String
 renderItems : Show a => a -> String
 renderNested : Show a => a -> String
+_instance_4261736963732e53686f77_426f7828243029_showTo : Builder -> Box a -> Builder
+_instance_4261736963732e53686f77_426f7828243029_showArgTo : Builder -> Box a -> Builder
 _instance_4261736963732e53686f77_426f7828243029_show : Box a -> String
 _instance_4261736963732e53686f77_426f7828243029_showArg : Box a -> String
+_instance_4261736963732e53686f77_426f7828243029_context_4261736963732e457128243029_showTo : Eq a => Builder -> Box a -> Builder
+_instance_4261736963732e53686f77_426f7828243029_context_4261736963732e457128243029_showArgTo : Eq a => Builder -> Box a -> Builder
 _instance_4261736963732e53686f77_426f7828243029_context_4261736963732e457128243029_show : Eq a => Box a -> String
 _instance_4261736963732e53686f77_426f7828243029_context_4261736963732e457128243029_showArg : Eq a => Box a -> String
 renderBox : Show (Box a) => a -> String
 givenWhole : Show (Items a) => Items a -> String
+_instance_4261736963732e53686f77_5772617070656428243029_context_4261736963732e53686f7728243029_showTo : Show a => Builder -> Wrapped a -> Builder
+_instance_4261736963732e53686f77_5772617070656428243029_context_4261736963732e53686f7728243029_showArgTo : Show a => Builder -> Wrapped a -> Builder
 _instance_4261736963732e53686f77_5772617070656428243029_context_4261736963732e53686f7728243029_show : Show a => Wrapped a -> String
 _instance_4261736963732e53686f77_5772617070656428243029_context_4261736963732e53686f7728243029_showArg : Show a => Wrapped a -> String

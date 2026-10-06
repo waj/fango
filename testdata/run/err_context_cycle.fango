@@ -1,9 +1,13 @@
+import Text.Builder
+
 type LeftBox a = LeftBox a
 type RightBox a = RightBox a
 instance Show (RightBox a) => Show (LeftBox a)
+    showTo built value = Text.Builder.append (show value) built
     show left = case left of
         LeftBox value -> show (RightBox value)
 instance Show (LeftBox a) => Show (RightBox a)
+    showTo built value = Text.Builder.append (show value) built
     show right = case right of
         RightBox value -> show (LeftBox value)
 main = show (LeftBox True)

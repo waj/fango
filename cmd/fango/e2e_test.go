@@ -745,7 +745,7 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 	jsonPath := filepath.Join("..", "..", "testdata", "run", "json_encode.fango")
 	files := emittedProject(t, jsonPath)
 	again := emittedProject(t, jsonPath)
-	for _, path := range []string{"native/IO/native.go", "native/String/native.go"} {
+	for _, path := range []string{"native/IO/native.go", "native/String/native.go", "native/Text_dBuilder/native.go"} {
 		src := generatedFile(t, files, path)
 		if !bytes.HasPrefix(src, []byte("package native\n")) {
 			t.Errorf("%s was not materialized as package native:\n%s", path, src)
@@ -763,6 +763,9 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 	}
 	if src := generatedFile(t, files, "native/IO/native.go"); !bytes.Contains(src, []byte("func Write")) || bytes.Contains(src, []byte("fangort.")) {
 		t.Errorf("IO sidecar does not own its implementation:\n%s", src)
+	}
+	if src := generatedFile(t, files, "native/Text_dBuilder/native.go"); !bytes.Contains(src, []byte("func BufferAppendStringLiteral")) || bytes.Contains(src, []byte("fangort.")) {
+		t.Errorf("Text.Builder sidecar does not own its implementation:\n%s", src)
 	}
 
 	files = emittedProject(t, filepath.Join("..", "..", "testdata", "run", "stdlib_random.fango"))

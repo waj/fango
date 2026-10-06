@@ -73,12 +73,21 @@ class Ord a
 -- Basics.showArg (Just 3) == "(Just 3)"
 -- ```
 class Show a
-    -- The representation of a value.
+    -- Appends a value's representation. Overrides of `show` must agree with
+    -- this method, which nested values and interpolation use.
+    showTo : Text.Builder.Builder -> a -> Text.Builder.Builder
+    -- Appends a representation in constructor-argument position. Defaults to
+    -- `showTo`; override it when the representation needs parentheses.
+    showArgTo : Text.Builder.Builder -> a -> Text.Builder.Builder
+    showArgTo built value = showTo built value
+    -- The representation of a value. Defaults to `showTo` with an empty
+    -- builder; an override can return a String directly to avoid allocations.
     show : a -> String
-    -- The representation in constructor-argument position. It defaults to
-    -- `show`.
+    show value = Text.Builder.toString (showTo Text.Builder.empty value)
+    -- The representation in constructor-argument position. Defaults to
+    -- `showArgTo` with an empty builder; an override must agree with it.
     showArg : a -> String
-    showArg value = show value
+    showArg value = Text.Builder.toString (showArgTo Text.Builder.empty value)
 
 -- Text for output. It differs from the representation only where a type
 -- deliberately renders as itself, as String and Char do; everything else
@@ -133,9 +142,6 @@ intGe = native "$1 >= $2"
 intNegate : Int -> Int
 intNegate = native "-$1"
 
-intShow : Int -> String
-intShow = native "fangort.ShowInt($1)"
-
 floatAdd : Float -> Float -> Float
 floatAdd = native "$1 + $2"
 
@@ -163,9 +169,6 @@ floatGe = native "$1 >= $2"
 floatNegate : Float -> Float
 floatNegate = native "-$1"
 
-floatShow : Float -> String
-floatShow = native "fangort.ShowFloat($1)"
-
 stringEq : String -> String -> Bool
 stringEq = native "$1 == $2"
 
@@ -182,16 +185,14 @@ stringGe : String -> String -> Bool
 stringGe = native "$1 >= $2"
 
 stringShow : String -> String
-stringShow = native "fangort.ShowString($1)"
-
-stringShowLiteral : String -> String
-stringShowLiteral = native "fangort.ShowStringLiteral($1)"
+stringShow value = value
 
 boolEq : Bool -> Bool -> Bool
 boolEq = native "$1 == $2"
 
 boolShow : Bool -> String
-boolShow = native "fangort.ShowBool($1)"
+boolShow True = "True"
+boolShow False = "False"
 
 charEq : Char -> Char -> Bool
 charEq = native "$1 == $2"
@@ -207,12 +208,6 @@ charLe = native "$1 <= $2"
 
 charGe : Char -> Char -> Bool
 charGe = native "$1 >= $2"
-
-charShow : Char -> String
-charShow = native "fangort.ShowChar($1)"
-
-charShowLiteral : Char -> String
-charShowLiteral = native "fangort.ShowCharLiteral($1)"
 
 floatFromInt : Int -> Float
 floatFromInt = native "float64($1)"
@@ -241,8 +236,12 @@ instance Ord Int
     (>=) x y = intGe x y
 
 instance Show Int
-    show x = intShow x
-    showArg x = if intLt x 0 then "(" ++ intShow x ++ ")" else intShow x
+    showTo built x = Text.Builder.appendInt x built
+    showArgTo built x =
+        if intLt x 0 then Text.Builder.append ")" (showTo (Text.Builder.append "(" built) x)
+        else showTo built x
+    show x = Text.Builder.intToString x
+    showArg x = if intLt x 0 then "(" ++ Text.Builder.intToString x ++ ")" else Text.Builder.intToString x
 
 instance Eq Float
     (==) x y = floatEq x y
@@ -254,8 +253,12 @@ instance Ord Float
     (>=) x y = floatGe x y
 
 instance Show Float
-    show x = floatShow x
-    showArg x = if floatLt x 0.0 then "(" ++ floatShow x ++ ")" else floatShow x
+    showTo built x = Text.Builder.appendFloat x built
+    showArgTo built x =
+        if floatLt x 0.0 then Text.Builder.append ")" (showTo (Text.Builder.append "(" built) x)
+        else showTo built x
+    show x = Text.Builder.floatToString x
+    showArg x = if floatLt x 0.0 then "(" ++ Text.Builder.floatToString x ++ ")" else Text.Builder.floatToString x
 
 instance Eq String
     (==) x y = stringEq x y
@@ -267,12 +270,14 @@ instance Ord String
     (>=) x y = stringGe x y
 
 instance Show String
-    show x = stringShowLiteral x
+    showTo built x = Text.Builder.appendStringLiteral x built
+    show x = Text.Builder.stringLiteral x
 
 instance Eq Bool
     (==) x y = boolEq x y
 
 instance Show Bool
+    showTo built x = Text.Builder.append (boolShow x) built
     show x = boolShow x
 
 instance Eq Char
@@ -285,16 +290,19 @@ instance Ord Char
     (>=) x y = charGe x y
 
 instance Show Char
-    show x = charShowLiteral x
+    showTo built x = Text.Builder.appendCharLiteral x built
+    show x = Text.Builder.charLiteral x
 
 instance Eq ()
     (==) x y = True
 
 instance Show ()
+    showTo built () = Text.Builder.append "()" built
     show x = "()"
 
 instance Show a => Display a
-    displayTo built value = Text.Builder.append (show value) built
+    displayTo built value = showTo built value
+    display value = show value
 
 instance Display String
     displayTo built value = Text.Builder.append value built
@@ -302,15 +310,15 @@ instance Display String
 
 instance Display Char
     displayTo built value = Text.Builder.appendChar value built
-    display value = charShow value
+    display value = Text.Builder.charToString value
 
 instance Display Int
     displayTo built value = Text.Builder.appendInt value built
-    display value = intShow value
+    display value = Text.Builder.intToString value
 
 instance Display Float
     displayTo built value = Text.Builder.appendFloat value built
-    display value = floatShow value
+    display value = Text.Builder.floatToString value
 
 instance Display Bool
     displayTo built True = Text.Builder.append "True" built

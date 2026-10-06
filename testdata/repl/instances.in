@@ -1,12 +1,13 @@
+import Text.Builder
 type Box a = Box a
 instance Show (Box a)
-    show b = "generic"
+    showTo built b = Text.Builder.append "generic" built
 
 show (Box 1)
 show (Box "s")
 type Box a = Box a
 instance Show (Box a)
-    show b = "regenerated"
+    showTo built b = Text.Builder.append "regenerated" built
 
 show (Box 2)
 :quit

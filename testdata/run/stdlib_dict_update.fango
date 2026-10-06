@@ -1,3 +1,5 @@
+import Text.Builder
+
 import Dict
 import IO
 import Maybe exposing (Maybe(..))
@@ -24,6 +26,7 @@ instance Ord Fold
     (>=) x y = lower x >= lower y
 
 instance Show Fold
+    showTo built value = Text.Builder.append (show value) built
     show key =
         case key of
             Fold text -> text

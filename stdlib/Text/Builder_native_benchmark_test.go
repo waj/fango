@@ -1,4 +1,4 @@
-package fangort
+package native
 
 import (
 	"strconv"
@@ -8,16 +8,16 @@ import (
 
 // Retain the former storage algorithm as a benchmark baseline, independent of
 // Fango dictionary/callback costs. Run these deliberately on an idle host.
-type mutexTextBuffer struct {
+type mutexBuffer struct {
 	mu   sync.Mutex
 	data []byte
 }
 
 func mutexTextAppend(buffer any, length int64, text string) (any, int64) {
 	if buffer == nil {
-		return &mutexTextBuffer{data: append(make([]byte, 0, max(64, len(text))), text...)}, int64(len(text))
+		return &mutexBuffer{data: append(make([]byte, 0, max(64, len(text))), text...)}, int64(len(text))
 	}
-	b := buffer.(*mutexTextBuffer)
+	b := buffer.(*mutexBuffer)
 	b.mu.Lock()
 	if int64(len(b.data)) == length {
 		b.data = append(b.data, text...)
@@ -27,11 +27,11 @@ func mutexTextAppend(buffer any, length int64, text string) (any, int64) {
 	data := make([]byte, length, max(64, int(length)+len(text)))
 	copy(data, b.data[:length])
 	b.mu.Unlock()
-	return &mutexTextBuffer{data: append(data, text...)}, length + int64(len(text))
+	return &mutexBuffer{data: append(data, text...)}, length + int64(len(text))
 }
 
 func mutexTextRead(buffer any, length int64) string {
-	b := buffer.(*mutexTextBuffer)
+	b := buffer.(*mutexBuffer)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return string(b.data[:length])
@@ -42,15 +42,15 @@ func mutexTextRead(buffer any, length int64) string {
 func geometricMutexTextAppend(buffer any, length int64, text string) (any, int64) {
 	end := int(length) + len(text)
 	if buffer == nil {
-		return &mutexTextBuffer{data: append(make([]byte, 0, max(64, end)), text...)}, int64(end)
+		return &mutexBuffer{data: append(make([]byte, 0, max(64, end)), text...)}, int64(end)
 	}
-	b := buffer.(*mutexTextBuffer)
+	b := buffer.(*mutexBuffer)
 	b.mu.Lock()
 	if int64(len(b.data)) != length {
 		data := make([]byte, length, max(64, end))
 		copy(data, b.data[:length])
 		b.mu.Unlock()
-		return &mutexTextBuffer{data: append(data, text...)}, int64(end)
+		return &mutexBuffer{data: append(data, text...)}, int64(end)
 	}
 	if end > cap(b.data) {
 		data := make([]byte, length, max(end, cap(b.data)*2))
@@ -64,8 +64,8 @@ func geometricMutexTextAppend(buffer any, length int64, text string) (any, int64
 }
 
 func atomicTextAppend(buffer any, length int64, text string) (any, int64) {
-	next := TextBufferAppend(buffer, length, text)
-	return next, TextBufferLength(next)
+	next := BufferAppend(buffer, length, text)
+	return next, BufferLength(next)
 }
 
 var textBuilderBenchmarkResult string
@@ -78,7 +78,7 @@ func BenchmarkTextBuilder(b *testing.B) {
 	}{
 		{"OriginalMutex", mutexTextAppend, mutexTextRead},
 		{"GeometricMutex", geometricMutexTextAppend, mutexTextRead},
-		{"Atomic", atomicTextAppend, TextBufferText},
+		{"Atomic", atomicTextAppend, BufferText},
 	} {
 		for _, chunks := range []int{16, 256, 4096} {
 			b.Run(impl.name+"/Sequential/"+strconv.Itoa(chunks), func(b *testing.B) {

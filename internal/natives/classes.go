@@ -1,9 +1,5 @@
 package natives
 
-import (
-	"github.com/waj/fango/runtime/fangort"
-)
-
 func installScalarInstances(t map[string]Spec) {
 	t["Basics.intAdd"] = Spec{Arity: 2, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("add", args[0], args[1]), nil }}
 	t["Basics.intSub"] = Spec{Arity: 2, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("sub", args[0], args[1]), nil }}
@@ -14,7 +10,6 @@ func installScalarInstances(t map[string]Spec) {
 	t["Basics.intLe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("le", args[0], args[1]), nil }}
 	t["Basics.intGe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("ge", args[0], args[1]), nil }}
 	t["Basics.intNegate"] = Spec{Arity: 1, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) { return -args[0].(int64), nil }}
-	t["Basics.intShow"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowInt(args[0].(int64)), nil }}
 	t["Basics.floatAdd"] = Spec{Arity: 2, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("add", args[0], args[1]), nil }}
 	t["Basics.floatSub"] = Spec{Arity: 2, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("sub", args[0], args[1]), nil }}
 	t["Basics.floatMul"] = Spec{Arity: 2, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("mul", args[0], args[1]), nil }}
@@ -24,22 +19,16 @@ func installScalarInstances(t map[string]Spec) {
 	t["Basics.floatLe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("le", args[0], args[1]), nil }}
 	t["Basics.floatGe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("ge", args[0], args[1]), nil }}
 	t["Basics.floatNegate"] = Spec{Arity: 1, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) { return -args[0].(float64), nil }}
-	t["Basics.floatShow"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowFloat(args[0].(float64)), nil }}
 	t["Basics.stringEq"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("eq", args[0], args[1]), nil }}
 	t["Basics.stringLt"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("lt", args[0], args[1]), nil }}
 	t["Basics.stringGt"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("gt", args[0], args[1]), nil }}
 	t["Basics.stringLe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("le", args[0], args[1]), nil }}
 	t["Basics.stringGe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("ge", args[0], args[1]), nil }}
-	t["Basics.stringShow"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowString(args[0].(string)), nil }}
-	t["Basics.stringShowLiteral"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowStringLiteral(args[0].(string)), nil }}
 	t["Basics.boolEq"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return evalBasics("eq", args[0], args[1]), nil }}
-	t["Basics.boolShow"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowBool(args[0].(bool)), nil }}
 	t["Basics.charEq"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) == args[1].(rune), nil }}
 	t["Basics.charLt"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) < args[1].(rune), nil }}
 	t["Basics.charGt"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) > args[1].(rune), nil }}
 	t["Basics.charLe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) <= args[1].(rune), nil }}
 	t["Basics.charGe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) >= args[1].(rune), nil }}
-	t["Basics.charShow"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowChar(args[0].(rune)), nil }}
-	t["Basics.charShowLiteral"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowCharLiteral(args[0].(rune)), nil }}
 	t["Basics.floatFromInt"] = Spec{Arity: 1, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) { return float64(args[0].(int64)), nil }}
 }

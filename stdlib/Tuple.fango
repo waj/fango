@@ -12,6 +12,7 @@
 module Tuple exposing (Pair(..), Triple(..), first, second, swap)
 
 import Basics exposing (..)
+import Text.Builder as Builder
 
 -- Two values, written `(a, b)`.
 --
@@ -36,14 +37,17 @@ type Triple a b c
 -- rather than the derived structural form `Pair 1 2`. List does the same for
 -- its bracket display.
 instance (Show a, Show b) => Show (Pair a b)
-    show pair =
+    showTo built pair =
         case pair of
-            Pair a b -> "(" ++ show a ++ ", " ++ show b ++ ")"
+            Pair a b -> Builder.append ")" (showTo (Builder.append ", " (showTo (Builder.append "(" built) a)) b)
 
 instance (Show a, Show b, Show c) => Show (Triple a b c)
-    show triple =
+    showTo built triple =
         case triple of
-            Triple a b c -> "(" ++ show a ++ ", " ++ show b ++ ", " ++ show c ++ ")"
+            Triple a b c ->
+                firstPart = showTo (Builder.append "(" built) a
+                secondPart = showTo (Builder.append ", " firstPart) b
+                Builder.append ")" (showTo (Builder.append ", " secondPart) c)
 
 -- The first component of a pair.
 --

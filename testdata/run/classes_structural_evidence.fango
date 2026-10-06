@@ -1,9 +1,13 @@
+import Text.Builder
+
 type Box a = Box a
 instance Show a => Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
     show box = case box of
         Box value -> "box " ++ show value
 type Wrapper a = Wrapper (Box a)
 instance Show (Box a) => Show (Wrapper a)
+    showTo built value = Text.Builder.append (show value) built
     show wrapper = case wrapper of
         Wrapper box -> show box
 

@@ -1,6 +1,9 @@
+import Text.Builder
+
 type Tag a b = Tag a b
 
 instance Show b => Show (Tag Int b)
+    showTo built value = Text.Builder.append (show value) built
     show t = case t of
         Tag n x -> "tag " ++ show n ++ " " ++ show x
 

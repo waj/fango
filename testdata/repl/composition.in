@@ -1,7 +1,8 @@
+import Text.Builder
 type Box a = Box a
 instance Show a => Show (Box a)
-    show b = case b of
-        Box value -> "box " ++ show value
+    showTo built b = case b of
+        Box value -> Basics.showTo (Text.Builder.append "box " built) value
 
 render x = show (Box x)
 :type render

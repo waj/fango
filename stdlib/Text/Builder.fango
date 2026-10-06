@@ -15,7 +15,7 @@
 -- built = Text.Builder.empty |> Text.Builder.append "foo" |> Text.Builder.appendInt 123
 -- Text.Builder.toString built == "foo123"
 -- ```
-module Text.Builder exposing (Builder, append, appendChar, appendFloat, appendInt, empty, isEmpty, toString)
+module Text.Builder exposing (Builder, append, appendChar, appendCharLiteral, appendFloat, appendInt, appendStringLiteral, charLiteral, charToString, empty, floatToString, intToString, isEmpty, stringLiteral, toString)
 
 import Runtime.Native
 
@@ -30,28 +30,28 @@ This foundational module deliberately does not depend on Basics. -}
 type Builder = Builder Runtime.Native.Any Int
 
 emptyBuffer : () -> Runtime.Native.Any
-emptyBuffer = native "fangort.EmptyTextBuffer($1)"
+emptyBuffer = native
 
 zero : () -> Int
-zero = native "fangort.TextBuilderZero($1)"
+zero = native
 
 bufferAppend : Runtime.Native.Any -> Int -> String -> Runtime.Native.Any
-bufferAppend = native "fangort.TextBufferAppend($1, $2, $3)"
+bufferAppend = native
 
 bufferAppendChar : Runtime.Native.Any -> Int -> Char -> Runtime.Native.Any
-bufferAppendChar = native "fangort.TextBufferAppendChar($1, $2, $3)"
+bufferAppendChar = native
 
 bufferAppendInt : Runtime.Native.Any -> Int -> Int -> Runtime.Native.Any
-bufferAppendInt = native "fangort.TextBufferAppendInt($1, $2, $3)"
+bufferAppendInt = native
 
 bufferAppendFloat : Runtime.Native.Any -> Int -> Float -> Runtime.Native.Any
-bufferAppendFloat = native "fangort.TextBufferAppendFloat($1, $2, $3)"
+bufferAppendFloat = native
 
 bufferLength : Runtime.Native.Any -> Int
-bufferLength = native "fangort.TextBufferLength($1)"
+bufferLength = native
 
 bufferText : Runtime.Native.Any -> Int -> String
-bufferText = native "fangort.TextBufferText($1, $2)"
+bufferText = native
 
 sizeIsEmpty : Int -> Bool
 sizeIsEmpty = native "$1 == 0"
@@ -138,3 +138,43 @@ isEmpty (Builder _ size) = sizeIsEmpty size
 -- The text the builder holds, copied once.
 toString : Builder -> String
 toString (Builder buffer size) = bufferText buffer size
+
+bufferAppendStringLiteral : Runtime.Native.Any -> Int -> String -> Runtime.Native.Any
+bufferAppendStringLiteral = native
+
+-- Appends the quoted, escaped source representation of a String, without an
+-- intermediate string. Its spelling agrees with `show`.
+appendStringLiteral : String -> Builder -> Builder
+appendStringLiteral value (Builder buffer size) =
+    next = bufferAppendStringLiteral buffer size value
+    Builder next (bufferLength next)
+
+bufferAppendCharLiteral : Runtime.Native.Any -> Int -> Char -> Runtime.Native.Any
+bufferAppendCharLiteral = native
+
+-- Appends the quoted, escaped source representation of a Char, without an
+-- intermediate string. Its spelling agrees with `show`.
+appendCharLiteral : Char -> Builder -> Builder
+appendCharLiteral value (Builder buffer size) =
+    next = bufferAppendCharLiteral buffer size value
+    Builder next (bufferLength next)
+
+-- The decimal representation of an integer, without allocating a builder.
+intToString : Int -> String
+intToString = native
+
+-- The float representation used by `appendFloat`, without allocating a builder.
+floatToString : Float -> String
+floatToString = native
+
+-- A string containing one character, without quoting or escaping.
+charToString : Char -> String
+charToString = native
+
+-- The quoted, escaped source representation of a string, including escaping `#{`.
+stringLiteral : String -> String
+stringLiteral = native
+
+-- The quoted, escaped source representation of a character.
+charLiteral : Char -> String
+charLiteral = native

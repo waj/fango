@@ -11,6 +11,7 @@ module Bytes exposing (Bytes, Sink(..), Source(..), append, byteAt, concat, empt
 import Basics exposing (..)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
+import Text.Builder as Builder
 
 {- An immutable sequence of bytes.
 
@@ -254,6 +255,7 @@ instance Ord Bytes
 -- A quoted escaped form: printable ASCII passes through, `\\`, `\"`, `\n`,
 -- `\t` and `\r` are spelled as escapes, and every other byte is `\xNN`.
 instance Show Bytes
+    showTo built x = Builder.append (bytesShow x) built
     show x = bytesShow x
 
 {- A byte source and a byte sink.

@@ -96,24 +96,27 @@ Conditional instances may require structural constraints; every context
 variable must occur in the head, and open effect rows are rejected:
 
 ```fango
+import Basics exposing (showTo)
+import Text.Builder as Builder
+
 type Box a = Box a
 
 instance Show a => Show (Box a)
-    show box = case box of
-        Box value -> "Box " ++ show value
+    showTo built box = case box of
+        Box value -> showTo (Builder.append "Box " built) value
 ```
 
 A blanket instance is an overridable default: it is resolved wherever the
 concrete type is known, so a more specific instance applies even to a call
 whose own type is still a variable. An instance for a constructed type is
 composed instead: its evidence is assembled from its arguments' evidence, the
-way the `Box` instance above delegates to `show value`. One type constructor
+way the `Box` instance above delegates to `showTo`. One type constructor
 therefore has one head per class, and a second head specializing its arguments
 reports `OVERLAPPING INSTANCE`:
 
 ```fango
 instance Show (Box Int)      -- OVERLAPPING INSTANCE
-    show box = "integer box"
+    showTo built box = Builder.append "integer box" built
 ```
 
 Composition happens wherever the arguments are not yet known, and cannot
@@ -254,26 +257,35 @@ The standard classes are independent (in particular, `Ord` does not imply
 | `Num a` | `fromInt : Int -> a`, `(+)`, `(-)`, `(*) : a -> a -> a`, `negate : a -> a` | `Int`, `Float` |
 | `Eq a` | `(==) : a -> a -> Bool` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
 | `Ord a` | `(<)`, `(>)`, `(<=)`, `(>=) : a -> a -> Bool` | `Int`, `Float`, `String`, `Char` |
-| `Show a` | `show : a -> String`, `showArg : a -> String` (defaulted) | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
+| `Show a` | `showTo : Text.Builder.Builder -> a -> Text.Builder.Builder`; defaulted `showArgTo` with the same type, `show : a -> String`, `showArg : a -> String` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
 | `Display a` | `displayTo : Text.Builder.Builder -> a -> Text.Builder.Builder`, `display : a -> String` (defaulted) | `Show a => Display a`, `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
 
 Their operator-named methods are in the prelude, as are `show` and `display`.
-The named ones — `fromInt`, `negate`, and `displayTo` — are not, so using them
-unqualified takes a `Basics` import.
+The named ones — `fromInt`, `negate`, `showTo`, `showArgTo`, `showArg`, and
+`displayTo` — are not, so using them unqualified takes a `Basics` import.
 
 `Show` is a value's representation: text that reads like the source of the
 value. Strings and characters are quoted and escaped (`"a\n"`, `'x'`); string
 representations escape literal `#{` as `\#{`. Lists, tuples, records, and
 constructors show their parts' representations.
-`showArg` is the representation in constructor-argument position. Its default
-is `show`; an instance overrides it where juxtaposition would misread the
-text: a negative `Int` or `Float` gives `(-1)`, a `Dict` and a derived
-constructor with fields or record are parenthesized, so
-`show (Just (Just (-1)))` is `Just (Just (-1))`. A handwritten instance that
-writes only `show` is never parenthesized as an argument.
+Instances must implement `showTo`, which appends a representation to the supplied
+immutable builder. `show` defaults to rendering into an empty builder and returning
+its text; an override can return a String directly to avoid builder allocations.
+The override must agree with `showTo`, since nested values use the builder method.
+An instance implementing only `show` must migrate to `showTo`; omitting it reports
+`MISSING METHOD`.
+
+`showArgTo` appends the representation in constructor-argument position and defaults
+to `showTo`. An instance overrides it where juxtaposition would misread the text:
+a negative `Int` or `Float` gives `(-1)`, and a `Dict` or a derived constructor with
+fields or record is parenthesized, so `show (Just (Just (-1)))` is
+`Just (Just (-1))`. `showArg` defaults to `showArgTo` with an empty builder;
+an override must agree with it. An instance implementing only `showTo` receives
+no additional parentheses as an argument.
 
 `Display` is text for output. A blanket instance displays every `Show` type
-by its representation; `String` and `Char` display as themselves. `print` is
+by delegating `displayTo` to `showTo` and `display` to `show`; `String` and
+`Char` display as themselves. `print` is
 an ordinary Display-constrained function that writes `display value`
 followed by a newline, so `print "hi"` writes `hi` and `print ["hi"]` writes
 `["hi"]`. A type can override the blanket with its own `Display` instance. A

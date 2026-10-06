@@ -43,7 +43,13 @@ func (d *directCaller) Call(_ context.Context, _ fangort.SessionHost, name strin
 		if _, unit := arg.(struct{}); unit {
 			continue
 		}
-		in = append(in, reflect.ValueOf(arg))
+		v := reflect.ValueOf(arg)
+		if arg == nil {
+			// Runtime.Native.Any may hold a nil interface (for example an
+			// empty text buffer). ValueOf(nil) is invalid, not a nil Any.
+			v = reflect.Zero(reflect.TypeFor[any]())
+		}
+		in = append(in, v)
 	}
 	out := fn.Call(in)
 	if n := len(out); n > 0 && out[n-1].Type() == errorType {

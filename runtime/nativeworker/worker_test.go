@@ -1,6 +1,7 @@
 package nativeworker
 
 import (
+	"context"
 	"encoding/gob"
 	"errors"
 	"io"
@@ -15,6 +16,26 @@ import (
 	"github.com/waj/fango/runtime/fangort"
 	"github.com/waj/fango/runtime/nativewire"
 )
+
+func TestDirectCallerNilAny(t *testing.T) {
+	d := &directCaller{functions: map[string]any{
+		"empty": func() any { return nil },
+		"use": func(prefix string, buffer any, size int64) string {
+			if buffer != nil || size != 0 {
+				t.Fatal("nil buffer changed at the boundary")
+			}
+			return prefix
+		},
+	}}
+	buffer, err := d.Call(context.Background(), nil, "empty", []any{struct{}{}})
+	if err != nil || buffer != nil {
+		t.Fatalf("empty buffer = %v, %v", buffer, err)
+	}
+	got, err := d.Call(context.Background(), nil, "use", []any{"prefix", buffer, int64(0)})
+	if err != nil || got != "prefix" {
+		t.Fatalf("nil argument call = %v, %v", got, err)
+	}
+}
 
 func TestInvoke(t *testing.T) {
 	functions := map[string]any{

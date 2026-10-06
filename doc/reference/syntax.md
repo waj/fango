@@ -241,8 +241,8 @@ must be plain strings; interpolation there reports `INTERPOLATED PATTERN` or
 contexts too. Char and regex literals do not interpolate.
 
 Assembly uses [`Text.Builder`](../../stdlib/Text/Builder.fango). Scalar
-renderers append directly; the blanket `Show` fallback and nested interpolation
-results can still produce intermediate strings. The final builder text is
+renderers and the blanket `Show` fallback append through builder methods; nested
+interpolation results can still produce intermediate strings. The final builder text is
 copied once.
 
 ### Declaring operators

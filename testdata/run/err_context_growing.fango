@@ -1,4 +1,7 @@
+import Text.Builder
+
 type Box a = Box a
 instance Show (Box (Box a)) => Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
     show box = show (Box box)
 main = show (Box True)

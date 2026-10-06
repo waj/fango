@@ -31,13 +31,13 @@ func TestStructuralInstanceHeads(t *testing.T) {
 			"type Box a = Box a\nclass C a\n    c : a -> Int\ninstance C (Box Int)\n    c x = 1\nf = c (Box 0)",
 			"Int"},
 		{"a head group with a choice keeps the whole predicate",
-			"type Box a = Box a\ninstance Show (Box a)\n    show b = \"box\"\ninstance Show a => Show (Box a)\n    show b = \"shown\"\nf b = show (Box b)",
+			"import Text.Builder\ntype Box a = Box a\ninstance Show (Box a)\n    showTo built value = Text.Builder.append (show value) built\n    show b = \"box\"\ninstance Show a => Show (Box a)\n    showTo built value = Text.Builder.append (show value) built\n    show b = \"shown\"\nf b = show (Box b)",
 			"Show (Box a) => a -> String"},
 		{"repeated head variable",
 			"type Pair a b = Pair a b\ninstance Eq (Pair a a)\n    (==) x y = True\nf : Pair Int Int -> Bool\nf p = p == p",
 			"Pair Int Int -> Bool"},
 		{"nested head with context",
-			"type Box a = Box a\ntype Wrap a = Wrap a\ninstance Show a => Show (Box (Wrap a))\n    show x = \"bw\"\nf : Box (Wrap Int) -> String\nf x = show x",
+			"import Text.Builder\ntype Box a = Box a\ntype Wrap a = Wrap a\ninstance Show a => Show (Box (Wrap a))\n    showTo built value = Text.Builder.append (show value) built\n    show x = \"bw\"\nf : Box (Wrap Int) -> String\nf x = show x",
 			"Box (Wrap Int) -> String"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

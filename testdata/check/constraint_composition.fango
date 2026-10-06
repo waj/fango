@@ -1,3 +1,5 @@
+import Text.Builder
+
 -- Evidence for a constructed type is composed from its arguments' evidence,
 -- so an inferred context carries the arguments' predicates rather than the
 -- constructed one. What this pins is the shape of the contexts inference
@@ -11,9 +13,11 @@ type Opt a = Absent | Present a
 type Box a = Box a
 
 instance Show a => Show (Items a)
+    showTo built value = Text.Builder.append (show value) built
     show items = "items"
 
 instance Show a => Show (Opt a)
+    showTo built value = Text.Builder.append (show value) built
     show opt = "opt"
 
 -- One candidate: Show (Items a) composes to Show a.
@@ -25,9 +29,11 @@ renderNested x = show (Present (More x None))
 -- Two candidates, and which applies depends on whether the caller has Eq, so
 -- the predicate stays whole for the caller to resolve.
 instance Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
     show box = "box"
 
 instance Eq a => Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
     show box = "comparable box"
 
 renderBox x = show (Box x)

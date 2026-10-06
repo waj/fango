@@ -12,6 +12,7 @@ module Derive exposing ()
 
 import Basics exposing (..)
 import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..), Shape(..), TypeInfo(..))
+import Text.Builder as Builder
 
 {- `deriving (Eq)` runs the `deriver Eq` block below: the compiler hands it the
 type's schema plus one `Code` per method parameter, and it answers with the
@@ -27,13 +28,13 @@ scope for `List` and `Maybe`, neither of which imports anything. -}
 -- method points at the line here that generated it.
 
 appendCode : Code -> Code -> Code
-appendCode lhs rhs = `$(lhs) ++ $(rhs)`
+appendCode built text = `Builder.append $(text) $(built)`
 
-showCode : Code -> Code
-showCode value = `show $(value)`
+showCode : Code -> Code -> Code
+showCode built value = `showTo $(built) $(value)`
 
-showArgCode : Code -> Code
-showArgCode value = `showArg $(value)`
+showArgCode : Code -> Code -> Code
+showArgCode built value = `showArgTo $(built) $(value)`
 
 equalsCode : Code -> Code -> Code
 equalsCode lhs rhs = `$(lhs) == $(rhs)`
@@ -71,52 +72,47 @@ deriver Eq
 -- values the braces and commas already delimit. As an argument itself, a
 -- constructor with fields or a record is parenthesized.
 
-unionShow : Bound -> Code
-unionShow bound =
+unionShow : Code -> Bound -> Code
+unionShow built bound =
     Meta.foldItems
-        { sofar field -> appendCode sofar (appendCode (lift " ") (showArgCode field.value)) }
-        (lift bound.ctor.name)
+        { sofar field -> showArgCode (appendCode sofar (lift " ")) field.value }
+        (appendCode built (lift bound.ctor.name))
         bound.fields
 
-recordShow : Bound -> Code
-recordShow bound =
+recordShow : Code -> Bound -> Code
+recordShow built bound =
     appendCode
         (Meta.foldItems
             { sofar field ->
-                appendCode sofar
-                    (appendCode
-                        (lift ((if field.index == 0 then " " else ", ") ++ field.name ++ " = "))
-                        (showCode field.value)
-                    )
+                showCode
+                    (appendCode sofar (lift ((if field.index == 0 then " " else ", ") ++ field.name ++ " = ")))
+                    field.value
             }
-            (lift (bound.ctor.name ++ " {"))
+            (appendCode built (lift (bound.ctor.name ++ " {")))
             bound.fields
         )
         (lift " }")
 
-showBound : TypeInfo -> Bound -> Code
-showBound subject bound =
+showBound : Code -> TypeInfo -> Bound -> Code
+showBound built subject bound =
     case subject.shape of
-        Record _ -> recordShow bound
-        Union _ -> unionShow bound
+        Record _ -> recordShow built bound
+        Union _ -> unionShow built bound
 
-parenthesize : Code -> Code
-parenthesize code = appendCode (lift "(") (appendCode code (lift ")"))
-
-showArgBound : TypeInfo -> Bound -> Code
-showArgBound subject bound =
+showArgBound : Code -> TypeInfo -> Bound -> Code
+showArgBound built subject bound =
     case subject.shape of
-        Record _ -> parenthesize (recordShow bound)
+        Record _ -> appendCode (recordShow (appendCode built (lift "(")) bound) (lift ")")
         Union _ ->
             case bound.fields of
-                NoItems -> unionShow bound
-                Item _ _ -> parenthesize (unionShow bound)
+                NoItems -> unionShow built bound
+                Item _ _ -> appendCode (unionShow (appendCode built (lift "(")) bound) (lift ")")
 
 deriver Show
-    show subject valueCode =
-        Meta.match subject valueCode { bound -> showBound subject bound }
-    showArg subject valueCode =
-        Meta.match subject valueCode { bound -> showArgBound subject bound }
+    showTo subject builtCode valueCode =
+        Meta.match subject valueCode { bound -> showBound builtCode subject bound }
+    showArgTo subject builtCode valueCode =
+        Meta.match subject valueCode { bound -> showArgBound builtCode subject bound }
 
 -- Ord: constructors order by declaration position, then fields
 -- lexicographically. The three outcomes — less, greater, and equal — are what

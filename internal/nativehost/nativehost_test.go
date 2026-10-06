@@ -167,3 +167,12 @@ func TestWorkerManifestDeterministicAndComplete(t *testing.T) {
 		t.Fatalf("generated main contains worker implementation:\n%s", mainSource)
 	}
 }
+
+// Native String results are trusted bytes: the sidecar owes UTF-8 validity.
+func TestDecodeNativeStringWithoutValidation(t *testing.T) {
+	raw := "\xff\x00text"
+	got, err := decodeValue(wireValue{Kind: "string", S: raw})
+	if err != nil || got != raw {
+		t.Fatalf("native string = %q, %v; want unchanged bytes", got, err)
+	}
+}

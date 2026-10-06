@@ -407,9 +407,6 @@ func decodeValue(v wireValue) (any, error) {
 	case "float":
 		return v.F, nil
 	case "string":
-		if !utf8.ValidString(v.S) {
-			panic("native returned invalid UTF-8")
-		}
 		return v.S, nil
 	case "char":
 		r := rune(v.R)

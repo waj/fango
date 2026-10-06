@@ -1,0 +1,50 @@
+import Basics exposing (showTo, showArgTo, showArg)
+import Text.Builder as Builder
+import Dict
+import Meta
+
+type Tree = Leaf String | Branch Tree Tree deriving (Show)
+type Label = { title : String, tree : Tree } deriving (Show)
+
+type Custom = Custom Int
+instance Show Custom
+    showTo built (Custom value) = Builder.appendInt value (Builder.append "custom:" built)
+    showArgTo built value = Builder.append ")" (showTo (Builder.append "(" built) value)
+    show (Custom value) = "custom:" ++ show value
+    showArg value = "(" ++ show value ++ ")"
+
+type Default = Default
+instance Show Default
+    showTo built Default = Builder.append "default" built
+
+agrees : Show a => a -> Bool
+agrees value =
+    prefix = Builder.append "prefix:" Builder.empty
+    Builder.toString (showTo prefix value) == "prefix:" ++ show value
+        && Builder.toString (showArgTo prefix value) == "prefix:" ++ showArg value
+        && Builder.toString prefix == "prefix:"
+
+main() =
+    tree = Branch (Leaf "\#{x}\n") (Leaf "二")
+    print (agrees tree)
+    print (agrees (Label { title = "name", tree = tree }))
+    print (agrees [tree, Leaf ""])
+    print (agrees (tree, "quoted", '\''))
+    print (agrees (Dict.fromList [("a", tree)]))
+    print (agrees (-9223372036854775807 - 1))
+    print (agrees (-1.25))
+    print (agrees (-0.0))
+    print (agrees (1.0 / 0.0))
+    print (agrees (0.0 / 0.0))
+    print (agrees "\t\r\"\\\#{literal}")
+    print (agrees '"')
+    print (agrees True)
+    print (agrees ())
+    print (agrees (Custom 7))
+    print (agrees Default)
+    print (show (Just (Custom 7)) == "Just (custom:7)")
+    print (showArg Default == "default")
+    print (display (Custom 7) == "custom:7")
+    print ("[#{Custom 7}]" == "[custom:7]")
+    print $(Meta.lift (show (Just ["\#{staged}", "二"]) == "Just [\"\\\#{staged}\", \"二\"]"))
+    print $(Meta.lift ("#{Just (-1.25)}" == "Just (-1.25)"))

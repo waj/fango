@@ -8,6 +8,7 @@
 module List exposing (List(..), each, filter, foldl, foldr, length, map, range, reverse)
 
 import Basics exposing (..)
+import Text.Builder as Builder
 
 -- An immutable sequence of values of type `a`. Source code builds and matches
 -- lists with brackets: `[]`, `[1, 2, 3]`, and `[head | tail]` for the list
@@ -31,15 +32,15 @@ type List a
     | Cons a (List a)
     deriving (Eq, Ord)
 
-showItems : Show a => List a -> String
-showItems values =
+showItems : Show a => Builder.Builder -> List a -> Builder.Builder
+showItems built values =
     case values of
-        [] -> "]"
-        [value] -> show value ++ "]"
-        [value | rest] -> show value ++ ", " ++ showItems rest
+        [] -> Builder.append "]" built
+        [value] -> Builder.append "]" (showTo built value)
+        [value | rest] -> showItems (Builder.append ", " (showTo built value)) rest
 
 instance Show a => Show (List a)
-    show values = "[" ++ showItems values
+    showTo built values = showItems (Builder.append "[" built) values
 
 -- The values from `start` through `end`, counting up by one, or `[]` when
 -- `start` is greater than `end`. It works at both `Int` and `Float`; the
