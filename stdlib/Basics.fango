@@ -366,9 +366,9 @@ quotientBy : Int -> Int -> Int
 quotientBy = native "$2 / $1"
 
 -- Discard an answer. A call stands as a statement only where its type is
--- Unit, and a binding needs a name it would never read, so `ignore (f x)` is
--- how a caller says it wants the effects and not the result. The argument is
--- evaluated before the call, as every argument is.
+-- Unit; a block discards with `_ = f x`, and `ignore (f x)` says the same in
+-- expression position. The argument is evaluated before the call, as every
+-- argument is.
 --
 -- ```fango
 -- ignore 42 == ()

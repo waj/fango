@@ -55,11 +55,12 @@ surrounding block's column and still belong to the lambda; the first body item
 remains their indentation ceiling. A statement after `}` at the surrounding
 block's column belongs to that block.
 
-A call answering anything other than Unit is not a statement, and binding it
-would need a name nothing reads. `ignore : a -> ()`, declared in `Basics` and
-exposed by `Prelude`, is how a caller says it wants the effects and not the
-answer: `ignore (reader.skip 4)`. Its argument is evaluated before the call,
-like every argument.
+A call answering anything other than Unit is not a statement. A block says
+it wants the effects and not the answer by binding the result to a wildcard:
+`_ = reader.skip 4` (see [destructuring bindings](types.md#destructuring-bindings)).
+Outside a block, `ignore : a -> ()`, declared in `Basics` and exposed by
+`Prelude`, does the same: `ignore (reader.skip 4)`. Its argument is evaluated
+before the call, like every argument.
 
 The same block may be written inline with `;` between its items. This works in
 every statement-bearing body: after `=`, `->`, `then`, `else`, and `handle`,

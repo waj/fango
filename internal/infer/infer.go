@@ -2701,9 +2701,6 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 		}
 		bind := &e.Binds[item.BindIndex]
 		if bind.Pattern != nil {
-			if len(patternNames(bind.Pattern, nil)) == 0 {
-				g.errs = append(g.errs, diag.Errorf(bind.Pattern.Span(), "PATTERN BINDING", "A destructuring binding must bind at least one name."))
-			}
 			rhsTy := g.expr(bind.Body)
 			oldPins := g.patternPins
 			g.patternPins = g.locals

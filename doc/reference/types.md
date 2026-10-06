@@ -243,8 +243,9 @@ bindings:
 Pair first second = pair
 ```
 
-Such a binding must bind at least one name and its single row must be
-exhaustive. It has no direct annotation syntax; an annotation directly above one
+Its single row must be exhaustive. A top-level one must bind at least one
+name; a local one may bind none, as in `_ = Async.spawn work`, which runs the
+RHS for its effects and discards the value. It has no direct annotation syntax; an annotation directly above one
 is a `DESTRUCTURING ANNOTATION` error, so annotate a named subject and
 destructure that subject on the following declaration. The RHS is checked and
 evaluated once, then every bound name becomes visible simultaneously. A

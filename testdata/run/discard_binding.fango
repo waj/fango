@@ -1,0 +1,15 @@
+type Pair = Pair Int Int
+
+loud : Int ->{IO} Int
+loud n =
+    print n
+    n * 2
+
+inline : () ->{IO} ()
+inline () = _ = loud 3; print "inline"
+
+main() =
+    _ = loud 1
+    Pair _ _ = Pair (loud 2) 0
+    print "done"
+    inline()
