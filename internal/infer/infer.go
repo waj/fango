@@ -1564,6 +1564,10 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		}
 	case *ast.StringLit:
 		ty = g.ck.B.String
+	case *ast.StringInterpolation:
+		app := interpolationExpr(e)
+		g.ck.Desugared[e] = app
+		ty = g.exprWant(app, want)
 	case *ast.CharLit:
 		ty = g.ck.B.Char
 	case *ast.UnitLit:
@@ -2473,6 +2477,12 @@ func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *res
 	case *ast.OpChain:
 		for _, operand := range x.Operands {
 			if failure := nontail(operand); failure != nil {
+				return failure
+			}
+		}
+	case *ast.StringInterpolation:
+		for _, hole := range x.Exprs {
+			if failure := nontail(hole); failure != nil {
 				return failure
 			}
 		}

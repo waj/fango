@@ -86,15 +86,31 @@ runtime helpers for typed and interpreter-erased lists. Both helpers size the
 output before building it. String.span slices at a validated byte boundary
 after scanning characters, avoiding a second scan of the unvisited suffix.
 
-`Text.Builder` versions share one growable UTF-8 buffer through a native
-handle and record their own byte lengths as ordinary fields, so a version
-is a small product and appending allocates no version object. A native
-append extends the buffer in place only when the version's length equals the
-buffer's current length, which makes it the newest version; otherwise it
-copies that prefix into a fresh buffer. Bytes below any version's length are
-never rewritten, so persistence needs no copying for ordered use. The Go
-buffer serializes appends and reads with a lock because tasks may share
-versions. The
-interpreter runs the same Go natives in-process, and in-process bundled
-natives apply the same wrapper boundary as sidecar calls.
+`Text.Builder` is foundational, importing only Runtime.Native so Basics can
+declare builder-based Display methods without a cycle. Versions carry an
+opaque buffer and byte length as an ordinary product, so appending allocates
+no version object. Both backends use shared runtime helpers. Integer and float
+rendering use bounded stack scratch rather than intermediate strings; float
+spelling shares the implementation used by Show.
 
+Each native buffer has fixed backing storage and an atomic append frontier.
+An append claims tail space with compare-and-swap only when the frontier equals
+its version's length; otherwise it copies that version's prefix into a fresh
+buffer. Exhausted storage grows geometrically in a fresh buffer. Slice headers
+never mutate, and bytes below a published version's length are never rewritten,
+so reads require no lock even while other tasks append.
+
+A reservation advances the frontier before writing, but the resulting version
+is published only after its tail is complete. Other callers possess only
+earlier published lengths, so they cannot claim or read unfinished bytes. The
+private buffer-length helper is called only between a nonempty append and
+construction of its resulting Builder, before that new frontier length escapes.
+Empty appends keep their original version and length. `toString` copies only the
+version's prefix and returns a stable immutable string.
+
+Growing fixed storage allocates a new buffer header as well as backing bytes.
+This trades a small object per growth for removing mutex operations; appending
+within available capacity allocates neither a header nor intermediate text.
+The focused storage benchmark in `runtime/fangort/text_builder_benchmark_test.go`
+compares the atomic implementation with mutex baselines; timings are manual
+measurements, outside correctness gates.

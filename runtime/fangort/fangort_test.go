@@ -53,6 +53,9 @@ func TestShowStringLiteral(t *testing.T) {
 		{"cr\rhere", `"cr\rhere"`},
 		{"bell\x07", `"bell\u{0007}"`},
 		{"héllo", `"héllo"`},
+		{"#{value}", `"\#{value}"`},
+		{`\#{value}`, `"\\\#{value}"`},
+		{"#plain {", `"#plain {"`},
 	}
 	for _, c := range cases {
 		if got := ShowStringLiteral(c.in); got != c.want {

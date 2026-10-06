@@ -42,10 +42,11 @@ type parser struct {
 
 	// usesStaging records that this file built a quote or a splice, so the
 	// module loader knows to pull in the bundled `Meta` module.
-	usesStaging bool
-	usesLists   bool
-	usesTuples  bool
-	usesRegex   bool
+	usesStaging       bool
+	usesLists         bool
+	usesTuples        bool
+	usesRegex         bool
+	usesInterpolation bool
 
 	// stopWith makes the contextual word `with` terminate only the subject
 	// of a handle expression. It remains an ordinary identifier elsewhere.
@@ -85,6 +86,7 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 	m.UsesLists = p.usesLists
 	m.UsesTuples = p.usesTuples
 	m.UsesRegex = p.usesRegex
+	m.UsesInterpolation = p.usesInterpolation
 	return m, p.errs
 }
 
@@ -568,6 +570,11 @@ func (p *parser) appendEquation(prev, next *ast.ValueDecl) bool {
 func (p *parser) parseNativeBody() *ast.NativeBody {
 	kw := p.next()
 	n := &ast.NativeBody{Sp: kw.Span}
+	if p.peekInExpr().Kind == token.STRING_BEGIN {
+		p.errorAt(p.peekInExpr().Span, "INTERPOLATED NATIVE TEMPLATE", "A native template must be a plain string; escape literal `#{` as `\\#{`.")
+		p.parseStringInterpolation()
+		return n
+	}
 	if p.peekInExpr().Kind == token.STRING {
 		t := p.next()
 		s := lexer.Unescape(t.Text)
@@ -1895,7 +1902,7 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.REGEX, token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.LQUOTE, token.DOLLARPAREN, token.ATTYPE:
+		case token.REGEX, token.INT, token.FLOAT, token.STRING, token.STRING_BEGIN, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.LQUOTE, token.DOLLARPAREN, token.ATTYPE:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
 				return nil
@@ -2223,7 +2230,7 @@ func (p *parser) parsePattern() ast.Pattern {
 func isPatternAtomStart(k token.Kind) bool {
 	switch k {
 	case token.UNDERSCORE, token.CARET, token.LIDENT, token.UIDENT,
-		token.INT, token.FLOAT, token.STRING, token.CHAR, token.LPAREN, token.LBRACKET,
+		token.INT, token.FLOAT, token.STRING, token.STRING_BEGIN, token.CHAR, token.LPAREN, token.LBRACKET,
 		token.LBRACE:
 		return true
 	}
@@ -2272,6 +2279,10 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 	case token.STRING:
 		p.next()
 		return &ast.PString{Value: lexer.Unescape(t.Text), Sp: t.Span}
+	case token.STRING_BEGIN:
+		p.errorAt(t.Span, "INTERPOLATED PATTERN", "A string pattern must be a plain string; escape literal `#{` as `\\#{`.")
+		p.parseStringInterpolation()
+		return nil
 	case token.CHAR:
 		p.next()
 		return &ast.PChar{Value: lexer.UnescapeChar(t.Text), Sp: t.Span}
@@ -2550,6 +2561,8 @@ func (p *parser) parseAtom() ast.Expr {
 	case token.STRING:
 		p.next()
 		return &ast.StringLit{Value: lexer.Unescape(t.Text), Sp: t.Span}
+	case token.STRING_BEGIN:
+		return p.parseStringInterpolation()
 	case token.CHAR:
 		p.next()
 		return &ast.CharLit{Value: lexer.UnescapeChar(t.Text), Sp: t.Span}

@@ -359,6 +359,17 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(regex %q)", e.Value)
 	case *StringLit:
 		return fmt.Sprintf("(string %q)", e.Value)
+	case *StringInterpolation:
+		var b strings.Builder
+		b.WriteString("(interpolation")
+		for i, text := range e.Segments {
+			fmt.Fprintf(&b, " %q", text)
+			if i < len(e.Exprs) {
+				b.WriteByte(' ')
+				b.WriteString(DumpExpr(e.Exprs[i]))
+			}
+		}
+		return b.String() + ")"
 	case *CharLit:
 		return fmt.Sprintf("(char %q)", e.Value)
 	case *UnitLit:

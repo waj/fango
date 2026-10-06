@@ -210,6 +210,15 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 	case *ast.StringLit:
 		n := *e
 		return &n
+	case *ast.StringInterpolation:
+		n := *e
+		n.Segments = append([]string(nil), e.Segments...)
+		n.SegmentSpans = append([]source.Span(nil), e.SegmentSpans...)
+		n.Exprs = make([]ast.Expr, len(e.Exprs))
+		for i, hole := range e.Exprs {
+			n.Exprs[i] = rec(hole)
+		}
+		return &n
 	case *ast.CharLit:
 		n := *e
 		return &n
@@ -448,6 +457,12 @@ func FillSpans(e ast.Expr, sp source.Span) {
 		fill(&e.Sp)
 	case *ast.StringLit:
 		fill(&e.Sp)
+	case *ast.StringInterpolation:
+		fill(&e.Sp)
+		for i := range e.SegmentSpans {
+			fill(&e.SegmentSpans[i])
+		}
+		rec(e.Exprs...)
 	case *ast.CharLit:
 		fill(&e.Sp)
 	case *ast.UnitLit:

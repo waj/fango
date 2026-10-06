@@ -358,10 +358,10 @@ scanString reader cursor built =
                 Just '"' -> (Builder.toString pending, after)
                 Just '\\' ->
                     (char, rest) = escaped reader after
-                    scanString reader rest (Builder.appendChar pending char)
+                    scanString reader rest (Builder.appendChar char pending)
                 Just char ->
                     if Char.toCode char < 32 then badAt reader afterPlain after "Unescaped control character in JSON string"
-                    else scanString reader after (Builder.appendChar pending char)
+                    else scanString reader after (Builder.appendChar char pending)
 
 digit : Char -> Bool
 digit char = char >= '0' && char <= '9'
@@ -519,11 +519,11 @@ stringRun snapshot built =
         Err _ -> Err (snapshot, built)
         Ok (text, _, afterPlain) ->
             code = TextReader.asciiAt afterPlain
-            if code == 34 then Ok (if Builder.isEmpty built then text else Builder.toString (Builder.append built text), TextReader.skipAscii afterPlain)
+            if code == 34 then Ok (if Builder.isEmpty built then text else Builder.toString (Builder.append text built), TextReader.skipAscii afterPlain)
             else if code == 92 then case fastEscape (TextReader.skipAscii afterPlain) of
-                Nothing -> Err (afterPlain, Builder.append built text)
-                Just (char, afterEscape) -> stringRun afterEscape (Builder.appendChar (Builder.append built text) char)
-            else Err (afterPlain, Builder.append built text)
+                Nothing -> Err (afterPlain, Builder.append text built)
+                Just (char, afterEscape) -> stringRun afterEscape (Builder.appendChar char (Builder.append text built))
+            else Err (afterPlain, Builder.append text built)
 
 fastString : TextReader.Window -> Builder -> Maybe (String, TextReader.Window)
 fastString snapshot built = case stringRun snapshot built of

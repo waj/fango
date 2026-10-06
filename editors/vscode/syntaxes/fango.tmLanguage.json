@@ -655,14 +655,28 @@
         "0": { "name": "punctuation.definition.string.end.fango" }
       },
       "patterns": [
-        { "include": "#string_escapes" }
+        { "include": "#string_escapes" },
+        { "include": "#string_interpolation" }
       ]
+    },
+    "string_interpolation": {
+      "name": "meta.interpolation.fango",
+      "contentName": "meta.embedded.line.fango",
+      "begin": "#\\{",
+      "end": "\\}|$",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.interpolation.begin.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.interpolation.end.fango" }
+      },
+      "patterns": [ { "include": "#expressions" } ]
     },
     "string_escapes": {
       "patterns": [
         {
           "name": "constant.character.escape.fango",
-          "match": "\\\\[\\\\\"ntr]"
+          "match": "\\\\(?:[\\\\\"ntr]|#\\{)"
         },
         {
           "name": "invalid.illegal.escape.fango",

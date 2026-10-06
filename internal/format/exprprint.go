@@ -31,6 +31,23 @@ func exprInline(e ast.Expr) (string, bool) {
 		return e.Raw, true
 	case *ast.StringLit:
 		return raw(e.Sp), true
+	case *ast.StringInterpolation:
+		var b strings.Builder
+		b.WriteByte('"')
+		for i, span := range e.SegmentSpans {
+			b.WriteString(raw(span))
+			if i < len(e.Exprs) {
+				hole, ok := exprInline(e.Exprs[i])
+				if !ok {
+					return "", false
+				}
+				b.WriteString("#{")
+				b.WriteString(hole)
+				b.WriteByte('}')
+			}
+		}
+		b.WriteByte('"')
+		return b.String(), true
 	case *ast.CharLit:
 		return raw(e.Sp), true
 	case *ast.UnitLit:
@@ -195,7 +212,7 @@ func localBindInline(b ast.LocalBind) ([]string, bool) {
 // position, either because it is a single token or because it brackets itself.
 func atomic(e ast.Expr) bool {
 	switch e := e.(type) {
-	case *ast.IntLit, *ast.FloatLit, *ast.RegexLit, *ast.StringLit, *ast.CharLit, *ast.UnitLit,
+	case *ast.IntLit, *ast.FloatLit, *ast.RegexLit, *ast.StringLit, *ast.StringInterpolation, *ast.CharLit, *ast.UnitLit,
 		*ast.Var, *ast.RecordGet, *ast.Splice, *ast.Quote:
 		return true
 	case *ast.RecordLit:

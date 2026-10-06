@@ -13,7 +13,6 @@ loaded Reader
 loaded String
 loaded Encoding
 loaded Json.Field
-loaded Text.Builder
 loaded Text.Reader
 loaded Json.Pull
 loaded Url

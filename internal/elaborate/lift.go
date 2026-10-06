@@ -185,6 +185,10 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 	}
 	visit = func(e ast.Expr) {
 		switch e := e.(type) {
+		case *ast.StringInterpolation:
+			for _, hole := range e.Exprs {
+				visit(hole)
+			}
 		case *ast.Var:
 			visitVar(e.Name)
 		case *ast.App:

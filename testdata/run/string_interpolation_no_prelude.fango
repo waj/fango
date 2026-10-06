@@ -1,0 +1,2 @@
+{-# no-prelude #-}
+main = "#{True} #{'二'}"

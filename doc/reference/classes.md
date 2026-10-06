@@ -255,15 +255,16 @@ The standard classes are independent (in particular, `Ord` does not imply
 | `Eq a` | `(==) : a -> a -> Bool` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
 | `Ord a` | `(<)`, `(>)`, `(<=)`, `(>=) : a -> a -> Bool` | `Int`, `Float`, `String`, `Char` |
 | `Show a` | `show : a -> String`, `showArg : a -> String` (defaulted) | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
-| `Display a` | `display : a -> String` | `Show a => Display a`, `String`, `Char` |
+| `Display a` | `displayTo : Text.Builder.Builder -> a -> Text.Builder.Builder`, `display : a -> String` (defaulted) | `Show a => Display a`, `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
 
 Their operator-named methods are in the prelude, as are `show` and `display`.
-The named ones — `fromInt` and `negate` — are not, so using them unqualified
-takes a `Basics` import.
+The named ones — `fromInt`, `negate`, and `displayTo` — are not, so using them
+unqualified takes a `Basics` import.
 
 `Show` is a value's representation: text that reads like the source of the
-value. Strings and characters are quoted and escaped (`"a\n"`, `'x'`), and
-lists, tuples, records, and constructors show their parts' representations.
+value. Strings and characters are quoted and escaped (`"a\n"`, `'x'`); string
+representations escape literal `#{` as `\#{`. Lists, tuples, records, and
+constructors show their parts' representations.
 `showArg` is the representation in constructor-argument position. Its default
 is `show`; an instance overrides it where juxtaposition would misread the
 text: a negative `Int` or `Float` gives `(-1)`, a `Dict` and a derived
@@ -279,6 +280,14 @@ followed by a newline, so `print "hi"` writes `hi` and `print ["hi"]` writes
 polymorphic body that prints its argument needs `Display a` rather than
 `Show a`: the blanket gives `Display` from `Show` only once the type is
 known, and `MISSING CONSTRAINT` notes this when the annotation lists `Show a`.
+
+Instances must implement `displayTo`, which appends to the supplied immutable
+[`Text.Builder`](../../stdlib/Text/Builder.fango) and returns the resulting
+builder. `display` defaults to `displayTo` with an empty builder followed by
+`toString`. An override must agree with `displayTo`, since
+[string interpolation](syntax.md#string-interpolation) always uses the builder
+method. An existing instance that implemented only `display` must migrate to
+`displayTo`; omitting it reports `MISSING METHOD`.
 
 ## Defaulting
 

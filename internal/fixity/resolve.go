@@ -154,6 +154,11 @@ func (r *resolver) value(d *ast.ValueDecl) {
 // pass fails a test, rather than leaving a chain to surface in inference.
 func (r *resolver) expr(e ast.Expr) ast.Expr {
 	switch e := e.(type) {
+	case *ast.StringInterpolation:
+		for i, hole := range e.Exprs {
+			e.Exprs[i] = r.expr(hole)
+		}
+		return e
 	case nil:
 		return nil
 	case *ast.OpChain:

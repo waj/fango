@@ -233,6 +233,17 @@ followed by `->` introduces an explicit lambda. These forms introduce no
 second type or evaluation system. Tuple is a syntax
 root, always resolvable but never implicitly in scope.
 
+Interpolated strings retain decoded segments, their source spans, and ordinary
+expression children in the AST. The lexer switches between string text and
+ordinary tokens, with a delimiter boundary for each hole. Source resolution
+visits the holes, and syntax adds Basics and Text.Builder dependencies without
+exposing their names. Inference desugars to nested canonical builder appends and
+Display method calls through the existing desugaring map. Ordinary strict calls
+preserve evaluation/rendering order, carry effects and dictionary constraints,
+and elaborate to existing Core nodes. Quotation copying, staging, and object
+codecs retain the surface node; the formatter prints literal spelling and
+ordinary inline hole expressions.
+
 Parses are not persisted. Every command parses each module in the graph from
 source, and discovery reads those bytes anyway to hash them, so the front end
 is deliberately the one stage with no artifact. Serializing an AST is not worth

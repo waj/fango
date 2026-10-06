@@ -5,86 +5,124 @@
 -- one answering exactly the text it had, whichever builders extend it, in
 -- whatever order, and from whichever tasks. Appending in sequence costs
 -- amortized time proportional to the text appended.
-module Text.Builder exposing (Builder, append, appendChar, empty, isEmpty, toString)
-
-import Basics exposing (..)
-import Char
-import Maybe exposing (Maybe(..))
-import Runtime.Native
-import String
-
-{- Text assembled by appending, as an immutable value.
-
-Successive versions share one growable buffer and each records its own
-length. An append extends the buffer in place only when the version it
-extends is the buffer's newest; otherwise it copies that version's prefix
-into a fresh buffer. Bytes below a version's length are never rewritten, so
-every version, old or new, keeps answering exactly its own text. -}
-
-type Buffer = Buffer Runtime.Native.Any
-
--- Text built by appending. Builders have no equality or display; compare or
--- show their `toString`.
-type Builder = Builder (Maybe Buffer) Int
-
--- The natives hold UTF-8 bytes; lengths are byte counts.
-newBuffer : String -> Buffer
-newBuffer = native
-
-extendBuffer : Buffer -> Int -> String -> Buffer
-extendBuffer = native
-
-newBufferChar : Char -> Buffer
-newBufferChar = native
-
-extendBufferChar : Buffer -> Int -> Char -> Buffer
-extendBufferChar = native
-
-bufferText : Buffer -> Int -> String
-bufferText = native
-
-charWidth : Char -> Int
-charWidth char =
-    code = Char.toCode char
-    if code < 128 then 1 else if code < 2048 then 2 else if code < 65536 then 3 else 4
-
--- The builder holding no text.
-empty : Builder
-empty = Builder Nothing 0
-
--- The builder with `text` appended. Extending the most recently extended
--- builder reuses its storage; extending an older one copies its text first.
+--
+-- Append operations take the text or scalar first and the builder last, so
+-- they compose with `|>`.
 --
 -- ```fango
 -- import Text.Builder
 --
--- base = Text.Builder.append Text.Builder.empty "a"
--- left = Text.Builder.append base "b"
--- right = Text.Builder.append base "c"
+-- built = Text.Builder.empty |> Text.Builder.append "foo" |> Text.Builder.appendInt 123
+-- Text.Builder.toString built == "foo123"
+-- ```
+module Text.Builder exposing (Builder, append, appendChar, appendFloat, appendInt, empty, isEmpty, toString)
+
+import Runtime.Native
+
+{- The native buffer has fixed backing storage and an atomic append frontier.
+Each version keeps its own byte length. Native append reserves unused tail
+storage or copies that version's prefix into fresh storage; published bytes are
+never rewritten. Appends and reads need no mutex, even across tasks.
+This foundational module deliberately does not depend on Basics. -}
+
+-- Text built by appending. Builders have no equality or display; compare or
+-- show their `toString`.
+type Builder = Builder Runtime.Native.Any Int
+
+emptyBuffer : () -> Runtime.Native.Any
+emptyBuffer = native "fangort.EmptyTextBuffer($1)"
+
+zero : () -> Int
+zero = native "fangort.TextBuilderZero($1)"
+
+bufferAppend : Runtime.Native.Any -> Int -> String -> Runtime.Native.Any
+bufferAppend = native "fangort.TextBufferAppend($1, $2, $3)"
+
+bufferAppendChar : Runtime.Native.Any -> Int -> Char -> Runtime.Native.Any
+bufferAppendChar = native "fangort.TextBufferAppendChar($1, $2, $3)"
+
+bufferAppendInt : Runtime.Native.Any -> Int -> Int -> Runtime.Native.Any
+bufferAppendInt = native "fangort.TextBufferAppendInt($1, $2, $3)"
+
+bufferAppendFloat : Runtime.Native.Any -> Int -> Float -> Runtime.Native.Any
+bufferAppendFloat = native "fangort.TextBufferAppendFloat($1, $2, $3)"
+
+bufferLength : Runtime.Native.Any -> Int
+bufferLength = native "fangort.TextBufferLength($1)"
+
+bufferText : Runtime.Native.Any -> Int -> String
+bufferText = native "fangort.TextBufferText($1, $2)"
+
+sizeIsEmpty : Int -> Bool
+sizeIsEmpty = native "$1 == 0"
+
+textIsEmpty : String -> Bool
+textIsEmpty "" = True
+textIsEmpty _ = False
+
+-- The builder holding no text.
+empty : Builder
+empty = Builder emptyBuffer() zero()
+
+-- The builder with `text` appended. Extending the most recently extended
+-- builder reuses available storage; extending an older one copies its text.
+--
+-- ```fango
+-- import Text.Builder
+--
+-- base = Text.Builder.append "a" Text.Builder.empty
+-- left = Text.Builder.append "b" base
+-- right = Text.Builder.append "c" base
 --
 -- Text.Builder.toString left == "ab"
 -- Text.Builder.toString right == "ac"
 -- Text.Builder.toString base == "a"
 -- ```
-append : Builder -> String -> Builder
-append (Builder buffer size) text =
-    if text == "" then Builder buffer size
-    else case buffer of
-        Nothing -> Builder (Just (newBuffer text)) (String.byteLength text)
-        Just shared -> Builder (Just (extendBuffer shared size text)) (size + String.byteLength text)
+append : String -> Builder -> Builder
+append text (Builder buffer size) =
+    if textIsEmpty text then Builder buffer size
+    else
+        next = bufferAppend buffer size text
+        Builder next (bufferLength next)
 
 -- The builder with one character appended.
 --
 -- ```fango
 -- import Text.Builder
 --
--- Text.Builder.toString (Text.Builder.appendChar (Text.Builder.append Text.Builder.empty "o") 'k') == "ok"
+-- Text.Builder.toString (Text.Builder.appendChar 'k' (Text.Builder.append "o" Text.Builder.empty)) == "ok"
 -- ```
-appendChar : Builder -> Char -> Builder
-appendChar (Builder buffer size) char =
-    case buffer of
-        Nothing -> Builder (Just (newBufferChar char)) (charWidth char)
-        Just shared -> Builder (Just (extendBufferChar shared size char)) (size + charWidth char)
+appendChar : Char -> Builder -> Builder
+appendChar char (Builder buffer size) =
+    next = bufferAppendChar buffer size char
+    Builder next (bufferLength next)
+
+-- The builder with an integer's decimal display appended without an
+-- intermediate string.
+--
+-- ```fango
+-- import Text.Builder
+--
+-- Text.Builder.toString (Text.Builder.appendInt (-42) Text.Builder.empty) == "-42"
+-- ```
+appendInt : Int -> Builder -> Builder
+appendInt value (Builder buffer size) =
+    next = bufferAppendInt buffer size value
+    Builder next (bufferLength next)
+
+-- The builder with a float's display appended without an intermediate string.
+-- Its spelling is the same as `show`: shortest round-trip decimals, unpadded
+-- exponents outside the ordinary decimal range, `Infinity`, and `NaN`.
+--
+-- ```fango
+-- import Text.Builder
+--
+-- Text.Builder.toString (Text.Builder.appendFloat 1.25 Text.Builder.empty) == "1.25"
+-- ```
+appendFloat : Float -> Builder -> Builder
+appendFloat value (Builder buffer size) =
+    next = bufferAppendFloat buffer size value
+    Builder next (bufferLength next)
 
 -- Whether the builder holds no text.
 --
@@ -92,14 +130,11 @@ appendChar (Builder buffer size) char =
 -- import Text.Builder
 --
 -- Text.Builder.isEmpty Text.Builder.empty
--- Text.Builder.isEmpty (Text.Builder.append Text.Builder.empty "")
+-- Text.Builder.isEmpty (Text.Builder.append "" Text.Builder.empty)
 -- ```
 isEmpty : Builder -> Bool
-isEmpty (Builder _ size) = size == 0
+isEmpty (Builder _ size) = sizeIsEmpty size
 
 -- The text the builder holds, copied once.
 toString : Builder -> String
-toString (Builder buffer size) =
-    case buffer of
-        Nothing -> ""
-        Just shared -> bufferText shared size
+toString (Builder buffer size) = bufferText buffer size

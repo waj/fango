@@ -35,6 +35,25 @@ async function main() {
   assert(!scopeAt(sample.indexOf("|>")).includes("keyword.operator.pipe.fango"));
   assert(!scopeAt(sample.lastIndexOf("value")).includes("variable.parameter.fango"));
 
+  for (const [sample, holes] of [
+    ['"hi #{name}: #{1 + 2}"', 2],
+    ['"#{"nested #{3}"}"', 2],
+    ['"#{({ x = "}"; x })()}"', 1],
+    ['"\\#{literal} #{/}/}"', 1],
+    ['"\\\\#{value}"', 1],
+    ['"#{1 {- } -} + 2}"', 1],
+  ]) {
+    const tokens = grammar.tokenizeLine(sample).tokens;
+    const begins = tokens.filter(t => t.scopes.includes('punctuation.definition.interpolation.begin.fango'));
+    const ends = tokens.filter(t => t.scopes.includes('punctuation.definition.interpolation.end.fango'));
+    assert.equal(begins.length, holes, sample);
+    assert.equal(ends.length, holes, sample);
+    const next = grammar.tokenizeLine('value = 1', grammar.tokenizeLine(sample).ruleStack);
+    assert(!next.tokens.some(t => t.scopes.includes('meta.interpolation.fango')), sample);
+  }
+  const escapedInterpolation = grammar.tokenizeLine('"\\#{literal}"').tokens;
+  assert(escapedInterpolation.some(t => t.scopes.includes('constant.character.escape.fango')));
+
   for (const [sample, count] of [
     ['f /abc/ // /a\\/b/ /[\\/]/ /\\\\/ /(?i)abc/', 6],
     ['x/y/z', 0], ['x / y / z', 0], ['x /y', 0],

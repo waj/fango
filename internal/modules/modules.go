@@ -559,6 +559,14 @@ func syntaxDependencies(m *ast.Module, self string) []string {
 	if m.UsesRegex && self != RegexModule {
 		deps = addDep(deps, RegexModule)
 	}
+	if m.UsesInterpolation {
+		if self != "Basics" {
+			deps = addDep(deps, "Basics")
+		}
+		if self != "Text.Builder" {
+			deps = addDep(deps, "Text.Builder")
+		}
+	}
 	return deps
 }
 
@@ -1974,6 +1982,10 @@ func (r *resolver) predicate(p *ast.PredExpr) {
 
 func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bool) {
 	switch e := e.(type) {
+	case *ast.StringInterpolation:
+		for _, hole := range e.Exprs {
+			r.expr(hole, vals, locals)
+		}
 	case *ast.Var:
 		if !locals[e.Name] {
 			e.Name = r.qualified(e.Name, vals, "value", e.Sp)

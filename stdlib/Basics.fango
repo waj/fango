@@ -10,6 +10,8 @@
 -- does not imply `Eq`.
 module Basics exposing (Display(..), Eq(..), Num(..), Ord(..), Show(..), Type, ignore, modBy, quotientBy, remainderBy, (++), (/), (/=), (<|), (|>))
 
+import Text.Builder
+
 -- A runtime witness of a type argument, which directs a call whose result
 -- type nothing else determines, as `Json.parse @Person text` does. The
 -- witness expression `@T` is its only public constructor.
@@ -88,8 +90,13 @@ class Show a
 -- display (Just "a") == "Just \"a\""
 -- ```
 class Display a
-    -- The text of a value for output.
+    -- Appends a value's output text to an immutable builder. String
+    -- interpolation uses this method, so it should agree with `display`.
+    displayTo : Text.Builder.Builder -> a -> Text.Builder.Builder
+    -- The text of a value for output. Defaults to rendering into an empty
+    -- builder and returning its text.
     display : a -> String
+    display value = Text.Builder.toString (displayTo Text.Builder.empty value)
 
 -- Joins two strings.
 --
@@ -287,13 +294,32 @@ instance Show ()
     show x = "()"
 
 instance Show a => Display a
-    display value = show value
+    displayTo built value = Text.Builder.append (show value) built
 
 instance Display String
-    display x = stringShow x
+    displayTo built value = Text.Builder.append value built
+    display value = stringShow value
 
 instance Display Char
-    display x = charShow x
+    displayTo built value = Text.Builder.appendChar value built
+    display value = charShow value
+
+instance Display Int
+    displayTo built value = Text.Builder.appendInt value built
+    display value = intShow value
+
+instance Display Float
+    displayTo built value = Text.Builder.appendFloat value built
+    display value = floatShow value
+
+instance Display Bool
+    displayTo built True = Text.Builder.append "True" built
+    displayTo built False = Text.Builder.append "False" built
+    display value = boolShow value
+
+instance Display ()
+    displayTo built () = Text.Builder.append "()" built
+    display () = "()"
 
 -- Whether two values differ: the negation of `(==)`.
 --

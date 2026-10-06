@@ -110,9 +110,9 @@ collecting : (Writer s ->{s} a) ->{e} (a, String)
 collecting action =
     Runtime.Local.run Builder.empty { built ->
         result = action (Writer (Output
-            { emit = { text -> built.write (Builder.append built.read() text) }
+            { emit = { text -> built.write (Builder.append text built.read()) }
             , attempt = { text ->
-                built.write (Builder.append built.read() text)
+                built.write (Builder.append text built.read())
                 Ok ()
               }
             , flush = { () }

@@ -1,4 +1,5 @@
 import Dict
+import Text.Builder
 
 -- Show is the representation: strings and characters quoted and escaped,
 -- nested constructors and negative numbers parenthesized as arguments.
@@ -11,8 +12,8 @@ type Shape = Circle Float | Labeled String Shape | Origin deriving (Show)
 type Money = Money Int deriving (Show)
 
 instance Display Money
-    display money = case money of
-        Money cents -> "$" ++ show cents
+    displayTo built money = case money of
+        Money cents -> Text.Builder.appendInt cents (Text.Builder.append "$" built)
 
 report : Display a => a ->{IO} ()
 report value = print value

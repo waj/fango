@@ -11,6 +11,11 @@ const (
 	INT
 	FLOAT
 	STRING
+	STRING_BEGIN        // opening quote of an interpolated string
+	STRING_TEXT         // raw text between interpolation delimiters (no quotes)
+	INTERPOLATION_BEGIN // #{
+	INTERPOLATION_END   // }
+	STRING_END          // closing quote of an interpolated string
 	REGEX
 	CHAR
 	LIDENT // lower-case identifier
@@ -90,6 +95,8 @@ const (
 )
 
 var kindNames = map[Kind]string{
+	STRING_BEGIN: "STRING_BEGIN", STRING_TEXT: "STRING_TEXT", STRING_END: "STRING_END",
+	INTERPOLATION_BEGIN: "INTERPOLATION_BEGIN", INTERPOLATION_END: "INTERPOLATION_END",
 	ATTRIBUTE: "ATTRIBUTE",
 	EOF:       "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING", REGEX: "REGEX", CHAR: "CHAR",
 	LIDENT: "LIDENT", UIDENT: "UIDENT", PRAGMA: "PRAGMA",

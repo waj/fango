@@ -642,6 +642,8 @@ func visitChildren(e ast.Expr, f func(ast.Expr)) {
 		}
 	}
 	switch e := e.(type) {
+	case *ast.StringInterpolation:
+		each(e.Exprs...)
 	case *ast.RecordLit:
 		for _, field := range e.Fields {
 			each(field.Value)

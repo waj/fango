@@ -176,7 +176,7 @@ their contents are Fango code rather than string text.
 Built-in value types are `Int`, `Float`, `String`, `Char`, `Bool`, and Unit `()`.
 Integers are signed 64-bit decimal literals. Floats include `1.25`, `1e3`, and
 `1.0e-2`; `.5` and `1.` are not float literals. Strings are single-line,
-double-quoted values with `\\`, `\"`, `\n`, `\t`, and `\r` escapes. A Char
+double-quoted values with `\\`, `\"`, `\n`, `\t`, `\r`, and `\#{` escapes. A Char
 literal contains exactly one Unicode scalar between single quotes and accepts
 `\\`, `\'`, `\n`, `\t`, and `\r` escapes; examples are `'x'`, `'二'`, and
 `'\n'`. Booleans are the constructors `True` and `False`.
@@ -215,6 +215,35 @@ result, so its effects do not happen either. They are the one exception to
 "an operator is a value": they are fixed syntax with fixed fixity, and there
 is no `(&&)` function to pass, bind, or redeclare, because a called value
 would have to evaluate both operands.
+
+### String interpolation
+
+`"Hello, #{name}"` inserts an expression's output text into a string using
+[`Display`](classes.md#standard-classes). Each hole is an ordinary expression
+in the surrounding scope. Nested strings and interpolations, records, lambdas,
+and conditionals work normally; an explicit block can be called as
+`"#{{ x = 2; x * 3 }()}"`. The result is always `String`.
+
+Holes evaluate exactly once, left to right, and each value is rendered before
+the next hole is evaluated. Their effects propagate to the enclosing expression;
+an abort prevents later holes from running. Polymorphic holes require
+`Display a`, and values without an instance report `MISSING INSTANCE` at the
+hole. Rendering uses `Basics.displayTo`, regardless of local names such as
+`display`, `displayTo`, or `Text`.
+
+The string and every hole must stay on one physical line. `\#{` inserts the
+literal characters `#{`; a preceding escaped backslash, as in `\\#{value}`,
+still leaves an active hole. An empty hole reports `EMPTY INTERPOLATION`, a
+missing closing brace reports `UNCLOSED INTERPOLATION`, and a newline in a
+hole reports `MULTILINE INTERPOLATION`. String patterns and native templates
+must be plain strings; interpolation there reports `INTERPOLATED PATTERN` or
+`INTERPOLATED NATIVE TEMPLATE`. Escape literal interpolation markers in those
+contexts too. Char and regex literals do not interpolate.
+
+Assembly uses [`Text.Builder`](../../stdlib/Text/Builder.fango). Scalar
+renderers append directly; the blanket `Show` fallback and nested interpolation
+results can still produce intermediate strings. The final builder text is
+copied once.
 
 ### Declaring operators
 

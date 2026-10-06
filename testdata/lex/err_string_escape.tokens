@@ -7,7 +7,7 @@
 
 I do not recognize this escape sequence. Valid escapes are:
 
-    \\  \"  \n  \t  \r
+    \\  \"  \n  \t  \r  \#{
 
 1| x = "bad \q escape"
             ^^

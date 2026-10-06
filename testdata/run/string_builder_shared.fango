@@ -1,0 +1,19 @@
+import Async
+import List
+import String
+import Text.Builder
+
+extend built count =
+    if count == 0 then built
+    else extend (Text.Builder.appendChar '二' built) (count - 1)
+
+main() =
+    base = Text.Builder.append "base" Text.Builder.empty
+    checks = Async.parMap { _ ->
+        built = extend base 100
+        branch = Text.Builder.append "-branch" base
+        Text.Builder.toString base == "base"
+            && Text.Builder.toString branch == "base-branch"
+            && Text.Builder.toString built == "base" ++ String.concat (List.map { _ -> "二" } (List.range 1 100))
+        } (List.range 1 16)
+    print (List.foldl { result value -> result && value } True checks)

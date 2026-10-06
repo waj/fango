@@ -76,25 +76,30 @@ func (l *lexer) run() {
 			l.emit(token.EOF, l.pos, l.pos)
 			return
 		}
-		start := l.pos
-		c := l.f.Content[l.pos]
-		switch {
-		case c == '/' && l.lexRegex(start):
-		case isDigit(c):
-			l.lexNumber(start)
-		case c == '"':
-			l.lexString(start)
-		case c == '\'':
-			l.lexChar(start)
-		case isLower(c):
-			l.lexIdent(start, false)
-		case isUpper(c):
-			l.lexIdent(start, true)
-		case c == '_':
-			l.lexUnderscore(start)
-		default:
-			l.lexOperator(start)
-		}
+		l.lexToken()
+	}
+}
+
+// lexToken also serves interpolation holes, using exactly the ordinary lexer.
+func (l *lexer) lexToken() {
+	start := l.pos
+	c := l.f.Content[l.pos]
+	switch {
+	case c == '/' && l.lexRegex(start):
+	case isDigit(c):
+		l.lexNumber(start)
+	case c == '"':
+		l.lexString(start)
+	case c == '\'':
+		l.lexChar(start)
+	case isLower(c):
+		l.lexIdent(start, false)
+	case isUpper(c):
+		l.lexIdent(start, true)
+	case c == '_':
+		l.lexUnderscore(start)
+	default:
+		l.lexOperator(start)
 	}
 }
 
@@ -285,13 +290,21 @@ func (l *lexer) scanExponent() bool {
 // the REPL errors immediately instead of prompting for a continuation.
 func (l *lexer) lexString(start int) {
 	l.pos++ // opening quote
+	textStart := l.pos
+	interpolated := false
 	for l.pos < len(l.f.Content) {
 		switch c := l.f.Content[l.pos]; c {
 		case '"':
+			if interpolated {
+				l.emit(token.STRING_TEXT, textStart, l.pos)
+				l.emit(token.STRING_END, l.pos, l.pos+1)
+				l.pos++
+				return
+			}
 			l.pos++
 			l.emit(token.STRING, start, l.pos)
 			return
-		case '\n':
+		case '\n', '\r':
 			sp := source.Span{File: l.f, Start: start, End: l.pos}
 			l.errs = append(l.errs, diag.Errorf(sp, "UNCLOSED STRING",
 				"This string never gets a closing double quote on its line.\nStrings cannot span lines."))
@@ -299,14 +312,37 @@ func (l *lexer) lexString(start int) {
 			return
 		case '\\':
 			switch l.peekAt(1) {
+			case '#':
+				if l.peekAt(2) == '{' {
+					l.pos += 3
+					continue
+				}
+				fallthrough
+			default:
+				sp := source.Span{File: l.f, Start: l.pos, End: min(l.pos+2, len(l.f.Content))}
+				l.errs = append(l.errs, diag.Errorf(sp, "UNKNOWN ESCAPE",
+					"I do not recognize this escape sequence. Valid escapes are:\n\n    \\\\  \\\"  \\n  \\t  \\r  \\#{"))
+				l.pos = min(l.pos+2, len(l.f.Content))
 			case '\\', '"', 'n', 't', 'r':
 				l.pos += 2
-			default:
-				sp := source.Span{File: l.f, Start: l.pos, End: l.pos + 2}
-				l.errs = append(l.errs, diag.Errorf(sp, "UNKNOWN ESCAPE",
-					"I do not recognize this escape sequence. Valid escapes are:\n\n    \\\\  \\\"  \\n  \\t  \\r"))
-				l.pos += 2
 			}
+		case '#':
+			if l.peekAt(1) != '{' {
+				l.pos++
+				continue
+			}
+			if !interpolated {
+				l.emit(token.STRING_BEGIN, start, start+1)
+				interpolated = true
+			}
+			l.emit(token.STRING_TEXT, textStart, l.pos)
+			hole := l.pos
+			l.pos += 2
+			l.emit(token.INTERPOLATION_BEGIN, hole, l.pos)
+			if !l.lexInterpolation(hole) {
+				return
+			}
+			textStart = l.pos
 		default:
 			l.pos++
 		}
@@ -317,11 +353,49 @@ func (l *lexer) lexString(start int) {
 	l.emit(token.STRING, start, l.pos)
 }
 
+func (l *lexer) lexInterpolation(start int) bool {
+	depth := len(l.delimiters)
+	defer func() { l.delimiters = l.delimiters[:depth-1] }()
+	for l.pos < len(l.f.Content) {
+		before := l.pos
+		l.skipSpaceAndComments()
+		if strings.ContainsAny(l.text[before:l.pos], "\n\r") {
+			l.errs = append(l.errs, diag.Errorf(source.Span{File: l.f, Start: start, End: l.pos}, "MULTILINE INTERPOLATION",
+				"A string and its interpolation expressions must stay on one line."))
+			return false
+		}
+		if l.pos >= len(l.f.Content) {
+			break
+		}
+		if l.f.Content[l.pos] == '}' && len(l.delimiters) == depth {
+			// The defer restores the enclosing delimiter stack.
+			l.toks = append(l.toks, token.Token{Kind: token.INTERPOLATION_END, Text: "}", Span: source.Span{File: l.f, Start: l.pos, End: l.pos + 1}})
+			l.pos++
+			return true
+		}
+		before = l.pos
+		l.lexToken()
+		if strings.ContainsAny(l.text[before:l.pos], "\n\r") {
+			l.errs = append(l.errs, diag.Errorf(source.Span{File: l.f, Start: start, End: l.pos}, "MULTILINE INTERPOLATION",
+				"A string and its interpolation expressions must stay on one line."))
+			return false
+		}
+	}
+	l.errs = append(l.errs, diag.Errorf(source.Span{File: l.f, Start: start, End: min(start+2, len(l.f.Content))}, "UNCLOSED INTERPOLATION",
+		"I expect `}` to close this interpolation expression."))
+	return false
+}
+
 // Unescape decodes a raw STRING token text (including its quotes) into the
 // string value. The lexer has already validated the escapes.
 func Unescape(raw string) string {
 	raw = strings.TrimPrefix(raw, `"`)
 	raw = strings.TrimSuffix(raw, `"`)
+	return UnescapeText(raw)
+}
+
+// UnescapeText decodes a string segment without stripping delimiters.
+func UnescapeText(raw string) string {
 	if !strings.Contains(raw, `\`) {
 		return raw
 	}
@@ -489,6 +563,8 @@ func (l *lexer) emit(k token.Kind, start, end int) {
 		l.delimiters = append(l.delimiters, token.RBRACE)
 	case token.LQUOTE:
 		l.delimiters = append(l.delimiters, token.RQUOTE)
+	case token.INTERPOLATION_BEGIN:
+		l.delimiters = append(l.delimiters, token.INTERPOLATION_END)
 	case token.RPAREN, token.RBRACKET, token.RBRACE, token.RQUOTE:
 		if n := len(l.delimiters); n > 0 && l.delimiters[n-1] == k {
 			l.delimiters = l.delimiters[:n-1]

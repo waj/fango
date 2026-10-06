@@ -45,46 +45,76 @@ func ShowInt(v int64) string { return strconv.FormatInt(v, 10) }
 // [1e-6, 1e21) band with unpadded exponents, "Infinity"/"NaN" specials,
 // and both zeros as "0".
 func ShowFloat(f float64) string {
+	var scratch [32]byte
+	return string(AppendShowFloat(scratch[:0], f))
+}
+
+// AppendShowFloat shares exactly the ShowFloat spelling without allocating
+// intermediate strings. The shortest-round-trip digits fit in stack storage.
+func AppendShowFloat(dst []byte, f float64) []byte {
 	switch {
 	case math.IsNaN(f):
-		return "NaN"
+		return append(dst, "NaN"...)
 	case math.IsInf(f, 1):
-		return "Infinity"
+		return append(dst, "Infinity"...)
 	case math.IsInf(f, -1):
-		return "-Infinity"
+		return append(dst, "-Infinity"...)
 	case f == 0:
-		return "0" // JS parity: String(-0) is "0"
+		return append(dst, '0')
 	}
-	neg := ""
 	if f < 0 {
-		neg = "-"
+		dst = append(dst, '-')
 		f = -f
 	}
-	// Shortest round-trip digits and decimal exponent: value = 0.digits×10ⁿ.
-	e := strconv.FormatFloat(f, 'e', -1, 64) // "d[.ddd]e±xx"
-	mant, expStr, _ := strings.Cut(e, "e")
-	digits := strings.Replace(mant, ".", "", 1)
-	exp, _ := strconv.Atoi(expStr)
-	n := exp + 1
-	k := len(digits)
-
-	switch {
-	case k <= n && n <= 21: // integral: digits then n-k zeros
-		return neg + digits + strings.Repeat("0", n-k)
-	case 0 < n && n <= 21: // point inside the digits
-		return neg + digits[:n] + "." + digits[n:]
-	case -6 < n && n <= 0: // leading zeros after "0."
-		return neg + "0." + strings.Repeat("0", -n) + digits
-	default: // exponent form, unpadded, explicit sign
-		s := digits[:1]
-		if k > 1 {
-			s += "." + digits[1:]
-		}
-		if n-1 >= 0 {
-			return neg + s + "e+" + strconv.Itoa(n-1)
-		}
-		return neg + s + "e-" + strconv.Itoa(-(n - 1))
+	var scratch [32]byte
+	scientific := strconv.AppendFloat(scratch[:0], f, 'e', -1, 64)
+	split := 0
+	for scientific[split] != 'e' {
+		split++
 	}
+	exp := 0
+	for _, c := range scientific[split+2:] {
+		exp = exp*10 + int(c-'0')
+	}
+	if scientific[split+1] == '-' {
+		exp = -exp
+	}
+	digits := scientific[:0]
+	for _, c := range scientific[:split] {
+		if c != '.' {
+			digits = append(digits, c)
+		}
+	}
+	n, k := exp+1, len(digits)
+	switch {
+	case k <= n && n <= 21:
+		dst = append(dst, digits...)
+		for i := k; i < n; i++ {
+			dst = append(dst, '0')
+		}
+	case 0 < n && n <= 21:
+		dst = append(dst, digits[:n]...)
+		dst = append(dst, '.')
+		dst = append(dst, digits[n:]...)
+	case -6 < n && n <= 0:
+		dst = append(dst, '0', '.')
+		for i := 0; i < -n; i++ {
+			dst = append(dst, '0')
+		}
+		dst = append(dst, digits...)
+	default:
+		dst = append(dst, digits[0])
+		if k > 1 {
+			dst = append(dst, '.')
+			dst = append(dst, digits[1:]...)
+		}
+		dst = append(dst, 'e')
+		if exp >= 0 {
+			dst = append(dst, '+')
+		}
+		dst = strconv.AppendInt(dst, int64(exp), 10)
+	}
+	return dst
 }
 
 // ShowString is the raw rendering (what print outputs). It exists so that
@@ -100,13 +130,18 @@ func ShowCharLiteral(r rune) string {
 }
 
 // ShowStringLiteral renders a String as a Fango source literal — the REPL's
-// at-the-prompt form. Escapes: \\ \" \n \t \r; other control characters as
+// at-the-prompt form. Escapes: \\ \" \n \t \r \#{; other control characters as
 // \u{XXXX}; everything else (including non-ASCII) passes through.
 func ShowStringLiteral(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
-	for _, r := range s {
+	for i, r := range s {
 		switch r {
+		case '#':
+			if i+1 < len(s) && s[i+1] == '{' {
+				b.WriteByte('\\')
+			}
+			b.WriteRune(r)
 		case '\\':
 			b.WriteString(`\\`)
 		case '"':

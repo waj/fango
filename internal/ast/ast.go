@@ -28,6 +28,15 @@ type StringLit struct {
 	Sp    source.Span
 }
 
+// StringInterpolation retains literal spelling for formatting. Segments and
+// their spans surround the expressions, so len(Segments) == len(Exprs)+1.
+type StringInterpolation struct {
+	Segments     []string
+	SegmentSpans []source.Span
+	Exprs        []Expr
+	Sp           source.Span
+}
+
 // RegexLit retains both the Go pattern and original delimiter spelling.
 type RegexLit struct {
 	Value string
@@ -520,46 +529,48 @@ func (p *PCtor) Span() source.Span {
 	return p.NameSpan.Merge(p.Args[len(p.Args)-1].Span())
 }
 
-func (*IntLit) isExpr()       {}
-func (*FloatLit) isExpr()     {}
-func (*RegexLit) isExpr()     {}
-func (*StringLit) isExpr()    {}
-func (*CharLit) isExpr()      {}
-func (*UnitLit) isExpr()      {}
-func (*Var) isExpr()          {}
-func (*Ctor) isExpr()         {}
-func (*RecordLit) isExpr()    {}
-func (*RecordGet) isExpr()    {}
-func (*RecordUpdate) isExpr() {}
-func (*App) isExpr()          {}
-func (*Neg) isExpr()          {}
-func (*BinOp) isExpr()        {}
-func (*OpChain) isExpr()      {}
-func (*If) isExpr()           {}
-func (*Block) isExpr()        {}
-func (*Lambda) isExpr()       {}
-func (*Case) isExpr()         {}
-func (*Handle) isExpr()       {}
-func (*Resume) isExpr()       {}
-func (*Quote) isExpr()        {}
-func (*Splice) isExpr()       {}
-func (*TypeOf) isExpr()       {}
-func (*MetaValue) isExpr()    {}
+func (*IntLit) isExpr()              {}
+func (*FloatLit) isExpr()            {}
+func (*RegexLit) isExpr()            {}
+func (*StringLit) isExpr()           {}
+func (*StringInterpolation) isExpr() {}
+func (*CharLit) isExpr()             {}
+func (*UnitLit) isExpr()             {}
+func (*Var) isExpr()                 {}
+func (*Ctor) isExpr()                {}
+func (*RecordLit) isExpr()           {}
+func (*RecordGet) isExpr()           {}
+func (*RecordUpdate) isExpr()        {}
+func (*App) isExpr()                 {}
+func (*Neg) isExpr()                 {}
+func (*BinOp) isExpr()               {}
+func (*OpChain) isExpr()             {}
+func (*If) isExpr()                  {}
+func (*Block) isExpr()               {}
+func (*Lambda) isExpr()              {}
+func (*Case) isExpr()                {}
+func (*Handle) isExpr()              {}
+func (*Resume) isExpr()              {}
+func (*Quote) isExpr()               {}
+func (*Splice) isExpr()              {}
+func (*TypeOf) isExpr()              {}
+func (*MetaValue) isExpr()           {}
 
-func (e *IntLit) Span() source.Span       { return e.Sp }
-func (e *FloatLit) Span() source.Span     { return e.Sp }
-func (e *RegexLit) Span() source.Span     { return e.Sp }
-func (e *StringLit) Span() source.Span    { return e.Sp }
-func (e *CharLit) Span() source.Span      { return e.Sp }
-func (e *UnitLit) Span() source.Span      { return e.Sp }
-func (e *Var) Span() source.Span          { return e.Sp }
-func (e *Ctor) Span() source.Span         { return e.Sp }
-func (e *RecordLit) Span() source.Span    { return e.Sp }
-func (e *RecordGet) Span() source.Span    { return e.Record.Span().Merge(e.FieldSpan) }
-func (e *RecordUpdate) Span() source.Span { return e.Sp }
-func (e *App) Span() source.Span          { return e.Fn.Span().Merge(e.Arg.Span()) }
-func (e *Neg) Span() source.Span          { return e.Sp }
-func (e *BinOp) Span() source.Span        { return e.L.Span().Merge(e.R.Span()) }
+func (e *IntLit) Span() source.Span              { return e.Sp }
+func (e *FloatLit) Span() source.Span            { return e.Sp }
+func (e *RegexLit) Span() source.Span            { return e.Sp }
+func (e *StringLit) Span() source.Span           { return e.Sp }
+func (e *StringInterpolation) Span() source.Span { return e.Sp }
+func (e *CharLit) Span() source.Span             { return e.Sp }
+func (e *UnitLit) Span() source.Span             { return e.Sp }
+func (e *Var) Span() source.Span                 { return e.Sp }
+func (e *Ctor) Span() source.Span                { return e.Sp }
+func (e *RecordLit) Span() source.Span           { return e.Sp }
+func (e *RecordGet) Span() source.Span           { return e.Record.Span().Merge(e.FieldSpan) }
+func (e *RecordUpdate) Span() source.Span        { return e.Sp }
+func (e *App) Span() source.Span                 { return e.Fn.Span().Merge(e.Arg.Span()) }
+func (e *Neg) Span() source.Span                 { return e.Sp }
+func (e *BinOp) Span() source.Span               { return e.L.Span().Merge(e.R.Span()) }
 func (e *OpChain) Span() source.Span {
 	return e.Operands[0].Span().Merge(e.Operands[len(e.Operands)-1].Span())
 }
@@ -781,6 +792,8 @@ type Module struct {
 
 	// UsesRegex records literals, including those inside quotations.
 	UsesRegex bool
+	// UsesInterpolation adds the canonical builder and Display dependencies.
+	UsesInterpolation bool
 
 	// NoPrelude records the `{-# no-prelude #-}` pragma: this module is
 	// resolved with no implicit imports at all, so every name it uses comes

@@ -1,0 +1,44 @@
+import Text.Builder
+import Fail
+
+type Money = Money Int deriving (Show)
+instance Display Money
+    displayTo built (Money cents) = Text.Builder.appendInt cents (Text.Builder.append "$" built)
+
+render : Display a => a -> String
+render value = "value=#{value}"
+
+effect Tick
+    next : () -> Int
+
+ordered() =
+    handle "#{next()}:#{next()}:#{next()}"
+    with count = 0
+    on next () -> resume (count + 1) with count + 1
+
+stop : () ->{Fail.Fail String} Int
+stop() = Fail.fail "stopped"
+
+later() = print "unexpected later hole"; 2
+
+main() =
+    name = "Ada"
+    print "Hello, #{name}!"
+    print "#{1} #{-2} #{1.25} #{True} #{False} #{()} #{'二'}"
+    print "#{Money 250} / #{display (Money 5)}"
+    print (render (Just "a"))
+    print "#{if True then "yes" else "no"} / #{"nested #{3}"}"
+    print "#{({ x = 2; x * 3 })()}"
+    print "\#{literal} / #{"\#{nested}"} / #{"}"}"
+    print (show "\#{literal}")
+    print (ordered())
+    displayTo value = "shadow"
+    print "#{4}"
+    base = Text.Builder.append "prefix" Text.Builder.empty
+    left = Text.Builder.append "-left" base
+    right = Text.Builder.appendChar '二' base
+    print "#{Text.Builder.toString base}|#{Text.Builder.toString left}|#{Text.Builder.toString right}"
+    print (Fail.attempt { "#{stop()}#{later()}" })
+    local prefix = "#{prefix}:#{name}"
+    print (local "captured")
+    print $(`"staged #{1 + 2}"`)

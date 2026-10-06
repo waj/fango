@@ -1,26 +1,28 @@
 import Basics
 import List
 import String
-import Text.Builder as Builder
+import Text.Builder as Builder exposing (append, appendChar, appendFloat, appendInt)
 
 build : List String -> Builder.Builder
-build parts = List.foldl { part builder -> Builder.append builder part } Builder.empty parts
+build parts = List.foldl Builder.append Builder.empty parts
 
 main() =
     print (Builder.toString Builder.empty)
     base = build ["caf", "é ", "東京"]
     print (Builder.toString base)
     -- Two versions extend one base: the second must not see the first's text.
-    left = Builder.append base " left"
-    right = Builder.appendChar (Builder.appendChar base ' ') '🚚'
+    left = Builder.append " left" base
+    right = Builder.appendChar '🚚' (Builder.appendChar ' ' base)
     print (Builder.toString left)
     print (Builder.toString right)
     print (Builder.toString base)
     -- Extending the older version again after a newer one copies its prefix.
-    again = Builder.append left "!"
+    again = Builder.append "!" left
     print (Builder.toString again)
-    print (Builder.toString (Builder.append left "?"))
-    print (Builder.toString (Builder.append Builder.empty ""))
-    print (Builder.toString (Builder.appendChar Builder.empty 'x'))
-    long = List.foldl { n builder -> Builder.appendChar builder (if Basics.modBy 2 n == 0 then 'a' else 'b') } Builder.empty (List.range 1 1000)
+    print (Builder.toString (Builder.append "?" left))
+    print (Builder.toString (Builder.append "" Builder.empty))
+    print (Builder.toString (Builder.appendChar 'x' Builder.empty))
+    long = List.foldl { n builder -> Builder.appendChar (if Basics.modBy 2 n == 0 then 'a' else 'b') builder } Builder.empty (List.range 1 1000)
     print (String.length (Builder.toString long))
+    piped = Builder.empty |> append "foo" |> appendInt 123 |> appendChar '!' |> appendFloat 1.25
+    print (Builder.toString piped)

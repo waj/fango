@@ -532,6 +532,10 @@ func (i *index) expr(e ast.Expr, s scope) {
 		}
 	case *ast.Quote:
 		i.expr(e.Body, s)
+	case *ast.StringInterpolation:
+		for _, hole := range e.Exprs {
+			i.expr(hole, s)
+		}
 	case *ast.Splice:
 		i.expr(e.Operand, s)
 	case *ast.TypeOf:

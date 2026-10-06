@@ -8,10 +8,10 @@ import Text.Builder as Builder
 -- Tasks extending one shared version each get their own text; whichever
 -- extends the buffer in place, the others copy the shared prefix.
 extend : Builder.Builder -> String -> String
-extend base suffix = Builder.toString (List.foldl { _ builder -> Builder.append builder suffix } base (List.range 1 200))
+extend base suffix = Builder.toString (List.foldl { _ builder -> Builder.append suffix builder } base (List.range 1 200))
 
 main() =
-    base = Builder.append Builder.empty "shared:"
+    base = Builder.append "shared:" Builder.empty
     outcome = Async.runOutcome { _ ->
         tasks = List.map { suffix -> Async.spawn { _ -> extend base suffix } } ["a", "b", "c", "d"]
         List.map { task -> Async.await task } tasks
