@@ -25,12 +25,12 @@ func TestTasksShareMemoizedGlobals(t *testing.T) {
 			return fangort.AsyncCompletion{Value: value}
 		}))
 	}
-	scope.Finish(fangort.AsyncCompletion{})
 	for _, task := range tasks {
 		if got := task.Wait().Value; got != int64(42) {
 			t.Fatalf("result: %v", got)
 		}
 	}
+	scope.Finish(fangort.AsyncCompletion{})
 }
 
 func TestParallelMapHostCancellationOwnership(t *testing.T) {

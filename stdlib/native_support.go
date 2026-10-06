@@ -26,4 +26,5 @@ var FangoNewAsyncScope = fangort.NewAsyncScope
 var FangoNewAsyncValue = fangort.NewAsyncValue
 var FangoPublishAsyncValue = fangort.PublishAsyncValue
 var FangoAsyncSleep = fangort.AsyncSleep
+var FangoAwaitAnyAsync = fangort.AwaitAnyAsync
 var FangoNewAsyncChannel = fangort.NewAsyncChannel[any]

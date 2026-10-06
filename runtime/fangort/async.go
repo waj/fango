@@ -20,7 +20,8 @@ type AsyncScope struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	mu         sync.Mutex
-	children   []*AsyncTask
+	children   map[*AsyncTask]struct{}
+	taskOwner  *AsyncScope
 	closing    bool
 	finishOnce sync.Once
 	finished   chan struct{}
@@ -28,9 +29,12 @@ type AsyncScope struct {
 }
 
 type AsyncTask struct {
-	scope  *AsyncScope
-	done   chan struct{}
-	result AsyncCompletion // published by closing done
+	scope   *AsyncScope
+	owner   *AsyncScope
+	done    chan struct{}
+	result  AsyncCompletion // published by closing done
+	mu      sync.Mutex
+	waiters map[*asyncSelection]int
 }
 
 func NewAsyncScope(parent *AsyncScope) *AsyncScope {
@@ -38,41 +42,65 @@ func NewAsyncScope(parent *AsyncScope) *AsyncScope {
 	if parent != nil {
 		ctx = parent.ctx
 	}
-	return NewAsyncRoot(ctx)
+	scope := NewAsyncRoot(ctx)
+	if parent != nil {
+		scope.taskOwner = parent.taskOwner
+	}
+	return scope
 }
 
 // NewAsyncRoot connects a source runner to its host evaluation.
 func NewAsyncRoot(ctx context.Context) *AsyncScope {
 	ctx, cancel := context.WithCancel(ctx)
-	return &AsyncScope{ctx: ctx, cancel: cancel, finished: make(chan struct{})}
+	scope := &AsyncScope{ctx: ctx, cancel: cancel, children: make(map[*AsyncTask]struct{}), finished: make(chan struct{})}
+	scope.taskOwner = scope
+	return scope
 }
 
 func (s *AsyncScope) Context() context.Context { return s.ctx }
 func (s *AsyncScope) Cancel()                  { s.cancel() }
 func (s *AsyncScope) Cancelled() bool          { return s.ctx.Err() != nil }
 
+// CancelTaskOwner propagates observed cancellation through the executing task,
+// including observation inside a nested lifetime scope.
+func (s *AsyncScope) CancelTaskOwner() { s.taskOwner.Cancel() }
+
 // SpawnAsync registers the child before starting it. The callback must run its
 // source cleanup before returning; Finish then drains all of that child's tasks.
 func SpawnAsync(owner *AsyncScope, body func(*AsyncScope) AsyncCompletion) *AsyncTask {
 	child := NewAsyncScope(owner)
-	task := &AsyncTask{scope: child, done: make(chan struct{})}
+	child.taskOwner = child
+	task := &AsyncTask{scope: child, owner: owner, done: make(chan struct{})}
 	owner.mu.Lock()
 	if owner.closing {
 		owner.mu.Unlock()
 		child.Cancel()
+		task.owner = nil
 		task.result.Cancelled = true
 		close(task.done)
 		return task
 	}
-	owner.children = append(owner.children, task)
+	owner.children[task] = struct{}{}
 	owner.mu.Unlock()
 	go func() { task.publish(child.Finish(body(child))) }()
 	return task
 }
 
 func (t *AsyncTask) publish(result AsyncCompletion) {
+	if t.owner != nil {
+		t.owner.mu.Lock()
+		defer t.owner.mu.Unlock()
+		delete(t.owner.children, t)
+		t.owner = nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.result = result
 	close(t.done)
+	for selection, index := range t.waiters {
+		selection.report(index)
+	}
+	t.waiters = nil
 }
 
 func (t *AsyncTask) Cancel() {
@@ -108,9 +136,57 @@ func (t *AsyncTask) AwaitObserved(observer *AsyncScope) (AsyncCompletion, bool) 
 	}
 }
 
+type asyncSelection struct{ ready chan int }
+
+func (s *asyncSelection) report(index int) {
+	select {
+	case s.ready <- index:
+	default:
+	}
+}
+
+// AwaitAnyAsync observes one terminal completion without adopting its task.
+// Empty input returns -1; waiter cancellation returns -2. Selection among
+// simultaneously ready completions is intentionally unspecified.
+func AwaitAnyAsync(observer *AsyncScope, tasks []*AsyncTask) int {
+	if observer.Cancelled() {
+		return -2
+	}
+	if len(tasks) == 0 {
+		return -1
+	}
+	selection := &asyncSelection{ready: make(chan int, 1)}
+	defer func() {
+		for _, task := range tasks {
+			task.mu.Lock()
+			delete(task.waiters, selection)
+			task.mu.Unlock()
+		}
+	}()
+	for i, task := range tasks {
+		task.mu.Lock()
+		select {
+		case <-task.done:
+			selection.report(i)
+		default:
+			if task.waiters == nil {
+				task.waiters = make(map[*asyncSelection]int)
+			}
+			task.waiters[selection] = i
+		}
+		task.mu.Unlock()
+	}
+	select {
+	case index := <-selection.ready:
+		return index
+	case <-observer.ctx.Done():
+		return -2
+	}
+}
+
 // Finish is called once by a scope's owner after its body and cleanup finish.
-// All children finish before any result is returned; their values do not
-// change the scope outcome.
+// Every exit cancels unfinished children and drains their cleanup before any
+// result is returned; their values do not change the scope outcome.
 func (s *AsyncScope) Finish(body AsyncCompletion) AsyncCompletion {
 	s.finishOnce.Do(func() {
 		s.completion = s.finish(body)
@@ -130,10 +206,16 @@ func (s *AsyncScope) Completion() AsyncCompletion {
 func (s *AsyncScope) finish(body AsyncCompletion) AsyncCompletion {
 	s.mu.Lock()
 	s.closing = true
-	children := append([]*AsyncTask(nil), s.children...)
+	children := make([]*AsyncTask, 0, len(s.children))
+	for child := range s.children {
+		children = append(children, child)
+	}
 	s.mu.Unlock()
 	if body.Cancelled {
 		s.Cancel()
+	}
+	for _, child := range children {
+		child.Cancel()
 	}
 	for _, child := range children {
 		<-child.done
@@ -175,8 +257,6 @@ func PublishAsyncValue(owner *AsyncScope, task *AsyncTask) {
 	owner.mu.Lock()
 	if owner.closing {
 		result = AsyncCompletion{Cancelled: true}
-	} else {
-		owner.children = append(owner.children, task)
 	}
 	owner.mu.Unlock()
 	task.publish(result)

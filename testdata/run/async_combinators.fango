@@ -1,0 +1,76 @@
+import Async exposing (Outcome(..))
+import Fail
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Runtime.Scope
+
+main() =
+    print (Async.runOutcome {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        first = Async.spawn {
+            ignore (Async.receive ready)
+            ignore (Async.receive gate)
+            1
+        }
+        second = Async.spawn { ignore (Async.send ready ()); 42 }
+        print (Async.awaitAnyOutcome [first, second])
+        print (Async.awaitAny [second])
+        emptyTasks : List (Async.Task Int)
+        emptyTasks = []
+        print (Async.awaitAnyOutcome emptyTasks)
+        print (Async.awaitAny emptyTasks)
+        Async.awaitAll [Async.completed 1, Async.completed 2]
+    })
+    success : Outcome (Result String (Int, String))
+    success = Async.runOutcome { Fail.attempt { Async.both { 7 } { "value" } } }
+    print success
+    ordered : Outcome (Result String (List Int))
+    ordered = Async.runOutcome {
+        ready = Async.channel 0
+        Fail.attempt { Async.all [
+            { ignore (Async.receive ready); 1 }
+        , { ignore (Async.send ready ()); 2 }
+        , { 3 }
+        ] }
+    }
+    print ordered
+    empty : Outcome (Result String (List Int))
+    empty = Async.runOutcome { Fail.attempt { Async.all [] } }
+    print empty
+    print (Async.runOutcome {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        outsideGate = Async.channel 0
+        outside = Async.spawn { Async.receive outsideGate }
+        result = Fail.attempt { Async.all [
+            { Runtime.Scope.finally {
+                ignore (Async.send ready ())
+                ignore (Async.receive gate)
+                1
+              } { print "failed siblings drained" } }
+        , { ignore (Async.receive ready); Fail.fail "second failed"; 2 }
+        ] }
+        print result
+        ignore (Async.send outsideGate 9)
+        Async.await outside
+    })
+    data : Outcome (Result String (List (Result String Int)))
+    data = Async.runOutcome { Fail.attempt { Async.all [{ Err "ordinary data" }] } }
+    print data
+    print (Async.runOutcome {
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        cancelled = Async.spawn { Async.receive gate }
+        Async.cancel cancelled
+        Async.awaitAnyOutcome [cancelled]
+    })
+    print (Async.runOutcome {
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        cancelled = Async.spawn { Async.receive gate }
+        Async.cancel cancelled
+        Async.awaitAny [cancelled]
+    })

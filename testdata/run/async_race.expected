@@ -1,0 +1,8 @@
+race loser drained
+Completed (Ok 42)
+timeout loser drained
+Completed (Err "timeout")
+Cancelled
+Cancelled
+Completed (Ok (Err "ordinary data"))
+Cancelled

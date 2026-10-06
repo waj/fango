@@ -14,8 +14,9 @@ main() =
         gate = Async.channel 0
         ignore (Async.spawn (blocked ready gate "cancel cleanup"))
         ignore (Async.receive ready)
-        Async.cancelScope()
-        Async.checkpoint()
+        task = Async.spawn { Async.receive gate }
+        Async.cancel task
+        ignore (Async.await task)
         print "unreachable"
     }
     print "after cancellation"
@@ -30,9 +31,10 @@ main() =
     })
     use Async.run
     gate = Async.channel 0
-    ignore (Async.spawn {
+    task = Async.spawn {
         ignore (Async.receive gate)
         print "joined"
-    })
+    }
     print "body"
     ignore (Async.send gate ())
+    ignore (Async.await task)

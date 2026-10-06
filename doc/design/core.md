@@ -113,7 +113,10 @@ argument ABI. Eta expansion preserves the original binding and substitutes its
 execution, evidence, captures, and per-arrow control. Inputs adapt
 contravariantly and results covariantly. Nominal values needing representation
 changes use typed constructor/Case reconstruction and recursive local helpers;
-identically erased row-indexed values require no traversal. Local references,
+field conversion retains source callback rows, including those nested inside
+lists, so an erased residual ABI does not bind invocation-time effects to the
+activation around the conversion.
+Identically erased row-indexed values require no traversal. Local references,
 including partial applications, use their binding's actual ABI. A record
 field's binder is one of those: it holds the arrow the constructor stored,
 which is what the record's row argument erases to, so a projection wanted at a

@@ -340,7 +340,7 @@ func TestDocExamplesHold(t *testing.T) {
 // line binds a name with `=` or `:`, and Bool assertions otherwise;
 // continuation lines are indented.
 func exampleProgram(texts []string) (program, expected string, assertions int) {
-	imports := map[string]bool{}
+	imports := map[string]bool{"import IO": true, "import Fail": true}
 	var functions, calls, results []string
 	for _, text := range texts {
 		for _, block := range fencedBlocks(text) {
@@ -357,7 +357,10 @@ func exampleProgram(texts []string) (program, expected string, assertions int) {
 				}
 			}
 			name := fmt.Sprintf("example%d", len(functions)+1)
-			var body, checks []string
+			// Give pure and effectful blocks the same concrete IO budget without
+			// changing output. A concrete annotation also bounds fresh permissions.
+			body := []string{"    ignore (Fail.attempt { IO.write IO.stdout \"\" })"}
+			var checks []string
 			for _, item := range items {
 				if declares(item[0]) {
 					for _, line := range item {
@@ -372,14 +375,14 @@ func exampleProgram(texts []string) (program, expected string, assertions int) {
 			}
 			assertions += len(checks)
 			body = append(body, "    [ "+strings.Join(checks, "\n    , ")+"\n    ]")
-			functions = append(functions, name+" : () -> List Bool\n"+name+" _ =\n"+strings.Join(body, "\n")+"\n")
+			functions = append(functions, name+" : () ->{IO} List Bool\n"+name+" _ =\n"+strings.Join(body, "\n")+"\n")
 			calls = append(calls, name+" ()")
 			results = append(results, "["+strings.TrimSuffix(strings.Repeat("True, ", len(checks)), ", ")+"]")
 		}
 	}
 	var b strings.Builder
 	b.WriteString(mergeImports(imports))
-	b.WriteString("\n" + strings.Join(functions, "\n") + "\nmain = [" + strings.Join(calls, ", ") + "]\n")
+	b.WriteString("\n" + strings.Join(functions, "\n") + "\nmain() = print [" + strings.Join(calls, ", ") + "]\n")
 	return b.String(), "[" + strings.Join(results, ", ") + "]\n", assertions
 }
 

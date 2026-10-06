@@ -21,7 +21,7 @@ main() =
     print (Async.runOutcome {
             outerGate = Async.channel 0
             sibling = Async.spawn { Async.receive outerGate }
-            result = Fail.attempt { Async.within {
+            result = Fail.attempt { Async.scope {
                     ready = Async.channel 0
                     gate : Async.Channel Int
                     gate = Async.channel 0
@@ -42,7 +42,7 @@ main() =
             ignore (Async.send gate 3)
             Async.await child
     })
-    print (Async.runOutcome { Async.within {
+    print (Async.runOutcome { Async.scope {
             result = Fail.attempt { Fail.fail "nested catch"; 1 }
             result
     } })

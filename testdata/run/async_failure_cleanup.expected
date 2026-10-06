@@ -1,0 +1,6 @@
+sibling still running during failure cleanup
+failure cleanup finished
+Completed (Err "failed")
+cancelled combinator drained
+Completed Cancelled
+Completed Cancelled

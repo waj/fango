@@ -1,0 +1,9 @@
+root drained
+Completed 42
+task drained
+Completed 7
+scope drained
+Completed (Just 11)
+Completed Cancelled
+outer task drained
+Cancelled

@@ -207,7 +207,10 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[t
 // callbackResidual avoids treating a surrounding row's upper bound as the
 // requirements of a closed callback. A shared quantified tail is the union of
 // the concrete callback rows supplying it, less each callback's explicit row.
-// Open or structurally indirect sources retain ordinary abstract forwarding.
+// Lists of callbacks follow the same rule, including their literal elements.
+// List element budgets can subtract explicit handled labels while forwarding
+// their shared abstract tail. Other open or indirect sources retain ordinary
+// abstract forwarding.
 func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, tyArgs []types.Type, fallback *core.RowArgument) *core.RowArgument {
 	if fallback == nil || len(args) < arity {
 		return fallback
@@ -235,11 +238,18 @@ func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, tyArgs
 	}
 	for i, param := range params {
 		fn, ok := param.(*types.TFun)
+		list := false
 		if !ok {
-			if containsTail(param) {
-				return fallback
+			if con, isList := param.(*types.TCon); isList && con.Name == infer.ListTypeName && len(con.Args) == 1 {
+				fn, ok = con.Args[0].(*types.TFun)
+				list = ok
 			}
-			continue
+			if !ok {
+				if containsTail(param) {
+					return fallback
+				}
+				continue
+			}
 		}
 		if containsTail(fn.Arg) || containsTail(fn.Ret) {
 			return fallback
@@ -249,8 +259,20 @@ func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, tyArgs
 			continue
 		}
 		actual, ok := el.callbackRequirements(args[i])
-		if !ok || actual.Tail != nil {
+		if list {
+			actual, ok = el.listCallbackRequirements(args[i])
+		}
+		if !ok {
 			return fallback
+		}
+		if actual.Tail != nil {
+			if !list {
+				return fallback
+			}
+			if needed.Tail != nil && !types.Equal(needed.Tail, actual.Tail) {
+				return fallback
+			}
+			needed.Tail = actual.Tail
 		}
 		found = true
 		for _, label := range actual.Labels {
@@ -270,6 +292,63 @@ func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, tyArgs
 		return fallback
 	}
 	return el.residualArgument(needed, final.Eff)
+}
+
+// A list literal can have a contextually widened element row. Read each
+// lambda's performed effects before falling back to a nonliteral list's declared
+// element budget. A shared open tail keeps abstract forwarding and its safety
+// checks; unrelated tails conservatively keep the caller's original row.
+func (el *elab) listCallbackRequirements(expr ast.Expr) (types.Row, bool) {
+	row := types.Row{}
+	for {
+		if nilCtor, ok := expr.(*ast.Ctor); ok && nilCtor.Name == infer.ListNilName {
+			return row, true
+		}
+		tail, isApp := expr.(*ast.App)
+		if isApp {
+			head, isHead := tail.Fn.(*ast.App)
+			if isHead {
+				ctor, isCons := head.Fn.(*ast.Ctor)
+				if isCons && ctor.Name == infer.ListConsName {
+					actual, ok := el.callbackRequirements(head.Arg)
+					if !ok {
+						return types.Row{}, false
+					}
+					if actual.Tail != nil {
+						if row.Tail != nil && !types.Equal(row.Tail, actual.Tail) {
+							return types.Row{}, false
+						}
+						row.Tail = actual.Tail
+					}
+					for _, label := range actual.Labels {
+						if !slices.ContainsFunc(row.Labels, func(existing types.EffLabel) bool {
+							return types.EffectLabelKey(existing) == types.EffectLabelKey(label)
+						}) {
+							row.Labels = append(row.Labels, label)
+						}
+					}
+					expr = tail.Arg
+					continue
+				}
+			}
+		}
+		con, ok := el.apply(el.ck.ExprTypes[expr]).(*types.TCon)
+		if !ok || con.Name != infer.ListTypeName || len(con.Args) != 1 {
+			return types.Row{}, false
+		}
+		fn, ok := con.Args[0].(*types.TFun)
+		if !ok {
+			return types.Row{}, false
+		}
+		if fn.Eff.Tail != nil {
+			if row.Tail != nil && !types.Equal(row.Tail, fn.Eff.Tail) {
+				return types.Row{}, false
+			}
+			row.Tail = fn.Eff.Tail
+		}
+		row.Labels = append(row.Labels, fn.Eff.Labels...)
+		return row, true
+	}
 }
 
 // Lambda annotations can be widened by contextual row inclusion. Retain the

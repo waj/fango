@@ -13,12 +13,16 @@ import (
 func TestAsyncValuesAndDrain(t *testing.T) {
 	root := NewAsyncScope(nil)
 	release := make(chan struct{})
-	child := SpawnAsync(root, func(*AsyncScope) AsyncCompletion {
+	cancelled := make(chan struct{})
+	child := SpawnAsync(root, func(scope *AsyncScope) AsyncCompletion {
+		<-scope.Context().Done()
+		close(cancelled)
 		<-release
 		return AsyncCompletion{Value: "Err missing"}
 	})
 	joined := make(chan AsyncCompletion, 1)
 	go func() { joined <- root.Finish(AsyncCompletion{Value: "body"}) }()
+	<-cancelled
 	select {
 	case <-joined:
 		t.Fatal("returned before child cleanup")
@@ -28,8 +32,8 @@ func TestAsyncValuesAndDrain(t *testing.T) {
 	if got := <-joined; got.Cancelled || got.Value != "body" {
 		t.Fatalf("child value changed parent result: %+v", got)
 	}
-	if got := child.Wait(); got.Cancelled || got.Value != "Err missing" {
-		t.Fatalf("lost child value: %+v", got)
+	if got := child.Wait(); !got.Cancelled {
+		t.Fatalf("unfinished child was not cancelled: %+v", got)
 	}
 }
 
@@ -101,11 +105,11 @@ func TestAsyncReturnedErrorsAndCompletedValuesLeaveSiblingsRunning(t *testing.T)
 		t.Fatal("returned data cancelled a sibling")
 	}
 	close(release)
-	if got := root.Finish(AsyncCompletion{Value: 0}); got.Cancelled || got.Value != 0 {
-		t.Fatalf("ignored error changed parent: %+v", got)
-	}
 	if sibling.Wait().Value != true {
 		t.Fatal("sibling was cancelled")
+	}
+	if got := root.Finish(AsyncCompletion{Value: 0}); got.Cancelled || got.Value != 0 {
+		t.Fatalf("ignored error changed parent: %+v", got)
 	}
 }
 
@@ -285,5 +289,153 @@ func TestAsyncHostCancellationDrainsCleanup(t *testing.T) {
 	close(release)
 	if !(<-done).Cancelled || !child.Wait().Cancelled {
 		t.Fatal("lost cancellation")
+	}
+}
+
+func TestAsyncTaskReturnDrainsDescendants(t *testing.T) {
+	root := NewAsyncRoot(context.Background())
+	cleanup, release := make(chan struct{}), make(chan struct{})
+	parent := SpawnAsync(root, func(scope *AsyncScope) AsyncCompletion {
+		SpawnAsync(scope, func(child *AsyncScope) AsyncCompletion {
+			<-child.Context().Done()
+			close(cleanup)
+			<-release
+			return AsyncCompletion{Cancelled: true}
+		})
+		return AsyncCompletion{Value: 42}
+	})
+	<-cleanup
+	select {
+	case <-parent.done:
+		t.Fatal("published parent before descendant cleanup")
+	default:
+	}
+	close(release)
+	if got := parent.Wait(); got.Cancelled || got.Value != 42 {
+		t.Fatalf("normal task exit cancelled its own result: %+v", got)
+	}
+	root.Finish(AsyncCompletion{})
+}
+
+func TestAsyncNestedScopeAndTaskCancellation(t *testing.T) {
+	root := NewAsyncRoot(context.Background())
+	nested := NewAsyncScope(root)
+	nested.Finish(AsyncCompletion{Value: 7})
+	if root.Cancelled() {
+		t.Fatal("normal nested exit cancelled executing task")
+	}
+	child := SpawnAsync(root, func(scope *AsyncScope) AsyncCompletion {
+		inner := NewAsyncScope(scope)
+		inner.CancelTaskOwner()
+		if !scope.Cancelled() {
+			t.Error("nested cancellation did not reach executing task")
+		}
+		inner.Finish(AsyncCompletion{Cancelled: true})
+		return AsyncCompletion{Cancelled: true}
+	})
+	if !child.Wait().Cancelled || root.Cancelled() {
+		t.Fatal("task cancellation reached its starter")
+	}
+	root.Finish(AsyncCompletion{})
+}
+
+func TestAsyncCompletedTasksLeaveRegistry(t *testing.T) {
+	root := NewAsyncRoot(context.Background())
+	for range 1000 {
+		task := SpawnAsync(root, func(*AsyncScope) AsyncCompletion { return AsyncCompletion{Value: 7} })
+		task.Wait()
+		root.mu.Lock()
+		retained := len(root.children)
+		root.mu.Unlock()
+		if retained != 0 {
+			t.Fatalf("retained %d completed tasks", retained)
+		}
+		if task.owner != nil {
+			t.Fatal("completed handle retained its owner's registry")
+		}
+	}
+	value := NewAsyncValue(42)
+	PublishAsyncValue(root, value)
+	root.Finish(AsyncCompletion{})
+	if value.Wait().Value != 42 {
+		t.Fatal("completed handle lost its value")
+	}
+}
+
+func TestAsyncAwaitAny(t *testing.T) {
+	root := NewAsyncRoot(context.Background())
+	if got := AwaitAnyAsync(root, nil); got != -1 {
+		t.Fatalf("empty selection: %d", got)
+	}
+	ready := NewAsyncValue(42)
+	PublishAsyncValue(root, ready)
+	blocked := SpawnAsync(root, func(scope *AsyncScope) AsyncCompletion {
+		<-scope.Context().Done()
+		return AsyncCompletion{Cancelled: true}
+	})
+	for range 3 {
+		if got := AwaitAnyAsync(root, []*AsyncTask{blocked, ready}); got != 1 {
+			t.Fatalf("already-completed selection: %d", got)
+		}
+	}
+	blocked.Cancel()
+	blocked.Wait()
+	if got := AwaitAnyAsync(root, []*AsyncTask{blocked}); got != 0 {
+		t.Fatalf("cancelled target selection: %d", got)
+	}
+	root.Finish(AsyncCompletion{})
+}
+
+func TestAsyncAwaitAnyCancellationWithdrawsSubscriptions(t *testing.T) {
+	root := NewAsyncRoot(context.Background())
+	target := SpawnAsync(root, func(scope *AsyncScope) AsyncCompletion {
+		<-scope.Context().Done()
+		return AsyncCompletion{Cancelled: true}
+	})
+	observer := NewAsyncRoot(context.Background())
+	selected := make(chan int, 1)
+	go func() { selected <- AwaitAnyAsync(observer, []*AsyncTask{target, target}) }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		target.mu.Lock()
+		registered := len(target.waiters) != 0
+		target.mu.Unlock()
+		if registered {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("selection did not register")
+		}
+		runtime.Gosched()
+	}
+	observer.Cancel()
+	if got := <-selected; got != -2 {
+		t.Fatalf("waiter cancellation: %d", got)
+	}
+	target.mu.Lock()
+	retained := len(target.waiters)
+	target.mu.Unlock()
+	if retained != 0 || target.scope.Cancelled() {
+		t.Fatal("selection retained subscriptions or cancelled unrelated target")
+	}
+	observer.Finish(AsyncCompletion{Cancelled: true})
+	root.Finish(AsyncCompletion{})
+}
+
+func TestAsyncAwaitAnyCompletionRegistrationRace(t *testing.T) {
+	for range 100 {
+		root := NewAsyncRoot(context.Background())
+		release := make(chan struct{})
+		task := SpawnAsync(root, func(*AsyncScope) AsyncCompletion {
+			<-release
+			return AsyncCompletion{Value: 7}
+		})
+		selected := make(chan int, 1)
+		go func() { selected <- AwaitAnyAsync(root, []*AsyncTask{task}) }()
+		close(release)
+		if got := <-selected; got != 0 || task.Wait().Value != 7 {
+			t.Fatal("lost completion racing with selection registration")
+		}
+		root.Finish(AsyncCompletion{})
 	}
 }

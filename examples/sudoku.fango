@@ -118,11 +118,11 @@ parallelSolve board =
         (ready, Solved) -> Just ready
         (_, Dead) -> Nothing
         (ready, Pick index options) ->
-            answers = Async.channel (List.length options)
-            tasks = startBranches ready index options answers
-            result = firstAnswer answers (List.length options)
-            List.each Async.cancel tasks
-            result
+            Async.scope {
+                answers = Async.channel (List.length options)
+                ignore (startBranches ready index options answers)
+                firstAnswer answers (List.length options)
+            }
 
 runSolve : List Int ->{IO} Outcome (Maybe (List Int))
 runSolve board = Async.runOutcome { parallelSolve board }

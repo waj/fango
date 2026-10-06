@@ -8,8 +8,9 @@ import (
 )
 
 type valueAdapter struct {
-	from, to types.Type
-	ref      *core.VarRef
+	from, to             types.Type
+	sourceFrom, sourceTo types.Type
+	ref                  *core.VarRef
 }
 
 // Equal surface types can still have different residual callback ABIs, even
@@ -36,7 +37,7 @@ func sameValueABI(a, b types.Type) bool {
 // adaptNominalValue maps an immutable nominal value only when its stored
 // runtime types differ. Row-indexed values whose rows erase identically need
 // no traversal. Recursive conversions are ordinary, typed local functions.
-func (el *elab) adaptNominalValue(e core.Expr, want types.Type) core.Expr {
+func (el *elab) adaptNominalValue(e core.Expr, want, sourceActual, sourceWant types.Type) core.Expr {
 	from, ok := e.Type().(*types.TCon)
 	to, tok := want.(*types.TCon)
 	if !ok || !tok || from.Unique != to.Unique {
@@ -46,8 +47,16 @@ func (el *elab) adaptNominalValue(e core.Expr, want types.Type) core.Expr {
 	if adt == nil {
 		return e
 	}
+	sourceFrom, sourceOK := sourceActual.(*types.TCon)
+	if !sourceOK || sourceFrom.Unique != from.Unique {
+		sourceFrom = from
+	}
+	sourceTo, sourceOK := sourceWant.(*types.TCon)
+	if !sourceOK || sourceTo.Unique != to.Unique {
+		sourceTo = to
+	}
 	for _, a := range el.valueAdapters {
-		if sameValueABI(a.from, from) && sameValueABI(a.to, to) {
+		if sameValueABI(a.from, from) && sameValueABI(a.to, to) && types.Equal(a.sourceFrom, sourceFrom) && types.Equal(a.sourceTo, sourceTo) {
 			return el.valueApp(a.ref, e)
 		}
 	}
@@ -59,9 +68,10 @@ func (el *elab) adaptNominalValue(e core.Expr, want types.Type) core.Expr {
 	el.tmp++
 	fn := &types.TFun{Arg: from, Ret: to}
 	ref := &core.VarRef{Name: name, Local: true, Ty: fn}
-	el.valueAdapters = append(el.valueAdapters, valueAdapter{from: from, to: to, ref: ref})
+	el.valueAdapters = append(el.valueAdapters, valueAdapter{from: from, to: to, sourceFrom: sourceFrom, sourceTo: sourceTo, ref: ref})
 	defer func() { el.valueAdapters = el.valueAdapters[:len(el.valueAdapters)-1] }()
 	fromSub, toSub := adt.ParamSubst(from.Args), adt.ParamSubst(to.Args)
+	sourceFromSub, sourceToSub := adt.ParamSubst(sourceFrom.Args), adt.ParamSubst(sourceTo.Args)
 	tree := &core.SwitchCtor{Scrut: matched, ADT: adt}
 	for _, ctor := range adt.Ctors {
 		binds := make([]string, len(ctor.Fields))
@@ -73,7 +83,7 @@ func (el *elab) adaptNominalValue(e core.Expr, want types.Type) core.Expr {
 			el.tmp++
 			actual := el.eraseRuntimeKinds(eraseRows(types.SubstRigid(field, fromSub)))
 			fields[i] = el.eraseRuntimeKinds(eraseRows(types.SubstRigid(field, toSub)))
-			args[i] = el.adaptFunctionValue(&core.VarRef{Name: binds[i], Local: true, Ty: actual}, fields[i])
+			args[i] = el.adaptFunctionValue(&core.VarRef{Name: binds[i], Local: true, Ty: actual}, fields[i], types.SubstRigid(field, sourceFromSub), types.SubstRigid(field, sourceToSub))
 		}
 		for i := len(fields) - 1; i >= 0; i-- {
 			ctorTy = &types.TFun{Arg: fields[i], Ret: ctorTy}

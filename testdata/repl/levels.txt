@@ -1,6 +1,7 @@
 Fango 0.1 — :help for commands
 > loaded State
 > loaded Char
+loaded Dict
 loaded Iterator
 loaded Runtime.Local
 loaded Runtime.Scope

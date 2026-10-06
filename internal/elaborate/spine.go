@@ -691,7 +691,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 	wantFn, wantOK := want.(*types.TFun)
 	_, actualOK := e.Type().(*types.TFun)
 	if !wantOK || !actualOK {
-		return el.adaptNominalValue(e, want)
+		return el.adaptNominalValue(e, want, sourceActual, sourceWant)
 	}
 	switch e := e.(type) {
 	case *core.Lambda:

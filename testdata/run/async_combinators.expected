@@ -1,0 +1,14 @@
+Just (1, Completed 42)
+Just (0, 42)
+Nothing
+Nothing
+Completed [1, 2]
+Completed (Ok (7, "value"))
+Completed (Ok [1, 2, 3])
+Completed (Ok [])
+failed siblings drained
+Err "second failed"
+Completed (Just 9)
+Completed (Ok [Err "ordinary data"])
+Completed (Just (0, Cancelled))
+Cancelled

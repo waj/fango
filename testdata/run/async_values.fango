@@ -7,15 +7,17 @@ runStrings : (() ->{Async.Async, IO, Fail String | e} a) ->{IO | e} Outcome (Res
 runStrings body = Async.runOutcome { Fail.attempt body }
 
 main() =
-    print (runStrings ({ _ -> Async.within ({ _ -> Async.await (Async.spawn ({ _ -> 7 })) }) }))
-    print (runStrings ({ _ -> Fail.attempt ({ _ -> Async.within ({ _ ->
+    print (runStrings ({ _ -> Async.scope ({ _ -> Async.await (Async.spawn ({ _ -> 7 })) }) }))
+    print (runStrings ({ _ -> Fail.attempt ({ _ -> Async.scope ({ _ ->
         Fail.fail "nested"
         1 }) }) }))
     print (runStrings ({ _ -> Runtime.Scope.finally
         ({ _ ->
-            Async.cancelScope()
-            Async.checkpoint()
-            1 })
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            task = Async.spawn { ignore (Async.receive gate); 1 }
+            Async.cancel task
+            Async.await task })
         ({ _ -> print "cancel cleanup" }) }))
     print (runStrings ({ _ ->
         ch = Async.channel 1

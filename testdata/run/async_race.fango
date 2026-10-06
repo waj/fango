@@ -1,0 +1,57 @@
+import Async exposing (Outcome(..))
+import Fail
+import Result exposing (Result(..))
+import Runtime.Scope
+
+main() =
+    print (Async.runOutcome {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        Fail.attempt { Async.race [
+            { Runtime.Scope.finally {
+                ignore (Async.send ready ())
+                ignore (Async.receive gate)
+                1
+              } { print "race loser drained" } }
+        , { ignore (Async.receive ready); 42 }
+        , { ignore (Async.receive gate); Fail.fail "late failure"; 3 }
+        ] }
+    })
+    print (Async.runOutcome {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        Fail.attempt { Async.race [
+            { Runtime.Scope.finally {
+                ignore (Async.send ready ())
+                ignore (Async.receive gate)
+                1
+              } { print "timeout loser drained" } }
+        , { ignore (Async.receive ready); Fail.fail "timeout"; 2 }
+        ] }
+    })
+    empty : Outcome (Result String Int)
+    empty = Async.runOutcome { Fail.attempt { Async.race [] } }
+    print empty
+    cancelledRace : Outcome (Result String (Maybe Int))
+    cancelledRace = Async.runOutcome {
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        task = Async.spawn { Async.receive gate }
+        Async.cancel task
+        Fail.attempt { Async.race [{ Async.await task }] }
+    }
+    print cancelledRace
+    returned : Outcome (Result String (Result String Int))
+    returned = Async.runOutcome { Fail.attempt { Async.race [{ Err "ordinary data" }] } }
+    print returned
+    cancelledAll : Outcome (Result String (List (Maybe Int)))
+    cancelledAll = Async.runOutcome {
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        task = Async.spawn { Async.receive gate }
+        Async.cancel task
+        Fail.attempt { Async.all [{ Async.await task }] }
+    }
+    print cancelledAll

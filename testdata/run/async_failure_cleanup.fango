@@ -1,0 +1,64 @@
+import Async exposing (Outcome(..), Task)
+import Fail
+import Result exposing (Result(..))
+import Runtime.Scope
+
+main() =
+    print (Async.runOutcome {
+        cleanupStarted = Async.channel 0
+        cleanupRelease = Async.channel 0
+        runSlow = Async.channel 0
+        slowFinished = Async.channel 0
+        coordinator = Async.spawn {
+            ignore (Async.receive cleanupStarted)
+            ignore (Async.send runSlow ())
+            ignore (Async.receive slowFinished)
+            ignore (Async.send cleanupRelease ())
+        }
+        result = Fail.attempt { Async.all [
+            {
+                ignore (Async.receive runSlow)
+                print "sibling still running during failure cleanup"
+                ignore (Async.send slowFinished ())
+                1
+            }
+        , { Runtime.Scope.finally { Fail.fail "failed"; 2 } {
+                ignore (Async.send cleanupStarted ())
+                ignore (Async.receive cleanupRelease)
+                print "failure cleanup finished"
+            } }
+        ] }
+        ignore (Async.await coordinator)
+        result
+    })
+    print (Async.runOutcome {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        group : Task (Result String (List (Maybe Int)))
+        group = Async.spawn {
+            Fail.attempt { Async.all [
+                { Runtime.Scope.finally {
+                    ignore (Async.send ready ())
+                    Async.receive gate
+                  } { print "cancelled combinator drained" } }
+            ] }
+        }
+        ignore (Async.receive ready)
+        Async.cancel group
+        Async.awaitOutcome group
+    })
+    print (Async.runOutcome {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        task = Async.spawnAttempt {
+            Runtime.Scope.finally {
+                ignore (Async.send ready ())
+                Async.receive gate
+            } { Fail.fail "suppressed beneath cancellation" }
+        }
+        ignore (Async.receive ready)
+        Async.cancel task
+        Async.awaitOutcome task
+    })

@@ -19,12 +19,30 @@ scope performing the traversal, so there is no suspended-stack cleanup protocol.
 ## Async runtime foundation
 
 The native Async runtime stores an ordinary task value or cooperative
-cancellation, and drains child scopes before publishing completion. Scope exit
-joins ignored tasks without inspecting their values. A returned application
+cancellation, and drains child scopes before publishing completion. Every exit,
+including normal return, seals registration, cancels unfinished children, and
+waits for their cleanup without inspecting their values. The active-task registry
+removes a task at publication; handles keep its stable outcome without retaining
+the owner's registry. Registration and closure share the registry lock: a late
+launch returns a cancelled handle without executing its callback. A returned application
 Result has no runtime failure state, observation flag, or sibling cancellation
 policy. Repeated and concurrent observations are stable. Cancellation propagates
 down the task tree; cancelling one child does not cancel its parent or siblings.
 Go panics are not translated into application outcomes.
+
+Every spawned task has its own implicit lifetime scope. An explicit nested
+`Async.scope` retains the executing task's identity while changing the current
+lifetime owner. Propagating an observed cancellation targets that executing task,
+including its other scopes and descendants; normal nested exit cancels only the
+nested scope's children. Draining waits without a cancellation-sensitive select,
+so cancellation arriving during cleanup cannot let the owner return early.
+
+Task selection subscribes to each candidate's completion under its publication
+lock, checking already-published outcomes at registration. One buffered
+notification selects an index; completion, cancellation, and return withdraw all
+subscriptions. There are no watcher tasks or process-global selection state.
+Selection creates no ownership relationship and exposes no native payload:
+the Fango observer reads the selected handle's sealed result index.
 
 Its channels linearize transfer, close, and cancellation withdrawal under one
 lock. Closed channels retain buffered values until drained and reject blocked
@@ -51,7 +69,23 @@ caller's goroutine, so an abort leaving them propagates to its lexical handler.
 Their bracket release cancels and drains remaining children first. An abort
 caught inside the body does not leave that lifetime boundary. `runOutcome`
 returns the root value or cancellation; `run` wraps it for Unit-returning
-bodies and discards the outcome only after cleanup and joining finish.
+bodies and discards the outcome only after cancellation and draining finish.
+
+`both`, `all`, and `race` are Fango functions over local Fail handling, explicit
+scopes, and task selection. `all` removes each selected handle from its pending
+list and stores successful values by original index in an immutable dictionary;
+`both` tags its heterogeneous values and uses the same collector. `race` selects
+one terminal outcome. The selected Result leaves the scope before Fail is raised
+in the caller, so losing tasks drain first. Application failure is observable
+only after the failing task's own cleanup and descendant drain. Caller or selected
+participant cancellation remains cancellation; caller cancellation during drain
+takes precedence over a selected application failure. Later losing errors and
+cleanup failures suppressed beneath cancellation are discarded. The API comments
+in [Async](../../stdlib/Async.fango) own these policies and empty-input behavior.
+
+Cancellation-sensitive Async operations in a finalizer still stop immediately
+once cancelled; cancellation masking is not provided. The drain itself is native
+and unconditional. Cancellation-safe close and cancel operations remain usable.
 
 Each handler activation carries an origin, a factory for rebuilding its
 operation closures, and a publication hook. The parent invokes the hooks of
@@ -67,8 +101,10 @@ before the user callback executes. Type descriptors check replacement indices,
 including indirect dependencies and deferred row projections.
 
 Callback dependency summaries retain a known callee's own row rather than the
-ambient row's widened upper bound. Closed callback arguments narrow the residual
-row supplied to generic workers; open or indirect sources retain forwarding.
+ambient row's widened upper bound. Closed callbacks and callback lists narrow
+the residual row supplied to generic workers. Lists can subtract their element
+callbacks' explicit handled labels while forwarding a shared abstract tail;
+other open or indirect sources retain forwarding.
 This prevents unrelated parent effects from becoming child dependencies.
 
 The interpreter starts a fresh invocation environment and uses the same scope,

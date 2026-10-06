@@ -315,25 +315,21 @@ listenerResult stopped first =
 
 runListener : Config -> Channel () -> Net.Listener -> (Channel (Maybe Net.Error) ->{Async, IO} List (Task ())) ->{Async, IO, Fail Net.Error} ()
 runListener config stop listener startWorkers =
-    result = Async.within {
+    result = Async.scope {
         events = Async.channel (config.workers + 1)
-        watcher = Async.spawn {
-            ignore (Async.receive stop)
-            ignore (Async.send events Nothing)
-        }
+        ignore (Async.spawn {
+                ignore (Async.receive stop)
+                ignore (Async.send events Nothing)
+        })
         tasks = startWorkers events
         first = Async.receive events
         stopped = Net.stopListener listener
         cancelStoppedWorkers stopped tasks
-        Async.cancel watcher
-        timer = Async.spawn {
-            Async.sleep config.shutdownGraceMs
-            cancelWorkers tasks
-        }
+        ignore (Async.spawn {
+                Async.sleep config.shutdownGraceMs
+                cancelWorkers tasks
+        })
         awaitWorkers tasks
-        Async.cancel timer
-        ignore (Async.awaitOutcome timer)
-        ignore (Async.awaitOutcome watcher)
         listenerResult stopped first
     }
     fromResult result

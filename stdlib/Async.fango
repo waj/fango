@@ -1,24 +1,31 @@
 {-# no-prelude #-}
 -- Concurrent tasks, cancellation, and channels.
 --
--- `run` starts a root lifetime scope; every scope joins its children before
--- completing. Tasks return ordinary values, including application Results.
--- Returned errors do not cancel siblings or fail the root. Handle application
--- aborts inside spawned callbacks; inherited resumptive handlers share their
--- state cells. Root-body aborts cancel and drain children before propagating.
+-- `run` starts a root lifetime scope. Every task owns its children; returning
+-- from a task or scope cancels unfinished children and drains their cleanup.
+-- Await work whose normal completion matters. `scope` gives helpers a shorter
+-- lifetime; `both`, `all`, and `race` own their tasks and handle application Fail.
+-- Raw tasks return ordinary values, including Results: an Err does not cancel
+-- siblings. Handle application aborts inside spawned callbacks; inherited
+-- resumptive handlers share their state cells.
 -- Cancellation is cooperative: sleeps, channel transfers, and task waits
 -- respond to it, while CPU loops need `checkpoint`. Blocking IO is interrupted
--- only by cancellation-aware APIs such as `Net`. `cancelled`, `cancel`, `close`,
--- and `cancelScope` still work after cancellation; other Async operations leave
--- the cancelled scope. See the language reference under "Handlers in tasks".
+-- only by cancellation-aware APIs such as `Net`. `cancelled`, `cancel`, and `close`
+-- still work after cancellation; cancellation-sensitive operations in cleanup
+-- stop immediately. Draining itself cannot be interrupted. A task that never
+-- responds to cancellation can prevent its owner from finishing. Cancellation
+-- remains the primary outcome when cleanup also fails; its suppressed failures
+-- are discarded. See the language reference under "Handlers in tasks".
 module Async exposing
     ( Async, Channel, Outcome(..), Task
-    , await, awaitOutcome, cancel, cancelScope, cancelled, channel, checkpoint
-    , close, completed, contextToken, parMap, receive, run, runOutcome, send
-    , sleep, spawn, spawnAttempt, wait, within
+    , all, await, awaitAll, awaitAny, awaitAnyOutcome, awaitOutcome, both
+    , cancel, cancelled, channel, checkpoint, close, completed, contextToken
+    , parMap, race, receive, run, runOutcome, scope, send, sleep, spawn
+    , spawnAttempt, wait
     )
 
 import Basics exposing (..)
+import Dict
 import Fail exposing (Fail)
 import IO exposing (IO)
 import List exposing (List)
@@ -36,7 +43,7 @@ type Context = Context Runtime.Native.Any
 type RawTask result = RawTask Runtime.Native.Any
 
 -- A running or finished task that returns a `value`.
--- A task handle may outlive the scope that started it.
+-- A handle may outlive its owning scope, but does not extend the task's lifetime.
 type Task value = Task (RawTask value)
 
 -- A channel carrying values between tasks. It lives independently of the
@@ -47,7 +54,10 @@ type Channel value = Channel Runtime.Native.Any
 {-# resource #-}
 type ReadResult value = ReadResult Runtime.Native.Any
 
--- How a task or scope ended.
+{-# resource #-}
+type Selection = Selection Runtime.Native.Any
+
+-- How a task or root body ended.
 type Outcome value
     -- It finished with this value.
     = Completed value
@@ -55,10 +65,12 @@ type Outcome value
     | Cancelled
     deriving (Eq, Show)
 
--- Running inside a structured task scope. `run`, `runOutcome`, and `within`
+-- Running inside a structured task scope. `run`, `runOutcome`, and `scope`
 -- handle it.
 effect Async
+    -- The current lifetime scope, including during cancellation cleanup.
     current : () -> Scope
+    -- The current lifetime scope, stopping the task if it was cancelled.
     active : () -> Scope
 
 effect Cancellation
@@ -71,8 +83,9 @@ childScope = native
 scopeContext : Scope -> Context
 scopeContext = native
 
--- The current task's opaque cancellation context, for native sidecars that
--- must interrupt a blocking operation when the task is cancelled.
+-- The current lifetime's opaque cancellation context, for native sidecars that
+-- must interrupt a blocking operation when the task or its scope ends. It remains
+-- accessible during cancellation cleanup; obtaining it is not a checkpoint.
 contextToken : () ->{Async} Runtime.Native.Any
 contextToken() =
     case scopeContext current() of
@@ -126,6 +139,13 @@ readValue = native
 closeChannel : Channel value -> ()
 closeChannel = native
 
+newSelection : () -> Selection
+newSelection = native
+addSelection : Selection -> RawTask value -> ()
+addSelection = native
+selectIn : Context -> Selection -> Int
+selectIn = native
+
 enter owner body =
     handle body() on
         current () -> resume owner
@@ -151,27 +171,57 @@ runIn owner body =
         finish owner outcome
     }
 
--- Runs a Unit-returning `body` in a new root scope, joining every child,
--- including ignored handles. Returns Unit after completion or cancellation,
+-- Runs a Unit-returning `body` in a new root scope. On every exit it cancels
+-- unfinished children, including ignored handles, and drains their cleanup.
+-- Returns Unit after completion or cancellation,
 -- so `use Async.run` fits a Unit-returning block such as `main()`.
--- Application aborts leaving the body cancel and join its children before
+-- Application aborts leaving the body cancel and drain its children before
 -- propagating. The caller must permit the body's residual effects; `run`
 -- introduces IO. Use `runOutcome` to inspect completion or cancellation.
+--
+-- ```fango
+-- import Async
+--
+-- Async.run { ignore (Async.await (Async.spawn { 7 })) } == ()
+-- ```
 run : (() ->{Async | effects} ()) ->{IO | effects} ()
 run body = ignore (runOutcome body)
 
 -- Runs `body` in a new root scope, returning its value or cancellation after
--- joining every child, including ignored handles. Application aborts leaving
--- the body cancel and join its children before reaching their outer handler.
+-- cancelling and draining unfinished children, including ignored handles.
+-- Application aborts leaving the body drain its children before their outer handler.
 -- The caller must permit the body's residual effects; `runOutcome` introduces IO.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+--
+-- Async.runOutcome { Async.await (Async.spawn { 42 }) } == Completed 42
+-- ```
 runOutcome : (() ->{Async | effects} value) ->{IO | effects} Outcome value
 runOutcome body = supervise { runIn newRoot() body }
 
--- Runs `body` in a nested scope, joining its children before returning its
--- value. An abort leaving the body cancels and drains those children before
--- propagating; cancellation cancels the caller's scope.
-within : (() ->{Async | effects} value) ->{Async | effects} value
-within body =
+-- Runs `body` on the calling task with a shorter lifetime for its children.
+-- Every exit cancels unfinished children and drains their cleanup. Normal exit
+-- returns the body's value without cancelling the caller or outside tasks.
+-- Cancellation propagates through the calling task; it is not a scope result.
+-- Keep this scope inside any resource scope its tasks use. Unfinished tasks
+-- cannot escape by returning their handles; the handles keep their final outcomes.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+--
+-- result = Async.runOutcome {
+--     Async.scope {
+--         gate : Async.Channel Int
+--         gate = Async.channel 0
+--         ignore (Async.spawn { Async.receive gate })
+--         42
+--     }
+--     }
+-- result == Completed 42
+-- ```
+scope : (() ->{Async | effects} value) ->{Async | effects} value
+scope body =
     owner = active()
     outcome = runIn (childScope owner) body
     case outcome of
@@ -180,11 +230,26 @@ within body =
             cancelOwner owner
             stopCurrent()
 
--- Starts `body` as a child task and returns its handle at once. The caller
+-- Starts `body` as a child of the current lifetime scope and returns its handle
+-- at once. The child owns its own spawns: when its body exits, unfinished
+-- descendants are cancelled and drained before its outcome is published.
+-- Await children that must finish normally. There is no detached spawn.
+-- The caller
 -- must permit all of the body's effects, including IO, even for ignored
 -- handles. Application aborts must be handled inside the callback; known
 -- escapes are rejected statically and hidden dependencies before user code
 -- runs. An ordinary returned Err is a value and does not cancel siblings.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+--
+-- result = Async.runOutcome {
+--     first = Async.spawn { 10 }
+--     second = Async.spawn { 20 }
+--     Async.awaitAll [first, second]
+--     }
+-- result == Completed [10, 20]
+-- ```
 spawn : (() ->{effects} value) ->{Async | effects} Task value
 spawn body =
     owner = active()
@@ -193,10 +258,24 @@ spawn body =
 -- Starts `action` with its named Fail application handled inside the child,
 -- returning a task whose value is a Result. Other abort dependencies still
 -- need local handling. An Err does not cancel siblings or fail the scope.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- Async.runOutcome { Async.await (Async.spawnAttempt { Fail.fail "missing"; 1 }) } == Completed (Err "missing")
+-- ```
 spawnAttempt : (() ->{Fail error | effects} value) ->{Async | effects} Task (Result error value)
 spawnAttempt action = spawn { Fail.attempt action }
 
 -- A task already completed with `value`. An Err is ordinary data.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+--
+-- Async.runOutcome { Async.await (Async.completed 7) } == Completed 7
+-- ```
 completed : value ->{Async} Task value
 completed value =
     owner = active()
@@ -207,7 +286,18 @@ completed value =
 observe task = if taskStatus task == 2 then Cancelled else Completed (taskValue task)
 
 -- Waits, outside any task scope, for the task to finish and answers how it
--- ended.
+-- ended. This IO wait does not provide an Async cancellation point. Repeated
+-- observations keep the same outcome, including after its owner has exited.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+--
+-- saved = Async.runOutcome { Async.completed 7 }
+-- result = case saved of
+--     Completed task -> Async.wait task
+--     Cancelled -> Cancelled
+-- result == Completed 7
+-- ```
 wait : Task value ->{IO} Outcome value
 wait (Task task) =
     waitTask task
@@ -215,7 +305,22 @@ wait (Task task) =
 
 -- Waits for completion and returns the value or the child's cancellation.
 -- Repeated and concurrent observations see one stable outcome. Cancellation
--- of the observer interrupts its own wait without cancelling the target.
+-- of the observer interrupts its wait. Waiting creates no ownership or
+-- cancellation relationship; an owned descendant still follows tree cancellation.
+-- A target's Cancelled outcome does not cancel the observer.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+--
+-- result = Async.runOutcome {
+--     gate : Async.Channel Int
+--     gate = Async.channel 0
+--     task = Async.spawn { Async.receive gate }
+--     Async.cancel task
+--     Async.awaitOutcome task
+--     }
+-- result == Completed Cancelled
+-- ```
 awaitOutcome : Task value ->{Async} Outcome value
 awaitOutcome (Task task) =
     owner = active()
@@ -224,29 +329,222 @@ awaitOutcome (Task task) =
     else
         stopCurrent()
 
--- Waits for the task's value. A cancelled child cancels the observing scope;
+-- Waits for the task's value. A cancelled target cancels the observing task
+-- and its descendants, including when called inside a nested scope;
 -- use `awaitOutcome` to choose a different response. Returned Results remain
 -- ordinary values; use Fail.fromResult explicitly to raise an error here.
+-- The `spawn` example shows awaiting successful work; `awaitOutcome` shows
+-- inspecting cancellation without propagating it.
 await : Task value ->{Async} value
 await task =
     case awaitOutcome task of
         Completed value -> value
-        Cancelled ->
-            cancelScope()
-            stopCurrent()
+        Cancelled -> cancelCurrent()
+
+-- Waits for all task values in input order. Empty input returns []. A cancelled
+-- target cancels the observing task and drains its descendants. Returned Err
+-- values are ordinary data; use `all` to cancel other work on application Fail.
+awaitAll : List (Task value) ->{Async} List value
+awaitAll tasks =
+    ignore active()
+    List.map await tasks
+
+observeAt index tasks =
+    case tasks of
+        [] -> Nothing
+        [Task task | rest] ->
+            if index == 0 then Just (observe task)
+            else observeAt (index - 1) rest
+
+-- Observes one task's terminal outcome and its zero-based input index. Empty
+-- input returns Nothing. A selected cancellation is data. Simultaneously ready
+-- tasks may be selected in any order; repeated calls may select the same task.
+-- Waiter cancellation interrupts selection without adopting or cancelling its
+-- targets, except through an existing ownership relationship.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Maybe exposing (Maybe(..))
+--
+-- result = Async.runOutcome {
+--     task = Async.completed 42
+--     Async.awaitAnyOutcome [task]
+--     }
+-- result == Completed (Just (0, Completed 42))
+-- ```
+awaitAnyOutcome : List (Task value) ->{Async} Maybe (Int, Outcome value)
+awaitAnyOutcome tasks =
+    owner = active()
+    selection = newSelection()
+    List.each { (Task task) -> addSelection selection task } tasks
+    index = selectIn (scopeContext owner) selection
+    if index == -2 then stopCurrent()
+    else
+        case observeAt index tasks of
+            Just outcome -> Just (index, outcome)
+            Nothing -> Nothing
+
+-- Observes one task's value and its zero-based input index. Empty input returns
+-- Nothing; a selected cancellation cancels the observing task and descendants.
+-- Selection and repeated observations follow `awaitAnyOutcome`.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Maybe exposing (Maybe(..))
+--
+-- Async.runOutcome { Async.awaitAny [Async.completed 7] } == Completed (Just (0, 7))
+-- ```
+awaitAny : List (Task value) ->{Async} Maybe (Int, value)
+awaitAny tasks =
+    case awaitAnyOutcome tasks of
+        Nothing -> Nothing
+        Just (index, Completed value) -> Just (index, value)
+        Just (_, Cancelled) -> cancelCurrent()
+
+removeAt index values =
+    case values of
+        [] -> []
+        [value | rest] ->
+            if index == 0 then rest
+            else [value | removeAt (index - 1) rest]
+
+startActions : Int -> List (() ->{Fail error | effects} value) ->{Async | effects} List (Task (Int, Result error value))
+startActions index actions =
+    case actions of
+        [] -> []
+        [action | rest] ->
+            task = spawn { (index, Fail.attempt action) }
+            [task | startActions (index + 1) rest]
+
+startAttempts : List (() ->{Fail error | effects} value) ->{Async | effects} List (Task (Result error value))
+startAttempts actions =
+    case actions of
+        [] -> []
+        [action | rest] ->
+            task = spawnAttempt action
+            [task | startAttempts rest]
+
+collectActions tasks values =
+    case tasks of
+        [] -> Ok (Dict.values values)
+        _ ->
+            case awaitAnyOutcome tasks of
+                Just (index, Completed (original, Ok value)) ->
+                    collectActions (removeAt index tasks) (Dict.insert original value values)
+                Just (_, Completed (_, Err error)) -> Err error
+                _ -> cancelCurrent()
+
+allResults : List (() ->{Fail error | effects} value) ->{Async | effects} Result error (List value)
+allResults actions = scope { collectActions (startActions 0 actions) Dict.empty }
+
+-- Starts every action concurrently and returns values in input order. Empty
+-- input returns []. The first observed application Fail cancels remaining
+-- tasks; after their cleanup it is raised in the caller. A cancelled participant
+-- cancels the caller instead. Caller cancellation also drains all owned work.
+-- Caller cancellation before drain finishes takes precedence over a selected Fail.
+-- Failures are observed after the failing task's cleanup, not at the raise.
+-- Later errors during drain are discarded. Other abort effects need local
+-- handling; a returned Err is ordinary data and does not trigger this policy.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- result : Outcome (Result String (List Int))
+-- result = Async.runOutcome { Fail.attempt { Async.all [{ 1 }, { 2 }] } }
+-- result == Completed (Ok [1, 2])
+-- ```
+all : List (() ->{Fail error | effects} value) ->{Async, Fail error | effects} List value
+all actions = Fail.fromResult (allResults actions)
+
+type BothValue a b = First a | Second b
+
+-- Starts two actions concurrently and returns their values as a pair. Each may
+-- return a different type, but they report the same Fail error type. Cancellation,
+-- first-observed failure, draining, and returned Err data follow `all`.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- result : Outcome (Result String (Int, String))
+-- result = Async.runOutcome { Fail.attempt { Async.both { 1 } { "two" } } }
+-- result == Completed (Ok (1, "two"))
+-- ```
+both : (() ->{Fail error | effects} a) -> (() ->{Fail error | effects} b) ->{Async, Fail error | effects} (a, b)
+both left right =
+    values = all [{ First left() }, { Second right() }]
+    case values of
+        [First first, Second second] -> (first, second)
+        _ -> cancelCurrent()
+
+-- Starts every action concurrently and selects the first observed terminal
+-- outcome. A winning value is returned, a winning Fail is raised in the caller,
+-- and a winning cancellation cancels the caller. Empty input cancels the caller.
+-- Remaining tasks are cancelled and drained before return or propagation, so
+-- this is a prompt cancellation request, not a bounded return deadline.
+-- Simultaneous outcomes may win in any order. Later failures during drain are
+-- discarded. A returned Err is an ordinary winning value. Handle other abort
+-- effects inside the actions. This does not search for the first success.
+-- Caller cancellation before drain finishes takes precedence over the winner.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- result : Outcome (Result String Int)
+-- result = Async.runOutcome {
+--     Fail.attempt {
+--         Async.race [
+--             { 42 }
+--         , {
+--               gate : Async.Channel Int
+--               gate = Async.channel 0
+--               ignore (Async.receive gate)
+--               Fail.fail "timeout"
+--           }
+--         ]
+--     }
+--     }
+-- result == Completed (Ok 42)
+-- ```
+race : List (() ->{Fail error | effects} value) ->{Async, Fail error | effects} value
+race actions = Fail.fromResult (raceResult actions)
+
+raceResult : List (() ->{Fail error | effects} value) ->{Async | effects} Result error value
+raceResult actions =
+    result = scope {
+        tasks = startAttempts actions
+        case awaitAnyOutcome tasks of
+            Just (_, Completed value) -> value
+            _ -> cancelCurrent()
+    }
+    result
 
 -- Requests the task's cancellation, and its children's. It does not cancel
--- the caller.
+-- the caller or siblings. Returns without waiting for cleanup; awaitOutcome
+-- waits for that cleanup and inspects cancellation, as in its example.
 cancel : Task value ->{Async} ()
 cancel (Task task) =
     ignore current()
     cancelTask task
 
--- Requests cancellation of the current scope and its children.
-cancelScope : () ->{Async} ()
-cancelScope() = cancelOwner current()
+cancelCurrent : () ->{Async} value
+cancelCurrent() =
+    cancelOwner current()
+    stopCurrent()
 
--- Whether the current scope has been cancelled.
+-- Whether the current task's active lifetime scope has been cancelled. It
+-- remains usable during cancellation cleanup; it does not stop the task.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+--
+-- Async.runOutcome { Async.cancelled() } == Completed False
+-- ```
 cancelled : () ->{Async} Bool
 cancelled() = scopeCancelled current()
 
@@ -264,13 +562,36 @@ checkpoint() = ignore active()
 
 -- Pauses the task for `milliseconds`, waking early when it is cancelled. A
 -- duration of zero or less is a checkpoint.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+--
+-- Async.runOutcome { Async.checkpoint(); Async.sleep 0; 42 } == Completed 42
+-- ```
 sleep : Int ->{Async} ()
 sleep milliseconds =
     owner = active()
     if sleepIn (scopeContext owner) milliseconds then () else checkpoint()
 
 -- A new channel buffering up to `capacity` values. Zero or less makes it
--- unbuffered: each send waits for a receiver.
+-- unbuffered: each send waits for a receiver. Channels are independent of task
+-- ownership and may outlive their creating scope.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Maybe exposing (Maybe(..))
+--
+-- result = Async.runOutcome {
+--     messages = Async.channel 1
+--     ignore (Async.send messages 42)
+--     Async.close messages
+--     first = Async.receive messages
+--     next = Async.receive messages
+--     rejected = Async.send messages 7
+--     (first, next, rejected)
+--     }
+-- result == Completed (Just 42, Nothing, False)
+-- ```
 channel : Int ->{Async} Channel value
 channel capacity =
     ignore active()
@@ -280,6 +601,8 @@ channel capacity =
 
 -- Sends a value, waiting while the buffer is full. Answers `False` when the
 -- channel is closed, including while waiting.
+-- Cancellation stops the sending task instead of returning False. See
+-- `channel` for a buffered send/close/drain example.
 send : Channel value -> value ->{Async} Bool
 send ch value =
     owner = active()
@@ -291,6 +614,8 @@ send ch value =
 
 -- The next value, waiting while none is buffered, or `Nothing` once the
 -- channel is closed and drained.
+-- Cancellation stops the receiving task instead of returning Nothing. See
+-- `channel` for a buffered send/close/drain example.
 receive : Channel value ->{Async} Maybe value
 receive ch =
     owner = active()
@@ -303,6 +628,8 @@ receive ch =
 
 -- Closes the channel, waking blocked senders and receivers. Closing it again
 -- does nothing.
+-- It remains usable after task cancellation. Buffered values can still be
+-- received before Nothing; see the `channel` example.
 close : Channel value ->{Async} ()
 close ch =
     ignore current()

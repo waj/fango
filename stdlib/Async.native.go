@@ -4,7 +4,7 @@ func NewRoot() any                  { return FangoNewAsyncRoot(FangoHost.Executi
 func ChildScope(parent any) any     { return FangoNewAsyncScope(parent.(*FangoAsyncScope)) }
 func ScopeContext(owner any) any    { return owner }
 func ScopeCancelled(owner any) bool { return owner.(*FangoAsyncScope).Cancelled() }
-func CancelOwner(owner any)         { owner.(*FangoAsyncScope).Cancel() }
+func CancelOwner(owner any)         { owner.(*FangoAsyncScope).CancelTaskOwner() }
 func FinishScope(owner any, status int64) {
 	owner.(*FangoAsyncScope).Finish(FangoAsyncCompletion{Cancelled: status == 2})
 }
@@ -30,6 +30,17 @@ func TaskStatus(task any) int64 { return asyncStatus(task.(*FangoAsyncTask).Resu
 func TaskValue(task any) any    { return task.(*FangoAsyncTask).Result().Value }
 func SleepIn(context any, milliseconds int64) bool {
 	return FangoAsyncSleep(context.(*FangoAsyncScope), milliseconds)
+}
+
+type taskSelection struct{ tasks []*FangoAsyncTask }
+
+func NewSelection() any { return &taskSelection{} }
+func AddSelection(selection, task any) {
+	s := selection.(*taskSelection)
+	s.tasks = append(s.tasks, task.(*FangoAsyncTask))
+}
+func SelectIn(context, selection any) int64 {
+	return int64(FangoAwaitAnyAsync(context.(*FangoAsyncScope), selection.(*taskSelection).tasks))
 }
 
 type asyncChannel struct{ channel *FangoAsyncChannel }

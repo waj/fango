@@ -31,7 +31,7 @@ main() =
                 print (Async.send ch "c")
                 Async.receive ch }))
         _ -> print "unexpected"
-    task = runStrings ({ _ -> Async.spawn ({ _ -> 7 }) })
+    task = runStrings ({ _ -> Async.completed 7 })
     case task of
         Completed savedTask ->
             print (Async.wait savedTask)
@@ -44,8 +44,8 @@ main() =
         Async.cancel child
         Async.awaitOutcome child }))
     print (runStrings ({ _ ->
-        child = Async.spawn ({ _ ->
-            Async.cancelScope()
-            Async.checkpoint()
-            1 })
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        child = Async.spawn { ignore (Async.receive gate); 1 }
+        Async.cancel child
         Async.await child }))

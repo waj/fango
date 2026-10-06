@@ -147,6 +147,25 @@ main() = ignore (Fail.attempt { Async.runOutcome { submit job } })
 `)
 }
 
+func TestAsyncCombinatorsRejectOtherAbortEffects(t *testing.T) {
+	for _, expression := range []string{"Async.all [job]", "Async.race [job]", "Async.both job job"} {
+		t.Run(expression, func(t *testing.T) {
+			testAsyncRejectedBeforeUserCode(t, `import Async
+import Fail exposing (Fail)
+effect Stop
+    abort stop : () -> value
+job : () ->{IO, Fail String, Stop} Int
+job() =
+    print "CHILD_STARTED"
+    if stop() then Fail.fail "handled" else 7
+main() =
+    handle ignore (Fail.attempt { Async.runOutcome { `+expression+` } }) on
+        stop () -> ()
+`)
+		})
+	}
+}
+
 // A same-typed local Fail does not retarget an inherited handler's lexical
 // abort dependency, including dependencies reached through another handler.
 func TestAsyncLocalCaptureDoesNotRetargetInheritedAbort(t *testing.T) {

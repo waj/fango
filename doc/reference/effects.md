@@ -467,16 +467,20 @@ root, or gain a handled flag when observed. `Fail.fromResult (Async.await task)`
 explicitly raises its error in the observer's goroutine. Ignoring a Result or
 its task handle does not change scope policy.
 
-`Async.run`, `Async.runOutcome`, and `Async.within` do not handle or grant Fail.
-A root-body abort caught outside the runner cancels and joins its children
+`Async.run`, `Async.runOutcome`, and `Async.scope` do not handle or grant Fail.
+A root-body abort caught outside the runner cancels and drains its children
 before reaching the handler. Catching it inside the body lets that body continue without leaving
 the lifetime boundary. For a body returning Int and performing `Fail String`,
 `Fail.attempt { Async.runOutcome body }` has type `Result String (Async.Outcome Int)`,
 while `Async.runOutcome { Fail.attempt body }` has type
 `Async.Outcome (Result String Int)`. The same handler-placement rule applies to
-nested `within` scopes.
+nested `scope` lifetimes. A normal return also cancels unfinished children and
+drains them; await work whose normal completion matters. Each task owns its
+descendants, and waiting adds no relationship. The [Async combinators](../../stdlib/Async.fango)
+handle their named Fail inside each task and raise the selected error in the
+caller only after their scope drains; other abort effects still need local handling.
 
-Task inheritance does not extend native resource lifetimes. Keep the joining
+Task inheritance does not extend native resource lifetimes. Keep the draining
 Async scope inside the scope acquiring a shared resource, or acquire the
 resource inside the child. Scoped Reader/Writer permissions still prevent
 transferring their local buffers; see [resources](resources.md).

@@ -1,0 +1,61 @@
+import Async exposing (Outcome(..))
+import Runtime.Scope
+
+blocked ready gate label () = Runtime.Scope.finally {
+        ignore (Async.send ready ())
+        Async.receive gate
+    } { print label }
+
+main() =
+    print (Async.runOutcome {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        ignore (Async.spawn (blocked ready gate "root drained"))
+        ignore (Async.receive ready)
+        42
+    })
+    print (Async.runOutcome {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        parent = Async.spawn {
+            ignore (Async.spawn (blocked ready gate "task drained"))
+            ignore (Async.receive ready)
+            7
+        }
+        Async.await parent
+    })
+    print (Async.runOutcome {
+        gate = Async.channel 0
+        outside = Async.spawn { Async.receive gate }
+        value = Async.scope {
+            ready = Async.channel 0
+            inner : Async.Channel Int
+            inner = Async.channel 0
+            ignore (Async.spawn (blocked ready inner "scope drained"))
+            ignore (Async.receive ready)
+            11
+        }
+        ignore (Async.send gate value)
+        Async.await outside
+    })
+    print (Async.runOutcome {
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        task = Async.scope { Async.spawn { Async.receive gate } }
+        Async.awaitOutcome task
+    })
+    print (Async.runOutcome {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        ignore (Async.spawn (blocked ready gate "outer task drained"))
+        ignore (Async.receive ready)
+        Async.scope {
+            target = Async.spawn { Async.receive gate }
+            Async.cancel target
+            ignore (Async.await target)
+        }
+        print "unreachable"
+    })

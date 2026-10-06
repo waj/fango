@@ -401,6 +401,8 @@ Library examples, as in [Maybe](../../stdlib/Maybe.fango), are fenced
 `fango` blocks. A block brings its own imports, may bind helper names, and
 every other top-level line is a `Bool` expression that holds. The test suite
 runs them under both backends.
+Examples may perform IO, including Async runners; their generated helper
+functions permit IO and the entry function prints the Bool assertion lists.
 
 ### Output
 

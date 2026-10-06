@@ -15,8 +15,8 @@ capture-flow proposal do not authorize expansion of the old architecture.
 
 Measure immutable cons allocation and task overhead on an idle host using the
 retained historical comparisons. Improve private bulk List construction only
-when measurements justify it, preserving immutable published nodes. Add task
-combinators when concrete applications need them, using the existing closure
+when measurements justify it, preserving immutable published nodes. Add further task
+APIs when concrete applications need them, using the existing closure
 invocation boundary. Cancellation-aware socket IO is implemented through
 [Net](../stdlib/Net.fango).
 
@@ -103,11 +103,18 @@ mocking.
 
 ## Async task results and failure policy
 
-Value-returning [tasks](design/tasks.md#async-runtime-foundation) and the checked
-[abort boundary](reference/effects.md#handlers-in-tasks) are implemented.
-[Task ownership and failure policy](roadmap-async-scopes.md) tracks
-cancel-and-drain scope exit (TF2) and opt-in fail-fast combinators (TF1c), with
-explicit groups conditional on a consumer.
+Value-returning [tasks and cancel-and-drain lifetimes](design/tasks.md#async-runtime-foundation),
+the checked [abort boundary](reference/effects.md#handlers-in-tasks), and
+[Async combinators](../stdlib/Async.fango) are implemented.
+
+Deferred until a concrete consumer needs them: explicit-owner spawning,
+narrow cancellation masking, a selector that waits for the first success, and
+mandatory task-result consumption or discarded-result diagnostics. Reporting
+cleanup failures under cancellation or retaining losing application failures
+needs a specified type and bound. A reusable dynamic failure group is conditional
+on channels, scopes, and combinators being insufficient; its registration,
+completion, shutdown, and cancellation must follow explicit evidence rather than
+process-global state.
 
 ## Addressing a specific handler
 
