@@ -4,9 +4,10 @@
 implemented: the modules document their API and report, and the
 [design](design/testing.md) records why expectations abort, why the tree is
 row-indexed, and how `Inspect` renders operands. This document owns what
-remains: failure source positions, a `fango test` command, fuzz tests, and
-pluggable reporters. The main [roadmap](roadmap.md#test-framework) links
-here.
+remains: failure source positions, a `fango test` command, and fuzz tests.
+IO-free execution and pluggable reporters are
+[implemented](design/testing.md#the-report). The main
+[roadmap](roadmap.md#test-framework) links here.
 
 ## Failure source positions
 
@@ -77,9 +78,5 @@ Directions the design leaves room for, none committed:
   over generators built on the `Random` effect, with shrinking. The seed
   reported on failure reproduces the run under `Random.runSeeded`. The
   private constructors of `Test` leave room for the case.
-- **Pluggable reporters.** A reporter effect — the runner performing
-  `suiteStart`, `caseEnd`, and so on, with the console reporter as one
-  handler — for a machine-readable format or a quieter CI mode, without
-  changing the tree.
 - **More expectations** when an example asks: `within` for floats,
   `isTrue`/`isFalse` (`equal True` covers them), and collection helpers.

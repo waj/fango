@@ -188,7 +188,7 @@ and [editor support](reference/commands.md#language-server-and-editor-support) a
 
 [Expect](../stdlib/Expect.fango) and [Test](../stdlib/Test.fango) are
 implemented; see the [design](design/testing.md). [Testing](roadmap-testing.md)
-owns call-site failure positions, a test command, fuzzing, and reporters.
+owns call-site failure positions, a test command, and fuzzing.
 
 ## Tail calls beyond the self-call loop
 

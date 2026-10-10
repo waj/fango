@@ -1,0 +1,11 @@
+import Expect
+import Test
+
+-- Console prints a failed summary but returns normally; exit policy belongs
+-- to run. The return clause also preserves arbitrary action results.
+main() =
+    result = Test.console {
+        summary = Test.execute (Test.test "failure" { Expect.failWith "message" })
+        (summary.failed, 42)
+        }
+    print result

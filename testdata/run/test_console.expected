@@ -1,0 +1,11 @@
+FAIL  failure
+
+    message
+
+TEST RUN FAILED
+
+Passed:  0
+Failed:  1
+Skipped: 0
+Todo:    0
+(1, 42)

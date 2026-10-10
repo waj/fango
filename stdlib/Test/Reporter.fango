@@ -1,0 +1,390 @@
+{-# no-prelude #-}
+-- Handlers for test progress and the command-line test entry point.
+--
+-- [`Test.execute`](../Test.fango) emits `Reporter` events. `console` prints
+-- the traditional failures and summary, `progress` prints dots, and
+-- `documentation` prints groups and indented case names. `silent` discards
+-- events. These handlers return the action's result without exiting.
+-- `run` selects a format from command-line arguments, optionally writes a
+-- JSON report, and sets the process exit status.
+module Test.Reporter exposing
+    ( CaseOutcome(..), Event(..), Reporter(..), Summary(..), Verdict(..)
+    , console, documentation, progress, run, silent
+    )
+
+import Basics exposing (..)
+import Console exposing (write)
+import Expect exposing (Error)
+import File
+import IO exposing (IO)
+import Json exposing (Encode(..))
+import List exposing (List(..), foldl, reverse)
+import Maybe exposing (Maybe(..))
+import Process
+import Result exposing (Result(..))
+import String
+
+-- Progress notifications from `execute`. There is no default handler;
+-- `console`, `silent`, or a custom handler chooses what to do with them.
+effect Reporter
+    -- Reports one event synchronously before execution continues.
+    report : Event -> ()
+
+-- The verdict of a completed suite. Failures take precedence over
+-- incompleteness.
+type Verdict
+    -- Every test passed and the suite was complete.
+    = RunPassed
+    -- A test or group validation failed.
+    | RunFailed
+    -- No failures, but the suite contains `only`, skipped tests, or todos.
+    | RunIncomplete
+    deriving (Eq, Show)
+
+-- The outcome of a leaf in the suite.
+type CaseOutcome
+    -- The body completed without a failing expectation.
+    = CasePassed
+    -- The body's first failing expectation.
+    | CaseFailed Error
+    -- The body or placeholder was skipped explicitly or by focus.
+    | CaseSkipped
+    -- A placeholder with no body, not explicitly skipped.
+    | CaseTodo
+    deriving (Eq, Show)
+
+-- Counts and verdict of a completed suite. Group validation problems each
+-- count as a failure, so the counts can exceed the number of leaves.
+type Summary =
+    {
+      -- Bodies that completed successfully.
+      passed : Int
+      -- Failed bodies plus individual group validation problems.
+    , failed : Int
+      -- Leaves not run because of `skip` or focus.
+    , skipped : Int
+      -- Placeholders not explicitly skipped; focus does not suppress todos.
+    , todo : Int
+      -- Whether the run passed, failed, or was incomplete.
+    , verdict : Verdict
+    }
+    deriving (Eq, Show)
+
+-- A synchronous notification in depth-first tree order. Paths contain
+-- group and leaf names from outermost to innermost, without formatting.
+type Event
+    -- The run begins, with its total number of leaves, including todos and
+    -- skipped leaves. Group validation problems are not included.
+    = SuiteStarted Int
+    -- An active body is about to run.
+    | CaseStarted (List String)
+    -- A leaf completed, failed, was skipped, or is a todo. Skipped leaves
+    -- and todos have no preceding `CaseStarted`.
+    | CaseFinished (List String) CaseOutcome
+    -- One group validation problem, reported before visiting its children.
+    | GroupFailed (List String) String
+    -- The completed summary, identical to the value returned by `execute`.
+    | SuiteFinished Summary
+    deriving (Eq, Show)
+
+-- Handles progress by printing failures and the final summary to standard
+-- output, preserving `run`'s report format. Start events and non-failing
+-- outcomes are silent. Returns the action's result without exiting;
+-- effects besides `Reporter` pass through.
+console : (() ->{Reporter | e} a) ->{IO | e} a
+console action = withFormat ConsoleFormat action
+
+-- Prints one progress character for each completed leaf: `.` for a pass,
+-- `F` for a failure, and `*` for a skipped leaf or todo. Group validation
+-- failures also print `F`. Full failure messages and the summary follow
+-- the progress line. Returns the action's result without exiting.
+progress : (() ->{Reporter | e} a) ->{IO | e} a
+progress action = withFormat ProgressFormat action
+
+-- Prints group headings and indented case names with their outcomes as
+-- leaves complete. Full failure messages and the summary follow. Group
+-- names shared by consecutive paths are printed once. Returns the action's
+-- result without exiting.
+documentation : (() ->{Reporter | e} a) ->{IO | e} a
+documentation action = withFormat DocumentationFormat action
+
+-- Discards progress events and returns the action's result. Effects besides
+-- `Reporter` pass through, so pure suites can execute without IO.
+silent : (() ->{Reporter | e} a) ->{e} a
+silent action =
+    handle action() on
+        report _ -> resume ()
+
+type Format = ConsoleFormat | ProgressFormat | DocumentationFormat | SilentFormat
+
+type OutputState = { failures : List Event, groups : List String }
+
+withFormat : Format -> (() ->{Reporter | e} a) ->{IO | e} a
+withFormat format action =
+    handle action() with state = OutputState { failures = [], groups = [] } on
+        report event ->
+            next = render format state event
+            resume () with next
+
+render : Format -> OutputState -> Event ->{IO} OutputState
+render format state event =
+    case format of
+        SilentFormat -> state
+        ConsoleFormat ->
+            case event of
+                GroupFailed path message -> printFailure path message
+                CaseFinished path (CaseFailed error) -> printFailure path error.message
+                SuiteFinished summary -> printSummary summary
+                _ -> ()
+            state
+        _ ->
+            case event of
+                CaseFinished path outcome ->
+                    groups = parentPath path
+                    case format of
+                        ProgressFormat -> write (progressMark outcome)
+                        _ ->
+                            printGroups 0 state.groups groups
+                            write (indent (List.length groups) ++ displayName (leafName path) ++ " (" ++ outcomeName outcome ++ ")\n")
+                    failures = case outcome of
+                        CaseFailed _ -> [event | state.failures]
+                        _ -> state.failures
+                    { failures = failures, groups = groups }
+                GroupFailed path _ ->
+                    case format of
+                        ProgressFormat -> write "F"
+                        _ -> printGroups 0 state.groups path
+                    { failures = [event | state.failures], groups = path }
+                SuiteFinished summary ->
+                    write "\n"
+                    case format of
+                        ProgressFormat -> write "\n"
+                        _ -> ()
+                    List.each printFailureEvent (reverse state.failures)
+                    printSummary summary
+                    { failures = [], groups = [] }
+                _ -> state
+
+progressMark : CaseOutcome -> String
+progressMark outcome =
+    case outcome of
+        CasePassed -> "."
+        CaseFailed _ -> "F"
+        _ -> "*"
+
+outcomeName : CaseOutcome -> String
+outcomeName outcome =
+    case outcome of
+        CasePassed -> "passed"
+        CaseFailed _ -> "failed"
+        CaseSkipped -> "skipped"
+        CaseTodo -> "todo"
+
+parentPath : List String -> List String
+parentPath path =
+    case reverse path of
+        [] -> []
+        [_ | rest] -> reverse rest
+
+leafName : List String -> String
+leafName path =
+    case reverse path of
+        [] -> ""
+        [name | _] -> name
+
+displayName : String -> String
+displayName name = if name == "" then "\"\"" else name
+
+indent : Int -> String
+indent depth = if depth <= 0 then "" else "  " ++ indent (depth - 1)
+
+printGroups : Int -> List String -> List String ->{IO} ()
+printGroups depth previous next =
+    case next of
+        [] -> ()
+        [name | rest] ->
+            case previous of
+                [old | before] ->
+                    if name == old then printGroups (depth + 1) before rest
+                    else printNewGroups depth next
+                [] -> printNewGroups depth next
+
+printNewGroups : Int -> List String ->{IO} ()
+printNewGroups depth groups =
+    case groups of
+        [] -> ()
+        [name | rest] ->
+            write (indent depth ++ displayName name ++ "\n")
+            printNewGroups (depth + 1) rest
+
+printFailureEvent : Event ->{IO} ()
+printFailureEvent event =
+    case event of
+        GroupFailed path message -> printFailure path message
+        CaseFinished path (CaseFailed error) -> printFailure path error.message
+        _ -> ()
+
+printSummary : Summary ->{IO} ()
+printSummary summary =
+    verdict =
+        case summary.verdict of
+            RunPassed -> "TEST RUN PASSED"
+            RunFailed -> "TEST RUN FAILED"
+            RunIncomplete -> "TEST RUN INCOMPLETE"
+    write (verdict ++ "\n\n")
+    write ("Passed:  " ++ show summary.passed ++ "\n")
+    write ("Failed:  " ++ show summary.failed ++ "\n")
+    write ("Skipped: " ++ show summary.skipped ++ "\n")
+    write ("Todo:    " ++ show summary.todo ++ "\n")
+
+-- Prints one failure: the heading with the path, then the message's lines
+-- indented, each part followed by a blank line.
+printFailure : List String -> String ->{IO} ()
+printFailure path message =
+    write ("FAIL  " ++ heading path ++ "\n\n")
+    List.each { line -> write (if line == "" then "\n" else "    " ++ line ++ "\n") } (String.split "\n" message)
+    write "\n"
+
+-- The names joined by ` > `, an empty name shown as `""`.
+heading : List String -> String
+heading names =
+    case List.map { name -> if name == "" then "\"\"" else name } names of
+        [] -> ""
+        [name | rest] -> foldl { next acc -> acc ++ " > " ++ next } name rest
+
+type JsonCase = { path : List String, outcome : String, message : Maybe String }
+    deriving (Encode)
+type JsonGroupFailure = { path : List String, message : String }
+    deriving (Encode)
+type JsonSummary = { passed : Int, failed : Int, skipped : Int, todo : Int, verdict : String }
+    deriving (Encode)
+type JsonReport = { schemaVersion : Int, cases : List JsonCase, groupFailures : List JsonGroupFailure, summary : JsonSummary }
+    deriving (Encode)
+
+type Collected a = { value : a, cases : List JsonCase, groupFailures : List JsonGroupFailure }
+type CollectionState = { output : OutputState, cases : List JsonCase, groupFailures : List JsonGroupFailure }
+
+usage : String
+usage = "Usage: tests [--format console|progress|documentation|silent] [--json PATH] [--help]\n"
+
+-- Executes a test action using command-line options (without the program
+-- name). With no options it uses `console`. Supported options are:
+--
+-- - `--format console|progress|documentation|silent`: selects stdout output.
+-- - `--json PATH`: also writes a UTF-8 JSON report after the run completes,
+--   replacing PATH if it exists. Its parent directory must exist.
+-- - `--help`: prints usage without executing the action.
+--
+-- Repeated format or JSON options use the last value. Unknown options,
+-- missing values, and invalid formats print a diagnostic and usage, and
+-- exit with status 2 before executing the action. JSON encoding or file
+-- write errors print a diagnostic and exit with status 2. Diagnostics go
+-- to stdout, like the test report. Test failures or incomplete suites exit
+-- with status 1, after writing any requested JSON report; passing complete
+-- suites return normally. Unhandled effects and crashes propagate without
+-- writing a completed report.
+--
+-- The JSON document has `schemaVersion: 1`, `cases`, `groupFailures`, and
+-- `summary`. Each case has a `path` array, `outcome` (`passed`, `failed`,
+-- `skipped`, or `todo`), and `message` (failure text or null). Each group
+-- failure has `path` and `message`. Both arrays retain execution order.
+-- The summary has `passed`, `failed`, `skipped`, `todo`, and `verdict`
+-- (`passed`, `failed`, or `incomplete`). No durations or source positions
+-- are inferred from progress events. A JSON report can accompany any
+-- console format, including `silent`.
+--
+-- ```sh
+-- fango run Tests.fango --format progress --json report.json
+-- fango run Tests.fango --format documentation
+-- fango run Tests.fango --format silent --json report.json
+-- ```
+run : (() ->{Reporter | e} Summary) ->{IO | e} ()
+run action =
+    case parseOptions (Options { format = ConsoleFormat, json = Nothing }) (Process.args ()) of
+        Err message ->
+            write ("Test.run: " ++ message ++ "\n" ++ usage)
+            Process.exit 2
+        Ok Help -> write usage
+        Ok (Run options) ->
+            summary =
+                case options.json of
+                    Nothing -> withFormat options.format action
+                    Just path ->
+                        collected = withReport options.format action
+                        document = JsonReport
+                            { schemaVersion = 1
+                            , cases = collected.cases
+                            , groupFailures = collected.groupFailures
+                            , summary = jsonSummary collected.value
+                            }
+                        case Json.stringify document of
+                            Err problem -> outputError ("JSON encoding failed: " ++ problem.message)
+                            Ok text ->
+                                case File.writeAll path (text ++ "\n") of
+                                    Err problem -> outputError ("JSON report: " ++ IO.describeError problem)
+                                    Ok () -> ()
+                        collected.value
+            if summary.verdict == RunPassed then () else Process.exit 1
+
+type Options = { format : Format, json : Maybe String }
+type Command = Help | Run Options
+
+parseOptions : Options -> List String -> Result String Command
+parseOptions options args =
+    case args of
+        [] -> Ok (Run options)
+        ["--help" | _] -> Ok Help
+        ["--format", format | rest] ->
+            case parseFormat format of
+                Nothing -> Err ("unknown format \"" ++ format ++ "\".")
+                Just chosen -> parseOptions { options | format = chosen } rest
+        ["--format"] -> Err "--format requires a value."
+        ["--json", path | rest] ->
+            if path == "" || String.startsWith "--" path then
+                Err "--json requires a path."
+            else
+                parseOptions { options | json = Just path } rest
+        ["--json"] -> Err "--json requires a path."
+        [arg | _] -> Err ("unknown argument \"" ++ arg ++ "\".")
+
+parseFormat : String -> Maybe Format
+parseFormat format =
+    case format of
+        "console" -> Just ConsoleFormat
+        "progress" -> Just ProgressFormat
+        "documentation" -> Just DocumentationFormat
+        "silent" -> Just SilentFormat
+        _ -> Nothing
+
+outputError : String ->{IO} ()
+outputError message =
+    write ("Test.run: " ++ message ++ "\n")
+    Process.exit 2
+
+withReport : Format -> (() ->{Reporter | e} a) ->{IO | e} Collected a
+withReport format action =
+    handle action() with state = CollectionState { output = OutputState { failures = [], groups = [] }, cases = [], groupFailures = [] } on
+        report event ->
+            output = render format state.output event
+            next =
+                case event of
+                    CaseFinished path outcome ->
+                        message = case outcome of
+                            CaseFailed error -> Just error.message
+                            _ -> Nothing
+                        item = JsonCase { path = path, outcome = outcomeName outcome, message = message }
+                        { state | output = output, cases = [item | state.cases] }
+                    GroupFailed path message ->
+                        item = JsonGroupFailure { path = path, message = message }
+                        { state | output = output, groupFailures = [item | state.groupFailures] }
+                    _ -> { state | output = output }
+            resume () with next
+        return value -> { value = value, cases = reverse state.cases, groupFailures = reverse state.groupFailures }
+
+jsonSummary : Summary -> JsonSummary
+jsonSummary summary =
+    verdict = case summary.verdict of
+        RunPassed -> "passed"
+        RunFailed -> "failed"
+        RunIncomplete -> "incomplete"
+    { passed = summary.passed, failed = summary.failed, skipped = summary.skipped, todo = summary.todo, verdict = verdict }
