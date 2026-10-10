@@ -1,0 +1,131 @@
+-- Immutable timezone rules. UTC and fixed offsets are pure; loading a named
+-- IANA zone performs IO and caches successful loads for this process. System
+-- timezone data takes precedence over the Go toolchain's embedded fallback.
+-- The machine's zone is available only explicitly through `system`. Aliases
+-- retain their requested name.
+--
+-- ```fango
+-- import Time.Zone as Zone
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- Fail.attempt { Zone.fixedOffset (-10800) |> Zone.identifier } == Ok "-03:00"
+-- Fail.attempt { Zone.fixedOffset 0 } == Ok Zone.utc
+-- ```
+module Time.Zone exposing (Zone, firstInRange, fixedOffset, identifier, load, offsetAt, resolve, system, utc)
+
+import Basics exposing (Eq(..), Show(..))
+import Fail exposing (Fail, fail)
+import Maybe exposing (Maybe(..))
+import Runtime.Native
+import Text.Builder as Builder
+import Time exposing (Error(..), Resolution(..))
+import Time.Internal as Checked
+
+-- Shared immutable rules, equal by identifier. Zero fixed offset is UTC.
+type Zone = Zone Runtime.Native.Any
+type Loaded = Loaded Runtime.Native.Any
+type Resolved = Resolved Runtime.Native.Any
+
+zoneUTC : () -> Zone
+zoneUTC = native
+zoneFixed : Int -> Zone
+zoneFixed = native
+zoneLoadRaw : String ->{IO} Loaded
+zoneLoadRaw = native
+zoneSystem : () ->{IO} Zone
+zoneSystem = native
+zoneLoadOK : Loaded -> Bool
+zoneLoadOK = native
+zoneLoaded : Loaded -> Zone
+zoneLoaded = native
+zoneIdentifier : Zone -> String
+zoneIdentifier = native
+zoneOffset : Zone -> Int -> Int
+zoneOffset = native
+zoneResolve : Zone -> Int -> Resolved
+zoneResolve = native
+zoneResolveKind : Resolved -> Int
+zoneResolveKind = native
+zoneEarlier : Resolved -> Int
+zoneEarlier = native
+zoneLater : Resolved -> Int
+zoneLater = native
+zoneFirst : Zone -> Int -> Int -> Resolved
+zoneFirst = native
+
+-- Universal coordinated time, without offset transitions.
+utc : Zone
+utc = zoneUTC()
+
+-- A constant offset in seconds, strictly between -86400 and 86400. Fails
+-- with InvalidComponent "offset".
+fixedOffset : Int ->{Fail Error} Zone
+fixedOffset seconds =
+    Checked.require (InvalidComponent "offset") (seconds > -86400 && seconds < 86400)
+    zoneFixed seconds
+
+-- Looks up an IANA name. Empty names and Local answer Nothing, so the
+-- machine's ambient timezone never enters a value implicitly.
+load : String ->{IO} Maybe Zone
+load name =
+    result = zoneLoadRaw name
+    if zoneLoadOK result then Just (zoneLoaded result) else Nothing
+
+-- The machine's zone, detected once per process from the TZ variable or the
+-- system zone database link. When no IANA name can be determined the rules
+-- still apply but the identifier is "Local", which `load` does not accept.
+system : () ->{IO} Zone
+system() = zoneSystem()
+
+-- The requested IANA name, UTC, Local, or a canonical numeric fixed offset.
+identifier : Zone -> String
+identifier = zoneIdentifier
+
+-- Offset in seconds east of UTC at a Unix second. Always strictly within a
+-- day: zone data violating that contract is rejected when it is applied.
+offsetAt : Int -> Zone -> Int
+offsetAt seconds zone = zoneOffset zone seconds
+
+checkSeconds seconds = Checked.require OutOfRange (seconds >= -62135596800 && seconds <= 253402300799)
+
+-- Resolves a local epoch-second reading (calendar fields encoded as UTC) to
+-- Unix seconds. Earlier/Later shift backward/forward by the actual gap;
+-- Compatible chooses Earlier for overlaps and Later for gaps. Fails with
+-- OutOfRange for a reading outside years 1 through 9999, Ambiguous or
+-- Nonexistent under Reject, and Nonexistent when the zone has no candidate.
+resolve : Resolution -> Int -> Zone ->{Fail Error} Int
+resolve policy local zone =
+    checkSeconds local
+    result = zoneResolve zone local
+    kind = zoneResolveKind result
+    if kind == 0 then zoneEarlier result
+    else if kind == 1 then
+        case policy of
+            Reject -> fail Ambiguous
+            Later -> zoneLater result
+            _ -> zoneEarlier result
+    else if kind == 2 then
+        case policy of
+            Reject -> fail Nonexistent
+            Earlier -> zoneEarlier result
+            _ -> zoneLater result
+    else fail Nonexistent
+
+-- The earliest instant whose local reading lies in [start, finish), both
+-- encoded as local epoch seconds. A completely skipped interval fails with
+-- Nonexistent; bounds outside the calendar fail with OutOfRange. The
+-- exclusive finish may be 10000-01-01.
+firstInRange : Int -> Int -> Zone ->{Fail Error} Int
+firstInRange start finish zone =
+    checkSeconds start
+    Checked.require OutOfRange (finish > start && finish <= 253402300800)
+    result = zoneFirst zone start finish
+    if zoneResolveKind result == 0 then zoneEarlier result else fail Nonexistent
+
+instance Eq Zone
+    (==) a b = identifier a == identifier b
+
+instance Show Zone
+    showTo built zone = Builder.append ("Zone " ++ Builder.stringLiteral (identifier zone)) built
+    showArgTo built zone = Builder.append ")" (showTo (Builder.append "(" built) zone)

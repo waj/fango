@@ -1,0 +1,128 @@
+-- Exact elapsed time at nanosecond precision. Unlike Time.Period, a duration
+-- has no calendar units. Use `hours 24` when exactly 24 hours are intended.
+-- The representation is floor seconds plus a nonnegative nanosecond fraction,
+-- so the range is signed 64-bit seconds. Arithmetic is total: a result beyond
+-- that range wraps like Int, which takes inputs near 10^17 hours. Conversions
+-- to sub-second units answer Nothing when the integer would overflow.
+--
+-- ```fango
+-- import Time.Duration as Duration
+-- import Maybe exposing (Maybe(..))
+--
+-- Duration.toSeconds (Duration.milliseconds (-1500)) == -1
+-- Duration.toMilliseconds (Duration.scale 3 (Duration.milliseconds 500)) == Just 1500
+-- ```
+module Time.Duration exposing (Duration, add, fromParts, hours, microseconds, milliseconds, minutes, nanoseconds, negate, parts, scale, seconds, subtract, toHours, toMicroseconds, toMilliseconds, toMinutes, toNanoseconds, toSeconds, zero)
+
+import Basics exposing (modBy, quotientBy)
+import Maybe exposing (Maybe(..))
+import Time.Internal as Checked
+
+-- An exact signed interval, ordered by elapsed length.
+type Duration = Duration Int Int deriving (Eq, Ord, Show)
+
+-- No elapsed time.
+zero : Duration
+zero = Duration 0 0
+
+-- Normalizes seconds plus a signed nanosecond adjustment.
+fromParts : Int -> Int -> Duration
+fromParts sec nano = Duration (sec + Checked.floorDiv 1000000000 nano) (modBy 1000000000 nano)
+
+-- Floor seconds and the fraction in the range 0 through 999999999.
+parts : Duration -> (Int, Int)
+parts (Duration s n) = (s, n)
+
+-- An exact number of nanoseconds.
+nanoseconds : Int -> Duration
+nanoseconds n = Duration (Checked.floorDiv 1000000000 n) (modBy 1000000000 n)
+
+-- An exact number of microseconds.
+microseconds : Int -> Duration
+microseconds n = Duration (Checked.floorDiv 1000000 n) (modBy 1000000 n * 1000)
+
+-- An exact number of milliseconds.
+milliseconds : Int -> Duration
+milliseconds n = Duration (Checked.floorDiv 1000 n) (modBy 1000 n * 1000000)
+
+-- An exact number of seconds.
+seconds : Int -> Duration
+seconds n = Duration n 0
+
+-- An exact number of minutes.
+minutes : Int -> Duration
+minutes n = seconds (n * 60)
+
+-- An exact number of hours.
+hours : Int -> Duration
+hours n = seconds (n * 3600)
+
+-- Adds two durations.
+add : Duration -> Duration -> Duration
+add (Duration a an) (Duration b bn) = fromParts (a + b) (an + bn)
+
+-- Subtracts the first duration from the second; suitable for pipelines.
+subtract : Duration -> Duration -> Duration
+subtract (Duration b bn) (Duration a an) = fromParts (a - b) (an - bn)
+
+-- Reverses a duration's sign.
+negate : Duration -> Duration
+negate (Duration s n) = fromParts (0 - s) (0 - n)
+
+truncated (Duration s n) = if s < 0 && n > 0 then (s + 1, n - 1000000000) else (s, n)
+
+-- Multiplies by an integer, preserving nanoseconds.
+scale : Int -> Duration -> Duration
+scale factor duration =
+    (s, n) = truncated duration
+    -- Split the factor so the fractional product stays below 10^18.
+    fractional = n * remainderByBillion factor
+    whole = s * factor + n * quotientBy 1000000000 factor
+    fromParts (whole + quotientBy 1000000000 fractional) (remainderByBillion fractional)
+
+remainderByBillion value = value - quotientBy 1000000000 value * 1000000000
+
+maximum = 9223372036854775807
+minimum = -9223372036854775807 - 1
+
+-- Whole units of the given size per second, truncating toward zero and
+-- answering Nothing when the product leaves 64 bits.
+units : Int -> Duration -> Maybe Int
+units factor duration =
+    (s, n) = truncated duration
+    -- One nanosecond fraction fits at most one more unit, which the bounds
+    -- below leave room for.
+    bound = quotientBy factor maximum
+    if s > bound || s < quotientBy factor minimum then Nothing
+    else
+        whole = s * factor
+        fractionUnits = quotientBy (quotientBy factor 1000000000) n
+        if fractionUnits > 0 && whole > maximum - fractionUnits then Nothing
+        else if fractionUnits < 0 && whole < minimum - fractionUnits then Nothing
+        else Just (whole + fractionUnits)
+
+-- Total nanoseconds, or Nothing beyond roughly 292 years.
+toNanoseconds : Duration -> Maybe Int
+toNanoseconds = units 1000000000
+
+-- Whole microseconds, truncating toward zero, or Nothing on overflow.
+toMicroseconds : Duration -> Maybe Int
+toMicroseconds = units 1000000
+
+-- Whole milliseconds, truncating toward zero, or Nothing on overflow.
+toMilliseconds : Duration -> Maybe Int
+toMilliseconds = units 1000
+
+-- Whole seconds, truncating toward zero.
+toSeconds : Duration -> Int
+toSeconds duration =
+    (s, _) = truncated duration
+    s
+
+-- Whole minutes, truncating toward zero.
+toMinutes : Duration -> Int
+toMinutes duration = quotientBy 60 (toSeconds duration)
+
+-- Whole hours, truncating toward zero.
+toHours : Duration -> Int
+toHours duration = quotientBy 3600 (toSeconds duration)

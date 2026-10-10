@@ -1,0 +1,65 @@
+-- A moment on the Unix time line without a timezone: floor seconds and a
+-- nanosecond fraction. Supported moments run from 0001-01-02T00:00:00Z
+-- through 9999-12-30T23:59:59.999999999Z, one day inside the calendar at
+-- each end so that interpreting any instant in any zone yields a local date
+-- within years 1 through 9999. Use Time.DateTime to view an instant in a zone.
+--
+-- ```fango
+-- import Time.Instant as Instant
+-- import Time.Duration as Duration
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- result = Fail.attempt {
+--     start = Instant.fromUnix 1700000000 0
+--     finish = Instant.add (Duration.milliseconds 1500) start
+--     (Instant.toIso finish, Duration.toSeconds (Instant.between start finish))
+--     }
+-- result == Ok ("2023-11-14T22:13:21.5Z", 1)
+-- ```
+module Time.Instant exposing (Instant, add, between, fromUnix, toIso, toUnix)
+
+import Basics exposing (Show(..), modBy, quotientBy)
+import Fail exposing (Fail)
+import Text.Builder as Builder
+import Time exposing (Error(..))
+import Time.Date as Date
+import Time.Duration as Duration
+import Time.Internal as Checked exposing (Instant(..))
+
+-- Constructs from Unix seconds and a signed nanosecond adjustment, which is
+-- carried into the seconds. Fails with OutOfRange outside the supported
+-- moments.
+fromUnix : Int -> Int ->{Fail Error} Instant
+fromUnix seconds nanos =
+    carry = Checked.floorDiv 1000000000 nanos
+    -- Bound the seconds before adding the carry so nothing can wrap.
+    Checked.require OutOfRange (seconds >= Checked.instantMin - carry && seconds <= Checked.instantMax - carry)
+    Instant (seconds + carry) (modBy 1000000000 nanos)
+
+-- Unix floor seconds and the nonnegative nanosecond fraction.
+toUnix : Instant -> (Int, Int)
+toUnix (Instant s n) = (s, n)
+
+-- Moves by exact elapsed time, failing with OutOfRange.
+add : Duration.Duration -> Instant ->{Fail Error} Instant
+add duration (Instant s n) =
+    (ds, dn) = Duration.parts duration
+    -- Reject a shift that cannot land in range before adding, so the sum
+    -- cannot wrap; fromUnix then applies the exact bounds with the carry.
+    Checked.require OutOfRange (ds <= Checked.instantMax - s + 1 && ds >= Checked.instantMin - s - 1)
+    fromUnix (s + ds) (n + dn)
+
+-- Signed elapsed duration from the first moment to the second.
+between : Instant -> Instant -> Duration.Duration
+between (Instant a an) (Instant b bn) = Duration.fromParts (b - a) (bn - an)
+
+-- Canonical UTC ISO timestamp with Z, trimming trailing fractional zeros.
+toIso : Instant -> String
+toIso (Instant s n) =
+    clock = modBy 86400 s
+    Date.toIso (Checked.Date (Checked.floorDiv 86400 s + 719162)) ++ "T" ++ Checked.pad 2 (quotientBy 3600 clock) ++ ":" ++ Checked.pad 2 (modBy 60 (quotientBy 60 clock)) ++ ":" ++ Checked.pad 2 (modBy 60 clock) ++ Checked.fraction n ++ "Z"
+
+instance Show Instant
+    showTo built instant = Builder.append ("Instant " ++ Builder.stringLiteral (toIso instant)) built
+    showArgTo built instant = Builder.append ")" (showTo (Builder.append "(" built) instant)

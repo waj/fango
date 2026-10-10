@@ -55,6 +55,7 @@ var Table = func() map[string]Spec {
 	installBytes(t)
 	installRegex(t)
 	installTextBuilder(t)
+	installTime(t)
 	// The two operator-named Basics natives. The registry key is the
 	// canonical symbol, so it wears the operator spelling.
 	t["Basics./"] = Spec{Arity: 2, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) {
@@ -173,8 +174,8 @@ var Table = func() map[string]Spec {
 		}}
 	}
 	// Bundled natives are compile-time-safe by default: they are pure
-	// functions of their arguments. System entropy is Random's one exclusion,
-	// and the File natives observe the file system; seeded draws now use
+	// functions of their arguments. Entropy, clocks, zone loading, filesystem,
+	// network, and other ambient operations are excluded; seeded draws use
 	// explicit handler-local state.
 	for name, spec := range t {
 		_, file := fileNatives[name]
@@ -183,7 +184,8 @@ var Table = func() map[string]Spec {
 		if name == "IO.lineText" || name == "IO.lineEnding" || name == "IO.standardHandle" {
 			ambient = false
 		}
-		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network && !ambient
+		timeIO := name == "Time.Zone.zoneLoadRaw" || name == "Time.Zone.zoneSystem" || name == "Time.Clock.clockRead"
+		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !timeIO && !file && !network && !ambient
 		t[name] = spec
 	}
 	return t

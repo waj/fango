@@ -1,0 +1,137 @@
+import Async exposing (Outcome(..))
+import Fail exposing (Fail)
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Time exposing (Error(..), Resolution(..))
+import Time.Clock as Clock
+import Time.Date as Date
+import Time.DateTime as DT
+import Time.Duration as Duration
+import Time.Instant as Instant
+import Time.Period as Period
+import Time.TimeOfDay as TOD
+import Time.Zone as Zone
+
+check : String -> Bool ->{Fail Error} ()
+check label passed = if passed then () else Fail.fail (InvalidComponent label)
+
+failed result = case result of
+    Err _ -> True
+    Ok _ -> False
+
+zoneNamed : String ->{IO, Fail Error} Zone.Zone
+zoneNamed name = case Zone.load name of
+    Just found -> found
+    Nothing -> Fail.fail (InvalidComponent name)
+
+inheritedClock : DT.DateTime ->{IO} Outcome DT.DateTime
+inheritedClock value = Clock.runFixed value { Async.runOutcome { task = Async.spawn { Clock.now() }; Async.await task } }
+
+systemInTask : () ->{IO} Outcome DT.DateTime
+systemInTask() = Async.runOutcome {
+    task = Async.spawn { Clock.runSystemIn Zone.utc { Clock.now() } }
+    Async.await task
+}
+
+main = print (Fail.attempt {
+        ny = zoneNamed "America/New_York"
+        tokyo = zoneNamed "Asia/Tokyo"
+        springDate = Date.make 2024 3 10
+        gap = TOD.make 2 30 0 123
+        check "compatible gap" (DT.toIso (DT.make ny springDate gap) == "2024-03-10T03:30:00.000000123-04:00")
+        check "earlier gap" (DT.toIso (DT.makeWith Earlier ny springDate gap) == "2024-03-10T01:30:00.000000123-05:00")
+        check "later gap" (DT.makeWith Later ny springDate gap == DT.make ny springDate gap)
+        check "reject gap" (Fail.attempt { DT.makeWith Reject ny springDate gap } == Err Nonexistent)
+        autumn = Date.make 2024 11 3
+        repeated = TOD.make 1 30 0 0
+        early = DT.make ny autumn repeated
+        late = DT.makeWith Later ny autumn repeated
+        check "overlap" (DT.toIso early == "2024-11-03T01:30:00-04:00" && DT.toIso late == "2024-11-03T01:30:00-05:00")
+        check "overlap instants" (Instant.toIso (DT.toInstant early) == "2024-11-03T05:30:00Z" && Instant.toIso (DT.toInstant late) == "2024-11-03T06:30:00Z")
+        check "reject overlap" (Fail.attempt { DT.makeWith Reject ny autumn repeated } == Err Ambiguous)
+        check "zero identity" (DT.advanceWith Reject Period.zero late == late)
+        check "replace identity" (DT.withTimeWith Reject repeated late == late && DT.withDateWith Reject autumn late == late)
+        before = DT.make ny (Date.make 2024 3 9) (TOD.make 12 0 0 0)
+        next = DT.addDays 1 before
+        check "calendar 23 hours" (Duration.toHours (DT.between before next) == 23 && DT.hour next == 12)
+        check "elapsed 24 hours" (DT.hour (DT.add (Duration.hours 24) before) == 13)
+        beforeAutumn = DT.make ny (Date.make 2024 11 2) (TOD.make 12 0 0 0)
+        check "calendar 25 hours" (Duration.toHours (DT.between beforeAutumn (DT.addDays 1 beforeAutumn)) == 25)
+        (start, finish) = DT.dayRange next
+        check "day range" (Duration.toHours (DT.between start finish) == 23 && start <= next && next < finish)
+        (monthStart, monthFinish) = DT.monthRange next
+        check "month range" (DT.toIso monthStart == "2024-03-01T00:00:00-05:00" && DT.toIso monthFinish == "2024-04-01T00:00:00-04:00")
+        utc = DT.inZone Zone.utc late
+        check "moment equality" (utc == late && DT.sameRepresentation utc late == False && DT.sameRepresentation late late)
+        check "utc iso" (DT.toIso utc == "2024-11-03T06:30:00Z" && DT.toIso (DT.inZone tokyo late) == "2024-11-03T15:30:00+09:00")
+        check "show" (show late == "DateTime \"2024-11-03T01:30:00-05:00\" \"America/New_York\"")
+        check "ordering" (early < late && early <= early && late > early && late >= late)
+        check "pure local fields" (DT.date late == autumn && DT.timeOfDay late == repeated && DT.offsetSeconds late == -18000)
+        check "format offset" (DT.format "%F %T %z %:z %N" late == "2024-11-03 01:30:00 -0500 -05:00 000000000")
+        check "fixed second offset" (DT.format "%z %:z" (DT.inZone (Zone.fixedOffset 37) utc) == "+000037 +00:00:37")
+        check "ISO offset" (DT.parse "2024-11-03T01:30:00-05:00" == late)
+        check "ISO roundtrip" (DT.parse (DT.toIso late) == late && DT.toIso (DT.parse (DT.toIso late)) == DT.toIso late)
+        past = DT.make ny (Date.make 1850 7 1) (TOD.make 12 0 0 0)
+        check "LMT roundtrip" (DT.toIso past == "1850-07-01T12:00:00-04:56:02" && DT.parse (DT.toIso past) == past)
+        check "fractional epoch" (DT.toIso (DT.fromInstant Zone.utc (Instant.fromUnix (-1) 1)) == "1969-12-31T23:59:59.000000001Z")
+        check "instant carry" (Instant.fromUnix 0 (-1) == Instant.fromUnix (-1) 999999999)
+        check "instant arithmetic" (Instant.between (DT.toInstant before) (Instant.add (Duration.milliseconds 1500) (DT.toInstant before)) == Duration.milliseconds 1500)
+        check "missing offset" (failed (Fail.attempt { DT.parse "2024-11-03T01:30:00" }))
+        check "unknown offset" (failed (Fail.attempt { DT.parse "2024-11-03T01:30:00-00:00" }) && failed (Fail.attempt { DT.parse "2024-11-03T01:30:00-00:00:00" }))
+        check "bad offset" (failed (Fail.attempt { DT.parse "2024-11-03T01:30:00+24:00" }))
+        check "trailing input" (failed (Fail.attempt { DT.parse "2024-11-03T01:30:00Zx" }))
+        check "case strict" (failed (Fail.attempt { DT.parse "2024-11-03t01:30:00z" }))
+        check "unknown token verbatim" (DT.format "%Q%" late == "%Q%")
+        check "no local zone" (Zone.load "Local" == Nothing && Zone.load "" == Nothing && Zone.load "No/Such_Zone" == Nothing)
+        check "zone bounds" (Fail.attempt { Zone.fixedOffset 86400 } == Err (InvalidComponent "offset"))
+        apia = zoneNamed "Pacific/Apia"
+        skipped = Date.make 2011 12 30
+        check "skipped date boundary" (Fail.attempt { DT.startOfDay apia skipped } == Err Nonexistent)
+        check "skipped date construction" (Fail.attempt { DT.make apia skipped (TOD.make 12 0 0 0) } == Err Nonexistent)
+        apiaBefore = DT.make apia (Date.make 2011 12 29) (TOD.make 12 0 0 0)
+        (_, apiaFinish) = DT.dayRange apiaBefore
+        check "range crosses skipped date" (Date.toIso (DT.date apiaFinish) == "2011-12-31")
+        lordHowe = zoneNamed "Australia/Lord_Howe"
+        halfDate = Date.make 2024 10 6
+        halfGap = TOD.make 2 15 0 0
+        check "half hour gap" (DT.format "%T" (DT.make lordHowe halfDate halfGap) == "02:45:00")
+        check "half hour earlier" (DT.format "%T" (DT.makeWith Earlier lordHowe halfDate halfGap) == "01:45:00")
+        sao = zoneNamed "America/Sao_Paulo"
+        saoStart = DT.startOfDay sao (Date.make 2018 11 4)
+        check "missing midnight" (DT.hour saoStart == 1 && DT.minute saoStart == 0)
+        check "frozen today" (Clock.runFixed late { Clock.today() } == autumn)
+        check "frozen today elsewhere" (Clock.runFixed late { (Clock.todayIn tokyo, Clock.nowIn tokyo) } == (Date.make 2024 11 3, DT.inZone tokyo late))
+        check "nested clocks" (Clock.runFixed late { inner = Clock.runFixed before { Clock.now() }; (inner, Clock.now()) } == (before, late))
+        check "with zone" (Clock.runFixed late { Clock.withZone tokyo { (Clock.now() == late, Zone.identifier (DT.zone Clock.now()), Clock.today()) } } == (True, "Asia/Tokyo", Date.make 2024 11 3))
+        check "with zone restores" (Clock.runFixed late { Clock.withZone tokyo { () }; Zone.identifier (DT.zone Clock.now()) } == "America/New_York")
+        inherited = inheritedClock late
+        check "task inherits clock" (inherited == Completed late)
+        system = Clock.runSystemIn Zone.utc { Clock.now() }
+        check "system clock zone" (Zone.identifier (DT.zone system) == "UTC")
+        check "system clock elsewhere" (Clock.runSystemIn Zone.utc { Zone.identifier (DT.zone (Clock.nowIn tokyo)) } == "Asia/Tokyo")
+        machine = Zone.system()
+        check "machine zone" (Zone.identifier machine /= "" && Clock.runSystem { DT.zone Clock.now() } == machine)
+        check "machine zone shared" (case Zone.load (Zone.identifier machine) of
+                Just loaded -> loaded == machine
+                Nothing -> Zone.identifier machine == "Local"
+        )
+        check "system clock plausible" (DT.year system >= 2026)
+        taskClockValid = case systemInTask() of
+            Completed value -> Zone.identifier (DT.zone value) == "UTC"
+            _ -> False
+        check "system clock in task" taskClockValid
+        low = DT.parse "0001-01-02T00:00:00Z"
+        high = DT.parse "9999-12-30T23:59:59.999999999Z"
+        check "timestamp minimum" (DT.toIso low == "0001-01-02T00:00:00Z")
+        check "timestamp maximum" (DT.toIso high == "9999-12-30T23:59:59.999999999Z")
+        check "beyond minimum" (Fail.attempt { DT.parse "0001-01-01T23:59:59Z" } == Err (InvalidText "0001-01-01T23:59:59Z"))
+        check "beyond maximum" (failed (Fail.attempt { DT.parse "9999-12-31T00:00:00Z" }))
+        check "conversion total at minimum" (Date.toIso (DT.date (DT.inZone (Zone.fixedOffset (-86399)) low)) == "0001-01-01")
+        check "conversion total at maximum" (Date.toIso (DT.date (DT.inZone (Zone.fixedOffset 86399) high)) == "9999-12-31")
+        check "make beyond range" (Fail.attempt { DT.make (Zone.fixedOffset 3600) (Date.make 1 1 1) TOD.midnight } == Err OutOfRange)
+        check "add beyond range" (Fail.attempt { DT.add (Duration.nanoseconds 1) high } == Err OutOfRange)
+        check "add huge" (Fail.attempt { DT.add (Duration.seconds 9223372036854775807) high } == Err OutOfRange)
+        check "range beyond limit" (Fail.attempt { DT.yearRange high } == Err OutOfRange)
+        check "week beginning at limit" (Date.toIso (DT.date (DT.beginningOfWeek high)) == "9999-12-27")
+        True
+})

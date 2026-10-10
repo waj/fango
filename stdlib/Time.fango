@@ -1,0 +1,57 @@
+{-# no-prelude #-}
+-- Gregorian dates, zoned moments, exact durations, and calendar periods.
+-- Import the individual Time modules, normally with aliases such as
+-- `import Time.Date as Date`. Values are immutable; calendar arithmetic never
+-- consults a system clock. Zone conversion and formatting are total; the few
+-- fallible operations use `Fail Error`, and each one's comment names the
+-- constructors it can raise.
+module Time exposing (Error(..), Resolution(..), Weekday(..))
+
+import Basics exposing (..)
+
+-- A checked time operation could not produce a value.
+type Error
+    -- A component given to a constructor is outside its range; the text names it.
+    = InvalidComponent String
+    -- Text does not match the documented ISO grammar or denotes an
+    -- unrepresentable moment.
+    | InvalidText String
+    -- The result leaves the supported calendar: dates in years 1 through
+    -- 9999, moments from 0001-01-02T00:00:00Z through 9999-12-30T23:59:59Z.
+    | OutOfRange
+    -- A local clock reading occurs twice and the policy rejects it.
+    | Ambiguous
+    -- A local clock reading does not occur: a gap under the Reject policy, or
+    -- a calendar date with no instants at all under any policy.
+    | Nonexistent
+    deriving (Eq, Show)
+
+-- How a local clock reading is resolved across an offset transition.
+type Resolution
+    -- Earlier in an overlap; forward by the gap for a skipped reading.
+    = Compatible
+    -- The earlier instant, moving backward by the gap for a skipped reading.
+    | Earlier
+    -- The later instant, moving forward by the gap for a skipped reading.
+    | Later
+    -- Fail for either an overlap or a skipped reading.
+    | Reject
+    deriving (Eq, Show)
+
+-- ISO weekdays, ordered Monday through Sunday.
+type Weekday
+    -- ISO weekday 1.
+    = Monday
+    -- ISO weekday 2.
+    | Tuesday
+    -- ISO weekday 3.
+    | Wednesday
+    -- ISO weekday 4.
+    | Thursday
+    -- ISO weekday 5.
+    | Friday
+    -- ISO weekday 6.
+    | Saturday
+    -- ISO weekday 7.
+    | Sunday
+    deriving (Eq, Ord, Show)

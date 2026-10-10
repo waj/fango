@@ -90,6 +90,10 @@ for otherwise unavailable semantics or measured performance needs.
 - Dict balance needs a durable gate: abstract exports hide height, and existing
   insertion-order fixtures prove correctness rather than balance. A manual
   n-log-n versus quadratic benchmark is the proposed check.
+- [Time](../stdlib/Time.fango) provides Gregorian dates, instants, zoned
+  moments, exact durations, calendar periods, and scoped clocks. Recurrence, holiday calendars,
+  localized formatting, custom-pattern parsing, automatic JSON codecs, and
+  monotonic timing remain deferred until concrete consumers need them.
 
 ## HTTP and a concurrent server
 

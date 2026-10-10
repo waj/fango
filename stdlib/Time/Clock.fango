@@ -1,0 +1,90 @@
+-- Scoped access to the current moment and a default zone. Install runSystem
+-- or runSystemIn explicitly in production or runFixed in tests; withZone
+-- changes only the default zone of an enclosing clock. Existing values never consult this
+-- effect for arithmetic. Handlers nest and are inherited by tasks like other
+-- effects, and none of them can fail.
+--
+-- ```fango
+-- import Time.Clock as Clock
+-- import Time.Date as Date
+-- import Time.DateTime as DT
+-- import Time.Zone as Zone
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- result = Fail.attempt {
+--     fixed = DT.parse "2026-01-31T23:00:00-03:00"
+--     Clock.runFixed fixed { (Date.toIso Clock.today(), Date.toIso (Clock.todayIn Zone.utc)) }
+--     }
+-- result == Ok ("2026-01-31", "2026-02-01")
+-- ```
+module Time.Clock exposing (Clock(..), now, nowIn, runFixed, runSystem, runSystemIn, today, todayIn, withZone)
+
+import Runtime.Native
+import Time.Date as Date
+import Time.DateTime as DateTime
+import Time.Instant as Instant
+import Time.Internal as Checked
+import Time.Zone as Zone
+
+-- Reads the clock. There is no ambient default handler.
+effect Clock
+    -- The current moment.
+    instant : () -> Instant.Instant
+    -- The default zone that now and today use.
+    zone : () -> Zone.Zone
+
+type Sample = Sample Runtime.Native.Any
+clockRead : () ->{IO} Sample
+clockRead = native
+clockSeconds : Sample -> Int
+clockSeconds = native
+clockNanos : Sample -> Int
+clockNanos = native
+
+-- The current moment in the default zone.
+now : () ->{Clock} DateTime.DateTime
+now() = DateTime.fromInstant zone() instant()
+
+-- The current moment in the given zone.
+nowIn : Zone.Zone ->{Clock} DateTime.DateTime
+nowIn target = DateTime.fromInstant target instant()
+
+-- The date from a single reading of the clock, in the default zone.
+today : () ->{Clock} Date.Date
+today() = DateTime.date now()
+
+-- The date from a single reading of the clock, in the given zone.
+todayIn : Zone.Zone ->{Clock} Date.Date
+todayIn target = DateTime.date (nowIn target)
+
+-- Answers every reading with the same moment and the value's zone, without
+-- performing IO.
+runFixed : DateTime.DateTime -> (() ->{Clock | e} a) ->{e} a
+runFixed value action =
+    handle action() on
+        instant () -> resume (DateTime.toInstant value)
+        zone () -> resume (DateTime.zone value)
+
+-- Samples the system clock once per reading, with the machine's zone (see
+-- Time.Zone.system) as the default, detected when the handler is installed.
+runSystem : (() ->{Clock | e} a) ->{IO | e} a
+runSystem action = runSystemIn Zone.system() action
+
+-- Samples the system clock once per reading and uses the given default zone.
+-- A host clock outside years 1 through 9999 is a runtime fault, not a value.
+runSystemIn : Zone.Zone -> (() ->{Clock | e} a) ->{IO | e} a
+runSystemIn target action =
+    handle action() on
+        instant () ->
+            sample = clockRead()
+            resume (Checked.Instant (clockSeconds sample) (clockNanos sample))
+        zone () -> resume target
+
+-- Changes the default zone while readings continue to come from the
+-- enclosing clock.
+withZone : Zone.Zone -> (() ->{Clock | e} a) ->{Clock | e} a
+withZone target action =
+    handle action() on
+        instant () -> resume instant()
+        zone () -> resume target

@@ -1,0 +1,291 @@
+-- An exact moment viewed in a timezone. Equality and ordering compare the
+-- moment; sameRepresentation also compares the zone identifier. Calendar
+-- calculations use the stored zone, so equal moments in different zones can
+-- advance to different moments. Viewing a moment in another zone never fails:
+-- see Time.Instant for the supported range that makes this so.
+--
+-- `add` moves by elapsed time; `advance` moves local calendar fields. Compatible
+-- resolution chooses the earlier overlap and moves forward by a gap. Zero
+-- adjustments and unchanged field replacements preserve the original moment.
+-- ISO output is the local reading with its offset, which parse accepts, so a
+-- round trip keeps the moment and the local view but not an IANA zone name:
+-- store that identifier separately when the zone must survive serialization.
+--
+-- ```fango
+-- import Time.DateTime as DT
+-- import Time.Zone as Zone
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- result = Fail.attempt {
+--     local = DT.parse "2026-10-07T09:00:00-03:00"
+--     utc = DT.inZone Zone.utc local
+--     (DT.toIso utc, local == utc, DT.sameRepresentation local utc)
+--     }
+-- result == Ok ("2026-10-07T12:00:00Z", True, False)
+-- ```
+module Time.DateTime exposing (DateTime, add, addDays, addMonths, addWeeks, addYears, advance, advanceWith, beginningOfDay, beginningOfMonth, beginningOfQuarter, beginningOfWeek, beginningOfWeekOn, beginningOfYear, between, date, day, dayRange, format, fromInstant, hour, inZone, make, makeWith, minute, month, monthRange, nanosecond, offsetSeconds, parse, quarterRange, sameRepresentation, second, startOfDay, timeOfDay, toInstant, toIso, weekRange, weekday, withDate, withDateWith, withTime, withTimeWith, year, yearRange, zone)
+
+import Basics exposing (Eq(..), Ord(..), Show(..), ignore, modBy, quotientBy)
+import Fail exposing (Fail, fail)
+import Maybe exposing (Maybe(..))
+import String
+import Text.Builder as Builder
+import Time exposing (Error(..), Resolution(..), Weekday(..))
+import Time.Date as Date
+import Time.Duration as Duration
+import Time.Instant as Instant
+import Time.Internal as Checked
+import Time.Period as Period
+import Time.TimeOfDay as TOD
+import Time.Zone as Zone
+
+-- The moment, its zone, and the local date and clock reading in that zone.
+-- The local fields are derived once at construction so accessors are pure.
+type DateTime = DateTime Instant.Instant Zone.Zone Date.Date TOD.TimeOfDay
+
+-- Views an instant in a zone. Every supported instant has a local date within
+-- the calendar for every zone, so this never fails.
+fromInstant : Zone.Zone -> Instant.Instant -> DateTime
+fromInstant target instant =
+    (seconds, nanos) = Instant.toUnix instant
+    local = seconds + Zone.offsetAt seconds target
+    DateTime instant target (Checked.Date (Checked.floorDiv 86400 local + 719162)) (Checked.TimeOfDay (modBy 86400 local * 1000000000 + nanos))
+
+-- The moment, without the zone.
+toInstant : DateTime -> Instant.Instant
+toInstant (DateTime instant _ _ _) = instant
+
+-- Constructs local fields with Compatible resolution. Fails with Nonexistent
+-- for a date the zone skips entirely and OutOfRange at the calendar's ends.
+make : Zone.Zone -> Date.Date -> TOD.TimeOfDay ->{Fail Error} DateTime
+make = makeWith Compatible
+
+-- Constructs local fields with an explicit transition resolution policy.
+-- Reject additionally fails with Ambiguous or Nonexistent at a transition.
+makeWith : Resolution -> Zone.Zone -> Date.Date -> TOD.TimeOfDay ->{Fail Error} DateTime
+makeWith policy target localDate localTime =
+    local = Date.toEpochDays localDate * 86400 + quotientBy 1000000000 (TOD.toNanoseconds localTime)
+    seconds = Zone.resolve policy local target
+    result = fromInstant target (Instant.fromUnix seconds (TOD.nanosecond localTime))
+    -- Gap adjustment may change the time, but must not silently replace a
+    -- wholly skipped requested date with an adjacent one.
+    if date result /= localDate then
+        ignore (Zone.firstInRange (Date.toEpochDays localDate * 86400) ((Date.toEpochDays localDate + 1) * 86400) target)
+        result
+    else result
+
+-- Local calendar date in the stored zone.
+date : DateTime -> Date.Date
+date (DateTime _ _ d _) = d
+
+-- Local clock reading in the stored zone.
+timeOfDay : DateTime -> TOD.TimeOfDay
+timeOfDay (DateTime _ _ _ t) = t
+
+-- The stored timezone rules.
+zone : DateTime -> Zone.Zone
+zone (DateTime _ z _ _) = z
+
+-- The actual offset at this moment, in seconds east of UTC.
+offsetSeconds : DateTime -> Int
+offsetSeconds value =
+    (seconds, _) = Instant.toUnix (toInstant value)
+    Date.toEpochDays (date value) * 86400 + quotientBy 1000000000 (TOD.toNanoseconds (timeOfDay value)) - seconds
+
+-- Local calendar year.
+year : DateTime -> Int
+year value = Date.year (date value)
+-- Local calendar month.
+month : DateTime -> Int
+month value = Date.month (date value)
+-- Local day of month.
+day : DateTime -> Int
+day value = Date.day (date value)
+-- Local hour.
+hour : DateTime -> Int
+hour value = TOD.hour (timeOfDay value)
+-- Local minute.
+minute : DateTime -> Int
+minute value = TOD.minute (timeOfDay value)
+-- Local second.
+second : DateTime -> Int
+second value = TOD.second (timeOfDay value)
+-- Nanosecond fraction.
+nanosecond : DateTime -> Int
+nanosecond value = TOD.nanosecond (timeOfDay value)
+-- Local ISO weekday.
+weekday : DateTime -> Weekday
+weekday value = Date.weekday (date value)
+
+-- Preserves the moment while changing its zone and local fields.
+inZone : Zone.Zone -> DateTime -> DateTime
+inZone target value = fromInstant target (toInstant value)
+
+-- Whether both moment and stored zone identifier agree.
+sameRepresentation : DateTime -> DateTime -> Bool
+sameRepresentation a b = toInstant a == toInstant b && zone a == zone b
+
+-- Moves by exact elapsed time while retaining the zone. Fails with OutOfRange.
+add : Duration.Duration -> DateTime ->{Fail Error} DateTime
+add duration value = fromInstant (zone value) (Instant.add duration (toInstant value))
+
+-- Signed elapsed duration from the first moment to the second.
+between : DateTime -> DateTime -> Duration.Duration
+between start finish = Instant.between (toInstant start) (toInstant finish)
+
+-- Applies calendar months with clamping, then days, resolving once at the end
+-- with Compatible resolution. Fails with OutOfRange, or Nonexistent for a
+-- skipped date.
+advance : Period.Period -> DateTime ->{Fail Error} DateTime
+advance = advanceWith Compatible
+
+-- Calendar movement with an explicit resolution policy. Unchanged local
+-- fields preserve the original occurrence even during a repeated hour.
+advanceWith : Resolution -> Period.Period -> DateTime ->{Fail Error} DateTime
+advanceWith policy period value = withDateWith policy (Date.advance period (date value)) value
+
+-- Moves by local calendar days, preserving the clock reading where possible.
+addDays : Int -> DateTime ->{Fail Error} DateTime
+addDays count = advance (Period.days count)
+-- Moves by local seven-day weeks.
+addWeeks : Int -> DateTime ->{Fail Error} DateTime
+addWeeks count = advance (Period.weeks count)
+-- Moves by calendar months with day clamping.
+addMonths : Int -> DateTime ->{Fail Error} DateTime
+addMonths count = advance (Period.months count)
+-- Moves by calendar years with day clamping.
+addYears : Int -> DateTime ->{Fail Error} DateTime
+addYears count = advance (Period.years count)
+
+-- Replaces the local date, retaining the zone and using Compatible resolution.
+withDate : Date.Date -> DateTime ->{Fail Error} DateTime
+withDate = withDateWith Compatible
+-- Replaces the local date with an explicit resolution policy; fails as makeWith.
+withDateWith : Resolution -> Date.Date -> DateTime ->{Fail Error} DateTime
+withDateWith policy replacement value =
+    if replacement == date value then value else makeWith policy (zone value) replacement (timeOfDay value)
+-- Replaces the local clock reading, retaining the zone and resolving compatibly.
+withTime : TOD.TimeOfDay -> DateTime ->{Fail Error} DateTime
+withTime = withTimeWith Compatible
+-- Replaces the local clock reading with an explicit resolution policy; fails as makeWith.
+withTimeWith : Resolution -> TOD.TimeOfDay -> DateTime ->{Fail Error} DateTime
+withTimeWith policy replacement value =
+    if replacement == timeOfDay value then value else makeWith policy (zone value) (date value) replacement
+
+first start finish target =
+    fromInstant target (Instant.fromUnix (Zone.firstInRange (Date.toEpochDays start * 86400) ((Date.toEpochDays finish + 1) * 86400) target) 0)
+
+-- The first valid instant of a date, which need not be midnight. Fails with
+-- Nonexistent for a date the zone skips and OutOfRange at the calendar's ends.
+startOfDay : Zone.Zone -> Date.Date ->{Fail Error} DateTime
+startOfDay target localDate = first localDate localDate target
+-- The first valid instant of this local day; fails as startOfDay.
+beginningOfDay : DateTime ->{Fail Error} DateTime
+beginningOfDay value = startOfDay (zone value) (date value)
+-- The first valid instant of this Monday-based week; fails as startOfDay.
+beginningOfWeek : DateTime ->{Fail Error} DateTime
+beginningOfWeek = beginningOfWeekOn Monday
+-- The first valid instant of a week starting on the specified weekday; fails
+-- as startOfDay.
+beginningOfWeekOn : Weekday -> DateTime ->{Fail Error} DateTime
+beginningOfWeekOn weekdayStart value =
+    start = Date.beginningOfWeekOn weekdayStart (date value)
+    -- The final week of the calendar is cut short at December 31.
+    finish = if Date.toEpochDays start > 2932890 then Date.endOfYear start else Date.addDays 6 start
+    first start finish (zone value)
+-- The first valid instant within this local month; fails as startOfDay.
+beginningOfMonth : DateTime ->{Fail Error} DateTime
+beginningOfMonth value = first (Date.beginningOfMonth (date value)) (Date.endOfMonth (date value)) (zone value)
+-- The first valid instant within this local quarter; fails as startOfDay.
+beginningOfQuarter : DateTime ->{Fail Error} DateTime
+beginningOfQuarter value = first (Date.beginningOfQuarter (date value)) (Date.endOfQuarter (date value)) (zone value)
+-- The first valid instant within this local year; fails as startOfDay.
+beginningOfYear : DateTime ->{Fail Error} DateTime
+beginningOfYear value = first (Date.beginningOfYear (date value)) (Date.endOfYear (date value)) (zone value)
+
+range start finish target =
+    lower = first start finish target
+    next = Date.addDays 1 finish
+    -- A missing next date still marks a boundary: find the first instant at
+    -- or after its nominal midnight, not a shifted last instant of this period.
+    upper = fromInstant target (Instant.fromUnix (Zone.firstInRange (Date.toEpochDays next * 86400) 253402300800 target) 0)
+    (lower, upper)
+
+-- Half-open [start, nextStart) bounds of this local day. Fails with
+-- Nonexistent for a skipped date and OutOfRange when the upper bound leaves
+-- the supported moments.
+dayRange : DateTime ->{Fail Error} (DateTime, DateTime)
+dayRange value = range (date value) (date value) (zone value)
+-- Half-open bounds of this Monday-based week; fails as dayRange.
+weekRange : DateTime ->{Fail Error} (DateTime, DateTime)
+weekRange value =
+    start = Date.beginningOfWeek (date value)
+    range start (Date.addDays 6 start) (zone value)
+-- Half-open bounds of this local month; fails as dayRange.
+monthRange : DateTime ->{Fail Error} (DateTime, DateTime)
+monthRange value = range (Date.beginningOfMonth (date value)) (Date.endOfMonth (date value)) (zone value)
+-- Half-open bounds of this local quarter; fails as dayRange.
+quarterRange : DateTime ->{Fail Error} (DateTime, DateTime)
+quarterRange value = range (Date.beginningOfQuarter (date value)) (Date.endOfQuarter (date value)) (zone value)
+-- Half-open bounds of this local year; fails as dayRange.
+yearRange : DateTime ->{Fail Error} (DateTime, DateTime)
+yearRange value = range (Date.beginningOfYear (date value)) (Date.endOfYear (date value)) (zone value)
+
+-- Strict ISO timestamp: YYYY-MM-DDTHH:MM:SS[.1–9 digits] followed by Z or
+-- ±HH:MM[:SS]. The result carries UTC or a fixed-offset zone. Offsets are
+-- required; unknown offset -00:00, leap seconds, 24:00, and moments outside
+-- the supported range fail with InvalidText.
+parse : String ->{Fail Error} DateTime
+parse text =
+    size = String.length text
+    Checked.require (InvalidText text) (size >= 20 && String.slice 10 11 text == "T")
+    isUTC = String.slice (size - 1) size text == "Z"
+    withSeconds = size >= 23 && String.slice (size - 3) (size - 2) text == ":" && String.slice (size - 6) (size - 5) text == ":"
+    stop = if isUTC then size - 1 else if withSeconds then size - 9 else size - 6
+    offset = if isUTC then 0 else
+        sign = String.slice stop (stop + 1) text
+        Checked.require (InvalidText text) (stop >= 19 && (sign == "+" || sign == "-") && String.slice (stop + 3) (stop + 4) text == ":")
+        h = Checked.digits (stop + 1) 2 text
+        m = Checked.digits (stop + 4) 2 text
+        s = if withSeconds then Checked.digits (stop + 7) 2 text else 0
+        Checked.require (InvalidText text) (h < 24 && m < 60 && s < 60 && (sign /= "-" || h + m + s /= 0))
+        (h * 3600 + m * 60 + s) * (if sign == "-" then -1 else 1)
+    target = if isUTC then Zone.utc else Zone.fixedOffset offset
+    localDate = Date.parse (String.slice 0 10 text)
+    localTime = TOD.parse (String.slice 11 stop text)
+    seconds = Date.toEpochDays localDate * 86400 + quotientBy 1000000000 (TOD.toNanoseconds localTime) - offset
+    Checked.require (InvalidText text) (seconds >= Checked.instantMin && seconds <= Checked.instantMax)
+    DateTime (Checked.Instant seconds (TOD.nanosecond localTime)) target localDate localTime
+
+-- The local reading with its offset, as RFC 3339 text: Z for the UTC zone,
+-- otherwise ±HH:MM, extended with :SS for historical sub-minute offsets.
+-- Trailing fractional zeros are trimmed. The zone name is not included.
+toIso : DateTime -> String
+toIso value =
+    offset = if zone value == Zone.utc then "Z" else Checked.offsetText True (offsetSeconds value)
+    Date.toIso (date value) ++ "T" ++ TOD.toIso (timeOfDay value) ++ offset
+
+-- Local output formatting: Date and TimeOfDay tokens plus %z and %:z for
+-- offsets, including offset seconds when nonzero. Other tokens are copied
+-- verbatim.
+format : String -> DateTime -> String
+format pattern value = Checked.format (render value) pattern
+
+render value token =
+    if token == "z" then Just (Checked.offsetText False (offsetSeconds value))
+    else if token == ":z" then Just (Checked.offsetText True (offsetSeconds value))
+    else if token == "Y" || token == "m" || token == "d" || token == "F" then Just (Date.format ("%" ++ token) (date value))
+    else if token == "H" || token == "M" || token == "S" || token == "N" || token == "T" then Just (TOD.format ("%" ++ token) (timeOfDay value))
+    else Nothing
+
+instance Eq DateTime
+    (==) a b = toInstant a == toInstant b
+instance Ord DateTime
+    (<) a b = toInstant a < toInstant b
+    (>) a b = toInstant a > toInstant b
+    (<=) a b = toInstant a <= toInstant b
+    (>=) a b = toInstant a >= toInstant b
+instance Show DateTime
+    showTo built value = Builder.append ("DateTime " ++ Builder.stringLiteral (toIso value) ++ " " ++ Builder.stringLiteral (Zone.identifier (zone value))) built
+    showArgTo built value = Builder.append ")" (showTo (Builder.append "(" built) value)

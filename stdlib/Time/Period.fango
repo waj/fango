@@ -1,0 +1,61 @@
+-- Calendar adjustments, not elapsed seconds. Years become months and weeks
+-- become days. Application adds months with day clamping, then adds days.
+-- Combining periods before application can differ from applying each in turn.
+-- Construction and combination are total; a component beyond 64 bits wraps
+-- like Int, and application to a date checks the calendar range instead.
+--
+-- ```fango
+-- import Time.Period as Period
+-- import Time.Date as Date
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- result = Fail.attempt {
+--     jan = Date.make 2026 1 31
+--     combined = Date.advance (Period.combine (Period.months 1) (Period.months 1)) jan
+--     sequential = jan |> Date.addMonths 1 |> Date.addMonths 1
+--     (Date.toIso combined, Date.toIso sequential)
+--     }
+-- result == Ok ("2026-03-31", "2026-03-28")
+-- ```
+module Time.Period exposing (Period, combine, days, months, negate, totalDays, totalMonths, weeks, years, zero)
+
+-- Signed months and days. Equality compares these two components; periods
+-- have no chronological ordering without a starting date.
+type Period = Period Int Int deriving (Eq, Show)
+
+-- An adjustment that leaves a value unchanged.
+zero : Period
+zero = Period 0 0
+
+-- An adjustment by calendar months.
+months : Int -> Period
+months count = Period count 0
+
+-- An adjustment by calendar years, stored as twelve months each.
+years : Int -> Period
+years count = months (count * 12)
+
+-- An adjustment by calendar days, which need not last 24 hours.
+days : Int -> Period
+days count = Period 0 count
+
+-- An adjustment by seven-day calendar weeks.
+weeks : Int -> Period
+weeks count = days (count * 7)
+
+-- Adds the components, which is not sequential application.
+combine : Period -> Period -> Period
+combine (Period am ad) (Period bm bd) = Period (am + bm) (ad + bd)
+
+-- Negates both components.
+negate : Period -> Period
+negate (Period m d) = Period (0 - m) (0 - d)
+
+-- The signed month component.
+totalMonths : Period -> Int
+totalMonths (Period m _) = m
+
+-- The signed day component.
+totalDays : Period -> Int
+totalDays (Period _ d) = d

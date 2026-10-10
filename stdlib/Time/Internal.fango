@@ -1,0 +1,118 @@
+-- Raw value representations and shared text machinery for the Time modules.
+-- The constructors here bypass validation: application code must use the
+-- checked constructors of Time.Date, Time.TimeOfDay, and Time.Instant, which
+-- re-export these types without their constructors.
+module Time.Internal exposing (Date(..), Instant(..), TimeOfDay(..), digits, floorDiv, format, fraction, instantMax, instantMin, offsetText, pad, require)
+
+import Basics exposing (modBy, quotientBy, remainderBy)
+import Char
+import Fail exposing (Fail, fail)
+import Maybe exposing (Maybe(..))
+import String
+import Text.Builder as Builder
+import Time exposing (Error(..))
+
+-- A calendar date. Equality and ordering compare calendar positions.
+type Date
+    -- The day serial, where 0001-01-01 is 0 and 9999-12-31 is 3652058.
+    = Date Int
+    deriving (Eq, Ord)
+
+-- A clock reading. Ordering runs from midnight to the final nanosecond.
+type TimeOfDay
+    -- Nanoseconds since midnight, below 86400000000000.
+    = TimeOfDay Int
+    deriving (Eq, Ord)
+
+-- A moment on the Unix time line. Ordering compares the moment.
+type Instant
+    -- Unix floor seconds within instantMin through instantMax, and the
+    -- nanosecond fraction, 0 through 999999999.
+    = Instant Int Int
+    deriving (Eq, Ord)
+
+-- The earliest supported Unix second, 0001-01-02T00:00:00Z. The margin of one
+-- day keeps every local date within year 1 for any offset below 24 hours.
+instantMin : Int
+instantMin = -62135510400
+
+-- The latest supported Unix second, 9999-12-30T23:59:59Z.
+instantMax : Int
+instantMax = 253402214399
+
+-- Floor division by a positive divisor.
+floorDiv : Int -> Int -> Int
+floorDiv divisor value =
+    q = quotientBy divisor value
+    if remainderBy divisor value < 0 then q - 1 else q
+
+-- Fails with the supplied error unless the condition holds.
+require : Error -> Bool ->{Fail Error} ()
+require error condition = if condition then () else fail error
+
+-- Zero-pads a nonnegative decimal field to at least the given width.
+pad : Int -> Int -> String
+pad width value =
+    text = Builder.intToString value
+    String.padLeft width '0' text
+
+-- Parses exactly the requested ASCII decimal slice, rejecting short input.
+digits : Int -> Int -> String ->{Fail Error} Int
+digits start count text =
+    require (InvalidText text) (start >= 0 && count > 0 && start + count <= String.length text)
+    digitLoop start (start + count) text 0
+
+digitLoop at stop text value =
+    if at == stop then value
+    else
+        c = case String.uncons (String.slice at (at + 1) text) of
+            Just part -> Char.toCode part.first
+            Nothing -> fail (InvalidText text)
+        require (InvalidText text) (c >= 48 && c <= 57)
+        digitLoop (at + 1) stop text (value * 10 + c - 48)
+
+-- Canonical optional fractional seconds, omitting zero and trailing zeros.
+fraction : Int -> String
+fraction nanos = if nanos == 0 then "" else "." ++ trim (pad 9 nanos)
+
+trim text =
+    n = String.length text
+    if String.slice (n - 1) n text == "0" then trim (String.slice 0 (n - 1) text) else text
+
+-- Formats a bounded zone offset, including seconds when nonzero.
+offsetText : Bool -> Int -> String
+offsetText colon seconds =
+    magnitude = if seconds < 0 then 0 - seconds else seconds
+    separator = if colon then ":" else ""
+    base = (if seconds < 0 then "-" else "+") ++ pad 2 (quotientBy 3600 magnitude) ++ separator ++ pad 2 (modBy 60 (quotientBy 60 magnitude))
+    if modBy 60 magnitude == 0 then base else base ++ separator ++ pad 2 (modBy 60 magnitude)
+
+-- Expands percent tokens through a type-specific renderer. `%%` is a percent
+-- sign; a token the renderer does not know, or a trailing `%`, is copied
+-- verbatim so a typo stays visible in the output rather than failing.
+format : (String -> Maybe String) -> String -> String
+format render pattern = Builder.toString (formatLoop render pattern Builder.empty)
+
+formatLoop render text built =
+    case String.uncons text of
+        Nothing -> built
+        Just part ->
+            if part.first /= '%' then formatLoop render part.rest (Builder.appendChar part.first built)
+            else case String.uncons part.rest of
+                Nothing -> Builder.appendChar '%' built
+                Just token ->
+                    if token.first == '%' then formatLoop render token.rest (Builder.appendChar '%' built)
+                    else if token.first == ':' then
+                        case String.uncons token.rest of
+                            Just following ->
+                                if following.first == 'z' then
+                                    case render ":z" of
+                                        Just rendered -> formatLoop render following.rest (Builder.append rendered built)
+                                        Nothing -> formatLoop render following.rest (Builder.append "%:z" built)
+                                else formatLoop render token.rest (Builder.append "%:" built)
+                            Nothing -> Builder.append "%:" built
+                    else
+                        name = String.fromChar token.first
+                        case render name of
+                            Just rendered -> formatLoop render token.rest (Builder.append rendered built)
+                            Nothing -> formatLoop render token.rest (Builder.append ("%" ++ name) built)

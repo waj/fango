@@ -1,0 +1,99 @@
+-- A nanosecond-precise clock reading without a date or timezone. Midnight
+-- belongs to the start of a day; 24:00 and leap seconds are not accepted.
+--
+-- ```fango
+-- import Time.TimeOfDay as TOD
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- Fail.attempt { TOD.parse "09:30:00.120000000" |> TOD.toIso } == Ok "09:30:00.12"
+-- ```
+module Time.TimeOfDay exposing (TimeOfDay, format, fromNanoseconds, hour, make, midnight, minute, nanosecond, parse, second, toIso, toNanoseconds)
+
+import Basics exposing (Show(..), modBy, quotientBy)
+import Fail exposing (Fail, fail)
+import Maybe exposing (Maybe(..))
+import String
+import Text.Builder as Builder
+import Time exposing (Error(..))
+import Time.Internal as Checked exposing (TimeOfDay(..))
+
+-- 00:00:00, with no fractional seconds.
+midnight : TimeOfDay
+midnight = TimeOfDay 0
+
+-- Validates hour (0–23), minute and second (0–59), and nanosecond
+-- (0–999999999), failing with InvalidComponent naming the offending field.
+make : Int -> Int -> Int -> Int ->{Fail Error} TimeOfDay
+make h m s n =
+    Checked.require (InvalidComponent "hour") (h >= 0 && h < 24)
+    Checked.require (InvalidComponent "minute") (m >= 0 && m < 60)
+    Checked.require (InvalidComponent "second") (s >= 0 && s < 60)
+    Checked.require (InvalidComponent "nanosecond") (n >= 0 && n < 1000000000)
+    TimeOfDay ((h * 3600 + m * 60 + s) * 1000000000 + n)
+
+-- Validates nanoseconds since midnight, in [0, 86400000000000), failing with
+-- InvalidComponent "time of day".
+fromNanoseconds : Int ->{Fail Error} TimeOfDay
+fromNanoseconds n =
+    Checked.require (InvalidComponent "time of day") (n >= 0 && n < 86400000000000)
+    TimeOfDay n
+
+-- Nanoseconds since midnight.
+toNanoseconds : TimeOfDay -> Int
+toNanoseconds (TimeOfDay n) = n
+
+-- Hour, 0 through 23.
+hour : TimeOfDay -> Int
+hour (TimeOfDay n) = quotientBy 3600000000000 n
+
+-- Minute within the hour, 0 through 59.
+minute : TimeOfDay -> Int
+minute (TimeOfDay n) = modBy 60 (quotientBy 60000000000 n)
+
+-- Second within the minute, 0 through 59.
+second : TimeOfDay -> Int
+second (TimeOfDay n) = modBy 60 (quotientBy 1000000000 n)
+
+-- Nanosecond fraction, 0 through 999999999.
+nanosecond : TimeOfDay -> Int
+nanosecond (TimeOfDay n) = modBy 1000000000 n
+
+-- Strict HH:MM:SS with an optional decimal fraction of 1 through 9 digits.
+-- Fails with InvalidText, including for out-of-range fields.
+parse : String ->{Fail Error} TimeOfDay
+parse text =
+    size = String.length text
+    Checked.require (InvalidText text) ((size == 8 || (size >= 10 && size <= 18)) && String.slice 2 3 text == ":" && String.slice 5 6 text == ":")
+    n = if size == 8 then 0 else
+        Checked.require (InvalidText text) (String.slice 8 9 text == ".")
+        Checked.digits 0 9 (String.padRight 9 '0' (String.slice 9 size text))
+    h = Checked.digits 0 2 text
+    m = Checked.digits 3 2 text
+    s = Checked.digits 6 2 text
+    Checked.require (InvalidText text) (h < 24 && m < 60 && s < 60)
+    TimeOfDay ((h * 3600 + m * 60 + s) * 1000000000 + n)
+
+whole time = Checked.pad 2 (hour time) ++ ":" ++ Checked.pad 2 (minute time) ++ ":" ++ Checked.pad 2 (second time)
+
+-- Canonical HH:MM:SS with a fraction only when nonzero, without trailing zeros.
+toIso : TimeOfDay -> String
+toIso time = whole time ++ Checked.fraction (nanosecond time)
+
+-- Output formatting with %H, %M, %S, %N (nine digits), %T, and %%. Other
+-- tokens are copied verbatim.
+format : String -> TimeOfDay -> String
+format pattern time = Checked.format (render time) pattern
+
+render time token =
+    case token of
+        "H" -> Just (Checked.pad 2 (hour time))
+        "M" -> Just (Checked.pad 2 (minute time))
+        "S" -> Just (Checked.pad 2 (second time))
+        "N" -> Just (Checked.pad 9 (nanosecond time))
+        "T" -> Just (whole time)
+        _ -> Nothing
+
+instance Show TimeOfDay
+    showTo built time = Builder.append ("TimeOfDay " ++ Builder.stringLiteral (toIso time)) built
+    showArgTo built time = Builder.append ")" (showTo (Builder.append "(" built) time)

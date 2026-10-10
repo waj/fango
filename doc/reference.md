@@ -24,6 +24,7 @@ defines the default scope.
 | --- | --- |
 | Classes, operators, and integer helpers | [Basics](../stdlib/Basics.fango) |
 | Collections and results (list syntax: [Lists](reference/types.md#lists)) | [List](../stdlib/List.fango), [Range](../stdlib/Range.fango), [Maybe](../stdlib/Maybe.fango), [Tuple](../stdlib/Tuple.fango), [Dict](../stdlib/Dict.fango), [Result](../stdlib/Result.fango) |
+| Dates, times, and clocks | [Time](../stdlib/Time.fango), [Time.Date](../stdlib/Time/Date.fango), [Time.TimeOfDay](../stdlib/Time/TimeOfDay.fango), [Time.Instant](../stdlib/Time/Instant.fango), [Time.DateTime](../stdlib/Time/DateTime.fango), [Time.Duration](../stdlib/Time/Duration.fango), [Time.Period](../stdlib/Time/Period.fango), [Time.Zone](../stdlib/Time/Zone.fango), [Time.Clock](../stdlib/Time/Clock.fango) |
 | Streams and cursors | [Stream](../stdlib/Stream.fango), [Iterator](../stdlib/Iterator.fango) |
 | Text | [String](../stdlib/String.fango), [Char](../stdlib/Char.fango), [Regex](../stdlib/Regex.fango), [Encoding](../stdlib/Encoding.fango), [Text.Builder](../stdlib/Text/Builder.fango) |
 | Bytes and buffered IO | [Bytes](../stdlib/Bytes.fango), [Reader](../stdlib/Reader.fango), [Writer](../stdlib/Writer.fango), [Text.Reader](../stdlib/Text/Reader.fango), [Text.Writer](../stdlib/Text/Writer.fango) |

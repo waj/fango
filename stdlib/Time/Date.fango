@@ -1,0 +1,244 @@
+-- Gregorian calendar dates from 0001-01-01 through 9999-12-31, independent of
+-- timezones. Construction rejects invalid fields. Month and year arithmetic
+-- clamp the day; combined periods apply months first, then days. Only
+-- construction, parsing, and movement that would leave the calendar fail.
+--
+-- ```fango
+-- import Time.Date as Date
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- Fail.attempt { Date.make 2026 1 31 |> Date.addMonths 1 |> Date.toIso } == Ok "2026-02-28"
+-- ```
+module Time.Date exposing (Date, addDays, addMonths, addWeeks, addYears, advance, beginningOfMonth, beginningOfQuarter, beginningOfWeek, beginningOfWeekOn, beginningOfYear, components, day, daysBetween, daysInMonth, endOfMonth, endOfQuarter, endOfYear, format, fromEpochDays, isLeapYear, make, month, nextWeekday, parse, previousWeekday, toEpochDays, toIso, weekday, weekdayNumber, year)
+
+import Basics exposing (Show(..), modBy, quotientBy)
+import Fail exposing (Fail, fail)
+import Maybe exposing (Maybe(..))
+import String
+import Text.Builder as Builder
+import Time exposing (Error(..), Weekday(..))
+import Time.Internal as Checked exposing (Date(..))
+import Time.Period as Period
+
+-- Whether the year is divisible by 4, except centuries not divisible by 400.
+isLeapYear : Int -> Bool
+isLeapYear y = modBy 4 y == 0 && (modBy 100 y /= 0 || modBy 400 y == 0)
+
+monthLength y m =
+    if m == 2 then if isLeapYear y then 29 else 28
+    else if m == 4 || m == 6 || m == 9 || m == 11 then 30 else 31
+
+-- Day serial of 1970-01-01, and the serial bounds of the calendar.
+epochSerial = 719162
+maxSerial = 3652058
+
+serialOf y m d =
+    prior = y - 1
+    Date (365 * prior + quotientBy 4 prior - quotientBy 100 prior + quotientBy 400 prior + beforeMonth y m + d - 1)
+
+-- Validates a year, month, and day. Invalid days are not normalized. Fails
+-- with InvalidComponent naming the offending field.
+make : Int -> Int -> Int ->{Fail Error} Date
+make y m d =
+    Checked.require (InvalidComponent "year") (y >= 1 && y <= 9999)
+    Checked.require (InvalidComponent "month") (m >= 1 && m <= 12)
+    Checked.require (InvalidComponent "day") (d >= 1 && d <= monthLength y m)
+    serialOf y m d
+
+-- Constructs a date from signed days since 1970-01-01, failing with
+-- OutOfRange outside the calendar.
+fromEpochDays : Int ->{Fail Error} Date
+fromEpochDays days =
+    Checked.require OutOfRange (days >= 0 - epochSerial && days <= maxSerial - epochSerial)
+    Date (days + epochSerial)
+
+-- Signed days since 1970-01-01.
+toEpochDays : Date -> Int
+toEpochDays (Date serial) = serial - epochSerial
+
+-- The year, month, and day, computed with Gregorian 400-year cycles.
+components : Date -> (Int, Int, Int)
+components (Date serial) =
+    z = serial + 306
+    era = quotientBy 146097 z
+    doe = modBy 146097 z
+    yoe = quotientBy 365 (doe - quotientBy 1460 doe + quotientBy 36524 doe - quotientBy 146096 doe)
+    y = yoe + era * 400
+    doy = doe - (365 * yoe + quotientBy 4 yoe - quotientBy 100 yoe)
+    mp = quotientBy 153 (5 * doy + 2)
+    d = doy - quotientBy 5 (153 * mp + 2) + 1
+    m = mp + (if mp < 10 then 3 else -9)
+    (y + (if m <= 2 then 1 else 0), m, d)
+
+-- Calendar year, 1 through 9999.
+year : Date -> Int
+year date =
+    (y, _, _) = components date
+    y
+
+-- Calendar month, 1 through 12.
+month : Date -> Int
+month date =
+    (_, m, _) = components date
+    m
+
+-- Day within the month, starting at 1.
+day : Date -> Int
+day date =
+    (_, _, d) = components date
+    d
+
+-- The number of days in this date's month.
+daysInMonth : Date -> Int
+daysInMonth date = monthLength (year date) (month date)
+
+-- ISO weekday number, Monday 1 through Sunday 7.
+weekdayNumber : Weekday -> Int
+weekdayNumber Monday = 1
+weekdayNumber Tuesday = 2
+weekdayNumber Wednesday = 3
+weekdayNumber Thursday = 4
+weekdayNumber Friday = 5
+weekdayNumber Saturday = 6
+weekdayNumber Sunday = 7
+
+-- This date's ISO weekday.
+weekday : Date -> Weekday
+weekday (Date serial) =
+    case modBy 7 serial of
+        0 -> Monday
+        1 -> Tuesday
+        2 -> Wednesday
+        3 -> Thursday
+        4 -> Friday
+        5 -> Saturday
+        _ -> Sunday
+
+-- Moves by signed calendar days, failing with OutOfRange when the result
+-- leaves the calendar.
+addDays : Int -> Date ->{Fail Error} Date
+addDays count (Date serial) =
+    -- Compare against the bounded serial so no intermediate sum can wrap.
+    Checked.require OutOfRange (count <= maxSerial - serial && count >= 0 - serial)
+    Date (serial + count)
+
+-- Moves by signed seven-day weeks, failing with OutOfRange.
+addWeeks : Int -> Date ->{Fail Error} Date
+addWeeks count date =
+    Checked.require OutOfRange (count <= maxSerial && count >= 0 - maxSerial)
+    addDays (count * 7) date
+
+-- Moves by calendar months, clamping the day to the target month's last day
+-- and failing with OutOfRange outside years 1 through 9999.
+addMonths : Int -> Date ->{Fail Error} Date
+addMonths count date =
+    Checked.require OutOfRange (count <= 9999 * 12 && count >= 0 - 9999 * 12)
+    (y, m, d) = components date
+    target = (y - 1) * 12 + m - 1 + count
+    Checked.require OutOfRange (target >= 0 && target < 9999 * 12)
+    nextYear = quotientBy 12 target + 1
+    nextMonth = modBy 12 target + 1
+    lastDay = monthLength nextYear nextMonth
+    serialOf nextYear nextMonth (if d > lastDay then lastDay else d)
+
+-- Moves by calendar years, clamping February 29 in non-leap target years and
+-- failing with OutOfRange.
+addYears : Int -> Date ->{Fail Error} Date
+addYears count date =
+    Checked.require OutOfRange (count <= 9999 && count >= -9999)
+    addMonths (count * 12) date
+
+-- Applies the period's months with clamping, followed by its days. Fails
+-- with OutOfRange.
+advance : Period.Period -> Date ->{Fail Error} Date
+advance period date = date |> addMonths (Period.totalMonths period) |> addDays (Period.totalDays period)
+
+-- Signed day count from the first date to the second.
+daysBetween : Date -> Date -> Int
+daysBetween start finish = toEpochDays finish - toEpochDays start
+
+-- The first day of this month.
+beginningOfMonth : Date -> Date
+beginningOfMonth (Date serial) = Date (serial - day (Date serial) + 1)
+
+-- The last day of this month.
+endOfMonth : Date -> Date
+endOfMonth (Date serial) = Date (serial + daysInMonth (Date serial) - day (Date serial))
+
+-- The first day of this quarter.
+beginningOfQuarter : Date -> Date
+beginningOfQuarter date =
+    (y, m, _) = components date
+    startMonth = quotientBy 3 (m - 1) * 3 + 1
+    serialOf y startMonth 1
+
+beforeMonth y m = quotientBy 12 (367 * m - 362) - (if m <= 2 then 0 else if isLeapYear y then 1 else 2)
+
+-- The last day of this quarter.
+endOfQuarter : Date -> Date
+endOfQuarter date =
+    (y, m, _) = components date
+    lastMonth = quotientBy 3 (m - 1) * 3 + 3
+    serialOf y lastMonth (monthLength y lastMonth)
+
+-- January 1 of this year.
+beginningOfYear : Date -> Date
+beginningOfYear date = serialOf (year date) 1 1
+
+-- December 31 of this year.
+endOfYear : Date -> Date
+endOfYear date = serialOf (year date) 12 31
+
+-- The Monday on or before this date. Never fails: 0001-01-01 is a Monday.
+beginningOfWeek : Date -> Date
+beginningOfWeek (Date serial) = Date (serial - modBy 7 serial)
+
+-- The requested weekday on or before this date, failing with OutOfRange only
+-- when that day would precede 0001-01-01.
+beginningOfWeekOn : Weekday -> Date ->{Fail Error} Date
+beginningOfWeekOn first date = addDays (0 - modBy 7 (weekdayNumber (weekday date) - weekdayNumber first)) date
+
+-- The next occurrence, strictly after this date. Fails with OutOfRange at the
+-- end of the calendar.
+nextWeekday : Weekday -> Date ->{Fail Error} Date
+nextWeekday target date = addDays (modBy 7 (weekdayNumber target - weekdayNumber (weekday date) - 1) + 1) date
+
+-- The previous occurrence, strictly before this date. Fails with OutOfRange
+-- at the start of the calendar.
+previousWeekday : Weekday -> Date ->{Fail Error} Date
+previousWeekday target date = addDays (0 - (modBy 7 (weekdayNumber (weekday date) - weekdayNumber target - 1) + 1)) date
+
+-- Strictly parses YYYY-MM-DD, without whitespace or trailing input. Fails
+-- with InvalidText, including for a well-formed but nonexistent date.
+parse : String ->{Fail Error} Date
+parse text =
+    Checked.require (InvalidText text) (String.length text == 10 && String.slice 4 5 text == "-" && String.slice 7 8 text == "-")
+    y = Checked.digits 0 4 text
+    m = Checked.digits 5 2 text
+    d = Checked.digits 8 2 text
+    Checked.require (InvalidText text) (y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= monthLength y m)
+    serialOf y m d
+
+-- Canonical YYYY-MM-DD text.
+toIso : Date -> String
+toIso date =
+    (y, m, d) = components date
+    Checked.pad 4 y ++ "-" ++ Checked.pad 2 m ++ "-" ++ Checked.pad 2 d
+
+-- Output formatting with %Y, %m, %d, %F, and %%. Other tokens are copied
+-- verbatim.
+format : String -> Date -> String
+format pattern date = Checked.format (render date) pattern
+
+render date token =
+    case token of
+        "Y" -> Just (Checked.pad 4 (year date))
+        "m" -> Just (Checked.pad 2 (month date))
+        "d" -> Just (Checked.pad 2 (day date))
+        "F" -> Just (toIso date)
+        _ -> Nothing
+
+instance Show Date
+    showTo built date = Builder.append ("Date " ++ Builder.stringLiteral (toIso date)) built
+    showArgTo built date = Builder.append ")" (showTo (Builder.append "(" built) date)

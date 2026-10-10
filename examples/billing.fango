@@ -1,0 +1,24 @@
+import Fail
+import Result exposing (Result(..))
+-- Fixed-clock billing: a month-end renewal and a half-open reporting window.
+import Time.Clock as Clock
+import Time.Date as Date
+import Time.DateTime as DT
+import Time.Zone as Zone
+
+main =
+    result = Fail.attempt {
+        zone = Zone.fixedOffset (-10800)
+        issued = DT.parse "2026-01-31T10:00:00-03:00" |> DT.inZone zone
+        Clock.runFixed issued {
+            renewal = Clock.today() |> Date.addMonths 1
+            (start, finish) = DT.monthRange Clock.now()
+            print ("Invoice date: " ++ Date.toIso Clock.today())
+            print ("Renewal date: " ++ Date.toIso renewal)
+            print ("Report window: [" ++ DT.toIso start ++ ", " ++ DT.toIso finish ++ ")")
+            print "Invoice belongs to report: #{start <= issued && issued < finish}"
+        }
+    }
+    case result of
+        Ok () -> ()
+        Err error -> print error
