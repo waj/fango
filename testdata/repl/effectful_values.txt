@@ -1,0 +1,48 @@
+Fango 0.1 — :help for commands
+> loaded State
+> > 1
+x : ()
+> () : ()
+> 1> n : Int
+1> () : ()
+1> 0 : Int
+1> m : Int
+1> 5 : Int
+1> Unhandled Error: "boom" : String
+1> -- NAMING ERROR ----------------------------------------- <repl>
+
+I don't know a value named `v`.
+
+1| v
+   ^
+1> n : Int
+1> 5 : Int
+1> a : Int
+b : Int
+1> 5 : Int
+1> 6 : Int
+1> | | Stop : effect
+1> | | | | | runStop : (() ->{Stop | e} a) ->{e} Maybe a
+1> 2> Nothing : Maybe () (left 1 level)
+1> -- NAMING ERROR ----------------------------------------- <repl>
+
+I don't know a value named `w`.
+
+1| w
+   ^
+1> StateResult { value = (), state = 5 } : StateResult Int ()
+> 5 : Int
+> 5 : Int
+> 5 : Int
+> f : () ->{State a} a
+> -- UNHANDLED EFFECT ------------------------------------- <repl>
+
+This performs `State a`, and nothing at the prompt handles it. Run it inside
+a handler, or install one with `use` for the inputs that follow.
+
+1| f()
+   ^^^
+> 1> k : Float
+1> 2.5 : Float
+1> StateResult { value = (), state = 1.5 } : StateResult Float ()
+> 

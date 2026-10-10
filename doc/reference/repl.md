@@ -82,9 +82,20 @@ evidence, so a String result is quoted; otherwise it prints `<value : T>` or
 
 ## Evaluation and commands
 
-Effectful expressions run directly. Ordinary effectful declarations such as
-`x = print 1` are rejected. Effectful function definitions are accepted and
-execute only when explicitly applied.
+Effectful expressions run directly, and so does a value declaration whose
+body performs effects: `x = print 1` runs its body once, when entered, under
+the rules an expression gets, then echoes `x : ()` and binds the result. A
+later use of `x` does not run the body again, and neither does ending a level
+the body used; redefining `x` does. A failure, a runtime error, or an
+interruption leaves the name as it was. A destructuring declaration evaluates
+its subject the same way and projects the names from it. Effectful function
+definitions execute only when explicitly applied, and a class default is
+checked by a module's rules.
+
+The value lives in the evaluator that computed it. An `import` that starts or
+rebuilds the session's native worker leaves it behind, and using it there is a
+runtime error: `` `x` holds the result of an effectful declaration that ran
+before the native worker started or was rebuilt; define it again ``.
 
 An expression may perform IO and any number of `Fail` applications. The
 prompt handles each `Fail` for that input alone: a failure ends the input and
@@ -162,8 +173,11 @@ reader : Reader {local scope}
 
 A value definition that uses a level's binders, directly or through another
 such definition, belongs to that level and goes away with it; a name it
-replaced comes back. Other declarations are unaffected by levels, and a type,
-class, instance, or effect declaration may not use a level's binders.
+replaced comes back. A definition that only performs what a level grants, such
+as `n = State.get()` under `use State.run 0`, ran once when entered and keeps
+its value after the level ends. Other declarations are unaffected by levels,
+and a type, class, instance, or effect declaration may not use a level's
+binders.
 
 `:end` or Ctrl-D ends the innermost level: its callback returns, the head
 finishes, and its result prints unless it is Unit. Ctrl-D with no level left

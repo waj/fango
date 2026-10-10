@@ -20,12 +20,8 @@ but the function expects:
 
 1| x / 2
    ^
-> -- EFFECTFUL PROMPT DECLARATION ------------------------- <repl>
-
-Effectful declarations are not installed at the prompt; run the expression directly.
-
-1| x = print 1
-       ^^^^^^^
+> 1
+x : ()
 > -2 : Num a => a
 > False : Bool
 > True : Bool

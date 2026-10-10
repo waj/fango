@@ -104,6 +104,12 @@ changes no declaration a live session has already accepted.
   explicit checkpoint in such loops.
 - Add transcript coverage for reload, cross-generation errors, handler
   interaction, and recovery after failures.
+- Guard an `import` that starts or rebuilds the native worker while a handler
+  level is parked in it: the parked exchange holds the executor's lock, so
+  retiring the worker from the session goroutine cannot proceed, and ending
+  the levels would discard their binders and the values effectful
+  declarations sealed in that worker. Either refuse the import until the
+  levels end or end them first and say so.
 - Decide whether leaving many [handler levels](reference/repl.md#handler-levels)
   needs something faster than one Ctrl-D or `:end` per level, once levels have
   seen use. `:type` does not yet show which of an expression's effects the

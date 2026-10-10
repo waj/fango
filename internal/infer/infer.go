@@ -210,6 +210,14 @@ type Checker struct {
 	// unobservable there and top-level values generalize per doc/design.md, "Go backend and runtime".
 	MonoValues bool
 
+	// PromptEffects grants a prompt value declaration's effect row: the REPL
+	// session installs it to unify the row's labels with what its handler
+	// levels grant and to report what nothing handles. It runs before the
+	// declaration's predicates are qualified, so a label's type arguments
+	// are fixed by the level rather than by defaulting. Only declarations
+	// checked with DeclPromptEffects consult it.
+	PromptEffects func(row types.Row, at source.Span) []diag.Error
+
 	// EntryName is the canonical symbol selected by the batch graph loader.
 	// It remains "main" for the REPL and headerless single-file programs.
 	EntryName string
@@ -384,6 +392,11 @@ type DeclInfo struct {
 	Equations []ast.Equation
 	Type      types.Type // solved but not zonked; apply ck.Sub for the final type
 	Body      ast.Expr
+	// Effects is the body's ambient effect row, unzonked; apply ck.Sub. A
+	// function's effects sit in its arrows, so this row holds labels only
+	// for a value whose body performs effects, which only a prompt
+	// declaration checked with DeclPromptEffects may.
+	Effects types.Type
 
 	// Scheme is the declaration's generalized type: Scheme.Vars are the
 	// definition's type parameters (elaboration's Def.TyParams). Quantified
@@ -532,12 +545,13 @@ func withClassDefaults(decls []ast.Decl) []ast.Decl {
 }
 
 // PatternDecl checks and installs one top-level destructuring group. It is
-// also the REPL entry point; callers use allowEffects=false there.
-func (ck *Checker) PatternDecl(d *ast.PatternDecl, allowEffects bool) ([]DeclInfo, []diag.Error) {
-	return ck.patternDecl(d, allowEffects)
+// also the REPL entry point, with the prompt's mode; the subject carries the
+// body and so its effects, and the projections over it are pure.
+func (ck *Checker) PatternDecl(d *ast.PatternDecl, mode DeclEffects) ([]DeclInfo, []diag.Error) {
+	return ck.patternDecl(d, mode)
 }
 
-func (ck *Checker) patternDecl(d *ast.PatternDecl, allowEffects bool) ([]DeclInfo, []diag.Error) {
+func (ck *Checker) patternDecl(d *ast.PatternDecl, mode DeclEffects) ([]DeclInfo, []diag.Error) {
 	names := patternNames(d.Pattern, nil)
 	if len(names) == 0 {
 		return nil, []diag.Error{diag.Errorf(d.Pattern.Span(), "PATTERN BINDING", "A destructuring binding must bind at least one name.")}
@@ -566,7 +580,7 @@ func (ck *Checker) patternDecl(d *ast.PatternDecl, allowEffects bool) ([]DeclInf
 	ck.MonoValues = true
 	defer func() { ck.MonoValues = savedMono }()
 	subjectDecl := &ast.ValueDecl{Name: subject, NameSpan: d.Pattern.Span(), Body: d.Body}
-	subjectInfo, es := ck.DeclWhere(subjectDecl, allowEffects)
+	subjectInfo, es := ck.DeclWhere(subjectDecl, mode)
 	errs = append(errs, es...)
 	ck.BindDecl(subjectInfo)
 	infos := []DeclInfo{subjectInfo}
@@ -575,7 +589,9 @@ func (ck *Checker) patternDecl(d *ast.PatternDecl, allowEffects bool) ([]DeclInf
 		pat, aliases := projectionPattern(d.Pattern)
 		body := &ast.Case{Scrutinee: &ast.Var{Name: subject, Sp: d.Pattern.Span()}, Branches: []ast.CaseBranch{{Pattern: pat, Body: &ast.Var{Name: aliases[name], Sp: d.Pattern.Span()}}}, Sp: d.Pattern.Span()}
 		vd := &ast.ValueDecl{Name: name, NameSpan: d.Pattern.Span(), Body: body}
-		info, es := ck.DeclWhere(vd, allowEffects)
+		// A projection only reads the subject, so its row stays empty under
+		// any mode; the pure rule keeps that checked.
+		info, es := ck.DeclWhere(vd, DeclPure)
 		// Every projection re-checks the same pattern against the same
 		// subject, so only the first copy of a pattern diagnostic is news.
 		if i == 0 {
@@ -1060,7 +1076,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 // Decl checks one value declaration and binds it in the environment —
 // rebinding an existing name is allowed (the REPL's redefinition path).
 func (ck *Checker) Decl(d *ast.ValueDecl) (DeclInfo, []diag.Error) {
-	info, errs := ck.DeclWhere(d, true)
+	info, errs := ck.DeclWhere(d, DeclPure)
 	ck.BindDecl(info)
 	return info, errs
 }
@@ -1090,23 +1106,37 @@ func (ck *Checker) SetCaptureSummary(name string, vars []types.CaptureVar, captu
 }
 
 type declInference struct {
-	originalAnn          types.Type
-	d                    *ast.ValueDecl
-	g                    *generator
-	ty, annTy            types.Type
-	given                []types.Pred
-	errs                 []diag.Error
-	allowEffects, isMain bool
-	info                 DeclInfo
+	originalAnn types.Type
+	d           *ast.ValueDecl
+	g           *generator
+	ty, annTy   types.Type
+	given       []types.Pred
+	errs        []diag.Error
+	mode        DeclEffects
+	isMain      bool
+	info        DeclInfo
 }
+
+// DeclEffects says what a declaration's ambient effect row may hold: the
+// effects a nullary body performs when the value is evaluated.
+type DeclEffects int
+
+const (
+	// DeclPure is a module's rule: a value's body must be pure, so its row
+	// is constrained empty and a leftover label is an escaping effect.
+	DeclPure DeclEffects = iota
+	// DeclPromptEffects leaves the row open and hands its labels to
+	// Checker.PromptEffects, for a prompt value that runs once when entered.
+	DeclPromptEffects
+)
 
 // DeclWhere checks one declaration — annotation resolution, body inference
 // (with parameter scoping and self-recursion for function definitions),
 // and the annotation constraint — without binding it, so callers control
 // whether a failed definition enters the environment (the REPL does not
 // bind on error).
-func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []diag.Error) {
-	q := ck.prepareDecl(d, allowEffects)
+func (ck *Checker) DeclWhere(d *ast.ValueDecl, mode DeclEffects) (DeclInfo, []diag.Error) {
+	q := ck.prepareDecl(d, mode)
 	sub, _, es := q.g.solveConstraints(nil)
 	ck.Sub = sub
 	q.errs = append(q.errs, q.g.errs...)
@@ -1116,7 +1146,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	return ck.finishDecl(q)
 }
 
-func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInference {
+func (ck *Checker) prepareDecl(d *ast.ValueDecl, mode DeclEffects) *declInference {
 	var errs []diag.Error
 	var given []types.Pred
 	isMain := d.Name == ck.EntryName
@@ -1162,7 +1192,7 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInferen
 	var ty types.Type
 	if len(d.Params) == 0 {
 		ty = g.expr(d.Body)
-		if !isMain && allowEffects {
+		if !isMain && mode == DeclPure {
 			g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
 		}
 	} else if annTy != nil {
@@ -1178,11 +1208,11 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInferen
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
 	}
-	return &declInference{originalAnn: originalAnn, d: d, g: g, ty: ty, annTy: annTy, given: given, errs: errs, allowEffects: allowEffects, isMain: isMain}
+	return &declInference{originalAnn: originalAnn, d: d, g: g, ty: ty, annTy: annTy, given: given, errs: errs, mode: mode, isMain: isMain}
 }
 
 func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
-	d, g, ty, annTy, given, errs, allowEffects, isMain := q.d, q.g, q.ty, q.annTy, q.given, q.errs, q.allowEffects, q.isMain
+	d, g, ty, annTy, given, errs, mode, isMain := q.d, q.g, q.ty, q.annTy, q.given, q.errs, q.mode, q.isMain
 
 	// An inferred record literal takes its nominal type from context, and a
 	// declaration's annotation is that context. The annotation is normally
@@ -1209,12 +1239,11 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	if d.Ann == nil && !isMain && ck.recursive == nil {
 		ck.closeSingleRows(ty)
 	}
-	promptEffects := false
-	if row, ok := ck.Sub.Apply(g.ambient).(types.Row); ok && len(row.Labels) > 0 {
-		promptEffects = true
-	}
-	if !allowEffects && promptEffects {
-		errs = append(errs, diag.Errorf(d.Body.Span(), "EFFECTFUL PROMPT DECLARATION", "Effectful declarations are not installed at the prompt; run the expression directly."))
+	// A prompt declaration's row is settled here, before the predicates are
+	// qualified: a label's type argument must unify with what a level grants
+	// before defaulting could fix it.
+	if row, ok := ck.Sub.Apply(g.ambient).(types.Row); ok && len(row.Labels) > 0 && mode == DeclPromptEffects && ck.PromptEffects != nil {
+		errs = append(errs, ck.PromptEffects(row, d.Body.Span())...)
 	}
 	if isMain && len(d.Params) == 0 && ck.IO != nil {
 		row := ck.Sub.Apply(g.ambient).(types.Row)
@@ -1245,7 +1274,7 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 		ty = annTy
 	}
 	ty = ck.runnerControl(ty, len(d.Params), declEquations(d))
-	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, InstanceLimit: ck.instanceLimit()}
+	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, Effects: g.ambient, InstanceLimit: ck.instanceLimit()}
 	if ck.recursive != nil {
 		errs = append(errs, g.checkScopeBoundaries()...)
 		q.info = info

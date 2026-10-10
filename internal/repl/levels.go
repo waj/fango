@@ -239,22 +239,44 @@ func (s *Session) cancelCurrent() {
 // from a shallower level means an abort escaped the input and ended the levels
 // between: the reply is then the outcome of the outermost level that ended.
 func (s *Session) settle(reply eval.LevelReply, shownTy string) {
+	s.settleWith(reply, nil, func(value string) {
+		fmt.Fprintf(s.out, "%s : %s\n", value, shownTy)
+	})
+}
+
+// settleWith prints the answer to an input sent at the current depth and
+// reports whether it finished with a value, passed to value when given. An
+// input that did not finish calls undo, if given, before anything prints or
+// a level ends, so a definition the input was making is gone before the
+// levels it may have belonged to.
+func (s *Session) settleWith(reply eval.LevelReply, undo func(), value func(string)) bool {
+	failed := func() {
+		if undo != nil {
+			undo()
+		}
+	}
 	if depth := len(s.levels); reply.Depth < depth {
+		failed()
 		ended := s.levels[reply.Depth]
 		s.popLevels(reply.Depth)
 		s.levelOutcome(reply, ended, depth-reply.Depth, true)
-		return
+		return false
 	}
 	if reply.Err != nil {
+		failed()
 		s.runtimeError(reply.Err)
-		return
+		return false
 	}
 	outcome := reply.Value.(string)
-	if rest, failed := strings.CutPrefix(outcome, elaborate.PromptFailure); failed {
+	if rest, isFailure := strings.CutPrefix(outcome, elaborate.PromptFailure); isFailure {
+		failed()
 		s.unhandled(rest)
-		return
+		return false
 	}
-	fmt.Fprintf(s.out, "%s : %s\n", strings.TrimPrefix(outcome, elaborate.PromptValue), shownTy)
+	if value != nil {
+		value(strings.TrimPrefix(outcome, elaborate.PromptValue))
+	}
+	return true
 }
 
 func (s *Session) runtimeError(err error) {

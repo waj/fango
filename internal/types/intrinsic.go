@@ -22,6 +22,10 @@ const (
 	// PromptLevelName is answered by the REPL's evaluator, which runs the
 	// prompt's inputs inside the handlers around the call.
 	PromptLevelName = "Runtime.Prompt.level"
+	// PromptStaleName is the body a prompt value keeps once its effectful
+	// declaration has run: an evaluator without its memo fails here rather
+	// than performing the effect again.
+	PromptStaleName = "Runtime.Prompt.stale"
 )
 
 // RuntimeEvidenceEffect reports whether a row label needs runtime evidence.

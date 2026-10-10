@@ -1,0 +1,40 @@
+import State
+import Fail
+x = print 1
+x
+use State.run 0
+n = State.get()
+State.put 5
+n
+m = State.get()
+m
+v = Fail.fail "boom"
+v
+n = State.get()
+n
+(a, b) = (State.get(), State.get() + 1)
+a
+b
+effect Stop
+    abort stop : () -> a
+
+runStop : (() ->{Stop | e} a) ->{e} Maybe a
+runStop action =
+    handle action() on
+        stop () -> Nothing
+        return v -> Just v
+
+use runStop
+w = stop ()
+w
+:end
+n
+m
+a
+f() = State.get()
+f()
+use State.run 1.5
+k = State.get() + 1
+k
+:end
+:quit

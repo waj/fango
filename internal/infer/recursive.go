@@ -32,7 +32,7 @@ func (b *moduleCheck) inferGroup(group []int) {
 	all := &generator{ck: ck}
 	for k, i := range group {
 		d := b.values[i]
-		b.context(i, symbolModule(d.Name), func() { qs[k] = ck.prepareDecl(d, true) })
+		b.context(i, symbolModule(d.Name), func() { qs[k] = ck.prepareDecl(d, DeclPure) })
 		all.cs = append(all.cs, qs[k].g.cs...)
 		all.scopeObligations = append(all.scopeObligations, qs[k].g.scopeObligations...)
 		all.preds = append(all.preds, qs[k].g.preds...)

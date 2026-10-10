@@ -115,6 +115,10 @@ type Session struct {
 	installed []core.Def
 	// promptDefs retains the active Core generation of prompt definitions.
 	promptDefs map[string]core.Def
+	// stamp numbers the values effectful declarations have computed, so an
+	// evaluator can tell a value's memo from a redefinition's; stamps are
+	// never reused.
+	stamp uint64
 }
 
 func NewSessionWith(out io.Writer, opts Options) *Session {
@@ -169,7 +173,7 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	env.DefineProg(&core.Prog{ADTs: ck.ADTOrder, Defs: preludeDefs, Natives: ck.Natives})
 	ioctx := eval.NewIOContext(strings.NewReader(""), out)
 	ioctx.ErrorWriter = opts.ErrorWriter
-	return &Session{
+	s := &Session{
 		ck:         ck,
 		env:        env,
 		out:        out,
@@ -183,6 +187,15 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 		color:      opts.Color,
 		loading:    loading,
 	}
+	// A value declaration that performs effects runs once when entered, so
+	// its row is granted exactly as an expression's is (doc/design.md,
+	// "Interpreter and REPL"). Its own predicates are qualified right after,
+	// so they are not settled here.
+	ck.PromptEffects = func(row types.Row, at source.Span) []diag.Error {
+		_, errs := s.grantLevels(row, at, nil)
+		return errs
+	}
+	return s
 }
 
 // Close stops the session's own native worker, if it built one.
@@ -511,8 +524,14 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	// Names reach the checker canonical, exactly as a module's do: the
 	// resolver binds what this input declares and rewrites what it uses.
 	var prior savedName
-	if vd, ok := m.Decls[0].(*ast.ValueDecl); ok {
-		prior = s.snapshot(-1, vd.Name)
+	var priors []savedName
+	switch d := m.Decls[0].(type) {
+	case *ast.ValueDecl:
+		prior = s.snapshot(-1, d.Name)
+	case *ast.PatternDecl:
+		for _, v := range patternVars(d.Pattern) {
+			priors = append(priors, s.snapshot(-1, v.Name))
+		}
 	}
 	if errs := s.prompt.Decl(m.Decls[0]); len(errs) > 0 {
 		restore()
@@ -529,7 +548,13 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		errs := s.ck.ClassDecl(cl)
 		for _, vd := range infer.ClassDefaultDecls(cl) {
 			if len(errs) == 0 {
-				_, _, errs = s.defineValue(vd)
+				// A default is checked by a module's rule: its methods are
+				// functions, so nothing runs when it is entered.
+				var info infer.DeclInfo
+				var defs []core.Def
+				if info, defs, errs = s.checkValue(vd, infer.DeclPure); len(errs) == 0 {
+					s.installValue(info, defs, true)
+				}
 			}
 		}
 		if len(errs) > 0 {
@@ -594,31 +619,49 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	if pd, ok := m.Decls[0].(*ast.PatternDecl); ok {
-		infos, inferErrs := s.ck.PatternDecl(pd, false)
+		infos, inferErrs := s.ck.PatternDecl(pd, infer.DeclPromptEffects)
 		if len(inferErrs) > 0 {
 			restore()
 			diag.Render(s.out, inferErrs)
 			return inputDone
 		}
-		var allDefs []core.Def
+		// The subject is a fresh name, so what it meant before is nothing.
+		subject := infos[0]
+		priors = append(priors, savedName{level: -1, name: subject.Name, binding: s.env.Binding(subject.Name)})
+		var groups [][]core.Def
 		for _, info := range infos {
-			defs, es := elaborate.DeclIn(info, s.installed, s.ck)
+			defs, es := elaborate.DeclIn(info, s.activeExecutionDefs(), s.ck)
 			if len(es) > 0 {
 				restore()
 				diag.Render(s.out, es)
 				return inputDone
 			}
-			allDefs = append(allDefs, defs...)
+			groups = append(groups, defs)
 		}
-		for i := range allDefs {
-			def := &allDefs[i]
-			if def.IsWorker() {
-				s.env.DefineWorker(def)
-			} else {
-				s.env.Define(def.Name, def.Body)
+		row, _ := s.ck.Sub.Apply(subject.Effects).(types.Row)
+		eager := len(row.Labels) > 0
+		if eager {
+			groups[0][0].Control = core.ExprControl(groups[0][0].Body)
+		}
+		for i, info := range infos {
+			s.installValue(info, groups[i], false)
+		}
+		if eager {
+			undo := func() {
+				for i := len(priors) - 1; i >= 0; i-- {
+					s.restoreName(priors[i])
+				}
+				restore()
 			}
+			if !s.forceValue(&groups[0][0], row, subject.Body.Span(), undo) {
+				return inputDone
+			}
+		} else {
+			s.ck.RecordChecked(infos)
 		}
-		s.ck.RecordChecked(infos)
+		for i, v := range patternVars(pd.Pattern) {
+			s.defined(v.Name, owner, priors[i])
+		}
 		for _, info := range infos[1:] {
 			sch := info.Scheme
 			sch.Body = s.ck.Sub.Apply(sch.Body)
@@ -638,42 +681,64 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	redefining := s.ck.Env.Has(vd.Name)
-	info, def, errs := s.defineValue(vd)
+	info, defs, errs := s.checkValue(vd, infer.DeclPromptEffects)
 	if len(errs) > 0 {
 		restore()
 		diag.Render(s.out, errs)
 		return inputDone
 	}
+	def := &defs[0]
+	sch := info.Scheme
+	sch.Body = s.ck.Sub.Apply(sch.Body)
+	sch.Preds = s.ck.NormalizePreds(sch.Preds)
+	// A value whose body performs effects runs once, now, under the handlers
+	// an expression gets; a function waits for its calls, and a pure value
+	// for its first use.
+	row, _ := s.ck.Sub.Apply(info.Effects).(types.Row)
+	if len(row.Labels) == 0 {
+		s.installValue(info, defs, true)
+	} else {
+		def.Control = core.ExprControl(def.Body)
+		for _, aux := range defs[1:] {
+			priors = append(priors, s.snapshot(-1, aux.Name))
+		}
+		s.installValue(info, defs, false)
+		undo := func() {
+			for i := len(priors) - 1; i >= 0; i-- {
+				s.restoreName(priors[i])
+			}
+			s.restoreName(prior)
+			restore()
+		}
+		if !s.forceValue(def, row, info.Body.Span(), undo) {
+			return inputDone
+		}
+	}
 	s.defined(vd.Name, owner, prior)
 	if redefining {
 		s.gen++
 	}
-	sch := info.Scheme
-	sch.Body = s.ck.Sub.Apply(sch.Body)
-	sch.Preds = s.ck.NormalizePreds(sch.Preds)
 	fmt.Fprintf(s.out, "%s : %s\n", def.Name, types.ShowScheme(sch))
 	return inputDone
 }
 
-// defineValue checks, elaborates, and installs one top-level definition. A
-// failed definition installs nothing; the caller restores its checkpoint.
-func (s *Session) defineValue(vd *ast.ValueDecl) (infer.DeclInfo, *core.Def, []diag.Error) {
+// checkValue stages, checks, and elaborates one top-level definition without
+// installing anything, so a failed definition leaves no broken name behind;
+// the caller restores its checkpoint.
+func (s *Session) checkValue(vd *ast.ValueDecl, mode infer.DeclEffects) (infer.DeclInfo, []core.Def, []diag.Error) {
 	// A failed input leaves nothing behind, expansion included: a splice that
 	// fails half way through has already checked whatever preceded it.
 	if errs := s.ck.StageDecl(vd); len(errs) > 0 {
 		return infer.DeclInfo{}, nil, errs
 	}
-	// Check the body BEFORE binding: a failed definition must not install
-	// a broken name into the session. REPL declarations are required to be
-	// pure; effectful expressions can be evaluated directly at the prompt.
-	info, errs := s.ck.DeclWhere(vd, false)
+	info, errs := s.ck.DeclWhere(vd, mode)
 	if len(errs) > 0 {
 		return infer.DeclInfo{}, nil, errs
 	}
 	// The elaborator's spine analysis needs the worker table to include
 	// THIS definition (a prompt-defined fib must self-call directly), so
-	// install its arity before elaborating; the checkpoint above restores it
-	// on failure along with everything else.
+	// install its arity before elaborating; the checkpoint restores it on
+	// failure along with everything else.
 	if len(vd.Params) > 0 {
 		s.ck.Workers[vd.Name] = len(vd.Params)
 	} else {
@@ -683,10 +748,18 @@ func (s *Session) defineValue(vd *ast.ValueDecl) (infer.DeclInfo, *core.Def, []d
 	if len(errs) > 0 {
 		return infer.DeclInfo{}, nil, errs
 	}
+	return info, defs, nil
+}
+
+// installValue binds a checked definition in the checker and the evaluator.
+// record adds it to the compile-time evaluator's prefix, so a later splice
+// may name it; a value computed when entered is not recorded, since its
+// body cannot be evaluated again.
+func (s *Session) installValue(info infer.DeclInfo, defs []core.Def, record bool) {
 	s.ck.BindDecl(info)
-	// A later splice may name this definition, so the compile-time
-	// evaluator's prefix has to grow with the session.
-	s.ck.RecordChecked([]infer.DeclInfo{info})
+	if record {
+		s.ck.RecordChecked([]infer.DeclInfo{info})
+	}
 	def := &defs[0]
 	for i := range defs {
 		s.promptDefs[defs[i].Name] = defs[i]
@@ -699,7 +772,29 @@ func (s *Session) defineValue(vd *ast.ValueDecl) (infer.DeclInfo, *core.Def, []d
 	} else {
 		s.env.Define(def.Name, def.Body)
 	}
-	return info, def, nil
+}
+
+// forceValue runs an installed value whose declaration performs effects,
+// once, in the evaluator that holds the prompt's levels and under the
+// handlers an expression gets, then seals the result there: the value's
+// shipped body becomes a trap, so no evaluator without the memo performs the
+// effect again. It reports whether the value now holds a result; otherwise
+// undo has put the session back and the outcome has been printed.
+func (s *Session) forceValue(def *core.Def, row types.Row, at source.Span, undo func()) bool {
+	fails, _ := s.grantLevels(row, at, nil)
+	s.stamp++
+	s.env.Stamp(def.Name, s.stamp)
+	reply, _ := s.evaluate(elaborate.PromptForce(def.Name, def.Type, row, fails, s.ck))
+	if !s.settleWith(reply, undo, nil) {
+		return false
+	}
+	stale := elaborate.PromptStale(def.Name, def.Type, s.ck)
+	s.env.Seal(def.Name, stale)
+	if pd, ok := s.promptDefs[def.Name]; ok {
+		pd.Body = stale
+		s.promptDefs[def.Name] = pd
+	}
+	return true
 }
 
 // importInput brings modules into the session. Each import loads what the
@@ -912,8 +1007,17 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 // promptEffects sorts the effects a prompt expression performs: IO is
 // ambient, and each Fail application is handled for this input alone, so its
 // failure prints rather than escaping. An installed level may grant others;
-// anything else has no handler here.
+// anything else has no handler here. Granting settles the expression's
+// pending predicates, since the grant may have fixed their types.
 func (s *Session) promptEffects(effects types.Type, at source.Span) ([]types.Type, []diag.Error) {
+	return s.grantLevels(effects, at, s.settlePreds)
+}
+
+// grantLevels matches each label of an input's row against what the prompt
+// handles, unifying a granted label's type arguments with the level's, and
+// returns the Fail argument types the input handles itself. granted, if
+// given, runs after each level grant.
+func (s *Session) grantLevels(effects types.Type, at source.Span, granted func(source.Span) []diag.Error) ([]types.Type, []diag.Error) {
 	row, ok := s.ck.Sub.Apply(effects).(types.Row)
 	if !ok {
 		return nil, nil
@@ -949,7 +1053,9 @@ func (s *Session) promptEffects(effects types.Type, at source.Span) ([]types.Typ
 			}
 			if len(candidates) > 0 {
 				errs = append(errs, s.unifyLabel(label, candidates[len(candidates)-1], at)...)
-				errs = append(errs, s.settlePreds(at)...)
+				if granted != nil {
+					errs = append(errs, granted(at)...)
+				}
 				continue
 			}
 			errs = append(errs, diag.Errorf(at, "UNHANDLED EFFECT",

@@ -23,6 +23,12 @@ type Prog struct {
 	// Entry selects the entry module's main definition by canonical symbol.
 	Entry        string
 	EntryDisplay Expr // optional, pure String observation used by tests and tooling
+	// Stamps marks prompt values computed once by an effectful declaration
+	// (doc/design.md, "Interpreter and REPL"). An evaluator reinstalling a
+	// stamped value keeps the memo it sealed under the same stamp rather
+	// than taking a fresh cell, so the value survives the per-input program
+	// a REPL session ships to its native worker.
+	Stamps map[string]uint64
 }
 
 type EffectInstance struct {

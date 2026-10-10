@@ -29,6 +29,16 @@ type argument, and any other effect is an `UNHANDLED EFFECT` before
 elaboration. The observed expression evaluates to one tagged String, value or
 failure, because only simple values return from the native worker.
 
+A value declaration's row is granted the same way, through a checker hook the
+session installs. The hook runs before the declaration's predicates are
+qualified, so a label's type arguments unify with the level's grant rather
+than defaulting first. A declaration whose row holds labels is installed and
+then forced once, by evaluating a tagged outcome that reads the value under
+the same abort handlers, in the evaluator that holds the levels. A cell
+memoizes only on success, so a failure, a runtime error, or an interruption
+leaves nothing to undo but the installation, which the session restores from
+the names' prior bindings before any level it may have ended is popped.
+
 Print is ordinary Display-constrained Console code over display and
 IO.write stdout, catching typed IO failures at the convenience boundary. Tooling
 evaluates an observed expression once. The REPL echoes a result through available
@@ -61,9 +71,23 @@ finish before returning an outcome.
 Runtime errors leave installed definitions and the worker available for subsequent inputs.
 
 Parser incompleteness/layout drives multiline input. Prompt inputs are sequential,
-even though imported module functions have module-wide visibility. Effectful ordinary
-declarations are rejected; effectful expressions run and installed functions wait
-for explicit calls. Surface limitations and commands live in [REPL](../reference/repl.md).
+even though imported module functions have module-wide visibility. Effectful
+expressions run, effectful value declarations run once when entered, and
+installed functions wait for explicit calls. Surface limitations and commands
+live in [REPL](../reference/repl.md).
+
+A value an effectful declaration computed carries a session-unique stamp.
+Forcing a stamped cell seals its memo under the name and stamp in the
+evaluator that forced it, and a program that reinstalls a stamped value
+reinstalls the sealed memo for the same stamp instead of a fresh cell: that is
+what keeps the value across the per-input program the session ships to its
+native worker. Once the value is sealed, its shipped body becomes a trap,
+`Runtime.Prompt.stale`, so an evaluator that never sealed the memo, a worker
+started or rebuilt after the declaration ran, fails rather than performing
+the effect again. A redefinition or a pure binding of the name drops its
+stamp; a binding put back brings its stamp, and so its memo, back with it.
+Such a value is not added to the compile-time evaluator's prefix, as a
+level's binders are not, since its body cannot run again.
 
 ## Imports and resolution
 

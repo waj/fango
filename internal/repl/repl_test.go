@@ -298,14 +298,86 @@ forward True
 	}
 }
 
-func TestEffectfulPromptDeclarationRejected(t *testing.T) {
+// A value declaration that performs effects runs once, when entered, and
+// binds its result: a later use does not run the body again.
+func TestEffectfulPromptDeclarationRunsOnce(t *testing.T) {
 	var out strings.Builder
-	Run(strings.NewReader("x = print 1\n40 + 2\n:quit\n"), &out)
-	if !strings.Contains(out.String(), "EFFECTFUL PROMPT DECLARATION") {
-		t.Fatalf("effectful declaration was installed:\n%s", out.String())
+	Run(strings.NewReader("x = print 1\nx\n40 + 2\n:quit\n"), &out)
+	got := out.String()
+	for _, want := range []string{"> 1\nx : ()\n", "() : ()\n", "42 : Num a => a"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
 	}
-	if !strings.Contains(out.String(), "42 : Num a => a") {
-		t.Fatalf("session did not recover after rejecting declaration:\n%s", out.String())
+	if strings.Count(got, "> 1\n") != 1 {
+		t.Fatalf("effectful declaration ran more than once:\n%s", got)
+	}
+}
+
+// Importing Time.Clock moves evaluation into the native worker, where every
+// input reinstalls the session's program: an effectful declaration's value
+// must survive that, and the level it was computed under ending.
+func TestEffectfulPromptDeclarationInWorker(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader("import Time.Clock\nuse Time.Clock.runSystem\nt = Time.Clock.now()\nt\nt\n:end\nt\n:quit\n"), &out)
+	got := out.String()
+	if !strings.Contains(got, "t : DateTime\n") {
+		t.Fatalf("missing type echo:\n%s", got)
+	}
+	var values []string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasSuffix(line, " : DateTime") && strings.Contains(line, "DateTime \"") {
+			values = append(values, line[strings.Index(line, "DateTime \""):])
+		}
+	}
+	if len(values) != 3 || values[0] != values[1] || values[1] != values[2] {
+		t.Fatalf("expected one clock reading shown three times, got %q:\n%s", values, got)
+	}
+}
+
+// A value computed in the worker is sealed there under its stamp, so later
+// inputs and the end of its level keep it; a rebuilt worker never held it, so
+// using the value there is an error rather than a second run of the effect.
+func TestEffectfulPromptDeclarationAcrossWorkerRebuild(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, contents string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("Hash.fango", "module Hash exposing (twice)\n\ntwice : Int -> Int\ntwice = native\n")
+	write("Hash.native.go", "package native\n\nfunc Twice(x int64) int64 { return x * 2 }\n")
+	write("Hash2.fango", "module Hash2 exposing (thrice)\n\nthrice : Int -> Int\nthrice = native\n")
+	write("Hash2.native.go", "package native\n\nfunc Thrice(x int64) int64 { return x * 3 }\n")
+	var out strings.Builder
+	RunWith(strings.NewReader("import Hash\nimport State\nuse State.run 0\nn = State.get()\nState.put 5\nn\nn\nm = State.get()\n:end\nn\nm\nimport Hash2\nn\nHash2.thrice 2\nn = 7\nn\n:quit\n"), &out, Options{Root: root})
+	got := out.String()
+	for _, want := range []string{"n : Int\n", "m : Int\n", "loaded Hash2\n", "6 : Int\n", "7 : Int\n", "holds the result of an effectful declaration"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "0 : Int\n") != 3 || strings.Count(got, "5 : Int\n") != 1 {
+		t.Fatalf("value did not survive the worker's program reinstall:\n%s", got)
+	}
+}
+
+// A value computed in process before the session needs a worker is not
+// carried into it: memos never cross the wire, so the worker reports it.
+func TestEffectfulPromptDeclarationBeforeWorker(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, contents string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("Hash.fango", "module Hash exposing (twice)\n\ntwice : Int -> Int\ntwice = native\n")
+	write("Hash.native.go", "package native\n\nfunc Twice(x int64) int64 { return x * 2 }\n")
+	var out strings.Builder
+	RunWith(strings.NewReader("x = print 1\nimport Hash\nx\n:quit\n"), &out, Options{Root: root})
+	got := out.String()
+	if !strings.Contains(got, "holds the result of an effectful declaration") || strings.Count(got, "> 1\n") != 1 {
+		t.Fatalf("expected the worker to report the stale value:\n%s", got)
 	}
 }
 

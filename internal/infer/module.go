@@ -343,7 +343,7 @@ func (b *moduleCheck) ensure(i int) {
 			d := b.values[j]
 			b.context(j, symbolModule(d.Name), func() {
 				if pd := b.patterns[j]; pd != nil {
-					ds, es := b.ck.patternDecl(pd, true)
+					ds, es := b.ck.patternDecl(pd, DeclPure)
 					b.add(j, ds, es)
 					return
 				}

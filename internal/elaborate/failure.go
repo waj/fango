@@ -75,17 +75,43 @@ const (
 func PromptOutcome(e core.Expr, row types.Row, fails []types.Type, ck *infer.Checker, owner string) core.Expr {
 	str := ck.B.String
 	lit := func(text string) core.Expr { return &core.StringLit{Val: text, Ty: str} }
-	concat := func(parts ...core.Expr) core.Expr {
-		out := parts[len(parts)-1]
-		for i := len(parts) - 2; i >= 0; i-- {
-			out = &core.NativeCall{Name: "Basics.++", Module: "Basics", Ty: str, Args: []core.Expr{parts[i], out}}
-		}
-		return out
+	body := promptConcat(ck, lit(PromptValue), Represent(e, ck, owner))
+	return promptHandled(body, row, fails, ck, owner)
+}
+
+// PromptForce evaluates the prompt value name once, as a declaration that
+// performs effects runs when it is entered, and yields PromptValue. Its
+// failures are handled as an expression's are, and a failing cell is left
+// unforced, so the outcome says whether the value now holds a result.
+func PromptForce(name string, ty types.Type, row types.Row, fails []types.Type, ck *infer.Checker) core.Expr {
+	str := ck.B.String
+	body := &core.Seq{First: &core.VarRef{Name: name, Ty: ty}, Then: &core.StringLit{Val: PromptValue, Ty: str}, Ty: str}
+	return promptHandled(body, row, fails, ck, "")
+}
+
+// PromptStale is the body a prompt value keeps once its effectful
+// declaration has run: the evaluator that ran it holds the memo, and any
+// other fails here rather than performing the effect again.
+func PromptStale(name string, ty types.Type, ck *infer.Checker) core.Expr {
+	return &core.NativeCall{Name: types.PromptStaleName, Module: "Runtime.Prompt", Ty: ty, Args: []core.Expr{&core.StringLit{Val: types.SurfaceName(name), Ty: ck.B.String}}}
+}
+
+func promptConcat(ck *infer.Checker, parts ...core.Expr) core.Expr {
+	out := parts[len(parts)-1]
+	for i := len(parts) - 2; i >= 0; i-- {
+		out = &core.NativeCall{Name: "Basics.++", Module: "Basics", Ty: ck.B.String, Args: []core.Expr{parts[i], out}}
 	}
-	body := concat(lit(PromptValue), Represent(e, ck, owner))
+	return out
+}
+
+// promptHandled wraps a tagged-outcome body in one abort handler per Fail
+// instance in fails, each rendering the failure it catches.
+func promptHandled(body core.Expr, row types.Row, fails []types.Type, ck *infer.Checker, owner string) core.Expr {
 	if len(fails) == 0 {
 		return body
 	}
+	str := ck.B.String
+	lit := func(text string) core.Expr { return &core.StringLit{Val: text, Ty: str} }
 	fail := ck.Effects["Fail.Fail"]
 	remaining := row
 	for _, arg := range fails {
@@ -94,7 +120,7 @@ func PromptOutcome(e core.Expr, row types.Row, fails []types.Type, ck *infer.Che
 		ev := core.EffectInstance{Unique: fail.Unique, Name: fail.Name, Args: []types.Type{arg}, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Exit}}
 		shown := Represent(&core.VarRef{Name: "_failure", Local: true, Ty: arg}, ck, owner)
 		clause := core.HandlerClause{Op: fail.Ops[0], Params: []string{"_failure"}, ParamTypes: []types.Type{arg}, ResultType: str,
-			Body: concat(lit(PromptFailure), shown, lit(" : "+types.Show(arg)))}
+			Body: promptConcat(ck, lit(PromptFailure), shown, lit(" : "+types.Show(arg)))}
 		body = &core.Handle{Body: body, Effects: []core.EffectInstance{ev}, Scope: scope, Ty: str, Control: rowControl(remaining, ck), Clauses: []core.HandlerClause{clause}}
 	}
 	return body

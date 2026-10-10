@@ -85,6 +85,17 @@ type Cell struct {
 	memo    Value
 	forced  bool
 	forcing bool
+	// stamp is nonzero for a prompt value an effectful declaration computes
+	// once: its memo is sealed under the stamp, and reinstalling the value
+	// with the same stamp keeps that memo (core.Prog.Stamps).
+	stamp uint64
+}
+
+// sealKey identifies a sealed memo: the value's name and the stamp of the
+// declaration that computed it.
+type sealKey struct {
+	name  string
+	stamp uint64
 }
 
 // CtorVal is a constructed ADT value: the constructor's table row plus its
@@ -304,6 +315,13 @@ type Env struct {
 	defs       map[string]core.Def
 	effects    map[int]*types.EffectInfo
 	intrinsics map[string]bool
+	// stamps are the prompt values computed once by an effectful
+	// declaration, and sealed their memos by name and stamp: a program
+	// shipped with the same stamp reinstalls the memo (doc/design.md,
+	// "Interpreter and REPL").
+	stamps map[string]uint64
+	sealMu sync.Mutex
+	sealed map[sealKey]Value
 
 	// Templates is the compiler's quote table, installed only for the
 	// compile-time environment. The Meta natives that assemble generated
@@ -343,7 +361,7 @@ func (f *Frame) lookup(name string) (Value, bool) {
 }
 
 func NewEnv() *Env {
-	return &Env{adts: map[int]*types.ADTInfo{}, cells: map[string]*Cell{}, workers: map[string]*core.Def{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}, defs: map[string]core.Def{}, effects: map[int]*types.EffectInfo{}, intrinsics: map[string]bool{}}
+	return &Env{adts: map[int]*types.ADTInfo{}, cells: map[string]*Cell{}, workers: map[string]*core.Def{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}, defs: map[string]core.Def{}, effects: map[int]*types.EffectInfo{}, intrinsics: map[string]bool{}, stamps: map[string]uint64{}, sealed: map[sealKey]Value{}}
 }
 
 // tailLoop reports (and caches) whether def executes as a frame-reuse loop.
@@ -366,6 +384,7 @@ func (e *Env) tailLoop(def *core.Def) *core.TailLoop {
 func (e *Env) Define(name string, body core.Expr) {
 	e.cells[name] = &Cell{Body: body}
 	delete(e.workers, name)
+	delete(e.stamps, name)
 	e.defs[name] = core.Def{Name: name, Type: body.Type(), Body: body}
 }
 
@@ -373,7 +392,46 @@ func (e *Env) Define(name string, body core.Expr) {
 func (e *Env) DefineWorker(d *core.Def) {
 	e.workers[d.Name] = d
 	delete(e.cells, d.Name)
+	delete(e.stamps, d.Name)
 	e.defs[d.Name] = *d
+}
+
+// Stamp marks name's cell as a prompt value computed once by an effectful
+// declaration: forcing it seals the memo under stamp, and a program that
+// carries the same stamp reinstalls that memo. The stamp travels with the
+// binding, so putting a binding back brings its memo back with it.
+func (e *Env) Stamp(name string, stamp uint64) {
+	if cell, ok := e.cells[name]; ok {
+		cell.stamp = stamp
+		e.stamps[name] = stamp
+	}
+}
+
+// Seal replaces what is shipped for a stamped value with body, keeping the
+// forced cell and its memo: the host calls it once the declaration has run,
+// so no evaluator without the memo performs the effect again.
+func (e *Env) Seal(name string, body core.Expr) {
+	cell, ok := e.cells[name]
+	if !ok {
+		return
+	}
+	cell.Body = body
+	e.defs[name] = core.Def{Name: name, Type: body.Type(), Body: body}
+}
+
+// sealMemo records a forced value's memo under its stamp.
+func (e *Env) sealMemo(name string, stamp uint64, v Value) {
+	e.sealMu.Lock()
+	e.sealed[sealKey{name, stamp}] = v
+	e.sealMu.Unlock()
+}
+
+// sealedMemo answers the memo sealed under name and stamp, if any.
+func (e *Env) sealedMemo(name string, stamp uint64) (Value, bool) {
+	e.sealMu.Lock()
+	v, ok := e.sealed[sealKey{name, stamp}]
+	e.sealMu.Unlock()
+	return v, ok
 }
 
 // DefineProg installs every definition of a Core program. Nullary generic
@@ -400,9 +458,21 @@ func (e *Env) DefineProg(p *core.Prog) {
 		d := &p.Defs[i]
 		if d.IsWorker() {
 			e.DefineWorker(d)
-		} else {
-			e.Define(d.Name, d.Body)
-			e.defs[d.Name] = *d
+			continue
+		}
+		e.Define(d.Name, d.Body)
+		e.defs[d.Name] = *d
+		// A stamped value keeps the memo this evaluator sealed when it ran
+		// the declaration; the shipped body is only for an evaluator that
+		// never did.
+		if stamp := p.Stamps[d.Name]; stamp != 0 {
+			e.Stamp(d.Name, stamp)
+			if memo, ok := e.sealedMemo(d.Name, stamp); ok {
+				cell := e.cells[d.Name]
+				cell.ready = make(chan struct{})
+				close(cell.ready)
+				cell.memo, cell.forced = memo, true
+			}
 		}
 	}
 }
@@ -424,10 +494,17 @@ func (e *Env) program() *core.Prog {
 	}
 	sort.Strings(names)
 	defs := make([]core.Def, len(names))
+	var stamps map[string]uint64
 	for i, name := range names {
 		defs[i] = e.defs[name]
+		if stamp := e.stamps[name]; stamp != 0 {
+			if stamps == nil {
+				stamps = map[string]uint64{}
+			}
+			stamps[name] = stamp
+		}
 	}
-	return &core.Prog{ADTs: adts, Effects: effects, Defs: defs, Natives: e.natives, Intrinsics: e.intrinsics, Entry: e.entry}
+	return &core.Prog{ADTs: adts, Effects: effects, Defs: defs, Natives: e.natives, Intrinsics: e.intrinsics, Entry: e.entry, Stamps: stamps}
 }
 
 // interp carries the cancellation context and the print destination; ctx is
@@ -561,6 +638,7 @@ func (e *Env) DefineValue(name string, ty types.Type, v Value) {
 	e.cells[name] = &Cell{Body: &core.UnitLit{Ty: ty}, ready: ready, memo: v, forced: true}
 	delete(e.workers, name)
 	delete(e.defs, name)
+	delete(e.stamps, name)
 }
 
 // Binding is what an Env holds for one name, so a prompt level can put back
@@ -571,17 +649,19 @@ type Binding struct {
 	worker *core.Def
 	def    core.Def
 	hasDef bool
+	stamp  uint64
 }
 
 func (e *Env) Binding(name string) Binding {
 	def, hasDef := e.defs[name]
-	return Binding{name: name, cell: e.cells[name], worker: e.workers[name], def: def, hasDef: hasDef}
+	return Binding{name: name, cell: e.cells[name], worker: e.workers[name], def: def, hasDef: hasDef, stamp: e.stamps[name]}
 }
 
 func (e *Env) Restore(b Binding) {
 	delete(e.cells, b.name)
 	delete(e.workers, b.name)
 	delete(e.defs, b.name)
+	delete(e.stamps, b.name)
 	if b.cell != nil {
 		e.cells[b.name] = b.cell
 	}
@@ -590,6 +670,9 @@ func (e *Env) Restore(b Binding) {
 	}
 	if b.hasDef {
 		e.defs[b.name] = b.def
+	}
+	if b.stamp != 0 {
+		e.stamps[b.name] = b.stamp
 	}
 }
 
@@ -1466,7 +1549,11 @@ func (in *interp) force(name string) (Value, error) {
 		}
 		cell.forcing = false
 		close(cell.ready)
+		stamp := cell.stamp
 		cell.mu.Unlock()
+		if success && stamp != 0 {
+			in.env.sealMemo(name, stamp, v)
+		}
 	}()
 
 	v, err = in.eval(cell.Body, nil)
