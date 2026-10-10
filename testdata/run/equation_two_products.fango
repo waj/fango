@@ -1,0 +1,18 @@
+-- Equations whose columns are all constructor patterns on single-constructor
+-- products, in pure functions small enough to be inlined at their call sites.
+type Pair = Pair Int Int deriving (Eq, Show)
+type Box = Box Int deriving (Eq, Show)
+
+combine : Pair -> Pair -> Pair
+combine (Pair a b) (Pair c d) = Pair (a + c) (b + d)
+
+scaleBy : Box -> Pair -> Pair
+scaleBy (Box k) (Pair a b) = Pair (k * a) (k * b)
+
+total (Pair a b) = a + b
+
+main =
+    first = Pair 1 2
+    print (combine first (Pair 3 4))
+    print (scaleBy (Box 2) (combine first first))
+    print (total (scaleBy (Box 3) first))

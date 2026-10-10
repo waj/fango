@@ -2595,6 +2595,10 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 	if g.rememberForwarder(let) {
 		return nil
 	}
+	// An inlined call binds the callee's parameters as locals, and a
+	// multi-column decision tree in the inlined body tests those locals
+	// directly, so they need the same registration as worker parameters.
+	g.caseVarTys[let.Name] = let.Rhs.Type()
 	if let.Rec {
 		// A Go local is not in scope inside its own initializer:
 		// declare, then assign — the standard recursive-closure idiom.
