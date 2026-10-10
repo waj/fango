@@ -1,0 +1,28 @@
+import Expect
+import String
+import Test exposing (Test, describe, test)
+
+-- `onFail` adds a context line above a failure's message, nests, and as a
+-- `use` item covers the rest of the block.
+
+suite : Test {}
+suite =
+    describe "onFail"
+        [ test "passes through" {
+            Expect.onFail "unused" { Expect.equal 1 1 }
+          }
+        , test "adds context" {
+            Expect.onFail "after splitting" { Expect.equal [ "a" ] (String.split "," "a,b") }
+          }
+        , test "nests" {
+            Expect.onFail "outer" { Expect.onFail "inner" { Expect.failWith "the message" } }
+          }
+        , test "as a use item" {
+            use Expect.onFail "checking the pieces"
+            pieces = String.split "," "a,b"
+            Expect.equal 2 (List.length pieces)
+            Expect.equal [ "a", "c" ] pieces
+          }
+        ]
+
+main() = Test.run suite

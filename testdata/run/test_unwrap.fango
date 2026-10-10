@@ -1,0 +1,36 @@
+import Expect
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import String
+import Test exposing (Test, describe, test)
+
+-- `ok`, `err`, and `just` return the value they unwrap, so the next
+-- expectation can use it; `nothing` only checks.
+
+parse : String -> Result String Int
+parse text =
+    case String.toInt text of
+        Just n -> Ok n
+        Nothing -> Err ("not a number: " ++ text)
+
+suite : Test {}
+suite =
+    describe "unwrapping"
+        [ test "ok returns the value" {
+            n = Expect.ok (parse "12")
+            Expect.equal 12 n
+          }
+        , test "err returns the error" {
+            Expect.equal "not a number: x" (Expect.err (parse "x"))
+          }
+        , test "just returns the value" {
+            Expect.equal 7 (Expect.just (String.toInt "7"))
+          }
+        , test "nothing checks" { Expect.nothing (String.toInt "x") }
+        , test "ok fails on Err" { Expect.equal 0 (Expect.ok (parse "x")) }
+        , test "err fails on Ok" { Expect.equal "" (Expect.err (parse "3")) }
+        , test "just fails on Nothing" { Expect.equal 0 (Expect.just (String.toInt "x")) }
+        , test "nothing fails on Just" { Expect.nothing (String.toInt "3") }
+        ]
+
+main() = Test.run suite

@@ -1,0 +1,208 @@
+{-# no-prelude #-}
+-- Expectations for tests.
+--
+-- An expectation that does not hold aborts through the `Expect` effect, so a
+-- test body is a plain sequence of statements and the first failing
+-- expectation ends it. [`Test.run`](Test.fango) handles the effect around
+-- each test and reports the failure; a body can also handle it itself, as
+-- `onFail` does. The expected value comes first, so
+-- `actual |> Expect.equal expected` and `List.length xs |> Expect.lessThan 10`
+-- read as written.
+--
+-- Because a failure aborts, `ok`, `err`, and `just` return the value they
+-- unwrap: `n = Expect.ok (parse "12")` followed by `Expect.equal 12 n`.
+-- Asserting that code fails means handling the code's own effect inside the
+-- body, with `Fail.attempt` say, and asserting on the `Result`.
+--
+-- Failure messages render operands with `Inspect`, which shows values that
+-- have a `Show` instance and writes `<value>` for the rest, so a type can be
+-- tested without deriving `Show`.
+module Expect exposing
+    ( Error(..), Expect, Inspect(..)
+    , atLeast, atMost, equal, err, fail, failWith, greaterThan, just, lessThan
+    , notEqual, nothing, ok, onFail
+    )
+
+import Basics exposing (..)
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+
+-- A failed expectation. A body that performs it is a test, and `Test.run`
+-- or a handler of the caller's own decides what a failure means.
+effect Expect
+    -- Fails with the error. It never returns: it unwinds to the nearest
+    -- enclosing handler.
+    abort fail : Error -> value
+
+-- Why an expectation failed.
+type Error =
+    {
+      -- The failure text. It may span several lines, separated by `\n` and
+      -- without a trailing newline; a report indents each.
+      message : String
+    }
+    deriving (Eq, Show)
+
+-- Text for a value in a failure message.
+--
+-- The two blanket instances make every type inspectable: a type with a
+-- `Show` instance is shown, and any other reads `<value>`. A type may
+-- declare its own instance to override either.
+--
+-- ```fango
+-- import Expect exposing (inspect)
+-- import IO
+--
+-- inspect (Just "a") == "Just \"a\""
+-- inspect IO.stdin == "<value>"
+-- ```
+class Inspect a
+    -- The value's text in a failure message.
+    inspect : a -> String
+
+instance Inspect a
+    inspect _ = "<value>"
+
+instance Show a => Inspect a
+    inspect value = show value
+
+-- Fails with a message that names what was expected and what was found.
+mismatch : String -> String ->{Expect} value
+mismatch expected actual =
+    fail (Error { message = "Expected: " ++ expected ++ "\nActual:   " ++ actual })
+
+-- Fails unless `actual` equals `expected`.
+--
+-- ```fango
+-- import Expect exposing (Expect)
+-- import Maybe exposing (Maybe(..))
+--
+-- message : (() ->{Expect} ()) -> Maybe String
+-- message body =
+--     handle body() on
+--         Expect.fail error -> Just error.message
+--         return _ -> Nothing
+--
+-- message { Expect.equal 1 1 } == Nothing
+-- message { Expect.equal [1, 2] [1] } == Just "Expected: [1, 2]\nActual:   [1]"
+-- ```
+equal : (Eq a, Inspect a) => a -> a ->{Expect} ()
+equal expected actual =
+    if actual == expected then () else mismatch (inspect expected) (inspect actual)
+
+-- Fails when `actual` equals `unexpected`.
+notEqual : (Eq a, Inspect a) => a -> a ->{Expect} ()
+notEqual unexpected actual =
+    if actual == unexpected then
+        mismatch ("not " ++ inspect unexpected) (inspect actual)
+    else
+        ()
+
+-- Fails unless `actual` is less than `bound`: `x |> Expect.lessThan 10`.
+lessThan : (Ord a, Inspect a) => a -> a ->{Expect} ()
+lessThan bound actual =
+    if actual < bound then () else mismatch ("less than " ++ inspect bound) (inspect actual)
+
+-- Fails unless `actual` is greater than `bound`.
+greaterThan : (Ord a, Inspect a) => a -> a ->{Expect} ()
+greaterThan bound actual =
+    if actual > bound then () else mismatch ("greater than " ++ inspect bound) (inspect actual)
+
+-- Fails unless `actual` is less than or equal to `bound`.
+atMost : (Ord a, Inspect a) => a -> a ->{Expect} ()
+atMost bound actual =
+    if actual <= bound then () else mismatch ("at most " ++ inspect bound) (inspect actual)
+
+-- Fails unless `actual` is greater than or equal to `bound`.
+atLeast : (Ord a, Inspect a) => a -> a ->{Expect} ()
+atLeast bound actual =
+    if actual >= bound then () else mismatch ("at least " ++ inspect bound) (inspect actual)
+
+-- The value of an `Ok`, failing on an `Err`.
+--
+-- ```fango
+-- import Expect exposing (Expect)
+-- import Result exposing (Result(..))
+--
+-- parsed : Result String Int
+-- parsed = Ok 12
+--
+-- rejected : Result String Int
+-- rejected = Err "bad"
+--
+-- passes : (() ->{Expect} ()) -> Bool
+-- passes body =
+--     handle body() on
+--         Expect.fail _ -> False
+--         return _ -> True
+--
+-- passes { Expect.equal 12 (Expect.ok parsed) }
+-- passes { Expect.equal "bad" (Expect.err rejected) }
+-- passes { Expect.equal 0 (Expect.ok rejected) } == False
+-- ```
+ok : Inspect error => Result error value ->{Expect} value
+ok result =
+    case result of
+        Ok value -> value
+        Err error -> mismatch "Ok _" ("Err " ++ inspect error)
+
+-- The error of an `Err`, failing on an `Ok`.
+err : Inspect value => Result error value ->{Expect} error
+err result =
+    case result of
+        Err error -> error
+        Ok value -> mismatch "Err _" ("Ok " ++ inspect value)
+
+-- The value of a `Just`, failing on `Nothing`.
+--
+-- ```fango
+-- import Expect exposing (Expect)
+-- import Maybe exposing (Maybe(..))
+--
+-- passes : (() ->{Expect} ()) -> Bool
+-- passes body =
+--     handle body() on
+--         Expect.fail _ -> False
+--         return _ -> True
+--
+-- passes { Expect.equal 3 (Expect.just (Just 3)) }
+-- passes { Expect.nothing (Just 3) } == False
+-- ```
+just : Maybe value ->{Expect} value
+just maybe =
+    case maybe of
+        Just value -> value
+        Nothing -> mismatch "Just _" "Nothing"
+
+-- Fails unless the value is `Nothing`.
+nothing : Inspect value => Maybe value ->{Expect} ()
+nothing maybe =
+    case maybe of
+        Nothing -> ()
+        Just value -> mismatch "Nothing" ("Just " ++ inspect value)
+
+-- Fails with the message as it is.
+failWith : String ->{Expect} value
+failWith message = fail (Error { message = message })
+
+-- Runs the body, adding a line of context above the message of any failure
+-- it raises. As a block item, `use Expect.onFail "after parsing"` applies to
+-- the rest of the block.
+--
+-- ```fango
+-- import Expect exposing (Expect)
+-- import Maybe exposing (Maybe(..))
+--
+-- message : (() ->{Expect} ()) -> Maybe String
+-- message body =
+--     handle body() on
+--         Expect.fail error -> Just error.message
+--         return _ -> Nothing
+--
+-- message { Expect.onFail "the count" { Expect.equal 1 2 } } == Just "the count\nExpected: 1\nActual:   2"
+-- message { Expect.onFail "the count" { Expect.equal 1 1 } } == Nothing
+-- ```
+onFail : String -> (() ->{Expect | e} value) ->{Expect | e} value
+onFail context body =
+    handle body() on
+        fail error -> fail (Error { message = context ++ "\n" ++ error.message })

@@ -1,0 +1,26 @@
+import Expect exposing (Inspect(..))
+import Test exposing (Test, describe, test)
+
+-- A type without Show still compares, and the message says `<value>` where
+-- it cannot show an operand; a type may supply its own Inspect instance, and
+-- Show text is used when there is one.
+
+type Opaque = Opaque Int deriving (Eq)
+
+type Named = Named String deriving (Eq)
+
+instance Inspect Named
+    inspect (Named name) = "Named " ++ name
+
+type Shown = Shown Int deriving (Eq, Show)
+
+suite : Test {}
+suite =
+    describe "inspect"
+        [ test "opaque" { Expect.equal (Opaque 1) (Opaque 2) }
+        , test "own instance" { Expect.equal (Named "a") (Named "b") }
+        , test "shown" { Expect.equal (Shown 1) (Shown 2) }
+        , test "quoted strings" { Expect.equal "1" "2" }
+        ]
+
+main() = Test.run suite

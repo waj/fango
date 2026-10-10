@@ -31,6 +31,7 @@ defines the default scope.
 | Handles, console, process, files, and sockets | [IO](../stdlib/IO.fango), [Console](../stdlib/Console.fango), [Process](../stdlib/Process.fango), [File](../stdlib/File.fango), [Net](../stdlib/Net.fango) |
 | URLs and HTTP | [Url](../stdlib/Url.fango), [Http](../stdlib/Http.fango), [Http.Wire](../stdlib/Http/Wire.fango), [Http.Server](../stdlib/Http/Server.fango), [Http.Server.Route](../stdlib/Http/Server/Route.fango), [Http.GZip](../stdlib/Http/GZip.fango), [Http.Client](../stdlib/Http/Client.fango) |
 | Effects | [Fail](../stdlib/Fail.fango), [Failure](../stdlib/Failure.fango), [State](../stdlib/State.fango), [Random](../stdlib/Random.fango), [Runtime.Local](../stdlib/Runtime/Local.fango) |
+| Testing | [Expect](../stdlib/Expect.fango), [Test](../stdlib/Test.fango) |
 | Cleanup scopes ([guide](reference/resources.md)) | [Runtime.Scope](../stdlib/Runtime/Scope.fango) |
 | Tasks and channels ([handlers in tasks](reference/effects.md#handlers-in-tasks)) | [Async](../stdlib/Async.fango) |
 | JSON | [Json](../stdlib/Json.fango), [Json.Field](../stdlib/Json/Field.fango), [Json.Pull](../stdlib/Json/Pull.fango) |

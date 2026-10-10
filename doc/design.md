@@ -79,6 +79,8 @@ import increments, generations, and transactions.
 
 [Verification](design/verification.md) — commands, fixture conventions,
 differential tests, deterministic emission, and manual timing gates.
+[Test framework](design/testing.md) — aborting expectations, the row-indexed
+tree, operand rendering, and the report contract.
 [Typed JSON comparison](design/json-performance.md) — the 10 MB Go/Aeson
 workload, current results, measurement contracts, and history.
 

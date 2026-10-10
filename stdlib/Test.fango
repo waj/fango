@@ -1,0 +1,253 @@
+{-# no-prelude #-}
+-- Organizing and running tests.
+--
+-- A suite is a tree: `describe` groups tests, `test` names a body that
+-- states [`Expect`](Expect.fango) expectations, and `skip`, `only`, and
+-- `todo` mark work that is not run. A program tests itself with
+-- `main() = Test.run suite`:
+--
+-- ```fango
+-- import Expect
+-- import String
+-- import Test exposing (Test, describe, test)
+--
+-- suite : Test {}
+-- suite =
+--     describe "String.split"
+--         [ test "splits on the separator" {
+--             Expect.equal [ "a", "b" ] (String.split "," "a,b")
+--             Expect.equal [ "" ] (String.split "," "")
+--           }
+--         , test "keeps the text without a separator" {
+--             String.split "" "abc" |> Expect.equal [ "abc" ]
+--           }
+--         ]
+--
+-- True
+-- ```
+--
+-- `run` prints its report to standard output. Each failure is printed in
+-- full, the heading naming the path through the groups, and a summary ends
+-- the report:
+--
+-- ```text
+-- FAIL  String.split > splits on the separator
+--
+--     Expected: ["a", "b"]
+--     Actual:   ["a"]
+--
+-- TEST RUN FAILED
+--
+-- Passed:  3
+-- Failed:  1
+-- Skipped: 1
+-- Todo:    1
+-- ```
+--
+-- The summary line reads `TEST RUN PASSED` when every test passed,
+-- `TEST RUN FAILED` when one failed, and `TEST RUN INCOMPLETE` when none
+-- failed but the suite contains `skip`, `only`, or `todo`. Only a passed and
+-- complete run exits with status 0; the others exit with status 1, so a
+-- placeholder cannot make a build green.
+--
+-- A group fails, without stopping its tests, when it has no tests, an empty
+-- name, a test with an empty name, or two tests with the same name. A
+-- runtime crash inside a test body ends the whole run: there is no Fango
+-- level catch for it.
+module Test exposing (Test, describe, only, run, skip, test, todo)
+
+import Basics exposing (..)
+import Console exposing (write)
+import Expect exposing (Error, Expect)
+import IO exposing (IO)
+import List exposing (List(..), foldl, reverse)
+import Process
+import Result exposing (Result(..))
+import String
+
+-- A test or a group of tests. The bodies may perform `Expect` and the
+-- effects in `e` besides: `Test {}` holds pure tests, and `Test IO` tests
+-- that read files. The constructors are private so the tree can grow.
+type Test e
+    = Describe String (List (Test e))
+    | Case String (() ->{Expect | e} ())
+    | Skip (Test e)
+    | Only (Test e)
+    | Todo String
+
+-- A named group of tests. Group names form the path a failure is reported
+-- under.
+describe : String -> List (Test e) -> Test e
+describe name tests = Describe name tests
+
+-- A named test. The body's expectations run as statements; the first that
+-- fails ends the body and fails the test.
+test : String -> (() ->{Expect | e} ()) -> Test e
+test name body = Case name body
+
+-- A test or group that is not run and makes the run incomplete. Its tests
+-- are counted as skipped.
+skip : Test e -> Test e
+skip inner = Skip inner
+
+-- Focuses the run: when a suite contains `only`, just the focused tests run
+-- and every other test counts as skipped. The run is incomplete.
+only : Test e -> Test e
+only inner = Only inner
+
+-- A test that is not written yet. It is counted and makes the run
+-- incomplete.
+todo : String -> Test e
+todo name = Todo name
+
+type Counts =
+    { passed : Int
+    , failed : Int
+    , skipped : Int
+    , todo : Int
+    }
+
+-- Runs the suite, prints the report to standard output, and exits with
+-- status 1 unless every test passed and the run was complete. Other effects
+-- the tests perform pass through to the caller, which handles them around
+-- the run.
+run : Test e ->{IO | e} ()
+run suite =
+    focused = hasOnly suite
+    counts = runTree focused (focused == False) [] (Counts { passed = 0, failed = 0, skipped = 0, todo = 0 }) suite
+    incomplete = focused || counts.skipped > 0 || counts.todo > 0
+    verdict =
+        if counts.failed > 0 then "TEST RUN FAILED"
+        else if incomplete then "TEST RUN INCOMPLETE"
+        else "TEST RUN PASSED"
+    write (verdict ++ "\n\n")
+    write ("Passed:  " ++ show counts.passed ++ "\n")
+    write ("Failed:  " ++ show counts.failed ++ "\n")
+    write ("Skipped: " ++ show counts.skipped ++ "\n")
+    write ("Todo:    " ++ show counts.todo ++ "\n")
+    if counts.failed == 0 && incomplete == False then () else Process.exit 1
+
+-- Whether the tree focuses some tests. An `only` inside a `skip` does not
+-- count: the skip wins.
+hasOnly : Test e -> Bool
+hasOnly tree =
+    case tree of
+        Describe _ tests -> foldl { child found -> found || hasOnly child } False tests
+        Case _ _ -> False
+        Skip _ -> False
+        Only _ -> True
+        Todo _ -> False
+
+-- How many tests a tree holds, placeholders included.
+size : Test e -> Int
+size tree =
+    case tree of
+        Describe _ tests -> foldl { child total -> total + size child } 0 tests
+        Case _ _ -> 1
+        Skip inner -> size inner
+        Only inner -> size inner
+        Todo _ -> 1
+
+-- Runs a tree. `active` says whether its tests run: it is false outside the
+-- focused subtrees of a suite that contains `only`. `path` holds the
+-- enclosing group names, innermost first.
+runTree : Bool -> Bool -> List String -> Counts -> Test e ->{IO | e} Counts
+runTree focused active path counts tree =
+    case tree of
+        Describe name tests ->
+            here = [name | path]
+            checked = foldl { problem acc -> report here problem; { acc | failed = acc.failed + 1 } } counts (groupProblems name tests)
+            foldl { child acc -> runTree focused active here acc child } checked tests
+        Case name body ->
+            if active then
+                case outcome body of
+                    Ok () -> { counts | passed = counts.passed + 1 }
+                    Err error ->
+                        report [name | path] error.message
+                        { counts | failed = counts.failed + 1 }
+            else
+                { counts | skipped = counts.skipped + 1 }
+        Skip inner -> { counts | skipped = counts.skipped + size inner }
+        Only inner -> runTree focused True path counts inner
+        Todo _ -> { counts | todo = counts.todo + 1 }
+
+-- The result of one body: `Err` with the error of its first failing
+-- expectation, `Ok` when it ran to the end.
+outcome : (() ->{Expect | e} ()) ->{e} Result Error ()
+outcome body =
+    handle body() on
+        Expect.fail error -> Err error
+        return _ -> Ok ()
+
+-- The problems with a group: an empty group, an empty name, a test with an
+-- empty name, and members sharing a name. A nested group with an empty name
+-- is that group's own problem.
+groupProblems : String -> List (Test e) -> List String
+groupProblems name tests =
+    names = List.map memberName tests
+    emptyGroup = if names == [] then ["The group has no tests."] else []
+    emptyName = if name == "" then ["The group has an empty name."] else []
+    emptyMember = if member "" (List.filter isTest tests |> List.map memberName) then ["A test in the group has an empty name."] else []
+    duplicates = List.map { duplicate -> "Two tests in the group are named \"" ++ duplicate ++ "\"." } (repeated names)
+    append emptyGroup (append emptyName (append emptyMember duplicates))
+
+append : List a -> List a -> List a
+append front back = List.foldr { item acc -> [item | acc] } back front
+
+-- Whether a member is a test or a todo rather than a group, through `skip`
+-- and `only`.
+isTest : Test e -> Bool
+isTest tree =
+    case tree of
+        Describe _ _ -> False
+        Case _ _ -> True
+        Skip inner -> isTest inner
+        Only inner -> isTest inner
+        Todo _ -> True
+
+-- The name a member reports under, through `skip` and `only`.
+memberName : Test e -> String
+memberName tree =
+    case tree of
+        Describe name _ -> name
+        Case name _ -> name
+        Skip inner -> memberName inner
+        Only inner -> memberName inner
+        Todo name -> name
+
+-- The names that occur more than once, each once, in first-occurrence
+-- order.
+repeated : List String -> List String
+repeated names =
+    reverse (repeatedHelp names [] [])
+
+repeatedHelp : List String -> List String -> List String -> List String
+repeatedHelp names seen found =
+    case names of
+        [] -> found
+        [name | rest] ->
+            if member name seen && member name found == False then
+                repeatedHelp rest seen [name | found]
+            else
+                repeatedHelp rest [name | seen] found
+
+member : String -> List String -> Bool
+member name names =
+    case names of
+        [] -> False
+        [first | rest] -> if first == name then True else member name rest
+
+-- Prints one failure: the heading with the path, then the message's lines
+-- indented, each part followed by a blank line.
+report : List String -> String ->{IO} ()
+report path message =
+    write ("FAIL  " ++ heading (reverse path) ++ "\n\n")
+    List.each { line -> write (if line == "" then "\n" else "    " ++ line ++ "\n") } (String.split "\n" message)
+    write "\n"
+
+-- The names joined by ` > `, an empty name shown as `""`.
+heading : List String -> String
+heading names =
+    case List.map { name -> if name == "" then "\"\"" else name } names of
+        [] -> ""
+        [name | rest] -> foldl { next acc -> acc ++ " > " ++ next } name rest

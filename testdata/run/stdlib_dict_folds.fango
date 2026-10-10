@@ -1,6 +1,8 @@
 import Dict
-import IO
-import List exposing (List(..))
+import Expect
+import List
+import State exposing (State(..))
+import Test exposing (Test, describe, test)
 
 base : Dict.Dict String Int
 base = Dict.fromList [("c", 3), ("a", 1), ("b", 2)]
@@ -8,26 +10,45 @@ base = Dict.fromList [("c", 3), ("a", 1), ("b", 2)]
 empty : Dict.Dict String Int
 empty = Dict.empty
 
-main() =
-    -- foldl ascends, foldr descends
-    print (Dict.foldl ({ entry acc -> case entry of (k, _) -> acc ++ k }) "" base)
-    print (Dict.foldr ({ entry acc -> case entry of (k, _) -> acc ++ k }) "" base)
-    print (Dict.foldl ({ entry acc -> case entry of (_, v) -> acc + v }) 0 base)
-    print (Dict.foldl ({ entry acc -> case entry of (_, v) -> acc + v }) 0 empty)
-    print (Dict.foldr ({ entry acc -> case entry of (_, v) -> acc + v }) 0 empty)
-    -- the row is open, so an effectful callback is allowed and its order is
-    -- part of the contract rather than an accident
-    Dict.foldl ({ entry acc -> case entry of (k, v) -> print (k ++ show v) }) () base
-    print "--"
-    Dict.foldr ({ entry acc -> case entry of (k, v) -> print (k ++ show v) }) () base
-    print "--"
-    -- map preserves keys, size and order while changing the value type
-    print (Dict.map ({ entry -> case entry of (k, v) -> k ++ show v }) base)
-    print (Dict.size (Dict.map ({ entry -> case entry of (_, v) -> v * 2 }) base))
-    print (Dict.keys (Dict.map ({ entry -> case entry of (_, v) -> v * 2 }) base))
-    print (Dict.map ({ entry -> case entry of (_, v) -> v * 2 }) empty)
-    -- and its callback also runs in ascending order
-    traced = Dict.map ({ entry -> case entry of (k, _) -> print k }) base
-    print (Dict.size traced)
-    -- toList round-trips through fromList
-    print (Dict.fromList (Dict.toList base) == base)
+-- Records a visit, so the order a callback runs in is observable without
+-- printing from inside a test.
+visit : String ->{State (List String)} ()
+visit key = put [key | get ()]
+
+visited : (() ->{State (List String)} a) -> List String
+visited action = List.reverse (State.run [] action).state
+
+suite : Test {}
+suite =
+    describe "Dict"
+        [ describe "foldl"
+            [ test "ascends" { Expect.equal "abc" (Dict.foldl { (k, _) acc -> acc ++ k } "" base) }
+            , test "combines values" { Expect.equal 6 (Dict.foldl { (_, v) acc -> acc + v } 0 base) }
+            , test "answers the seed for an empty dict" { Expect.equal 0 (Dict.foldl { (_, v) acc -> acc + v } 0 empty) }
+            , test "runs an effectful callback in ascending order" {
+                -- the row is open, so the callback's order is part of the contract
+                Expect.equal ["a1", "b2", "c3"] (visited { Dict.foldl { (k, v) _ -> visit (k ++ show v) } () base })
+              }
+            ]
+        , describe "foldr"
+            [ test "descends" { Expect.equal "cba" (Dict.foldr { (k, _) acc -> acc ++ k } "" base) }
+            , test "answers the seed for an empty dict" { Expect.equal 0 (Dict.foldr { (_, v) acc -> acc + v } 0 empty) }
+            , test "runs an effectful callback in descending order" {
+                Expect.equal ["c3", "b2", "a1"] (visited { Dict.foldr { (k, v) _ -> visit (k ++ show v) } () base })
+              }
+            ]
+        , describe "map"
+            [ test "preserves keys, size, and order while changing the value type" {
+                Expect.equal (Dict.fromList [("a", "a1"), ("b", "b2"), ("c", "c3")]) (Dict.map { (k, v) -> k ++ show v } base)
+                Expect.equal 3 (Dict.size (Dict.map { (_, v) -> v * 2 } base))
+                Expect.equal ["a", "b", "c"] (Dict.keys (Dict.map { (_, v) -> v * 2 } base))
+                Expect.equal Dict.empty (Dict.map { (_, v) -> v * 2 } empty)
+              }
+            , test "runs its callback in ascending order" {
+                Expect.equal ["a", "b", "c"] (visited { Dict.map { (k, _) -> visit k } base })
+              }
+            ]
+        , test "toList round-trips through fromList" { Expect.equal base (Dict.fromList (Dict.toList base)) }
+        ]
+
+main() = Test.run suite

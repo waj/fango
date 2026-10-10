@@ -1,0 +1,27 @@
+import Expect
+import Test exposing (Test, describe, test)
+
+-- Failures are printed in full under the path of group names, the run goes
+-- on after one, and the program exits with status 1. Each comparison names
+-- what it expected.
+
+suite : Test {}
+suite =
+    describe "arithmetic"
+        [ describe "addition"
+            [ test "adds" { Expect.equal 4 (2 + 2) }
+            , test "is not subtraction" {
+                Expect.equal 4 (2 + 2)
+                Expect.equal 0 (2 + 2)
+                Expect.failWith "not reached"
+              }
+            ]
+        , test "comparisons" { Expect.lessThan 3 (2 + 2) }
+        , test "not equal" { Expect.notEqual "a" "a" }
+        , test "at least" { 1 |> Expect.atLeast 2 }
+        , test "at most" { 3 |> Expect.atMost 2 }
+        , test "greater than" { 2 |> Expect.greaterThan 2 }
+        , test "fail with" { Expect.failWith "one line\nand another" }
+        ]
+
+main() = Test.run suite

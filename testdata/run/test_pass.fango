@@ -1,0 +1,31 @@
+import Expect
+import List
+import String
+import Test exposing (Test, describe, test)
+
+-- A suite in which every test passes: the report is the summary alone and
+-- the program exits with status 0.
+
+suite : Test {}
+suite =
+    describe "String"
+        [ describe "split"
+            [ test "splits on the separator" {
+                Expect.equal [ "a", "b" ] (String.split "," "a,b")
+                Expect.equal [ "" ] (String.split "," "")
+              }
+            , test "keeps the text without a separator" {
+                String.split "" "abc" |> Expect.equal [ "abc" ]
+              }
+            ]
+        , test "length counts characters" {
+            String.length "éé" |> Expect.equal 2
+            String.length "abc" |> Expect.lessThan 4
+            String.length "abc" |> Expect.greaterThan 2
+            String.length "abc" |> Expect.atMost 3
+            String.length "abc" |> Expect.atLeast 3
+            String.length "abc" |> Expect.notEqual 0
+          }
+        ]
+
+main() = Test.run suite

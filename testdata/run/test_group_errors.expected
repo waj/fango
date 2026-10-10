@@ -1,0 +1,31 @@
+FAIL  groups > empty
+
+    The group has no tests.
+
+FAIL  groups > ""
+
+    The group has an empty name.
+
+FAIL  groups > names
+
+    A test in the group has an empty name.
+
+FAIL  groups > names
+
+    Two tests in the group are named "twice".
+
+FAIL  groups > names
+
+    Two tests in the group are named "once".
+
+FAIL  groups > names > once
+
+    Expected: 1
+    Actual:   2
+
+TEST RUN FAILED
+
+Passed:  4
+Failed:  6
+Skipped: 1
+Todo:    1

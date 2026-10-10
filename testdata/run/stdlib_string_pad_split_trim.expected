@@ -1,28 +1,6 @@
-["a", "b", "c"]
-["a"]
-[""]
-1
-["", "a"]
-["a", ""]
-["a", "", "b"]
-3
-["", ""]
-2
-["a", "b", "c"]
-["abc"]
-["x", "y"]
-["abc"]
-hi
-hi
+TEST RUN PASSED
 
-
-hi
-a b
-...ab
-ab...
-ab
-ab
-ab
-ab
-..éé
-6
+Passed:  8
+Failed:  0
+Skipped: 0
+Todo:    0

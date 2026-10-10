@@ -1,0 +1,26 @@
+FAIL  inspect > opaque
+
+    Expected: <value>
+    Actual:   <value>
+
+FAIL  inspect > own instance
+
+    Expected: Named a
+    Actual:   Named b
+
+FAIL  inspect > shown
+
+    Expected: Shown 1
+    Actual:   Shown 2
+
+FAIL  inspect > quoted strings
+
+    Expected: "1"
+    Actual:   "2"
+
+TEST RUN FAILED
+
+Passed:  0
+Failed:  4
+Skipped: 0
+Todo:    0

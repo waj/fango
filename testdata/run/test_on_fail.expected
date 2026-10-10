@@ -1,0 +1,24 @@
+FAIL  onFail > adds context
+
+    after splitting
+    Expected: ["a"]
+    Actual:   ["a", "b"]
+
+FAIL  onFail > nests
+
+    outer
+    inner
+    the message
+
+FAIL  onFail > as a use item
+
+    checking the pieces
+    Expected: ["a", "c"]
+    Actual:   ["a", "b"]
+
+TEST RUN FAILED
+
+Passed:  1
+Failed:  3
+Skipped: 0
+Todo:    0

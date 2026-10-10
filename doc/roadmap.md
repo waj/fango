@@ -186,8 +186,9 @@ and [editor support](reference/commands.md#language-server-and-editor-support) a
 
 ## Test framework
 
-[Testing](roadmap-testing.md) proposes Expect, a row-indexed Test tree, Test.run,
-and call-site failure positions. A test command and fuzzing remain deferred.
+[Expect](../stdlib/Expect.fango) and [Test](../stdlib/Test.fango) are
+implemented; see the [design](design/testing.md). [Testing](roadmap-testing.md)
+owns call-site failure positions, a test command, fuzzing, and reporters.
 
 ## Tail calls beyond the self-call loop
 
