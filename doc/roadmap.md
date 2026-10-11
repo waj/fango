@@ -197,6 +197,10 @@ language-server follow-up work, and the
 [API documentation](roadmap-tooling.md#api-documentation) migration. [Formatter behavior](reference/commands.md#formatting)
 and [editor support](reference/commands.md#language-server-and-editor-support) are implemented.
 
+[Debugging](roadmap-debugging.md) proposes interpreter breakpoints, stepping,
+and scoped variable inspection, plus a Delve feasibility experiment for
+compiled binaries and later editor integration.
+
 ## Test framework
 
 [Expect](../stdlib/Expect.fango) and [Test](../stdlib/Test.fango) are

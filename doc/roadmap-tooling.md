@@ -1,6 +1,7 @@
 # Fango developer tooling: formatter and editor support
 
-Remaining formatter, language-server, and REPL work. Implemented formatter
+Remaining formatter, language-server, and REPL work. [Debugging](roadmap-debugging.md)
+owns proposed execution control, variable inspection, and debug adapters. Implemented formatter
 invariants live in [design](design/formatter.md), command behavior in
 [reference](reference/commands.md#formatting), and session invariants in
 [REPL design](design/repl.md).
