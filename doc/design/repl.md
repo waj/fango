@@ -79,6 +79,13 @@ frames. The execution payload keeps exactly the origins the stack reads, as
 line-only spans ([object encoding](pipeline.md#pipeline)); every other span
 is dropped as before.
 
+Language aborts remain separate from runtime errors. When a resolved handler
+entry requests diagnostics, `ControlExit` records its source site and copies
+the interpreter's current frames before returning the exit. Ordinary handlers
+do not copy the stack. Reporting binds the stored primary frames; detached
+snapshots keep capture presence and each suppressed exit's frames, matching
+the compiled [abort protocol](effects.md#abort-and-cleanup-protocol).
+
 ## Persistent stores and generations
 
 A session retains one checker, fresh-name supply, evaluator environment, module

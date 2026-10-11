@@ -48,9 +48,9 @@ I cannot find module `Missing.Module`; expected `Missing/Module.fango` beneath t
           ^^^^^^^^^^^^^^
 > -- RESERVED MODULE -------------------------------------- <repl>
 
-Module `String` is bundled with Fango as `<stdlib>/String.fango`; remove or rename the local `String.fango`.
+Module `Random` is bundled with Fango as `<stdlib>/Random.fango`; remove or rename the local `Random.fango`.
 
-1| import String
+1| import Random
           ^^^^^^
 > -- DUPLICATE IMPORT ALIAS ------------------------------- <repl>
 

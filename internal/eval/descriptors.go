@@ -69,7 +69,7 @@ func snapshotFailure(exit *ExitRequest) *fangort.Failure {
 	}
 	var copyExit func(*ExitRequest) *fangort.ExitRequest
 	copyExit = func(exit *ExitRequest) *fangort.ExitRequest {
-		result := &fangort.ExitRequest{Payload: exit.Payload, PayloadTypes: exit.PayloadTypes}
+		result := &fangort.ExitRequest{Payload: exit.Payload, PayloadTypes: exit.PayloadTypes, Trace: exit.Trace, TraceCaptured: exit.TraceCaptured}
 		if exit.Op != nil {
 			result.OperationName = exit.Op.Name
 			result.Operation = exit.Op.Index

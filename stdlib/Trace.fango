@@ -68,7 +68,7 @@ framesFrom batch index count =
         []
     else
         frame = { function = frameFunction batch index, file = frameFile batch index, line = frameLine batch index }
-        [ frame | framesFrom batch (index + 1) count ]
+        [frame | framesFrom batch (index + 1) count]
 
 -- Renders frames one per line, innermost first, as a crash report prints
 -- them: `  at Main.divide (Main.fango:12)`, with a trailing newline after

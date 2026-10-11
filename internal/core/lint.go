@@ -323,6 +323,33 @@ func (l *linter) numeric(t types.Type) bool {
 	return u == l.b.Int.Unique || u == l.b.Float.Unique
 }
 
+// traceFramesType independently verifies the nominal layout used by both
+// backends to package detached stack values.
+func (l *linter) traceFramesType(ty types.Type, where string) {
+	if !types.TraceFramesShape(ty) {
+		l.errorf("%s: invalid diagnostic frame list type", where)
+		return
+	}
+	list := ty.(*types.TCon)
+	listADT := l.adts[list.Unique]
+	frame := list.Args[0].(*types.TCon)
+	adt := l.adts[frame.Unique]
+	if listADT == nil || listADT.Con.Name != "List.List" || listADT.Repr != types.ReprList ||
+		adt == nil || adt.Con.Name != "Trace.Frame" || len(adt.Params) != 0 || len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 3 || len(adt.RecordFields) != 3 {
+		l.errorf("%s: missing or stale diagnostic frame packaging proof", where)
+		return
+	}
+	for i, name := range []string{"function", "file", "line"} {
+		want := types.Type(l.b.String)
+		if i == 2 {
+			want = l.b.Int
+		}
+		if adt.RecordFields[i].Name != name || !EqualValueRepresentation(adt.Ctors[0].Fields[i], want) {
+			l.errorf("%s: invalid diagnostic frame field %s", where, name)
+		}
+	}
+}
+
 func (l *linter) expr(e Expr, where string) {
 	l.typ(e.Type(), where)
 	switch e := e.(type) {
@@ -671,12 +698,15 @@ func (l *linter) expr(e Expr, where string) {
 		if adt := l.adts[failure.Unique]; adt == nil || adt.Con.Name != types.FailureTypeName {
 			l.errorf("%s: failure inspection has no declared snapshot identity", where)
 		}
-		if e.Name == types.FailureArgumentName {
+		if e.Name == types.FailureArgumentName || e.Name == types.FailureTraceName {
 			result := e.Ty.(*types.TCon)
 			adt := e.Result
 			if adt == nil || l.adts[result.Unique] != adt || adt.Con.Name != "Maybe.Maybe" || len(adt.Params) != 1 || len(adt.Ctors) != 2 ||
 				adt.Ctors[0].Name != "Maybe.Nothing" || len(adt.Ctors[0].Fields) != 0 || adt.Ctors[1].Name != "Maybe.Just" || len(adt.Ctors[1].Fields) != 1 || !EqualValueRepresentation(adt.InstFields(adt.Ctors[1], result.Args)[0], result.Args[0]) {
 				l.errorf("%s: failure inspection has missing or stale Maybe packaging proof", where)
+			}
+			if e.Name == types.FailureTraceName {
+				l.traceFramesType(result.Args[0], where)
 			}
 		} else if e.Result != nil {
 			l.errorf("%s: non-argument failure inspection carries a packaging proof", where)
@@ -781,6 +811,10 @@ func (l *linter) expr(e Expr, where string) {
 		delete(l.localTypes, e.Resource)
 	case *Handle:
 		l.control(e.Control, where)
+		diagnostic := l.defName == types.FailAttemptDiagnosticName && l.intrinsics[types.FailAttemptDiagnosticName]
+		if e.CaptureTrace != diagnostic {
+			l.errorf("%s: missing or misplaced diagnostic capture policy", where)
+		}
 		if len(e.Effects) == 0 {
 			l.errorf("%s: handler handles no effect application", where)
 		}
@@ -838,7 +872,7 @@ func (l *linter) expr(e Expr, where string) {
 				continue
 			}
 			instance := e.Effects[c.Effect]
-			report := l.defName == types.FailAttemptReportName && l.intrinsics[types.FailAttemptReportName]
+			report := diagnostic || (l.defName == types.FailAttemptReportName && l.intrinsics[types.FailAttemptReportName])
 			if report != (c.SuppressedParam != "") || (c.SuppressedParam == "") != (c.SuppressedType == nil) {
 				l.errorf("%s: missing or misplaced suppressed failure binding", where)
 			}
@@ -858,6 +892,20 @@ func (l *linter) expr(e Expr, where string) {
 				}
 				l.scope[c.SuppressedParam] = true
 				l.localTypes[c.SuppressedParam] = c.SuppressedType
+			}
+			if diagnostic != (c.TraceParam != "") || (c.TraceParam == "") != (c.TraceType == nil) {
+				l.errorf("%s: missing or misplaced diagnostic trace binding", where)
+			}
+			if c.TraceParam != "" {
+				if !diagnostic || c.Op == nil || !c.Op.Abort || instance.Name != "Fail.Fail" {
+					l.errorf("%s: invalid diagnostic trace binding", where)
+				}
+				l.traceFramesType(c.TraceType, where)
+				if l.scope[c.TraceParam] {
+					l.errorf("%s: diagnostic trace binding shadows", where)
+				}
+				l.scope[c.TraceParam] = true
+				l.localTypes[c.TraceParam] = c.TraceType
 			}
 			if c.Op == nil || c.Op.Owner.Unique != instance.Unique {
 				l.errorf("%s: handler clause has wrong effect", where)
@@ -952,6 +1000,8 @@ func (l *linter) expr(e Expr, where string) {
 			}
 			delete(l.scope, c.SuppressedParam)
 			delete(l.localTypes, c.SuppressedParam)
+			delete(l.scope, c.TraceParam)
+			delete(l.localTypes, c.TraceParam)
 			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = oldOwner, oldArg, oldRet, oldState
 			for _, p := range c.Params {
 				delete(l.scope, p)

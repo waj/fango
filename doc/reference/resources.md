@@ -74,7 +74,9 @@ When a release fails, the failure the body was already carrying stays primary:
 | Fails | Fails | The original failure, with the release failure recorded alongside it |
 
 A recorded release failure is kept in the exit in deterministic inner-to-outer
-order. `Fail.attemptReport` exposes these failures as typed-inspectable snapshots.
+order. [Fail](../../stdlib/Fail.fango) exposes these failures as typed-inspectable
+snapshots through its reporting APIs; [Failure](../../stdlib/Failure.fango)
+inspects the snapshots, including any captured diagnostic trace.
 If successful completion is followed by failed cleanup,
 the first cleanup failure becomes primary and later failures remain secondary.
 

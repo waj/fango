@@ -37,11 +37,11 @@ func TestGraphImportsBeyondPrelude(t *testing.T) {
 		t.Fatalf("re-import: %v %v", again.Modules, errs)
 	}
 	restore := g.Checkpoint()
-	if _, errs := g.Import("String", source.Span{}); len(errs) > 0 || !g.Loaded("String") {
-		t.Fatalf("Import String: %v", errs)
+	if _, errs := g.Import("Range", source.Span{}); len(errs) > 0 || !g.Loaded("Range") {
+		t.Fatalf("Import Range: %v", errs)
 	}
 	restore()
-	if g.Loaded("String") || !g.Loaded("Dict") {
+	if g.Loaded("Range") || !g.Loaded("Dict") {
 		t.Fatal("checkpoint did not restore the graph")
 	}
 }

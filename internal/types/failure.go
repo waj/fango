@@ -21,11 +21,31 @@ func FailureInspectionShape(name string, args []Type, result Type) bool {
 		return nominal(result, "Int", 0)
 	case FailureSuppressedName:
 		return nominal(result, "List.List", 1) && nominal(result.(*TCon).Args[0], FailureTypeName, 0)
+	case FailureTraceName:
+		return nominal(result, "Maybe.Maybe", 1) && TraceFramesShape(result.(*TCon).Args[0])
 	}
 	return false
 }
 
 func AttemptReportShape(t Type) bool {
+	return attemptFailureShape(t, "Fail.Report")
+}
+
+func AttemptDiagnosticShape(t Type) bool {
+	return attemptFailureShape(t, "Fail.Diagnostic")
+}
+
+// TraceFramesShape checks the nominal shape used by diagnostic projections.
+func TraceFramesShape(t Type) bool {
+	list, ok := t.(*TCon)
+	if !ok || list.Name != "List.List" || len(list.Args) != 1 {
+		return false
+	}
+	frame, ok := list.Args[0].(*TCon)
+	return ok && frame.Name == "Trace.Frame" && len(frame.Args) == 0
+}
+
+func attemptFailureShape(t Type, reportName string) bool {
 	fn, ok := t.(*TFun)
 	if !ok || len(fn.Eff.Labels) != 0 || fn.Eff.Tail == nil {
 		return false
@@ -47,5 +67,5 @@ func AttemptReportShape(t Type) bool {
 		return false
 	}
 	report, ok := result.Args[0].(*TCon)
-	return ok && report.Name == "Fail.Report" && len(report.Args) == 1 && Equal(report.Args[0], fail.Args[0])
+	return ok && report.Name == reportName && len(report.Args) == 1 && Equal(report.Args[0], fail.Args[0])
 }

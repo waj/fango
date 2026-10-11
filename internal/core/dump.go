@@ -169,10 +169,16 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			effects[i] = dumpEffect(ev, pr)
 		}
 		fmt.Fprintf(&b, "(handle %s %s", strings.Join(effects, " "), dumpExpr(e.Body, pr))
+		if e.CaptureTrace {
+			b.WriteString(" (capture-trace)")
+		}
 		if e.State != nil {
 			fmt.Fprintf(&b, " (state %s %s %s)", e.State.Name, pr.Type(e.State.Ty), dumpExpr(e.State.Initial, pr))
 		}
 		for _, c := range e.Clauses {
+			if c.TraceParam != "" {
+				fmt.Fprintf(&b, " (trace %s %s)", c.TraceParam, pr.Type(c.TraceType))
+			}
 			if c.SuppressedParam != "" {
 				fmt.Fprintf(&b, " (suppressed %s %s)", c.SuppressedParam, pr.Type(c.SuppressedType))
 			}

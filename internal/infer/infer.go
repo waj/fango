@@ -712,6 +712,9 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 	if d.Name == types.FailAttemptReportName && !types.AttemptReportShape(ty) {
 		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` must preserve the action's residual row and return `Result (Report error) value`.", ast.Spelling(d.Name)))
 	}
+	if d.Name == types.FailAttemptDiagnosticName && !types.AttemptDiagnosticShape(ty) {
+		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` must preserve the action's residual row and return `Result (Diagnostic error) value`.", ast.Spelling(d.Name)))
+	}
 	sch := types.Scheme{Vars: scope.Minted(), Preds: scope.Preds(), Body: ty}
 	if d.ScopedRow != "" {
 		errs = append(errs, ck.checkScopedDeclaration(d, ty, scope)...)

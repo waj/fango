@@ -210,6 +210,9 @@ type FailureInspect struct {
 }
 
 type HandlerClause struct {
+	// TraceParam is an intrinsic-only binding of detached diagnostic frames.
+	TraceParam string
+	TraceType  types.Type
 	// SuppressedParam is an intrinsic-only binding populated after unwinding.
 	// It retains opaque payload captures even when inspection is disallowed.
 	SuppressedParam string
@@ -235,8 +238,10 @@ type HandlerState struct {
 	Ty      types.Type
 }
 type Handle struct {
-	Body  Expr
-	State *HandlerState
+	// CaptureTrace is reserved for the diagnostic reporting intrinsic.
+	CaptureTrace bool
+	Body         Expr
+	State        *HandlerState
 	// Effects are the applications one activation handles. They share the
 	// Scope identity and the State cell; each has its own evidence key. A
 	// clause names its application by index.

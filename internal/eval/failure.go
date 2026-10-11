@@ -28,6 +28,13 @@ func (in *interp) inspectFailure(e *core.FailureInspect, fr *Frame) (Value, erro
 		return failure.ArgumentCount(), nil
 	case types.FailureSuppressedName:
 		return failureList(failure.Suppressed()), nil
+	case types.FailureTraceName:
+		frames, captured := failure.Trace()
+		if !captured {
+			return &CtorVal{Ctor: e.Result.Ctors[0]}, nil
+		}
+		listTy := e.Ty.(*types.TCon).Args[0]
+		return &CtorVal{Ctor: e.Result.Ctors[1], Fields: []Value{in.traceList(frames, listTy)}}, nil
 	case types.FailureArgumentName:
 		descriptor, err := in.typeDescriptor(e.Ty.(*types.TCon).Args[0], fr)
 		if err != nil {
@@ -40,6 +47,14 @@ func (in *interp) inspectFailure(e *core.FailureInspect, fr *Frame) (Value, erro
 		return &CtorVal{Ctor: e.Result.Ctors[0]}, nil
 	}
 	panic("eval: invalid failure inspection")
+}
+
+func (in *interp) traceList(frames []fangort.Frame, ty types.Type) fangort.List[Value] {
+	frameTy := ty.(*types.TCon).Args[0].(*types.TCon)
+	ctor := in.env.adts[frameTy.Unique].Ctors[0]
+	return fangort.TraceList(frames, func(function, file string, line int64) Value {
+		return &CtorVal{Ctor: ctor, Fields: []Value{function, file, line}}
+	})
 }
 
 func failureList(values fangort.List[*fangort.Failure]) fangort.List[Value] {

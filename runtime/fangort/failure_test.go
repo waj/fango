@@ -2,6 +2,34 @@ package fangort
 
 import "testing"
 
+func TestFailureTraceDetachesPresenceAndNestedFrames(t *testing.T) {
+	frame := Frame{Function: "Main.body", File: "Main.fango", Line: 12}
+	secondary := &ExitRequest{TraceCaptured: true, Trace: []Frame{{Function: "Main.cleanup", Line: 20}}}
+	exit := Suppress(&ExitRequest{TraceCaptured: true, Trace: []Frame{frame}}, secondary)
+	failure := SnapshotFailure(exit)
+	exit.Trace[0].Line = 99
+	secondary.Trace[0].Line = 99
+	frames, captured := failure.Trace()
+	if !captured || len(frames) != 1 || frames[0] != frame {
+		t.Fatalf("primary trace changed: %v %v", frames, captured)
+	}
+	frames[0].Line = 100
+	again, _ := failure.Trace()
+	if again[0] != frame {
+		t.Fatal("native reader modified the detached trace")
+	}
+	nested, captured := failure.Suppressed().Head().Trace()
+	if !captured || len(nested) != 1 || nested[0].Line != 20 {
+		t.Fatalf("suppressed trace changed: %v %v", nested, captured)
+	}
+	for _, present := range []bool{false, true} {
+		frames, got := SnapshotFailure(&ExitRequest{TraceCaptured: present}).Trace()
+		if got != present || len(frames) != 0 {
+			t.Fatalf("empty trace presence: %v %v, want %v", frames, got, present)
+		}
+	}
+}
+
 func TestFailureSnapshotUsesNominalDescriptorsAndDetachesControl(t *testing.T) {
 	integer := NominalType("Int", true)
 	text := NominalType("String", true)

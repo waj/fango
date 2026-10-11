@@ -73,8 +73,8 @@ func TestSuite(t *testing.T) {
 	}
 	// Pin the checked-in suite's case count too: silently dropping a case
 	// must not leave the gate green. Documentation cases are generated above.
-	expected := fmt.Sprintf("TEST RUN PASSED\n\nPassed:  %d\nFailed:  0\nSkipped: 0\nTodo:    0\n", 310+cases)
-	t.Logf("310 regression cases and %d documentation cases (%d assertions) in one executable", cases, assertions)
+	expected := fmt.Sprintf("TEST RUN PASSED\n\nPassed:  %d\nFailed:  0\nSkipped: 0\nTodo:    0\n", 320+cases)
+	t.Logf("320 regression cases and %d documentation cases (%d assertions) in one executable", cases, assertions)
 	t.Logf("execution backends: %s", strings.Join(executionTestBackends(), ", "))
 	runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{}, expected)
 }

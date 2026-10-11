@@ -419,6 +419,9 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		binders := a.clauseBinders(e)
 		for i, clause := range e.Clauses {
 			inner := cloneCaptureEnv(env)
+			if clause.TraceParam != "" {
+				inner[clause.TraceParam] = types.CaptureSet{}
+			}
 			if clause.SuppressedParam != "" {
 				inner[clause.SuppressedParam] = types.VarCapture(a.clauseVars[e][i][len(clause.Params)])
 			}

@@ -40,10 +40,12 @@ type Value = any
 // Go errors used for interpreter failures. Payload values have already been
 // checked against Op by Core lint.
 type ExitRequest struct {
-	Target       *evidence
-	Op           *types.EffectOp
-	Payload      []Value
-	PayloadTypes []*fangort.TypeDescriptor
+	Target        *evidence
+	Op            *types.EffectOp
+	Payload       []Value
+	PayloadTypes  []*fangort.TypeDescriptor
+	Trace         []fangort.Frame
+	TraceCaptured bool
 	// Suppressed mirrors fangort.ExitRequest.Suppressed: exits a cleanup
 	// scope could not make primary, in inner-to-outer order.
 	Suppressed []*ExitRequest
@@ -281,16 +283,17 @@ func (c *IOContext) Arguments() []string { return c.Args }
 func (c *IOContext) WorkingDirectory() string { return c.Dir }
 
 type evidence struct {
-	origin    *fangort.EvidenceOrigin
-	typeArgs  []*fangort.TypeDescriptor
-	row       *fangort.EvidenceRow
-	rowEffect string
-	rowArgs   []*fangort.TypeDescriptor
-	handler   *core.Handle
-	label     int // index into handler.Effects: the application this entry serves
-	frame     *Frame
-	outer     map[types.EffectKey]*evidence
-	state     *fangort.HandlerState[Value]
+	captureTrace bool
+	origin       *fangort.EvidenceOrigin
+	typeArgs     []*fangort.TypeDescriptor
+	row          *fangort.EvidenceRow
+	rowEffect    string
+	rowArgs      []*fangort.TypeDescriptor
+	handler      *core.Handle
+	label        int // index into handler.Effects: the application this entry serves
+	frame        *Frame
+	outer        map[types.EffectKey]*evidence
+	state        *fangort.HandlerState[Value]
 }
 
 // Env holds top-level cells and workers.
@@ -998,7 +1001,12 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		if target == nil {
 			return nil, fmt.Errorf("eval: missing abort evidence for `%s.%s`", e.Effect.Name, e.Op.Name)
 		}
-		return &ExitRequest{Target: target, Op: e.Op, Payload: payload, PayloadTypes: descriptors}, nil
+		in.callSite(e.Origin)
+		exit := &ExitRequest{Target: target, Op: e.Op, Payload: payload, PayloadTypes: descriptors}
+		if target.captureTrace {
+			exit.Trace, exit.TraceCaptured = in.frames(), true
+		}
+		return exit, nil
 
 	case *core.ResumeTail:
 		return nil, fmt.Errorf("eval: ResumeTail outside verified handler-clause evaluation")
@@ -1061,7 +1069,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		cell := fangort.NewHandlerState(state)
 		installed := make([]*evidence, len(e.Effects))
 		for i, inst := range e.Effects {
-			entry := &evidence{handler: e, label: i, frame: fr, outer: outer, state: cell}
+			entry := &evidence{handler: e, label: i, frame: fr, outer: outer, state: cell, captureTrace: e.CaptureTrace}
 			for _, arg := range inst.Args {
 				descriptor, err := in.typeDescriptor(arg, fr)
 				if err != nil {
@@ -1097,6 +1105,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, fmt.Errorf("eval: abort target missing clause `%s`", exit.Op.Name)
 			}
 			vars := map[string]Value{}
+			if clause.TraceParam != "" {
+				vars[clause.TraceParam] = in.traceList(exit.Trace, clause.TraceType)
+			}
 			if clause.SuppressedParam != "" {
 				vars[clause.SuppressedParam] = failureList(snapshotFailure(exit).Suppressed())
 			}

@@ -11,13 +11,15 @@ const (
 	// ScopeBracketName owns resource cleanup on normal and abort exits.
 	ScopeBracketName = "Runtime.Scope.bracket"
 
-	FailureTypeName          = "Failure.Failure"
-	FailureArgumentName      = "Failure.argument"
-	FailureEffectName        = "Failure.effectName"
-	FailureOperationName     = "Failure.operationName"
-	FailureArgumentCountName = "Failure.argumentCount"
-	FailureSuppressedName    = "Failure.suppressed"
-	FailAttemptReportName    = "Fail.attemptReport"
+	FailureTypeName           = "Failure.Failure"
+	FailureArgumentName       = "Failure.argument"
+	FailureEffectName         = "Failure.effectName"
+	FailureOperationName      = "Failure.operationName"
+	FailureArgumentCountName  = "Failure.argumentCount"
+	FailureSuppressedName     = "Failure.suppressed"
+	FailureTraceName          = "Failure.trace"
+	FailAttemptReportName     = "Fail.attemptReport"
+	FailAttemptDiagnosticName = "Fail.attemptDiagnostic"
 
 	// PromptLevelName is answered by the REPL's evaluator, which runs the
 	// prompt's inputs inside the handlers around the call.
@@ -43,7 +45,7 @@ func IntrinsicArity(name string) int {
 		return 3
 	case FailureArgumentName, AsyncLaunchName, AsyncParMapName:
 		return 2
-	case AsyncSuperviseName, AsyncRebaseName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
+	case AsyncSuperviseName, AsyncRebaseName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailureTraceName, FailAttemptReportName, FailAttemptDiagnosticName:
 		return 1
 	}
 	return 0
@@ -51,7 +53,7 @@ func IntrinsicArity(name string) int {
 
 func FailureInspection(name string) bool {
 	switch name {
-	case FailureArgumentName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName:
+	case FailureArgumentName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailureTraceName:
 		return true
 	}
 	return false

@@ -1,3 +1,0 @@
-module String exposing (shout)
-
-shout s = s

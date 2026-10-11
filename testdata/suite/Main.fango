@@ -96,6 +96,7 @@ import ErrMetaNative
 import ErrPrintLambda
 import FailCaseBinding
 import FailModule
+import FailDiagnostic
 import FailureReportBorrow
 import FailureReportResourceRetained
 import FailureReportStoredRetained
@@ -386,6 +387,7 @@ main() =
             , ErrPrintLambda.tests
             , FailCaseBinding.tests
             , FailModule.tests
+            , FailDiagnostic.tests
             , FailureReportBorrow.tests
             , FailureReportResourceRetained.tests
             , FailureReportStoredRetained.tests

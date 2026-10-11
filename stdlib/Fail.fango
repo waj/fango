@@ -5,12 +5,13 @@
 -- turns its outcome into a `Result`. The module is not part of the prelude, so
 -- a module that declares its own `Fail` keeps compiling; import
 -- `Fail exposing (Fail, attempt, fail)` to use it.
-module Fail exposing (Fail, Report(..), attempt, attemptReport, fail, fromResult)
+module Fail exposing (Diagnostic(..), Fail, Report(..), attempt, attemptDiagnostic, attemptReport, fail, fromResult)
 
 import Basics exposing (..)
 import Failure
 import List exposing (List)
 import Result exposing (Result(..))
+import Trace
 
 -- Failure with an `error`. Nested `attempt`s handle only the failures raised
 -- inside them.
@@ -20,6 +21,15 @@ effect Fail error
     abort fail : error -> value
 
 -- A failure together with the failures that cleanup raised after it.
+-- `Show` renders its fields when the primary error has a Show instance;
+-- suppressed failures show metadata without their opaque argument contents.
+--
+-- ```fango
+-- import Fail
+--
+-- report = Fail.Report { primary = "bad", suppressed = [] }
+-- show report == "Report { primary = \"bad\", suppressed = [] }"
+-- ```
 type Report error =
     {
       -- The typed failure that ended the computation.
@@ -28,6 +38,58 @@ type Report error =
       -- as detached snapshots that `Failure` inspects.
     , suppressed : List Failure.Failure
     }
+    deriving (Show)
+
+-- A typed failure with its original call stack and later cleanup failures.
+-- Like `Report`, suppressed snapshots retain their payloads, including resources.
+-- `Show` renders the fields when the primary error has a Show instance. For
+-- stack lines in a human-readable report, use `Trace.render` on `trace`.
+--
+-- ```fango
+-- import Fail
+--
+-- diagnostic = Fail.Diagnostic { primary = 7, trace = [], suppressed = [] }
+-- show diagnostic == "Diagnostic { primary = 7, trace = [], suppressed = [] }"
+-- ```
+type Diagnostic error =
+    {
+      -- The typed failure that ended the computation.
+      primary : error
+      -- The stack at the failure site, captured before unwinding and ordered
+      -- innermost first. Frame conventions are those of `Trace.capture`.
+    , trace : List Trace.Frame
+      -- Cleanup failures in the same order as `Report.suppressed`. Each has
+      -- its own optional stack, inspected with `Failure.trace`.
+    , suppressed : List Failure.Failure
+    }
+    deriving (Show)
+
+-- Like `attemptReport`, but captures the primary failure's stack before
+-- unwinding. `Ok` performs no stack capture. Only failures targeting this
+-- handler capture: an inner ordinary `attempt` and unrelated abort handlers
+-- do not. Cleanup failures targeting this handler capture their own stacks;
+-- other suppressed failures may have no trace.
+--
+-- Propagation preserves the captured stack. Calling `fail` again, including
+-- through `fromResult`, is a new failure occurrence: a plain `Result` does
+-- not preserve diagnostic metadata. To keep a child task's original trace,
+-- return its diagnostic as ordinary data; existing Async helpers re-raise
+-- errors in their caller. Panics and cancellation keep their existing behavior.
+-- Capture happens even if the diagnostic is later discarded; `Trace.render`
+-- renders the stored frames without another capture.
+--
+-- ```fango
+-- import Fail exposing (Fail, fail)
+-- import Result
+--
+-- checked : Int ->{Fail String} Int
+-- checked n = if n > 0 then n else fail "not positive"
+--
+-- Result.mapError { diagnostic -> diagnostic.primary } (Fail.attemptDiagnostic { checked 0 }) == Err "not positive"
+-- Result.mapError { diagnostic -> diagnostic.primary } (Fail.attemptDiagnostic { checked 2 }) == Ok 2
+-- ```
+attemptDiagnostic : (() ->{Fail error | e} value) ->{e} Result (Diagnostic error) value
+attemptDiagnostic = native
 
 -- Like `attempt`, but an `Err` also reports the secondary failures that
 -- cleanup raised while the computation unwound.

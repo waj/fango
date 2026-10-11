@@ -1,0 +1,172 @@
+module FailDiagnostic exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail exposing (Fail, fail)
+import Failure
+import IO
+import List
+import Result exposing (Result(..))
+import Runtime.Scope
+import Test
+import Trace
+
+-- Recursion prevents inlining, retaining a frame at the actual abort site.
+raise : Int -> String ->{Fail String} Int
+raise n message =
+    if n == 0 then fail message else raise (n - 1) message
+
+cleanup : Int -> String ->{Fail String} ()
+cleanup n message =
+    if n == 0 then fail message else cleanup (n - 1) message
+
+first : List a -> Maybe a
+first values =
+    case values of
+        [value | _] -> Just value
+        [] -> Nothing
+
+effect Stop
+    abort stop : Int -> value
+
+effect Opaque
+    abort reject : (Int -> Int) -> value
+
+attemptInt : (() ->{Fail Int | e} value) ->{e} Result Int value
+attemptInt = Fail.attempt
+
+raiseNumber : Int ->{Fail Int} Int
+raiseNumber number = fail number
+
+twoApplications : (() ->{Fail String, Fail Int | e} value) ->{e} Result (Fail.Diagnostic String) (Result Int value)
+twoApplications action = Fail.attemptDiagnostic { attemptInt action }
+
+taskDiagnostic : () ->{IO.IO} Outcome (Result (Fail.Diagnostic String) Int)
+taskDiagnostic () = Async.runOutcome { Async.await (Async.spawn { Fail.attemptDiagnostic { raise 0 "child" } }) }
+
+tests : Test.Test IO.IO
+tests = Test.describe "fail_diagnostic"
+    [ Test.test "original failure site" {
+        diagnostic = Expect.err (Fail.attemptDiagnostic { raise 2 "body" })
+        Expect.equal "body" diagnostic.primary
+        frame = Expect.just (first diagnostic.trace)
+        Expect.equal "FailDiagnostic.raise" frame.function
+        Expect.equal "FailDiagnostic.fango" frame.file
+        Expect.equal 17 frame.line
+        Expect.equal 0 (List.length diagnostic.suppressed)
+        Expect.notEqual "" (Trace.render diagnostic.trace)
+    }
+    , Test.test "success and nested handlers" {
+        success : Result (Fail.Diagnostic String) Int
+        success = Fail.attemptDiagnostic { 7 }
+        Expect.equal (Ok 7) (Result.mapError { d -> d.primary } success)
+        Expect.equal (Ok (Err "handled")) (Result.mapError { d -> d.primary } (Fail.attemptDiagnostic { Fail.attempt { raise 0 "handled" } }))
+        inner = Expect.ok (Fail.attemptDiagnostic { Fail.attemptDiagnostic { raise 0 "inner" } })
+        diagnostic = Expect.err inner
+        Expect.equal "inner" diagnostic.primary
+        Expect.equal "FailDiagnostic.raise" (Expect.just (first diagnostic.trace)).function
+        Expect.equal (Ok (Err 42)) (Result.mapError { d -> d.primary } (twoApplications { raiseNumber 42 }))
+        text = Expect.err (twoApplications { fail "text"; 0 })
+        Expect.equal "text" text.primary
+    }
+    , Test.test "same-handler cleanup traces" {
+        diagnostic = Expect.err (Fail.attemptDiagnostic { Runtime.Scope.finally { raise 0 "body" } { cleanup 0 "close" } })
+        Expect.equal "FailDiagnostic.raise" (Expect.just (first diagnostic.trace)).function
+        failure = Expect.just (first diagnostic.suppressed)
+        frames = Expect.just (Failure.trace failure)
+        Expect.equal "FailDiagnostic.cleanup" (Expect.just (first frames)).function
+        Expect.equal (Just "close") (Failure.argument 0 failure)
+        successfulBody = Expect.err (Fail.attemptDiagnostic { Runtime.Scope.finally { 7 } { cleanup 0 "after success" } })
+        Expect.equal "after success" successfulBody.primary
+        Expect.equal "FailDiagnostic.cleanup" (Expect.just (first successfulBody.trace)).function
+    }
+    , Test.test "ordinary reports do not capture" {
+        report = Expect.err (Fail.attemptReport { Runtime.Scope.finally { raise 0 "body" } { cleanup 0 "close" } })
+        failure = Expect.just (first report.suppressed)
+        Expect.equal Nothing (Failure.trace failure)
+        nested = Expect.ok (Fail.attemptDiagnostic { Fail.attemptReport { Runtime.Scope.finally { raise 0 "body" } { cleanup 0 "close" } } })
+        failureInside = Expect.just (first (Expect.err nested).suppressed)
+        Expect.equal Nothing (Failure.trace failureInside)
+    }
+    , Test.test "unrelated cleanup handler" {
+        result =
+            handle Fail.attemptDiagnostic { Runtime.Scope.finally { raise 0 "body" } { stop 42 } } on
+                stop _ -> Ok 0
+        diagnostic = Expect.err result
+        failure = Expect.just (first diagnostic.suppressed)
+        Expect.equal "FailDiagnostic.stop" (Failure.operationName failure)
+        Expect.equal Nothing (Failure.trace failure)
+        Expect.equal (Just 42) (Failure.argument 0 failure)
+    }
+    , Test.test "nested suppression preserves traces and order" {
+        diagnostic = Expect.err (Fail.attemptDiagnostic {
+                Runtime.Scope.finally
+                    { Runtime.Scope.finally { raise 0 "body" } { cleanup 0 "inner" } }
+                    { Runtime.Scope.finally { cleanup 0 "outer" } { cleanup 0 "nested" } }
+        })
+        Expect.equal [Just "inner", Just "outer"] (List.map { f -> Failure.argument 0 f } diagnostic.suppressed)
+        List.each { failure ->
+            frames = Expect.just (Failure.trace failure)
+            Expect.equal "FailDiagnostic.cleanup" (Expect.just (first frames)).function
+        } diagnostic.suppressed
+        outer = Expect.just (first (List.reverse diagnostic.suppressed))
+        nested = Expect.just (first (Failure.suppressed outer))
+        Expect.equal (Just "nested") (Failure.argument 0 nested)
+        Expect.just (Failure.trace nested) |> ignore
+    }
+    , Test.test "re-raise captures a new occurrence" {
+        original = Expect.err (Fail.attemptDiagnostic { raise 0 "original" })
+        reraised = Expect.err (Fail.attemptDiagnostic { Fail.fromResult (Err original.primary); 0 })
+        Expect.equal original.primary reraised.primary
+        Expect.notEqual (first original.trace) (first reraised.trace)
+        Expect.equal "FailDiagnostic.raise" (Expect.just (first original.trace)).function
+        -- fromResult may have its own frame or be inlined, but raise has gone.
+        Expect.equal False (List.length (List.filter { f -> f.function == "FailDiagnostic.raise" } reraised.trace) > 0)
+    }
+    , Test.test "diagnostics survive task completion" {
+        outcome = taskDiagnostic ()
+        case outcome of
+            Completed result ->
+                diagnostic = Expect.err result
+                Expect.equal "child" diagnostic.primary
+                Expect.equal "FailDiagnostic.raise" (Expect.just (first diagnostic.trace)).function
+            Cancelled -> Expect.failWith "task cancelled"
+    }
+    , Test.test "reports show nested metadata and opaque payloads" {
+        report = Expect.err (Fail.attemptReport {
+                Runtime.Scope.finally { raise 0 "body" }
+                    { Runtime.Scope.finally { cleanup 0 "outer" } { cleanup 0 "nested" } }
+        })
+        leaf = "Failure { effect = \"Fail.Fail\", operation = \"Fail.fail\", argumentCount = 1, trace = Nothing, suppressed = [] }"
+        outer = "Failure { effect = \"Fail.Fail\", operation = \"Fail.fail\", argumentCount = 1, trace = Nothing, suppressed = [" ++ leaf ++ "] }"
+        failure = Expect.just (first report.suppressed)
+        Expect.equal outer (show failure)
+        Expect.equal ("Just (" ++ outer ++ ")") (show (Just failure))
+        Expect.equal ("Report { primary = \"body\", suppressed = [" ++ outer ++ "] }") (show report)
+        wrappedReport : Result (Fail.Report String) Int
+        wrappedReport = Err report
+        Expect.equal ("Err (Report { primary = \"body\", suppressed = [" ++ outer ++ "] })") (show wrappedReport)
+        opaqueResult =
+            handle Fail.attemptReport { Runtime.Scope.finally { raise 0 "body" } { reject { n -> n + 1 } } } on
+                reject _ -> Ok 0
+        opaque = Expect.just (first (Expect.err opaqueResult).suppressed)
+        Expect.equal "Failure { effect = \"FailDiagnostic.Opaque\", operation = \"FailDiagnostic.reject\", argumentCount = 1, trace = Nothing, suppressed = [] }" (show opaque)
+    }
+    , Test.test "diagnostics show frames and traced suppressed failures" {
+        diagnostic = Fail.Diagnostic { primary = "body", trace = [{ function = "Main.work", file = "Main.fango", line = 3 }], suppressed = [] }
+        rendered = "Diagnostic { primary = \"body\", trace = [Frame { function = \"Main.work\", file = \"Main.fango\", line = 3 }], suppressed = [] }"
+        Expect.equal rendered (show diagnostic)
+        wrappedDiagnostic : Result (Fail.Diagnostic String) Int
+        wrappedDiagnostic = Err diagnostic
+        Expect.equal ("Err (" ++ rendered ++ ")") (show wrappedDiagnostic)
+        actual = Expect.err (Fail.attemptDiagnostic { Runtime.Scope.finally { raise 0 "body" } { cleanup 0 "close" } })
+        failure = Expect.just (first actual.suppressed)
+        frames = Expect.just (Failure.trace failure)
+        Expect.equal "FailDiagnostic.cleanup" (Expect.just (first frames)).function
+        summary = "Failure { effect = \"Fail.Fail\", operation = \"Fail.fail\", argumentCount = 1, trace = " ++ show (Just frames) ++ ", suppressed = [] }"
+        Expect.equal summary (show failure)
+        Expect.equal frames (Expect.just (Failure.trace failure))
+    }
+    ]
+
+main() = Test.run tests

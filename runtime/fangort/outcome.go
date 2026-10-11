@@ -14,17 +14,34 @@ type ExitRequest struct {
 	OperationName string
 	Payload       []any
 	PayloadTypes  []*TypeDescriptor
+	// Trace is captured at the abort site only when its target requests it.
+	// TraceCaptured distinguishes an empty captured stack from no capture.
+	Trace         []Frame
+	TraceCaptured bool
 	// Suppressed records exits a cleanup scope could not make primary: a
 	// release that failed while the body was already exiting. Deterministic
-	// inner-to-outer order; nothing reads it from Fango yet.
+	// inner-to-outer order; reporting handlers expose detached snapshots.
 	Suppressed []*ExitRequest
 }
 
 // ExitTarget is deliberately non-zero-sized. A fresh pointer is one handler
 // activation identity, including recursive activations of the same handler.
 type ExitTarget struct {
-	Marker  byte
-	resolve func() *ExitTarget
+	Marker byte
+	// CaptureTrace is immutable for the lifetime of this activation.
+	CaptureTrace bool
+	resolve      func() *ExitTarget
+}
+
+// CaptureExit attaches diagnostics before the caller's stack unwinds. Target
+// must already be resolved, so the policy belongs to the actual activation.
+// Forwarding an existing request never captures it again.
+func CaptureExit(exit *ExitRequest) *ExitRequest {
+	if !exit.TraceCaptured && exit.Target != nil && exit.Target.CaptureTrace {
+		exit.Trace = Capture(0)
+		exit.TraceCaptured = true
+	}
+	return exit
 }
 
 // DeferredExitTarget is used only by checked residual-evidence projections.

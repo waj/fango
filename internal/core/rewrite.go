@@ -192,6 +192,9 @@ func (r rewriter) expr(e Expr) Expr {
 		}
 		n.Clauses = make([]HandlerClause, len(e.Clauses))
 		for i, c := range e.Clauses {
+			if c.TraceType != nil {
+				c.TraceType = r.typ(c.TraceType)
+			}
 			if c.SuppressedType != nil {
 				c.SuppressedType = r.typ(c.SuppressedType)
 			}

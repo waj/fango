@@ -54,7 +54,7 @@ type Error =
 located : () -> Maybe Trace.Frame
 located () =
     case List.filter { frame -> String.startsWith "Expect." frame.function == False } (Trace.capture ()) of
-        [ frame | _ ] -> Just frame
+        [frame | _] -> Just frame
         [] -> Nothing
 
 -- Text for a value in a failure message.

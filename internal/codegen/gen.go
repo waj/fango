@@ -1589,8 +1589,9 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			&goast.KeyValueExpr{Key: ident("Payload"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: ident("any")}, Elts: payload}},
 			&goast.KeyValueExpr{Key: ident("PayloadTypes"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: g.descriptorType()}, Elts: descriptors}},
 		}}}
-		g.mark(exit)
-		return g.propagateOutcome(e.Ty, exit)
+		captured := callExpr(selector("fangort", "CaptureExit"), exit)
+		g.mark(captured)
+		return g.propagateOutcome(e.Ty, captured)
 	case *core.ResumeTail:
 		panic("codegen: ResumeTail outside verified handler-clause emission")
 	case *core.Seq:
@@ -2002,6 +2003,7 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 		}
 		target := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitTarget"), Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Marker"), Value: intLit(1)},
+			&goast.KeyValueExpr{Key: ident("CaptureTrace"), Value: ident(strconv.FormatBool(e.CaptureTrace))},
 		}}}
 		stmts = append(stmts, varDeclStmt(targetNames[i], &goast.StarExpr{X: selector("fangort", "ExitTarget")}, target))
 		evidenceName := fmt.Sprintf("ev%d", g.tmp)
@@ -2055,6 +2057,9 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 			cond = &goast.BinaryExpr{X: &goast.BinaryExpr{X: exitTarget, Op: gotoken.EQL, Y: ident(targetNames[clause.Effect])}, Op: gotoken.LAND, Y: cond}
 		}
 		var clauseStmts []goast.Stmt
+		if clause.TraceParam != "" {
+			clauseStmts = append(clauseStmts, varDeclStmt(mangleValue(clause.TraceParam), g.goType(clause.TraceType), g.traceListExpr(&goast.SelectorExpr{X: exit, Sel: ident("Trace")}, clause.TraceType)), assignBlank(ident(mangleValue(clause.TraceParam))))
+		}
 		if clause.SuppressedParam != "" {
 			clauseStmts = append(clauseStmts, varDeclStmt(mangleValue(clause.SuppressedParam), g.goType(clause.SuppressedType), callExpr(selector("fangort", "SnapshotSuppressed"), exit)), assignBlank(ident(mangleValue(clause.SuppressedParam))))
 		}
@@ -2784,16 +2789,31 @@ func (g *gen) directLambdaMember(e *core.Lambda, mode types.Transport) goast.Exp
 	g.control, g.resultType = mode, fn.Ret
 	params := make([]paramSpec, 0, len(fn.Eff.Labels)+1)
 	var pushed []types.EffectKey
-	evidenceNames := map[string]int{}
+	evidenceNames := map[string]bool{}
 	for _, l := range types.SortedRow(fn.Eff).Labels {
 		if !types.RuntimeEvidenceEffect(l) {
 			continue
 		}
-		name := g.evidenceName(l.Name)
-		if n := evidenceNames[name]; n > 0 {
-			name = fmt.Sprintf("%s_%d", name, n)
+		base := g.evidenceName(l.Name)
+		name := base
+		key := types.EffectLabelKey(l)
+		for n := 1; ; n++ {
+			collision := evidenceNames[name]
+			// A callback may capture a different application of this same
+			// effect. Its parameter must not shadow that application's name.
+			for outerKey, stack := range g.evidence {
+				if outerKey != key && len(stack) > 0 {
+					if outer, ok := stack[len(stack)-1].(*goast.Ident); ok && outer.Name == name {
+						collision = true
+					}
+				}
+			}
+			if !collision {
+				break
+			}
+			name = fmt.Sprintf("%s_%d", base, n)
 		}
-		evidenceNames[g.evidenceName(l.Name)]++
+		evidenceNames[name] = true
 		inst := core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args, Control: types.Control{Transport: mode}}
 		params = append(params, paramSpec{name: name, typ: g.effectType(inst)})
 		g.evidence[types.EffectLabelKey(l)] = append(g.evidence[types.EffectLabelKey(l)], ident(name))

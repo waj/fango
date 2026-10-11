@@ -48,7 +48,7 @@ func sameDescriptor(left, right *TypeDescriptor) bool {
 }
 
 // Failure is a detached snapshot. It contains immutable payload data and nested
-// snapshots, never handler targets, frames, or resumptions.
+// snapshots and diagnostic frame values, never handler targets or resumptions.
 type Failure struct {
 	operationIndex int
 	effect         string
@@ -56,6 +56,8 @@ type Failure struct {
 	arguments      []any
 	descriptors    []*TypeDescriptor
 	suppressed     []*Failure
+	trace          []Frame
+	traceCaptured  bool
 }
 
 func SnapshotFailure(exit *ExitRequest) *Failure {
@@ -63,7 +65,8 @@ func SnapshotFailure(exit *ExitRequest) *Failure {
 		return nil
 	}
 	failure := &Failure{effect: exit.Effect, operation: exit.OperationName, operationIndex: exit.Operation,
-		arguments: append([]any(nil), exit.Payload...), descriptors: append([]*TypeDescriptor(nil), exit.PayloadTypes...)}
+		arguments: append([]any(nil), exit.Payload...), descriptors: append([]*TypeDescriptor(nil), exit.PayloadTypes...),
+		trace: append([]Frame(nil), exit.Trace...), traceCaptured: exit.TraceCaptured}
 	for _, secondary := range exit.Suppressed {
 		failure.suppressed = append(failure.suppressed, SnapshotFailure(secondary))
 	}
@@ -97,6 +100,15 @@ func (failure *Failure) ArgumentCount() int64 {
 		return 0
 	}
 	return int64(len(failure.arguments))
+}
+
+// Trace reads detached diagnostic values, never a live stack. Copying keeps
+// native callers from changing the immutable snapshot.
+func (failure *Failure) Trace() ([]Frame, bool) {
+	if failure == nil || !failure.traceCaptured {
+		return nil, false
+	}
+	return append([]Frame(nil), failure.trace...), true
 }
 func (failure *Failure) Suppressed() List[*Failure] {
 	result := ListNil[*Failure]()

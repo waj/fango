@@ -581,3 +581,8 @@ ordinary runtime error instead of ending the process.
 Programs read the same stack through [Trace](../../stdlib/Trace.fango), whose
 `capture` returns the frames above its caller and `render` prints them in the
 report's format.
+
+For typed application failures, [Fail](../../stdlib/Fail.fango) provides opt-in
+diagnostic reporting with the original abort-site stack and cleanup snapshots.
+[Failure](../../stdlib/Failure.fango) inspects each snapshot's optional stored
+trace. These APIs use the same frame conventions as Trace.

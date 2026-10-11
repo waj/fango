@@ -16,7 +16,7 @@ import Geometry.Point exposing (manhattan, nope)
 import Geometry.Point exposing (manhattan)
 manhattan origin (P.Point 1 1)
 import Missing.Module
-import String
+import Random
 import Geometry.Shape as P
 import Geometry.Point as P
 origin = P.Point 9 9

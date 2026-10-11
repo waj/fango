@@ -133,6 +133,21 @@ outer evidence and invokes the clause after unwinding. Foreign exits propagate;
 exits from a clause or return transformation never re-enter that activation.
 Canonical effect names keep generated envelopes independent of graph-local IDs.
 
+`Fail.attemptDiagnostic` is a reporting intrinsic like `Fail.attemptReport`,
+with an immutable capture-request flag on its abort target and an additional
+clause binding for the primary stack. Core lint reserves both the flag and
+trace binding for that intrinsic and verifies the `List Trace.Frame` layout;
+the ordinary suppressed binding retains the same payload capture summary.
+Trace values themselves carry no handler capabilities. An abort resolves its
+target and checks that target's policy after evaluating its payload. Only a
+requested capture walks the stack, before any unwinding; the exit records both
+frames and capture presence, so an empty capture differs from no capture.
+Propagation and copying suppression preserve these values. Detached `Failure`
+snapshots copy them recursively and inspection never captures a live stack.
+Nested ordinary handlers and unrelated effect applications do not inherit the
+policy. The public contract belongs to [Fail](../../stdlib/Fail.fango) and
+[Failure](../../stdlib/Failure.fango).
+
 Runtime.Scope.bracket introduces a separate cleanup region. Its release closure retains
 definition-site evidence. Direct execution is acquire/body/release with plain
 results. Exit execution checks each child result: failed acquisition releases nothing;

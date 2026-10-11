@@ -308,6 +308,14 @@ walk reports Fango files and lines, and the runtime's `Capture` and the crash
 report in `main` read them from the ordinary Go line table at no cost to
 running code ([reference](../reference/commands.md#runtime-failures)).
 
+Language aborts call `CaptureExit` at their attributed source site. It checks
+the resolved target's immutable capture policy and walks the stack only for a
+diagnostic handler. Ordinary aborts allocate no diagnostic frames, and success
+does not call the helper. Captured frames travel in the exit and are converted
+to ordinary `Trace.Frame` values at reporting or inspection; suppression and
+snapshotting preserve each failure's own stack. The handler contract is in
+[effect execution](effects.md#abort-and-cleanup-protocol).
+
 Emission never positions the `go/ast` it builds. Instead every call,
 operator, perform, exit, and tail-jump node it emits is attributed to the
 innermost *own-file* origin being emitted: the `Origin` span Core keeps on

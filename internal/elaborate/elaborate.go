@@ -328,7 +328,7 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			defs = append(defs, scopeBracketDef(name, ty, ck))
 		} else if types.FailureInspection(name) {
 			defs = append(defs, failureInspectDef(name, ty, ck))
-		} else if name == types.FailAttemptReportName {
+		} else if name == types.FailAttemptReportName || name == types.FailAttemptDiagnosticName {
 			defs = append(defs, attemptReportDef(name, ty, ck))
 		}
 		if len(defs) > 0 && defs[len(defs)-1].Name == name {

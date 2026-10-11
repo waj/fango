@@ -18,6 +18,17 @@ type Frame struct {
 	Line     int
 }
 
+// TraceList packages stored diagnostic frames in the caller's checked Fango
+// representation. It performs no stack capture.
+func TraceList[A any](frames []Frame, makeFrame func(string, string, int64) A) List[A] {
+	result := ListNil[A]()
+	for i := len(frames) - 1; i >= 0; i-- {
+		frame := frames[i]
+		result = ListCons(makeFrame(frame.Function, frame.File, int64(frame.Line)), result)
+	}
+	return result
+}
+
 // TracebackVariable selects Go's own traceback for a crash when set to "go",
 // for debugging the compiler and runtime rather than the program.
 const TracebackVariable = "FANGO_TRACEBACK"

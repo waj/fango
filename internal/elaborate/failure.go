@@ -18,7 +18,7 @@ func failureInspectDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 		d.ParamCaptures = append(d.ParamCaptures, ck.Sup.FreshCapture())
 		projection.Args = append(projection.Args, &core.VarRef{Name: param, Local: true, Ty: arg})
 	}
-	if name == types.FailureArgumentName {
+	if name == types.FailureArgumentName || name == types.FailureTraceName {
 		projection.Result = ck.ADTs[result.(*types.TCon).Unique]
 	}
 	d.Body = projection
@@ -33,6 +33,11 @@ func attemptReportDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	reportADT := ck.ADTs[reportTy.Unique]
 	resultADT := ck.ADTs[resultTy.Unique]
 	fields := reportADT.InstFields(reportADT.Ctors[0], reportTy.Args)
+	diagnostic := name == types.FailAttemptDiagnosticName
+	suppressedIndex := 1
+	if diagnostic {
+		suppressedIndex = 2
+	}
 	scope := ck.Sup.FreshScope()
 	fail := ck.Effects["Fail.Fail"]
 	ev := core.EffectInstance{Unique: fail.Unique, Name: fail.Name, Args: reportTy.Args, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Exit}}
@@ -41,7 +46,14 @@ func attemptReportDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 		c := adt.Ctors[index]
 		return &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: c.Name, Ty: prependTypes(adt.InstFields(c, ty.Args), ty)}, Args: args, TyArgs: ty.Args, Ty: ty, Ctor: c}
 	}
-	report := ctor(reportADT, 0, reportTy, ref("_primary", fields[0]), ref("_suppressed", fields[1]))
+	reportArgs := []core.Expr{ref("_primary", fields[0])}
+	clause := core.HandlerClause{Op: fail.Ops[0], Params: []string{"_primary"}, ParamTypes: []types.Type{fields[0]}, SuppressedParam: "_suppressed", SuppressedType: fields[suppressedIndex], ResultType: action.Ret}
+	if diagnostic {
+		clause.TraceParam, clause.TraceType = "_trace", fields[1]
+		reportArgs = append(reportArgs, ref("_trace", fields[1]))
+	}
+	reportArgs = append(reportArgs, ref("_suppressed", fields[suppressedIndex]))
+	report := ctor(reportADT, 0, reportTy, reportArgs...)
 	// Result declares Err before Ok; resolve by constructor name rather than
 	// depending on layout when constructing the semantic Core proof.
 	var errIndex, okIndex int
@@ -55,9 +67,10 @@ func attemptReportDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	}
 	body := &core.App{CalleeKind: core.Value, Callee: ref("_action", action), Args: []core.Expr{&core.UnitLit{Ty: ck.B.Unit}}, EvidenceArgs: []core.EffectInstance{ev}, Ty: action.Ret, Control: types.FunctionControl(action)}
 	control := core.ArrowControl(ty, 1)
+	clause.Body = ctor(resultADT, errIndex, resultTy, report)
 	return core.Def{Name: name, Owner: symbolOwner(name), Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_action"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture()}, Control: control,
-		Body: &core.Handle{Body: body, Effects: []core.EffectInstance{ev}, Scope: scope, Ty: result, Control: control,
-			Clauses: []core.HandlerClause{{Op: fail.Ops[0], Params: []string{"_primary"}, ParamTypes: []types.Type{fields[0]}, SuppressedParam: "_suppressed", SuppressedType: fields[1], ResultType: action.Ret, Body: ctor(resultADT, errIndex, resultTy, report)}},
+		Body: &core.Handle{CaptureTrace: diagnostic, Body: body, Effects: []core.EffectInstance{ev}, Scope: scope, Ty: result, Control: control,
+			Clauses: []core.HandlerClause{clause},
 			Return:  &core.ReturnClause{Param: "_value", Body: ctor(resultADT, okIndex, resultTy, ref("_value", action.Ret))}}}
 }
 
