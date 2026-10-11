@@ -1,0 +1,30 @@
+module Probe exposing (run)
+
+import List
+
+effect Read
+    read : () -> Int
+
+foreign : Int -> Int
+foreign = native
+
+loop : Int -> Int -> Int
+loop n acc =
+    if n == 0 then acc else loop (n - 1) (acc + n)
+
+choose : Maybe Int -> Int
+choose value =
+    case value of
+        Just number -> foreign number
+        Nothing -> 0
+
+run : Int -> Int
+run seed =
+    offset = seed + 1
+    callback = { value -> choose (Just (value + offset)) }
+    values = List.map callback [1, 2, 3]
+    total = List.foldl { value acc -> value + acc } 0 values
+    handled =
+        handle read() on
+            read () -> resume (loop 3 total)
+    handled + seed

@@ -197,9 +197,10 @@ language-server follow-up work, and the
 [API documentation](roadmap-tooling.md#api-documentation) migration. [Formatter behavior](reference/commands.md#formatting)
 and [editor support](reference/commands.md#language-server-and-editor-support) are implemented.
 
-[Debugging](roadmap-debugging.md) proposes interpreter breakpoints, stepping,
-and scoped variable inspection, plus a Delve feasibility experiment for
-compiled binaries and later editor integration.
+[Interpreter debugging](reference/debugging.md) provides sequential breakpoints,
+stepping, and scoped inspection. The [debugging roadmap](roadmap-debugging.md)
+tracks native feasibility and variable presentation, entry-point launching,
+editor integration, and concurrent debugging.
 
 ## Test framework
 

@@ -2,6 +2,8 @@
 // and its native worker process.
 package nativewire
 
+import "github.com/waj/fango/internal/debugger"
+
 // Value is one native argument or result. Kind names which field carries it;
 // "bytes" is the bundled Bytes, which crosses as an ordinary []byte. gob does
 // not distinguish a nil slice from an empty one, so an empty Bytes arrives
@@ -17,17 +19,19 @@ type Value struct {
 }
 
 type Message struct {
-	Kind   string
-	Name   string
-	Auth   string
-	Error  string
-	Panic  string
-	Code   int
-	Args   []Value
-	Value  Value
-	Data   []byte
-	Values []string
-	Bool   bool
+	DebugEvent   *debugger.Event
+	DebugCommand *debugger.Command
+	Kind         string
+	Name         string
+	Auth         string
+	Error        string
+	Panic        string
+	Code         int
+	Args         []Value
+	Value        Value
+	Data         []byte
+	Values       []string
+	Bool         bool
 	// Failure is a fallible native's classified error. It is deliberately
 	// separate from Error (an infrastructure fault) and Panic (a native
 	// panic): it is an ordinary language value, not a failure of the worker.

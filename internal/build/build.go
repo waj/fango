@@ -325,15 +325,15 @@ func BinaryPath(dir, program string) string {
 // definition a Fango compiler bug: the generated code is our output, so a Go
 // error means we emitted something invalid. The build directory is preserved
 // for inspection.
-func GoBuild(dir, program string) error {
+func GoBuild(dir, program string, flags ...string) error {
 	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
 		return err
 	}
-	return GoBuildPackages(dir, BinaryPath(dir, program), EntryPackage(program))
+	return goBuildPackages(dir, BinaryPath(dir, program), flags, EntryPackage(program))
 }
 
 // Linked reports whether the binary for a program was produced from exactly
-// the files it would compile now.
+// the files and Go build flags it would compile with now.
 //
 // A program cannot decide this from whether its own synchronization wrote
 // anything, because the modules in a directory are shared: a sibling's build
@@ -341,29 +341,29 @@ func GoBuild(dir, program string) error {
 // writes nothing. So the stamp records what the binary was linked from, and
 // only the compiled inputs go into it — a source edit that produces the same
 // Go produces the same binary and needs no link.
-func Linked(dir, program string, files []codegen.File) bool {
+func Linked(dir, program string, files []codegen.File, flags ...string) bool {
 	if _, err := os.Stat(BinaryPath(dir, program)); err != nil {
 		return false
 	}
 	recorded, err := os.ReadFile(stampPath(dir, program))
-	return err == nil && bytes.Equal(recorded, stamp(files))
+	return err == nil && bytes.Equal(recorded, stamp(files, flags...))
 }
 
 // RecordLink stores the stamp [Linked] compares against. A stamp that cannot
 // be written costs a needless link next time and nothing else.
-func RecordLink(dir, program string, files []codegen.File) {
-	_, _ = WriteIfChanged(stampPath(dir, program), stamp(files))
+func RecordLink(dir, program string, files []codegen.File, flags ...string) {
+	_, _ = WriteIfChanged(stampPath(dir, program), stamp(files, flags...))
 }
 
 func stampPath(dir, program string) string {
 	return filepath.Join(dir, "bin", codegen.EntryLinkName(program)+".stamp")
 }
 
-// stamp digests what the binary is a function of: the toolchain that links it
-// and the files that toolchain reads, in path order. Generated files Go does
-// not compile — sources.json — are left out, so recording what a build was
+// stamp digests what the binary is a function of: the toolchain that links it,
+// its build flags, and the files that toolchain reads, in path order. Generated
+// files Go does not compile — sources.json — are left out, so recording what a build was
 // made from never forces a link on its own.
-func stamp(files []codegen.File) []byte {
+func stamp(files []codegen.File, flags ...string) []byte {
 	compiled := make([]codegen.File, 0, len(files))
 	for _, file := range files {
 		if strings.HasSuffix(file.Path, ".go") || file.Path == "go.mod" {
@@ -373,6 +373,9 @@ func stamp(files []codegen.File) []byte {
 	sort.Slice(compiled, func(i, j int) bool { return compiled[i].Path < compiled[j].Path })
 	h := sha256.New()
 	fmt.Fprintf(h, "%s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	for _, flag := range flags {
+		fmt.Fprintf(h, "flag %q\n", flag)
+	}
 	for _, file := range compiled {
 		fmt.Fprintf(h, "%s %d\n", file.Path, len(file.Data))
 		h.Write(file.Data)
@@ -386,11 +389,16 @@ func stamp(files []codegen.File) []byte {
 // The differential test harness uses it to build every fixture in a single
 // invocation.
 func GoBuildPackages(dir, dest string, patterns ...string) error {
+	return goBuildPackages(dir, dest, nil, patterns...)
+}
+
+func goBuildPackages(dir, dest string, flags []string, patterns ...string) error {
 	// The generated module usually sits inside the user's repository, where
 	// the toolchain would otherwise run git to stamp version-control status
 	// into every link — about a sixth of a warm link — for a tree that is
 	// generated, not versioned.
-	cmd := exec.Command("go", append([]string{"build", "-buildvcs=false", "-o", dest}, patterns...)...)
+	args := append([]string{"build", "-buildvcs=false", "-o", dest}, flags...)
+	cmd := exec.Command("go", append(args, patterns...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOTOOLCHAIN=local")
 	out, err := cmd.CombinedOutput()

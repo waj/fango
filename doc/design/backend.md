@@ -243,7 +243,7 @@ Each program's sources.json, beside its entry package, lists logical names,
 root-relative or `<stdlib>/` paths, and SHA-256 hashes in deterministic
 dependency order: the record of what that build was made from. It does not
 decide whether to link. That is decided from a stamp beside the binary, of the
-toolchain and the files it compiles, because a program cannot tell from its own
+toolchain, Go build flags, and the files it compiles, because a program cannot tell from its own
 writes whether it needs relinking — a sibling's build can update a shared
 module and leave this program's binary stale while this program writes nothing.
 Stamping what is compiled also means a source edit that produces the same Go
@@ -302,6 +302,9 @@ on modules, inference, or code generation; each layer above owns its own codec
 and validation.
 
 ### Source positions and stack traces
+
+The following describes ordinary emission. Native debug builds use the
+[complete source-site mapping](debugging.md#native-source-stepping).
 
 Generated Go carries `//line` directives back to Fango source, so a Go stack
 walk reports Fango files and lines, and the runtime's `Capture` and the crash
@@ -495,6 +498,9 @@ The execution payload the worker decodes keeps the call origins of `App`,
 `Perform`, `ControlExit`, `NativeCall`, and `Let` nodes as line-only spans
 (`source.NewLineFile`), which is what the interpreter's [call stack](repl.md#call-stack)
 reads; it still drops every other span.
+
+The opt-in [debug profile](debugging.md) additionally preserves source
+snapshots and lexical binding sites, and adds pause/inspection exchanges.
 
 ## Regex literals
 

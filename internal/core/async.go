@@ -5,6 +5,8 @@ import "github.com/waj/fango/internal/types"
 // AsyncLaunch invokes Call in a fresh child scope. Call's argument supplies the
 // parent scope and is replaced with the child scope only at invocation.
 type AsyncLaunch struct {
+	DebugInfo
+
 	Call                                              *App
 	ScopeCtor, TaskCtor, CompletedCtor, CancelledCtor *types.CtorInfo
 	Ty                                                types.Type
@@ -15,7 +17,10 @@ func (e *AsyncLaunch) Type() types.Type { return e.Ty }
 
 // AsyncRebase rebuilds the invocation's residual evidence against its explicit
 // child Async and cancellation boundaries before calling any user code.
-type AsyncRebase struct{ Call *App }
+type AsyncRebase struct {
+	DebugInfo
+	Call *App
+}
 
 func (*AsyncRebase) isExpr()            {}
 func (e *AsyncRebase) Type() types.Type { return e.Call.Type() }
@@ -87,7 +92,10 @@ func (l *linter) asyncRebase(e *AsyncRebase, where string) {
 // AsyncSupervise gives the source runner ownership of host cancellation through
 // its cleanup. Compiled execution is an ordinary call; interpreter ticks do not
 // insert cancellation points inside this boundary.
-type AsyncSupervise struct{ Call *App }
+type AsyncSupervise struct {
+	DebugInfo
+	Call *App
+}
 
 func (*AsyncSupervise) isExpr()            {}
 func (e *AsyncSupervise) Type() types.Type { return e.Call.Type() }

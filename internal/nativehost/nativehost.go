@@ -26,6 +26,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/waj/fango/internal/debugger"
+
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/execcodec"
 	"github.com/waj/fango/internal/libroot"
@@ -124,7 +126,7 @@ func New(sources []Source) (*Executor, error) {
 func (e *Executor) workerFiles() ([]workerFile, error) {
 	files := []workerFile{{Path: "go.mod", Data: []byte("module github.com/waj/fango\n\ngo 1.26\n")}}
 	runtimeSources, err := runtimefiles.WorkerSources(
-		[]string{"ast", "core", "eval", "execcodec", "meta", "natives", "objectcodec", "source", "types"},
+		[]string{"ast", "core", "debugger", "eval", "execcodec", "meta", "natives", "objectcodec", "source", "types"},
 		[]string{"fangort", "nativewire", "nativeworker"})
 	if err != nil {
 		return nil, err
@@ -302,6 +304,13 @@ func (e *Executor) exchange(ctx context.Context, host Host, request message, lab
 			e.reply(message{Kind: "host_reply", Data: []byte(host.WorkingDirectory())})
 		case "host_exit":
 			e.reply(message{Kind: "host_reply"})
+		case "host_debug":
+			hostDebug, ok := host.(debugger.Host)
+			command := debugger.Command{Kind: "stop"}
+			if ok && m.DebugEvent != nil {
+				command = hostDebug.DebugExchange(ctx, *m.DebugEvent)
+			}
+			e.reply(message{Kind: "host_reply", DebugCommand: &command})
 		case "host_level":
 			levels, ok := host.(LevelHost)
 			if !ok {

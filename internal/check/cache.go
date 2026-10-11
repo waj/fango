@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/waj/fango/internal/compilecache"
+	"github.com/waj/fango/internal/debugger"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/source"
 )
@@ -47,8 +48,14 @@ func objectSlot(module modules.ResolvedModule) (string, bool) {
 	return compilecache.Slot(false, module.Name), module.Name != ""
 }
 
-func moduleBaseKey(module modules.ResolvedModule, fixityHash string, summaries map[string]moduleSummary) (string, bool) {
+func moduleBaseKey(module modules.ResolvedModule, fixityHash string, summaries map[string]moduleSummary, debug bool) (string, bool) {
 	parts := []string{"checked-module-base", module.Name, module.SourceHash, module.NativeHash, fixityHash, fmt.Sprint(module.Role), module.Entry}
+	if debug {
+		parts = append(parts, fmt.Sprintf("debug-v%d", debugger.Version))
+		if module.Source != nil {
+			parts = append(parts, string(module.Source.Content))
+		}
+	}
 	for _, dep := range module.Dependencies {
 		summary, ok := summaries[dep]
 		if !ok {

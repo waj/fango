@@ -24,6 +24,9 @@ type tailJump struct {
 // map — installed by the caller — is already correct for every iteration.
 func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value, descriptors descriptorEnv, rows rowEnv) (Value, error) {
 	for {
+		if in.debug != nil {
+			in.debug.last = ""
+		}
 		// A fully-trivial jump (`f x = f x`) evaluates almost nothing, so
 		// count an explicit step per iteration to keep the every-N
 		// cancellation poll firing.
@@ -50,6 +53,14 @@ func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value, descriptors
 // *tailJump carrying the next frame. Everything off the skeleton evaluates
 // ordinarily.
 func (in *interp) tailStep(def *core.Def, e core.Expr, fr *Frame) (Value, error) {
+	if in.debug != nil {
+		switch e.(type) {
+		case *core.Let, *core.If, *core.Seq, *core.Case, *core.App:
+			if err := in.debugPoint(e, fr); err != nil {
+				return nil, err
+			}
+		}
+	}
 	switch e := e.(type) {
 	case *core.Let:
 		if e.Rec {

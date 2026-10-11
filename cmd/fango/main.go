@@ -16,6 +16,7 @@ import (
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/lsp"
 	"github.com/waj/fango/internal/modules"
+	"github.com/waj/fango/internal/nativedebug"
 )
 
 func main() {
@@ -67,6 +68,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdCheck(args[1:], stderr)
 	case "fmt":
 		return cmdFmt(args[1:], stdout, stderr)
+	case "debug":
+		return cmdDebug(args[1:], stdout, stderr)
 	case "repl":
 		return cmdRepl(args[1:], stdout, stderr)
 	case "clean":
@@ -93,11 +96,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	fmt.Fprint(w, `usage:
-  fango build [-o out] [--emit-go] [verbosity] main.fango
+  fango build [-o out] [--debug | --emit-go] [verbosity] main.fango
+  fango debug BINARY [--] [args...]
   fango run [verbosity] main.fango [--] [args...]
   fango check [verbosity] main.fango
   fango fmt [-w] [-l] [file...]
-  fango repl [dir]
+  fango repl [--debug] [dir]
   fango clean main.fango
   fango doc --stdlib [--module name]... [--strict]
   fango lsp
@@ -148,6 +152,9 @@ func compileToDir(entry, dir string, stderr io.Writer, session *compilationSessi
 
 func ensureBuilt(entry string, stderr io.Writer, session *compilationSession, report *reporter) (dir, program string, ok bool) {
 	dir, err := build.Dir(entry)
+	if err == nil && session.debugEnabled() {
+		dir = filepath.Join(dir, "debug")
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return "", "", false
@@ -158,15 +165,15 @@ func ensureBuilt(entry string, stderr io.Writer, session *compilationSession, re
 	}
 	// A binary already linked from exactly these files needs no toolchain run,
 	// so a warm build reports no linking stage at all.
-	if !build.Linked(dir, program, compiled) {
+	if !build.Linked(dir, program, compiled, session.buildFlags()...) {
 		linkStart := time.Now()
-		err := build.GoBuild(dir, program)
+		err := build.GoBuild(dir, program, session.buildFlags()...)
 		report.phase("go build", linkStart)
 		if err != nil {
 			fmt.Fprintf(stderr, "%v\n", err)
 			return "", "", false
 		}
-		build.RecordLink(dir, program, compiled)
+		build.RecordLink(dir, program, compiled, session.buildFlags()...)
 	}
 	return dir, program, true
 }
@@ -197,12 +204,21 @@ func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	out := fs.String("o", "", "output binary path, or project directory with --emit-go")
 	emit := fs.Bool("emit-go", false, "write the generated Go project and exit")
+	debug := fs.Bool("debug", false, "disable Go optimization and inlining for native debugging")
 	observed := reporting(fs, stderr)
 	if fs.Parse(args) != nil || fs.NArg() != 1 {
 		usage(stderr)
 		return 2
 	}
+	if *debug && *emit {
+		fmt.Fprintln(stderr, "fango: --debug cannot be combined with --emit-go; --debug builds a native executable")
+		return 2
+	}
 	session, report := observed()
+	if *debug {
+		session.debug = true
+		session.goBuildFlags = []string{"-gcflags=all=-N -l"}
+	}
 	entry := fs.Arg(0)
 	if *emit {
 		dest := *out
@@ -235,6 +251,12 @@ func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 	if err := os.WriteFile(dest, data, 0o755); err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return 1
+	}
+	if session.debugEnabled() {
+		if err := nativedebug.WriteManifest(dest, data, session.debugSources); err != nil {
+			fmt.Fprintf(stderr, "fango: %v\n", err)
+			return 1
+		}
 	}
 	report.finish(dest)
 	return 0

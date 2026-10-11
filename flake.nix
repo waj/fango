@@ -63,6 +63,7 @@
         default = pkgs.mkShell {
           packages = with pkgs; [
             go       # compiler implementation language and codegen backend
+            delve    # native-process debugger
             gopls    # LSP for editors
             gotools  # goimports etc.
             gnumake  # Makefile convenience targets

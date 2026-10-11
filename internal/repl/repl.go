@@ -40,6 +40,8 @@ import (
 
 // Options configures a session.
 type Options struct {
+	// Debug selects source-preserving runtime elaboration and debugger controls.
+	Debug bool
 	// ErrorWriter routes program stderr; nil uses os.Stderr.
 	ErrorWriter io.Writer
 	// Root is the source root a prompt `import Foo.Bar` resolves beneath as
@@ -67,10 +69,14 @@ func (o Options) objectCache(root string) check.ObjectCache {
 	if o.Cache != nil || o.DisableCache {
 		return o.Cache
 	}
+	if o.Debug {
+		return compilecache.NewDebugModuleStore(filepath.Join(root, "<repl>"))
+	}
 	return compilecache.NewModuleStore(filepath.Join(root, "<repl>"))
 }
 
 type Session struct {
+	debug      *replDebug
 	ck         *infer.Checker
 	env        *eval.Env
 	gen        int // generation counter incremented on redefinition
@@ -149,6 +155,7 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	ck.RuntimeDebug = opts.Debug
 	stage := staging.Install(ck)
 	stage.Observe(staging.Observer(observe))
 	// The prompt resolver canonicalizes every input, so the checker holds
@@ -195,6 +202,10 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 		options:          opts,
 		runtimeNames:     map[string]string{},
 		promptReferences: map[string][]string{},
+	}
+	if opts.Debug {
+		s.debug = newReplDebug()
+		s.ioctx.DebugHost = s.debug
 	}
 	s.installModules(preludeDefs)
 	// A value declaration that performs effects runs once when entered, so
@@ -282,7 +293,10 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 	input := newLinePump(source, interrupts)
 	defer input.Close()
 	s.interrupts = interrupts
-	s.ioctx = &eval.IOContext{Reader: reader, Input: input, Writer: out, ErrorWriter: s.ioctx.ErrorWriter, Natives: s.ioctx.Natives}
+	s.ioctx = &eval.IOContext{Reader: reader, Input: input, Writer: out, ErrorWriter: s.ioctx.ErrorWriter, Natives: s.ioctx.Natives, DebugHost: s.ioctx.DebugHost}
+	if s.debug != nil {
+		s.debug.input = input
+	}
 	var buf strings.Builder
 	flush := func() {
 		if buf.Len() > 0 {
@@ -291,6 +305,10 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 		}
 	}
 	for {
+		if s.debug != nil && s.debug.quit {
+			s.endAll()
+			return
+		}
 		req := lineRequest{prompt: "> "}
 		if len(s.levels) > 0 {
 			req.prompt = fmt.Sprintf("%d> ", len(s.levels))
@@ -373,6 +391,17 @@ const (
 )
 
 func (s *Session) command(cmd string) (quit bool) {
+	if s.debugCommand(cmd) {
+		return false
+	}
+	if strings.HasPrefix(cmd, ":step ") {
+		s.debugStepExpression(strings.TrimSpace(strings.TrimPrefix(cmd, ":step")))
+		if s.debug != nil && s.debug.quit {
+			s.endAll()
+			return true
+		}
+		return false
+	}
 	switch {
 	case cmd == ":quit" || cmd == ":q":
 		s.endAll()
@@ -384,6 +413,9 @@ func (s *Session) command(cmd string) (quit bool) {
 	case cmd == ":reload":
 		s.reload()
 	case cmd == ":help":
+		if s.debug != nil {
+			fmt.Fprint(s.out, debugHelp)
+		}
 		fmt.Fprint(s.out, `commands:
   :type <expr>   show an expression's type without evaluating
   :reload        refresh imported local modules atomically

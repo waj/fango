@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"io"
 	"os"
 
@@ -13,6 +14,13 @@ import (
 // cmdRepl starts a session whose source root is the given directory, or the
 // working directory: a prompt `import Foo.Bar` reads `Foo/Bar.fango` there.
 func cmdRepl(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("repl", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	debug := flags.Bool("debug", false, "retain source information and enable debugger commands")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	args = flags.Args()
 	if len(args) > 1 {
 		usage(stderr)
 		return 2
@@ -24,7 +32,7 @@ func cmdRepl(args []string, stdout, stderr io.Writer) int {
 		diag.Render(stderr, []diag.Error{{Title: "MISSING LIBRARY", Body: err.Error() + "."}})
 		return 1
 	}
-	var opts repl.Options
+	opts := repl.Options{Debug: *debug}
 	opts.ErrorWriter = stderr
 	if len(args) == 1 {
 		opts.Root = args[0]

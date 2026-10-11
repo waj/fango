@@ -16,6 +16,7 @@ import (
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/debugger"
 	"github.com/waj/fango/internal/execcodec"
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/natives"
@@ -125,9 +126,11 @@ type Closure struct {
 }
 
 type IOContext struct {
-	inputMu  sync.Mutex
-	outputMu sync.Mutex
-	Reader   *bufio.Reader
+	Debug     *debugger.Config
+	DebugHost debugger.Host
+	inputMu   sync.Mutex
+	outputMu  sync.Mutex
+	Reader    *bufio.Reader
 	// Input can supply one owned line stream to both the prompt and host RPCs.
 	// The REPL uses it so interruption never leaves a blocked read racing the
 	// next prompt for bytes.
@@ -171,8 +174,9 @@ func (c *ChannelLevels) LevelStep(depth int, entered bool, value Value, err erro
 }
 
 type LevelRequest struct {
-	Ctx  context.Context
-	Expr core.Expr // nil ends the innermost level
+	Debug *debugger.Config
+	Ctx   context.Context
+	Expr  core.Expr // nil ends the innermost level
 	// Program carries the session's definitions to a worker evaluator.
 	Program *core.Prog
 	// Binders names the level's packed binders, on its first input.
@@ -191,7 +195,7 @@ func (c *IOContext) ForwardLevel(depth int, entered bool, value any, err error) 
 	if req.Expr == nil {
 		return nil, nil
 	}
-	return &execcodec.Payload{Program: req.Program, Expr: req.Expr, Effects: req.Effects}, req.Binders
+	return &execcodec.Payload{Program: req.Program, Expr: req.Expr, Effects: req.Effects, Debug: req.Debug}, req.Binders
 }
 
 // LevelReply answers a request. Depth is the level whose evaluator replied,
@@ -515,6 +519,7 @@ func (e *Env) program() *core.Prog {
 // polled every pollEvery evaluation steps so Ctrl-C interrupts runaway REPL
 // expressions.
 type interp struct {
+	debug    *debugExecution
 	ctx      context.Context
 	env      *Env
 	out      io.Writer
@@ -581,9 +586,9 @@ func Eval(ctx context.Context, e core.Expr, env *Env, out io.Writer) (Value, err
 
 func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (v Value, err error) {
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
-		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Expr: e})
+		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Expr: e, Debug: ioctx.Debug})
 	}
-	in := &interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}}
+	in := &interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}, debug: newDebug(ioctx.Debug, ioctx.DebugHost)}
 	defer in.recoverPanic(&err)
 	return in.eval(e, nil)
 }
@@ -636,6 +641,7 @@ func (in *interp) levelInput(req LevelRequest, depth int, fr *Frame) (v Value, e
 	}
 	child = &interp{ctx: req.Ctx, env: in.env, out: in.out, ioctx: in.ioctx, evidence: evidence, levelDepth: depth, levelBase: evidence}
 	child.inherit(in)
+	child.debug = newDebug(req.Debug, in.ioctx.DebugHost)
 	return child.eval(req.Expr, nil)
 }
 
@@ -710,9 +716,9 @@ func Force(ctx context.Context, name string, env *Env, out io.Writer) (Value, er
 
 func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (v Value, err error) {
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
-		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Force: name})
+		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Force: name, Debug: ioctx.Debug})
 	}
-	in := &interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}}
+	in := &interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}, debug: newDebug(ioctx.Debug, ioctx.DebugHost)}
 	defer in.recoverPanic(&err)
 	return in.force(name)
 }
@@ -737,6 +743,11 @@ func (in *interp) tick() error {
 }
 
 func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
+	if in.debug != nil {
+		if err := in.debugPoint(e, fr); err != nil {
+			return nil, err
+		}
+	}
 	if err := in.tick(); err != nil {
 		return nil, err
 	}
@@ -953,7 +964,13 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			saved := in.evidence
 			in.evidence = cloneEvidence(ev.outer)
+			if in.debug != nil {
+				in.pushDebugFrame("handler " + e.Effect.Name + "." + e.Op.Name)
+			}
 			v, err := in.evalResumeTail(clause.Body, &Frame{parent: ev.frame, vars: vars, types: localTypes}, clause.ResumeID, ev)
+			if in.debug != nil {
+				in.popFrame()
+			}
 			in.evidence = saved
 			return v, err
 		}
@@ -1119,6 +1136,10 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 					vars[p] = exit.Payload[i]
 				}
 			}
+			if in.debug != nil {
+				in.pushDebugFrame("handler " + exit.Op.Name)
+				defer in.popFrame()
+			}
 			return in.eval(clause.Body, &Frame{parent: target.frame, vars: vars})
 		}
 		if e.Return == nil {
@@ -1130,6 +1151,10 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		if e.Return.Param != "_" && e.Return.Param != "()" {
 			vars[e.Return.Param] = v
+		}
+		if in.debug != nil {
+			in.pushDebugFrame("handler return")
+			defer in.popFrame()
 		}
 		return in.eval(e.Return.Body, &Frame{parent: fr, vars: vars})
 	case *core.App:
@@ -1304,6 +1329,11 @@ func (ev *evidence) unchangedState(next core.Expr) bool {
 // It accepts only the control skeleton proved by Core lint and returns the
 // operation result carried by the terminal ResumeTail.
 func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, ev *evidence) (Value, error) {
+	if in.debug != nil {
+		if err := in.debugPoint(e, fr); err != nil {
+			return nil, err
+		}
+	}
 	switch e := e.(type) {
 	case *core.ControlExit:
 		return in.eval(e, fr)

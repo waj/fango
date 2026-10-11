@@ -5,7 +5,7 @@ Compiler setup, command behavior, formatting, generated projects, and main.
 [Reference index](../reference.md).
 
 The repository uses Go 1.26 and provides a Nix development environment with
-Python 3 for development helpers:
+Python 3 for development helpers and Delve for native debugging:
 
 ```sh
 nix develop
@@ -31,11 +31,12 @@ projects or other ignored application data.
 `build`, `run`, `check`, and `clean` accept one `.fango` source file:
 
 ```text
-fango build [-o out] [--emit-go] [verbosity] main.fango
+fango build [-o out] [--debug | --emit-go] [verbosity] main.fango
+fango debug BINARY [--] [args...]
 fango run [verbosity] main.fango [--] [args...]
 fango check [verbosity] main.fango
 fango fmt [-w] [-l] [file...]
-fango repl [dir]
+fango repl [--debug] [dir]
 fango clean main.fango
 fango doc --stdlib [--module name]... [--strict]
 ```
@@ -468,6 +469,39 @@ there is one.
 
 Optional fields are omitted when absent. Private declarations, unexported
 members, and the representation of an opaque type never appear.
+
+## Native debug builds
+
+`fango build --debug [-o out] main.fango` produces a native executable and a
+companion `out.fango-debug.json` file (using the actual executable path for
+`out`). The companion contains source snapshots and linked statement locations,
+matched to the executable by its SHA-256 digest. Keep both files together.
+Missing, incompatible, or mismatched metadata is rejected by `fango debug`
+with a diagnostic asking for a rebuild.
+
+The debug profile disables Fango inlining, scalar specialization, and optional
+backend rewrites that obscure source structure. Semantic lowering, constant
+folding, and eligible self tail-call loops remain. The Go build uses
+`-gcflags='all=-N -l'` for every package, including native sidecars and the
+runtime. The default Nix shell includes Delve:
+
+```sh
+nix develop
+fango build --debug -o main-debug main.fango
+fango debug ./main-debug
+```
+
+See [native source debugging](native-debugging.md) for stepping, breakpoints,
+and inspection. Raw `dlv exec ./main-debug` remains available; its stepping
+commands operate on generated Go and runtime instructions.
+
+`--debug` cannot be combined with `--emit-go` (usage error, exit status 2).
+Debug builds have separate checked/emission cache namespaces and a `debug/`
+subdirectory inside the build tree, including when `FANGO_BUILD_DIR` is set.
+Switching profiles preserves both cached executables and generated projects.
+`run` uses the ordinary profile. Ordinary builds retain their optimization
+pipeline and emit no stepping hooks or debug companion; debugger execution
+and source indexing occur only for debug builds and debugging sessions.
 
 ## Generated Go projects
 

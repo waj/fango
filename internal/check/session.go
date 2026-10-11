@@ -17,6 +17,7 @@ import (
 type Observer = compileevent.Observer
 
 type Session struct {
+	Debug              bool
 	Observe            Observer
 	Cache              ObjectCache
 	DisableObjectCache bool
@@ -49,12 +50,17 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 	}
 	sup := &types.Supply{}
 	ck := infer.NewChecker(sup, types.NewBuiltins(sup), infer.NewEnv())
+	ck.RuntimeDebug = s.Debug
 	ck.Fixity, ck.EntryName = loaded.Fixity, loaded.Entry
 	stageSession := staging.Install(ck)
 	stageSession.Observe(staging.Observer(s.Observe))
 	objectCache := s.Cache
 	if objectCache == nil && !s.DisableObjectCache {
-		objectCache = compilecache.NewModuleStore(entry)
+		if s.Debug {
+			objectCache = compilecache.NewDebugModuleStore(entry)
+		} else {
+			objectCache = compilecache.NewModuleStore(entry)
+		}
 	}
 	installer := NewInstaller(ck, stageSession, objectCache, s.Observe)
 	installer.FreshSources = s.FreshSources

@@ -21,7 +21,8 @@ import (
 // initializers have no statement context).
 
 // anf rewrites a definition body (tail position).
-func (el *elab) anf(e core.Expr) core.Expr {
+func (el *elab) anf(e core.Expr) (result core.Expr) {
+	defer func() { core.CopyDebug(e, result) }()
 	switch e := e.(type) {
 	case *core.Let:
 		rhs, hoists := el.anfAssign(e.Rhs)
@@ -37,7 +38,7 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		out := core.Expr(&core.Case{Scrut: scrut, Bind: e.Bind, Tree: el.anfTree(e.Tree), Ty: e.Ty})
 		return wrapHoists(hoists, out)
 	case *core.Lambda:
-		return &core.Lambda{SourceType: e.SourceType, Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
+		return &core.Lambda{DebugInfo: e.DebugInfo, SourceType: e.SourceType, Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
 			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams, RowParam: e.RowParam, RowEffects: e.RowEffects}
 	case *core.Handle:
 		clauses := make([]core.HandlerClause, len(e.Clauses))
@@ -73,7 +74,8 @@ func (el *elab) anf(e core.Expr) core.Expr {
 // declared variable, so Case and If may head it directly (their innards
 // normalize as tails). Hoists from the RHS's slots propagate to the caller
 // and become Lets above the enclosing binding.
-func (el *elab) anfAssign(e core.Expr) (core.Expr, []hoist) {
+func (el *elab) anfAssign(e core.Expr) (result core.Expr, hs []hoist) {
+	defer func() { core.CopyDebug(e, result) }()
 	switch e := e.(type) {
 	case *core.If:
 		cond, hoists := el.anfSlot(e.Cond)
@@ -118,7 +120,7 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		}
 		return out, nil
 	case *core.Lambda:
-		return &core.Lambda{SourceType: e.SourceType, Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
+		return &core.Lambda{DebugInfo: e.DebugInfo, SourceType: e.SourceType, Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
 			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams, RowParam: e.RowParam, RowEffects: e.RowEffects}, nil
 	case *core.Handle, *core.Seq:
 		out := el.anf(e)
@@ -141,7 +143,8 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 
 // anfExprChildren rebuilds a non-binding node with each child treated as an
 // expression slot, accumulating the children's hoists left to right.
-func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
+func (el *elab) anfExprChildren(e core.Expr) (result core.Expr, hs []hoist) {
+	defer func() { core.CopyDebug(e, result) }()
 	var hoists []hoist
 	slot := func(c core.Expr) core.Expr {
 		out, h := el.anfSlot(c)

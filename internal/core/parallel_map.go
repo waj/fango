@@ -3,6 +3,8 @@ package core
 import "github.com/waj/fango/internal/types"
 
 type ParallelMap struct {
+	DebugInfo
+
 	Function, Input Expr
 	Ty              types.Type
 }

@@ -209,7 +209,7 @@ func (w *canonicalWriter) write(v reflect.Value, field string) {
 		}
 		for i := 0; i < v.NumField(); i++ {
 			f := v.Type().Field(i)
-			if f.PkgPath != "" || f.Tag.Get("object") == "omit" ||
+			if f.PkgPath != "" || f.Name == "DebugInfo" || f.Tag.Get("object") == "omit" ||
 				(v.Type() == tconReflectType && f.Name == "Unique") ||
 				(v.Type() == effectReflectType && f.Name == "Unique") ||
 				((v.Type() == effLabelReflectType || v.Type() == effectInstReflectType) && f.Name == "Unique") ||

@@ -2,9 +2,10 @@ package eval
 
 import (
 	"fmt"
+	"sync"
+
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/runtime/fangort"
-	"sync"
 )
 
 func (in *interp) asyncRebase(e *core.AsyncRebase, fr *Frame) (Value, error) {
@@ -35,6 +36,9 @@ func (in *interp) asyncRebase(e *core.AsyncRebase, fr *Frame) (Value, error) {
 }
 
 func (in *interp) asyncLaunch(e *core.AsyncLaunch, fr *Frame) (Value, error) {
+	if in.debug != nil {
+		return nil, fmt.Errorf("debugger: concurrent task creation is not supported")
+	}
 	if in.compileTime {
 		return nil, &UnsafeNativeError{Name: "Async.spawn", Reason: "starts concurrent execution"}
 	}
@@ -88,6 +92,9 @@ func (in *interp) asyncLaunch(e *core.AsyncLaunch, fr *Frame) (Value, error) {
 }
 
 func (in *interp) parallelMap(e *core.ParallelMap, fr *Frame) (Value, error) {
+	if in.debug != nil {
+		return nil, fmt.Errorf("debugger: concurrent task creation is not supported")
+	}
 	function, err := in.eval(e.Function, fr)
 	if err != nil {
 		return nil, err

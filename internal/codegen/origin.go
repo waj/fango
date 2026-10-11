@@ -72,7 +72,7 @@ func (g *gen) mark(node goast.Node) goast.Node {
 		}
 		target = paren.X
 	}
-	if pairedNode(target) {
+	if g.pairedNode(target) {
 		g.origins[target] = g.site
 	}
 	return node
@@ -124,12 +124,12 @@ const strictDirectivesVariable = "FANGO_INTERNAL_STRICT_DIRECTIVES"
 // formatted again so it stays a gofmt fixed point. Anything the pass cannot
 // account for keeps the plain text.
 func (g *gen) lineDirectives(file *goast.File, formatted []byte, unitPath string) ([]byte, error) {
-	if g.source == "" || len(g.origins) == 0 {
+	if g.source == "" || (!g.debug && len(g.origins) == 0) {
 		return formatted, nil
 	}
 	out, err := g.insertDirectives(file, formatted, unitPath)
 	if err != nil {
-		if os.Getenv(strictDirectivesVariable) != "" {
+		if g.debug || os.Getenv(strictDirectivesVariable) != "" {
 			return nil, fmt.Errorf("codegen: line directives for %s: %w", unitPath, err)
 		}
 		return formatted, nil
@@ -142,7 +142,7 @@ func (g *gen) insertDirectives(file *goast.File, formatted []byte, unitPath stri
 	wanted := map[nodeKey]source.Span{}
 	counts := map[reflect.Type]int{}
 	goast.Inspect(file, func(n goast.Node) bool {
-		if n == nil || !pairedNode(n) {
+		if n == nil || !g.pairedNode(n) {
 			return true
 		}
 		key := nodeKey{reflect.TypeOf(n), counts[reflect.TypeOf(n)]}
@@ -161,7 +161,7 @@ func (g *gen) insertDirectives(file *goast.File, formatted []byte, unitPath stri
 	lines := map[nodeKey]int{}
 	parsedCounts := map[reflect.Type]int{}
 	goast.Inspect(parsed, func(n goast.Node) bool {
-		if n == nil || !pairedNode(n) {
+		if n == nil || !g.pairedNode(n) {
 			return true
 		}
 		key := nodeKey{reflect.TypeOf(n), parsedCounts[reflect.TypeOf(n)]}
@@ -185,6 +185,18 @@ func (g *gen) insertDirectives(file *goast.File, formatted []byte, unitPath stri
 	}
 	text := strings.Split(strings.TrimSuffix(string(formatted), "\n"), "\n")
 	out := make([]string, 0, len(text)+2*len(claims))
+	if g.debug {
+		// Reset every unclaimed line, including braces and declarations. Otherwise
+		// Go increments the previous Fango line across synthetic instructions.
+		for i, line := range text {
+			directive := "<fango-generated>:1"
+			if sp, ok := claims[i+1]; ok {
+				directive = g.source + ":" + strconv.Itoa(sp.StartPos().Line)
+			}
+			out = append(out, "//line "+directive, line)
+		}
+		return format.Source([]byte(strings.Join(out, "\n") + "\n"))
+	}
 	redirected := false
 	for i, line := range text {
 		// A directive is a full line of its own. It cannot precede a line
@@ -217,4 +229,42 @@ func (g *gen) insertDirectives(file *goast.File, formatted []byte, unitPath stri
 func (g *gen) markExpr(e goast.Expr) goast.Expr {
 	g.mark(e)
 	return e
+}
+
+// Debug builds use the complete expression sites, including literals and local
+// references. Ordinary emission retains the existing stack-trace origins.
+func (g *gen) exprOrigin(e core.Expr) source.Span {
+	if g.debug && e != nil {
+		if site := e.DebugSite(); site != nil && site.Source != nil {
+			return source.Span{File: source.NewLineFile(site.Source.Name), Start: site.Line - 1, End: site.Line - 1}
+		}
+	}
+	return exprOrigin(e)
+}
+
+func (g *gen) pairedNode(n goast.Node) bool {
+	if g.debug {
+		switch n.(type) {
+		case *goast.ReturnStmt, *goast.DeclStmt, *goast.ExprStmt, *goast.IfStmt, *goast.SwitchStmt:
+			return true
+		}
+	}
+	return pairedNode(n)
+}
+
+func (g *gen) debugStatements(stmts []goast.Stmt, e core.Expr) {
+	if !g.debug {
+		return
+	}
+	sp := g.exprOrigin(e)
+	if !g.ownSpan(sp) {
+		return
+	}
+	for _, stmt := range stmts {
+		if g.pairedNode(stmt) {
+			if _, exists := g.origins[stmt]; !exists {
+				g.origins[stmt] = sp
+			}
+		}
+	}
 }

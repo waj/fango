@@ -98,3 +98,7 @@ defines the default scope.
 ## REPL
 
 [REPL](reference/repl.md) — Prompt scope, imports, redefinition, rollback, commands, and line editing.
+
+[REPL debugging](reference/debugging.md) — Breakpoints, stepping, scoped inspection, and cancellation.
+
+[Native debugging](reference/native-debugging.md) — Source stepping with Delve, breakpoints, and native inspection.

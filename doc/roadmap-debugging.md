@@ -1,167 +1,140 @@
 # Fango debugging
 
-Proposal for source breakpoints, stepping, and variable inspection. No debugger
-commands, debug build profile, or editor debug adapter are implemented yet.
-[Roadmap index](roadmap.md). This work extends
-[tooling](roadmap-tooling.md), the [interpreter](design/repl.md), and the
-[Go backend](design/backend.md#source-positions-and-stack-traces).
+The sequential interpreter debugger is implemented in `fango repl --debug`;
+see its [reference](reference/debugging.md) and [architecture](design/debugging.md).
+[Native source stepping](reference/native-debugging.md) is implemented through
+Delve. This page owns remaining presentation, platform, editor, and concurrency work.
+[Roadmap index](roadmap.md).
 
 ## Direction and existing foundations
 
-Use the interpreter for the first Fango-aware debugger, with the REPL as its
-terminal interface. Keep the execution controller independent of prompt input
-so it can also debug a program from its entry point and serve an editor.
-Use Delve for compiled Go binaries, first directly and later through a Fango
-adapter if the experiment below supports it. These paths should share source
-identity, breakpoint resolution, and value presentation rules where practical;
-they need different mechanisms to suspend and inspect execution.
+Use the interpreter controller for interpreted execution and the Fango source
+controller over Delve for compiled Go binaries. The transport-independent
+control messages can support an interpreted entry-point launcher and an editor adapter without coupling execution to
+terminal input. These are follow-ups to the REPL interface.
 
-The interpreter already has lexical value frames and a source-aware call
-stack. These are separate structures: trace frames do not expose the lexical
-environment of each suspended caller. Execution artifacts retain the origins
-needed for traces as line-only spans, not a complete source debugging model.
-The REPL also has generations, transactional reload, cancellation, and handler
-levels whose lifetimes debugging must respect.
-
-Generated Go already carries `//line` directives and reversibly named Fango
-symbols. The build invokes ordinary `go build` without explicit stripping
-flags. This is a useful starting point for native debugging, but trace
-attribution covers selected operations rather than every executable source
-expression or binding. Several generated operations can share one Fango line;
-some generated lines reset to the Go file.
-
-[Go's debugger guidance](https://go.dev/doc/gdb) recommends Delve over GDB
-because it understands Go's runtime, stacks, and values. GDB and LLDB can be
-investigated for low-level inspection, but neither is the initial Fango
-integration target. Delve already provides a
-[Debug Adapter Protocol interface](https://github.com/go-delve/delve/blob/master/Documentation/api/dap/README.md)
-for editor clients. That interface exposes Go expressions and representations;
-it does not by itself provide Fango expression evaluation or Fango variable names.
+[Go's debugger guidance](https://go.dev/doc/gdb) recommends Delve over GDB.
+Delve also provides a [DAP interface](https://github.com/go-delve/delve/blob/master/Documentation/api/dap/README.md),
+but it exposes Go expressions and representations. GDB and LLDB remain
+possible low-level investigation tools, not the initial Fango adapter target.
 
 ## Shared source debugging model
 
-Retain optional debug metadata through checking, elaboration, optimization,
-object encoding, and lowering. Identify executable source sites, lexical scopes,
-source binders and their types, and the corresponding Core/generated bindings.
-Preserve shadowing, pattern-bound variables, closure captures, and lifted local
-function identities. Hide evidence parameters and generated temporaries in the
-default view, with a raw view available for compiler/runtime investigation.
+Interpreter source snapshots, lexical binding sites, profile-aware checked
+objects, and exact-line breakpoint matching are
+[implemented](design/debugging.md#metadata-and-profile). Remaining work:
 
-Resolve a file-and-line breakpoint to an executable site and report its actual
-location. A line with no site must be reported as unresolved or explicitly
-relocated; do not silently claim it is a verified breakpoint. Internal site
-identities must distinguish repeated execution of one line, including tail-loop
-iterations, even if the first UI supports only line breakpoints.
-
-Use a source manifest to resolve logical entry/module names and `<stdlib>` paths
-to real files without baking consumer-specific absolute paths into shared module
-output. Record source content identity so a debugger can detect edits made since
-the debuggee was checked. Test the actual paths written to DWARF: Go interprets
-relative directive paths relative to the generated Go file's directory
-([line directives](https://pkg.go.dev/cmd/compile#hdr-Line_Directives)).
-
-A debug profile should disable Fango inlining and binding elimination where
-they destroy the source view. Turning off Go optimization cannot reverse
-[Fango's earlier inlining](design/core.md#inlining), which also affects the
-interpreter. Preserve required semantic lowering and the
-[self tail-call guarantee](reference/functions.md#tail-call-guarantee); tail
-iterations update the current frame rather than manufacturing a recursive
-history. Decide other optimization policies from concrete stepping fixtures.
-Debug profile and metadata version must participate in checked-object,
-emission, and link cache identities so ordinary artifacts cannot satisfy a debug
-request. Debug and ordinary outputs should coexist without overwriting one
-another's running executable or generated sources.
+- A raw inspection view for evidence parameters and generated temporaries.
+- Disk path mappings for raw Delve source lookup, plus the binding and scope
+  mapping described under [native variable presentation](#native-variable-presentation).
+  The native frontend already uses binary-matched source snapshots;
+  [debug emission and cache isolation](design/debugging.md#native-source-stepping)
+  preserve ordinary outputs and the self tail-call guarantee.
+- Measure stepping gaps from semantic lowering and extend explicit sites where
+  a concrete fixture needs finer source attribution.
 
 ## Compiled-binary feasibility experiment
 
-Before committing to a native adapter, export a small program through the
-existing `build --emit-go` command. Build that project with
-`go build -gcflags='all=-N -l' -o debug-main ./entries/Main`, then open it with
-`dlv exec ./debug-main`. Delve
-[recommends these compiler flags](https://github.com/go-delve/delve/blob/master/Documentation/usage/dlv_exec.md)
-for prebuilt binaries. This is an experiment using existing export behavior,
-not a promised Fango debugger workflow; the export still contains Fango's
-optimized Core.
+The [opt-in harness](design/debugging.md#native-experiment-harness) builds a
+fixture through `fango build --debug`, applying `-gcflags='all=-N -l'`, as
+[Delve recommends](https://github.com/go-delve/delve/blob/master/Documentation/usage/dlv_exec.md).
+Run `nix develop --command make test-debug-native` on a host
+allowed to debug its child processes.
 
-Check file/line breakpoints, next/step/step-out, source lookup, stack names,
-arguments, and locals on macOS and Linux. Include an imported module and a
-stdlib call, shadowed locals, a match, a closure, a self tail loop, an effect
-handler, and a native sidecar. Inspect the binary's line and variable tables
-alongside actual debugger stops. Determine which gaps need richer directives,
-debug-specific Go emission, binder metadata, or an adapter rather than assuming
-that a correct crash trace implies correct stepping.
+Evidence on macOS ARM64 with Go 1.26.7 and pinned Delve 1.27.1:
 
-Start with raw Go names and values. Record exactly what can be recovered about
-Fango bindings and value layouts before promising native variable inspection.
-Full ADT/record/List presentation, synthetic frame filtering, source-level step
-filtering, and Fango watch expressions are follow-up work. Delve path
-[substitution](https://github.com/go-delve/delve/blob/master/Documentation/cli/substitutepath.md)
-may help source lookup; evaluate it against the generated package layout.
+- Debug build, the fixture's result (`94`), and live source stepping pass.
+- DWARF contains `Main.fango`, `Probe.fango`, and `<stdlib>/...` paths, including
+  List. These are logical paths, not an exported copy of the Fango sources.
+- Generated bindings include `v_n`, `v_acc`, `v_offset`, `v_seed`, and closure
+  parameters. Synthetic evidence, adapter, and result variables also
+  appear. This establishes raw tables, not faithful Fango variable presentation.
+- Live tests cover entering stdlib, next, finish, callback breakpoint
+  precedence, a native sidecar, a tail loop, and process completion. Mandelbrot
+  steps through coordinate calculations at lines 35–37 and returns to Range.
+- `FANGO_DEBUG_NATIVE_DWARF_ONLY=1` runs static checks independently of host
+  debugger access.
+- Linux AMD64 execution remains unverified; run the same target there.
+
+Complete the live platform matrix before broadening native support:
+file/line breakpoints, next/step/step-out, source lookup, stack names,
+arguments, and locals. The fixture covers an imported module, stdlib calls,
+matching, closures, a self tail loop, an effect handler, and a native sidecar.
+Fango rejects lexical shadowing, so generation/redefinition coverage belongs
+to interpreter sessions rather than an invalid native fixture.
+
+Evaluate Delve [path substitution](https://github.com/go-delve/delve/blob/master/Documentation/cli/substitutepath.md)
+and actual stop paths. Keep [native variable presentation](#native-variable-presentation),
+synthetic-frame filtering and Fango watch expressions separate from
+source-stepping support. A native launch limitation does not block interpreter
+debugging.
+
+## Native variable presentation
+
+Present native arguments and locals using their Fango names, types, and
+scopes. This requires compiler metadata and a presentation layer; the current
+source-stepping frontend retains raw Go variable names and representations.
+Proposed implementation order:
+
+1. Extend the versioned, binary-matched source manifest with a mapping from
+   generated bindings to original Fango names, types, and lexical scopes.
+   Account for captures and inlined bindings; stripping `v_` alone
+   cannot recover those relationships. Mark unavailable or optimized-away
+   bindings explicitly, and reject a mapping from a different build.
+2. Prototype Delve terminal helpers using its
+   [Starlark commands](https://github.com/go-delve/delve/blob/master/Documentation/cli/starlark.md),
+   which can inspect arguments and locals. Proposed `flocals` and `fprint NAME`
+   commands would display source names, resolve a name in the selected frame,
+   and hide compiler temporaries by default, with access to a raw view.
+   These are custom commands: ordinary Delve commands would continue to use
+   Go names and expressions. Start with binding lookup, not arbitrary Fango
+   expression evaluation.
+3. Add bounded structural rendering for ADTs, records, and Lists, such as
+   `Just 42` and `[1, 2, 3]`, using type and representation metadata. Inspect
+   memory without invoking `Show` or other target functions. Preserve raw
+   inspection and report unreadable or truncated values explicitly.
+4. After terminal presentation is validated, reuse its mapping and rendering
+   rules alongside the native source controller in a Fango editor adapter for
+   editor variables, hover inspection, and source-level stack names. Keep
+   general watch expressions as distinct work.
+
+Verify original-name lookup in the selected frame, closure captures, pattern
+bindings, inlined and unavailable bindings, synthetic-variable filtering,
+representation decoding, and mismatched-build rejection. Confirm that
+inspection does not execute target code and that raw inspection remains
+available. Native fixtures must establish these behaviors independently of
+the interpreter debugger.
 
 ## Interpreter debugger
 
-Add optional execution hooks at explicit source sites, function entry/return,
-and tail-loop iteration boundaries. Pausing should block the evaluator at a
-safe boundary while retaining its continuation, lexical frames, and evidence.
-Do not unwind and replay evaluation: that would repeat IO and change handler,
-resource, and cleanup lifetimes. Keep compile-time evaluation outside debugger
-sessions.
+Sequential breakpoints, stepping, frame selection, bounded inspection,
+cancellation, handler-level requests, and worker control are
+[implemented](reference/debugging.md). Remaining extensions:
 
-The first controller should support line breakpoints, continue, step into,
-step over, step out, stack selection, and inspection of parameters and locals.
-Step over uses the selected activation's identity/depth; step out waits until
-that activation exits, including abort routing. Stepping should expose source
-evaluation order without stopping on every administrative Core node. Define
-whether pauses happen before evaluating a binding or after its value becomes
-available, and test that distinction. Treat a native call as an atomic step
-initially; report its boundary and do not promise stepping inside Go sidecars.
-
-Inspection should traverse already available values with bounded depth and
-collection size. It must not force an unevaluated top-level cell or invoke
-user `Show` code automatically. Preserve opaque native values. Frame selection
-must obey that frame's lexical scope and source generation, including private
-locals, rather than adding those names to the ordinary import interface.
-Pure watch evaluation needs a separate checked, budgeted contract and can wait
-until inspection works; an empty effect row alone does not ensure termination
-or prevent forcing cells.
-
-Debug control must reach the evaluator that owns the suspended frames. The
-interpreter can execute callbacks in its persistent native worker, and prompt
-levels can run there too. Extend that protocol with pause/control messages and
-bounded inspection handles where needed; serializing an ordinary display result
-is insufficient. Keep debug controls and program stdin independent so a paused
-console read cannot consume debugger commands. Cancel/stop must wake a paused
-evaluation and follow the existing cleanup and task-draining rules.
-
-Start acceptance with sequential programs. Specify task behavior before enabling
-debugging for concurrent programs: selected-task versus all-task suspension,
-cooperative pause boundaries, tasks blocked in native IO or cell forces, stepping
-across spawn/join, and cancellation while paused. Do not advertise all-task pause
-until the controller can confirm which tasks have stopped. Reload/redefinition
-should initially be rejected while execution is suspended; later support needs
-explicit breakpoint rebinding and old-generation inspection lifetimes.
+- Launch an interpreted program directly from its entry point.
+- Checked and budgeted watch expressions. An empty effect row alone does not
+  guarantee termination or prevent forcing top-level cells.
+- Reload or redefinition while suspended, with explicit old-generation
+  inspection lifetimes and breakpoint rebinding. The current interface
+  rejects all such mutations.
+- Concurrent debugging: selected-task versus all-task suspension, safe points
+  in native IO and cell forces, spawn/join stepping, and cancellation while
+  paused. Task creation and parallel map are currently rejected in debug mode.
 
 ## Delivery and verification
 
-Suggested order: native feasibility experiment; shared debug metadata/profile;
-sequential interpreter controller and REPL controls; editor integration; compiled
-Fango presentation; concurrent debugging. These are work packages, not changes
-to existing milestone identities. A failed native experiment should narrow that
-path without blocking interpreter debugging.
+Extend the native launcher with process attachment, restart, and redirected
+target input.
 
-Use Debug Adapter Protocol for editor integration, with a Fango adapter over
-the interpreter controller and, if needed, a translation layer over Delve for
-native sessions. Extend the VS Code extension with a Fango debug configuration
-and breakpoint support on `.fango` files. Keep language-server analysis separate
-from execution control. Exact CLI and REPL command names remain open until the
-controller's lifecycle is specified.
+Use DAP for editor integration, with a Fango adapter over the interpreter
+controller and the native source controller over Delve, extended with the
+[native presentation layer](#native-variable-presentation). Add a
+debug configuration and `.fango` breakpoint support to the VS Code extension;
+keep language-server analysis separate from execution control.
 
-Acceptance fixtures should assert stop sequences and visible scoped values,
-including multiple expressions on one line, repeated line visits, shadowing,
-captures, patterns, handlers/abort cleanup, tail loops, and private helpers.
-Compare debug and ordinary execution outcomes and IO across both backends.
-Cover cold/warm cache switching between profiles, moved source lines, stale
-sources, interruption, worker boundaries, and reload rejection while paused.
-Keep the existing [verification gates](design/verification.md#verification-commands).
-When each behavior ships, move its contract into reference/design and remove
-the corresponding unfinished proposal here.
+Retain the [existing verification gates](design/verification.md#verification-commands).
+Extend stop-sequence and value assertions with each capability, including
+source generations, repeated line visits, captures, patterns, handler aborts,
+cleanup, private helpers, cache switching, interruption, and worker boundaries.
+Native presentation and concurrent execution require their own acceptance
+fixtures rather than inheriting the sequential debugger's claims.

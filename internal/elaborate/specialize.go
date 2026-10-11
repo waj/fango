@@ -22,6 +22,9 @@ type scalarVariant struct {
 // preserving module-package stability. The already-resolved Core is cloned;
 // instance selection is never rerun at a more concrete type.
 func specializeScalars(p *core.Prog, infos []infer.DeclInfo, ck *infer.Checker) {
+	if ck.RuntimeDebug {
+		return
+	}
 	s := &scalarSpecializer{ck: ck, variants: map[string]map[int]*scalarVariant{}, dictionaries: map[string]*infer.InstanceInfo{}, methods: map[string]scalarMethod{}}
 	for _, in := range ck.Instances {
 		if in.Owner != "Basics" || len(in.Vars) != 0 || len(in.Preds) != 0 {

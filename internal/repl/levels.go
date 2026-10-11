@@ -161,7 +161,7 @@ func (s *Session) levelChannels() *eval.ChannelLevels {
 // worker receives the session's definitions with it, and a level's first
 // input names its binders.
 func (s *Session) request(ctx context.Context, e core.Expr) eval.LevelRequest {
-	req := eval.LevelRequest{Ctx: ctx, Expr: e}
+	req := eval.LevelRequest{Ctx: ctx, Expr: e, Debug: s.ioctx.Debug}
 	if e != nil && s.ioctx.Natives != nil {
 		req.Program = s.env.Program()
 	}
@@ -190,6 +190,10 @@ func (s *Session) request(ctx context.Context, e core.Expr) eval.LevelRequest {
 // own evaluator when there is none, and waits for the answer. Ctrl-C cancels
 // it. The context of an input that entered a level lives as long as the level.
 func (s *Session) evaluate(e core.Expr) (eval.LevelReply, context.CancelFunc) {
+	s.ioctx.Debug = s.debugConfig(e)
+	if s.debug != nil {
+		defer func() { s.debug.active = nil }()
+	}
 	e = s.runtimeExpr(e)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.setCancel(cancel)
@@ -209,7 +213,7 @@ func (s *Session) evaluate(e core.Expr) (eval.LevelReply, context.CancelFunc) {
 	} else {
 		levels.Requests <- s.request(ctx, e)
 	}
-	reply := <-levels.Replies
+	reply := s.waitEvaluation(levels.Replies)
 	if s.interrupts != nil {
 		select {
 		case <-s.interrupts:
@@ -350,7 +354,7 @@ func (s *Session) endLevel() {
 	s.setCancel(s.levels[depth-1].cancel)
 	levels := s.levelChannels()
 	levels.Requests <- s.request(nil, nil)
-	reply := <-levels.Replies
+	reply := s.waitEvaluation(levels.Replies)
 	s.setCancel(nil)
 	// The head's cleanup may abort toward an outer level too; the reply is
 	// then the outcome of the outermost level that ended.

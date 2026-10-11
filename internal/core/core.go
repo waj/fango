@@ -5,6 +5,7 @@
 package core
 
 import (
+	"github.com/waj/fango/internal/debugger"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
@@ -127,27 +128,37 @@ func (c *CallbackABI) AddUses(context types.Transport, uses uint8) {
 func (d *Def) IsWorker() bool { return len(d.Params) > 0 || len(d.TyParams) > 0 }
 
 type Expr interface {
+	DebugSite() *debugger.Site
+	SetDebugSite(*debugger.Site)
 	isExpr()
 	Type() types.Type
 }
 
 type IntLit struct {
+	DebugInfo
+
 	Val int64
 	Ty  types.Type
 }
 
 type FloatLit struct {
+	DebugInfo
+
 	Val float64
 	Ty  types.Type
 }
 
 type StringLit struct {
+	DebugInfo
+
 	Val string
 	Ty  types.Type
 }
 
 // RegexLit is checked syntax, initialized once rather than at each evaluation.
 type RegexLit struct {
+	DebugInfo
+
 	Pattern string
 	Ctor    *types.CtorInfo
 	Origin  source.Span
@@ -155,30 +166,43 @@ type RegexLit struct {
 }
 
 type CharLit struct {
+	DebugInfo
+
 	Val rune
 	Ty  types.Type
 }
 
-type UnitLit struct{ Ty types.Type }
+type UnitLit struct {
+	DebugInfo
+	Ty types.Type
+}
 
 // BoolLit is permanent, not an interim ADT stand-in: doc/design.md, "Go backend and runtime" special-cases
 // Bool in codegen forever (native Go bool), and eval's Value stays bool.
 type BoolLit struct {
+	DebugInfo
+
 	Val bool
 	Ty  types.Type
 }
 
 type Neg struct {
+	DebugInfo
+
 	Operand Expr
 	Ty      types.Type // ground Int or Float
 }
 
 type If struct {
+	DebugInfo
+
 	Cond, Then, Else Expr
 	Ty               types.Type
 }
 
 type Perform struct {
+	DebugInfo
+
 	Origin     source.Span
 	Op         *types.EffectOp
 	Effect     EffectInstance
@@ -193,6 +217,8 @@ type Perform struct {
 // the normal result type of the abandoned computation; the payload is checked
 // Core data, never an unchecked source value.
 type ControlExit struct {
+	DebugInfo
+
 	Origin  source.Span
 	Effect  EffectInstance
 	Op      *types.EffectOp
@@ -204,6 +230,8 @@ type ControlExit struct {
 // inspection derives a complete nominal descriptor from Ty and packages the
 // result with the independently checked Maybe declaration.
 type FailureInspect struct {
+	DebugInfo
+
 	Name   string
 	Args   []Expr
 	Result *types.ADTInfo
@@ -239,6 +267,8 @@ type HandlerState struct {
 	Ty      types.Type
 }
 type Handle struct {
+	DebugInfo
+
 	// CaptureTrace is reserved for the diagnostic reporting intrinsic.
 	CaptureTrace bool
 	Body         Expr
@@ -255,6 +285,8 @@ type Handle struct {
 	Control types.Control
 }
 type ResumeTail struct {
+	DebugInfo
+
 	Owner        types.ResumeID
 	Value        Expr
 	NextState    Expr
@@ -270,6 +302,8 @@ type ResumeTail struct {
 // handler activation. Elaboration is its only producer: the node is the body
 // of the bundled `Runtime.Scope.bracket` intrinsic and occurs nowhere else.
 type Bracket struct {
+	DebugInfo
+
 	Scope      types.ScopeID
 	Resource   string
 	ResourceTy types.Type
@@ -281,6 +315,8 @@ type Bracket struct {
 }
 
 type Seq struct {
+	DebugInfo
+
 	First, Then Expr
 	Ty          types.Type
 }
@@ -291,6 +327,8 @@ type Seq struct {
 // self-recursive local function (Rhs must be a Lambda; codegen emits the
 // declare-then-assign idiom, eval ties the frame cycle).
 type Let struct {
+	DebugInfo
+
 	Name string
 	Rhs  Expr
 	Body Expr
@@ -306,6 +344,8 @@ type Let struct {
 // compositional type mapping T⟦a->b⟧ = func(A) B — one Go func literal,
 // one interpreter closure. Multi-parameter surface lambdas nest.
 type Lambda struct {
+	DebugInfo
+
 	SourceType types.Type
 	Param      string
 	Body       Expr
@@ -319,6 +359,8 @@ type Lambda struct {
 }
 
 type VarRef struct {
+	DebugInfo
+
 	Origin source.Span
 	Name   string
 	Local  bool // resolves a lexical binding even if a later global shares its spelling
@@ -332,6 +374,8 @@ type VarRef struct {
 // the compiler is running a splice — a Quote reaching the Core linter means
 // a compile-time-only value leaked into emitted code.
 type Quote struct {
+	DebugInfo
+
 	Template int
 	Holes    []Expr
 	Ty       types.Type
@@ -339,12 +383,16 @@ type Quote struct {
 
 // TypeOf is a compile-time-only reflected type value.
 type TypeOf struct {
+	DebugInfo
+
 	Repr any
 	Ty   types.Type
 }
 
 // AttributeLookup performs a stage-only typed projection from an opaque bag.
 type AttributeLookup struct {
+	DebugInfo
+
 	Bag                             Expr
 	Requested                       types.Type
 	NilCtor, ItemCtor, AttachedCtor *types.CtorInfo
@@ -353,6 +401,8 @@ type AttributeLookup struct {
 
 // NativeCall is a saturated call to a declaration-backed primitive.
 type NativeCall struct {
+	DebugInfo
+
 	Storage types.NativeStorage
 
 	Name   string
@@ -376,6 +426,8 @@ const (
 )
 
 type App struct {
+	DebugInfo
+
 	SourceType   types.Type
 	Origin       source.Span
 	CalleeKind   CalleeKind
@@ -397,6 +449,8 @@ type App struct {
 // tree (doc/design.md, "Core and evidence invariants"). Elaboration compiled the branches: each scrutinee position
 // is examined once, pattern variables became Lets inside the leaves.
 type Case struct {
+	DebugInfo
+
 	Scrut Expr
 	Bind  string
 	Tree  Tree

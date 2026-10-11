@@ -39,6 +39,9 @@ type inliner struct {
 // from owned and installed definitions. Owned candidates are processed
 // callees first, so a body that is copied has already been inlined into.
 func inlineDefs(defs []core.Def, context []core.Def, ck *infer.Checker) {
+	if ck.RuntimeDebug {
+		return
+	}
 	if !Inlining {
 		return
 	}

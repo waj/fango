@@ -21,6 +21,7 @@ import (
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/debugger"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/natives"
@@ -543,6 +544,7 @@ func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) [
 }
 
 type elab struct {
+	debugSources  map[*source.File]*debugger.Source
 	bodySubst     map[int]types.Type
 	selfInstance  *infer.InstanceInfo
 	instanceLimit int
@@ -777,6 +779,10 @@ func handlerPatternParam(p ast.Pattern) string {
 }
 
 func (el *elab) expr(e ast.Expr) (out core.Expr) {
+	if el.ck.RuntimeDebug {
+		site := el.debugSite(e)
+		defer func() { attachDebug(out, site) }()
+	}
 	// The innermost expression that produced a node names its origin; an
 	// enclosing block or parenthesis that elaborates to the same node must
 	// not widen it, or a call would be attributed to the block's first line.

@@ -75,6 +75,9 @@ comment anchors, verbatim fallback, and round-trip verification.
 [Interpreter and REPL](design/repl.md) — Core values, display, persistent stores,
 import increments, generations, transactions, and module reload.
 
+[Source debugging](design/debugging.md) — Debug metadata, execution control,
+inspection, worker transport, and native source stepping.
+
 ## Testing and performance
 
 [Verification](design/verification.md) — commands, fixture conventions,

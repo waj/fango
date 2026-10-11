@@ -1,0 +1,5 @@
+module Main exposing (main)
+
+import Probe
+
+main() = print (Probe.run 10)

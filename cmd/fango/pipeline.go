@@ -24,14 +24,26 @@ import (
 type stageEvent = compileevent.Event
 
 // compilationSession carries what a command installs into the pipeline: an
-// observer, and whether to bypass the persistent cache. A session with no
-// observer costs the pipeline nothing.
+// observer, Go build flags, and whether to bypass the persistent cache. A
+// session with no observer costs the pipeline nothing.
 type compilationSession struct {
-	observe compileevent.Observer
-	noCache bool
+	observe      compileevent.Observer
+	noCache      bool
+	goBuildFlags []string
+	debug        bool
+	debugSources map[string]string
 }
 
+func (s *compilationSession) debugEnabled() bool { return s != nil && s.debug }
+
 func (s *compilationSession) disableCache() bool { return s != nil && s.noCache }
+
+func (s *compilationSession) buildFlags() []string {
+	if s == nil {
+		return nil
+	}
+	return s.goBuildFlags
+}
 
 func (s *compilationSession) observer() compileevent.Observer {
 	if s == nil {
@@ -60,7 +72,7 @@ func compileFileGraphSession(entry string, stderr io.Writer, session *compilatio
 }
 
 func checkGraph(entry string, stderr io.Writer, session *compilationSession) (*compilecheck.Result, bool) {
-	result, checkErrs, internalErr := (&compilecheck.Session{Observe: session.observer(), DisableObjectCache: session.disableCache()}).Compile(entry)
+	result, checkErrs, internalErr := (&compilecheck.Session{Debug: session.debugEnabled(), Observe: session.observer(), DisableObjectCache: session.disableCache()}).Compile(entry)
 	if report(stderr, checkErrs) {
 		return nil, false
 	}
@@ -116,12 +128,20 @@ func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Wr
 	units := make([]codegen.Unit, len(loadedUnits))
 	program := ""
 	for i, unit := range loadedUnits {
-		units[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source}
+		units[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source, Debug: session.debugEnabled()}
 		if unit.Entry {
 			program = unit.Program
 		}
 	}
-	emitting := &backend.Session{Observe: session.observer(), DisableCache: session.disableCache(), Emitted: build.Generated(tree)}
+	if session.debugEnabled() {
+		session.debugSources = map[string]string{}
+		for _, module := range result.Graph.Modules {
+			if module.Source != nil {
+				session.debugSources[module.Source.Name] = string(module.Source.Content)
+			}
+		}
+	}
+	emitting := &backend.Session{Debug: session.debugEnabled(), Observe: session.observer(), DisableCache: session.disableCache(), Emitted: build.Generated(tree)}
 	files, err := emitting.EmitProject(entry, result, units, printMain)
 	if err != nil {
 		reportInternal(stderr, err)

@@ -340,6 +340,9 @@ func (ev *evaluator) resetToBase() {
 }
 
 func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
+	savedDebug := ev.ck.RuntimeDebug
+	ev.ck.RuntimeDebug = false
+	defer func() { ev.ck.RuntimeDebug = savedDebug }()
 	// A prompt reaches the evaluator without going through module
 	// installation, so the deferred sections are forced here as well.
 	if err := ev.force(); err != nil {
@@ -437,6 +440,9 @@ func (ev *evaluator) executionDefs(body core.Expr, aux []core.Def) []core.Def {
 // evaluator installation see every recursive member. Instance registration
 // stays source-ordered and is bounded by the current splice's cutoff.
 func (ev *evaluator) sync() []diag.Error {
+	savedDebug := ev.ck.RuntimeDebug
+	ev.ck.RuntimeDebug = false
+	defer func() { ev.ck.RuntimeDebug = savedDebug }()
 	var defs []core.Def
 	var errs []diag.Error
 	add := func(ds []core.Def, es []diag.Error) {

@@ -77,6 +77,7 @@ func (s *Session) reload() {
 		return
 	}
 	ck := infer.NewChecker(s.ck.Sup, s.ck.B, infer.NewEnv())
+	ck.RuntimeDebug = s.options.Debug
 	ck.Fixity, ck.PreludeOwners = graph.Fixities(), s.ck.PreludeOwners
 	stage := staging.Install(ck)
 	stage.Observe(staging.Observer(s.options.Observe))
@@ -121,6 +122,7 @@ func (s *Session) reload() {
 		Templates []*meta.Template
 	}
 	reconciled := infer.NewChecker(s.ck.Sup, s.ck.B, infer.NewEnv())
+	reconciled.RuntimeDebug = s.options.Debug
 	reconciled.IO = s.ck.IO
 	objects := make([]*check.ModuleObject, len(installer.Objects()))
 	for i, object := range installer.Objects() {

@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/source"
+
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/types"
 )
@@ -280,6 +283,7 @@ func (l *linter) stageType(ty types.Type, name, where string) {
 }
 
 type linter struct {
+	debugSources     map[*debugger.Source]*source.File
 	b                *types.Builtins
 	scope            map[string]bool       // def names + enclosing Let/param names: no shadowing
 	localTypes       map[string]types.Type // binding ABIs; occurrences cannot retag a stored callback
@@ -351,6 +355,7 @@ func (l *linter) traceFramesType(ty types.Type, where string) {
 }
 
 func (l *linter) expr(e Expr, where string) {
+	l.debugSite(e, where)
 	l.typ(e.Type(), where)
 	switch e := e.(type) {
 	case *ParallelMap:

@@ -4,7 +4,7 @@ Persistent prompt scope, imports, transactions, redefinition, handler levels, co
 
 [Reference index](../reference.md).
 
-`fango repl [dir]` evaluates expressions, installs
+`fango repl [--debug] [dir]` evaluates expressions, installs
 value/function/type/effect/class/instance/deriver declarations, imports
 modules, and accepts multiline layout-sensitive input. The prompt starts in
 the same scope `Prelude` gives a module, and, since a later prompt may use
@@ -18,6 +18,9 @@ prelude imports `IO`. Definitions echo
 their inferred types; expressions print a value and type. Errors do not end the
 session. Redefinition is allowed at the prompt, while existing memoized values
 and closures retain earlier bindings.
+
+The opt-in [debugger](debugging.md) adds breakpoints, stepping, and scoped
+inspection with a separate prompt while execution is paused.
 
 ## Imports
 

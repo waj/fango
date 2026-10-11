@@ -35,7 +35,7 @@ install-lib:
 			install -m 644 "$$f" $(LIBDIR)/runtime/$$pkg; \
 		done; \
 	done
-	for pkg in ast core eval execcodec meta natives objectcodec source types; do \
+	for pkg in ast core debugger eval execcodec meta natives objectcodec source types; do \
 		install -d $(LIBDIR)/internal/$$pkg; \
 		for f in internal/$$pkg/*.go; do \
 			case "$$f" in *_test.go) continue;; esac; \
@@ -59,6 +59,11 @@ test-suite:
 # grammar packages come from the Nix development shell.
 test-grammar:
 	node editors/vscode/tests/tokenize.cjs
+
+# Optional native source-stepping integration with Delve; enter nix develop first.
+.PHONY: test-debug-native
+test-debug-native:
+	FANGO_TEST_DEBUG_NATIVE=1 go test ./internal/debugnative -run '^TestNativeDebugging$$' -count=1 -v
 
 # The compile-latency and runtime-ratio gates measure elapsed time, so they
 # answer to host load and, for latency, to the machine that recorded the

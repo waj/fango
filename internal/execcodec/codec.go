@@ -9,6 +9,7 @@ import (
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/debugger"
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/objectcodec"
 	"github.com/waj/fango/internal/source"
@@ -16,6 +17,7 @@ import (
 )
 
 type Payload struct {
+	Debug   *debugger.Config
 	Program *core.Prog
 	Expr    core.Expr
 	Force   string

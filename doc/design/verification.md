@@ -12,6 +12,7 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 | make test-suite | Combined Test framework suite and library documentation examples in one compiled executable |
 | make test-short | Short-mode Go tests and interpreter integration legs without compiled legs |
 | make test-grammar | TextMate tokenization of every .fango file under stdlib, testdata, and examples |
+| make test-debug-native | Opt-in native source-stepping integration with Delve; requires host debugger access |
 | make check-files | Reject executable or oversized files in the Git index |
 | make ci | Indexed-file check, Go/Fango formatting, go vet, Go unit tests, and full interpreter/compiler differential checks |
 | make update-goldens | Intentional lexer/parser/infer/elaborate/REPL/formatter golden updates |

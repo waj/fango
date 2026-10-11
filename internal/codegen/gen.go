@@ -31,6 +31,7 @@ import (
 // than passed alongside it so that whole-program emission and the module
 // backend agree on where the entry lands: they are compared path by path.
 type Unit struct {
+	Debug   bool
 	Name    string
 	Program string
 	Imports []string
@@ -171,7 +172,8 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		return nil, err
 	}
 	g := &gen{
-		disableOptimizations: p.DisableOptimizations,
+		disableOptimizations: p.DisableOptimizations || unit.Debug,
+		debug:                unit.Debug,
 		lowered:              lowered,
 		b:                    b,
 		adts:                 map[int]*types.ADTInfo{},
@@ -314,9 +316,11 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	}
 	file := &goast.File{Name: ident(packageName), Decls: decls}
 	g.splitOutcomeABI(file)
-	g.inlineReturnCalls(file)
-	g.inlineBoundOperations(file)
-	g.elideCopies(file)
+	if !g.debug {
+		g.inlineReturnCalls(file)
+		g.inlineBoundOperations(file)
+		g.elideCopies(file)
+	}
 	var buf bytes.Buffer
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
 		return nil, fmt.Errorf("codegen: printing generated Go: %w", err)
@@ -387,6 +391,7 @@ type gen struct {
 	knownOperations      map[goast.Expr]map[string]*goast.FuncLit
 	directActivations    map[string]map[string]directOperation
 	disableOptimizations bool
+	debug                bool
 	// abi selects the Direct/Exit representation family for controlled
 	// function and ADT values in the declaration currently being emitted.
 	// Unlike control, it does not change when emission enters a pure nested
@@ -952,8 +957,11 @@ func (g *gen) retStmts(e core.Expr) []goast.Stmt {
 	return g.retStmtsFor(e, false)
 }
 
-func (g *gen) retStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
-	defer g.enter(exprOrigin(e))()
+func (g *gen) retStmtsFor(e core.Expr, unitResult bool) (out []goast.Stmt) {
+	if g.debug {
+		defer func() { g.debugStatements(out, e) }()
+	}
+	defer g.enter(g.exprOrigin(e))()
 	if stmts, ok := g.immediateUnitApplication(e, func(body core.Expr) []goast.Stmt {
 		return g.retStmtsFor(body, unitResult)
 	}); ok {
@@ -1356,7 +1364,7 @@ const unaryPrec = 6
 // expr emits e in expression context; parentPrec is the precedence of the
 // enclosing operator (0 = none) for minimal parenthesization.
 func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
-	defer g.enter(exprOrigin(e))()
+	defer g.enter(g.exprOrigin(e))()
 	switch e := e.(type) {
 	case *core.IntLit:
 		return intLit(e.Val)
@@ -2620,7 +2628,10 @@ func (g *gen) letIIFE(e *core.Let) goast.Expr {
 // other bindings become `var` declarations, kept alive with `_ =` when the
 // rest of the chain never mentions them (Go rejects unused locals; Fango
 // bindings still evaluate eagerly).
-func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
+func (g *gen) letBindingStmts(let *core.Let) (out []goast.Stmt) {
+	if g.debug {
+		defer func() { g.debugStatements(out, let.Rhs) }()
+	}
 	defer g.enter(let.Origin)()
 	if g.rememberForwarder(let) {
 		return nil
@@ -2686,8 +2697,11 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 // stmts emits a Unit-typed expression in statement context — func main()'s
 // body. Prints become fangort calls; ifs become genuine Go if statements;
 // Let bindings become plain locals.
-func (g *gen) stmts(e core.Expr) []goast.Stmt {
-	defer g.enter(exprOrigin(e))()
+func (g *gen) stmts(e core.Expr) (out []goast.Stmt) {
+	if g.debug {
+		defer func() { g.debugStatements(out, e) }()
+	}
+	defer g.enter(g.exprOrigin(e))()
 	if stmts, ok := g.immediateUnitApplication(e, g.stmts); ok {
 		return stmts
 	}

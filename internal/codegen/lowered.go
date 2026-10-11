@@ -18,7 +18,9 @@ func (g *gen) loweredStmts(d *core.Def, block lower.Block, loop, unit bool) []go
 		case lower.Branch:
 			// Preserve the established if-return spelling without inventing
 			// expression closures at a branch join.
-			out = append(out, &goast.IfStmt{Cond: g.expr(s.Condition, 0), Body: &goast.BlockStmt{List: g.loweredStmts(d, s.Then, loop, unit)}})
+			branch := &goast.IfStmt{Cond: g.expr(s.Condition, 0), Body: &goast.BlockStmt{List: g.loweredStmts(d, s.Then, loop, unit)}}
+			g.debugStatements([]goast.Stmt{branch}, s.Condition)
+			out = append(out, branch)
 			out = append(out, g.loweredStmts(d, s.Else, loop, unit)...)
 		case lower.Match:
 			out = append(out, g.caseStmts(s.Case, func(e core.Expr) []goast.Stmt { return g.loweredStmts(d, lower.Tail(d, e, loop), loop, unit) })...)

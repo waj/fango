@@ -56,6 +56,24 @@ func TestStoresRoundTripUnderTheCompilerNamespace(t *testing.T) {
 	}
 }
 
+func TestDebugObjectsCoexistWithOrdinaryObjects(t *testing.T) {
+	entry := fixture(t)
+	rootedAt(t, filepath.Join(t.TempDir(), "local"), "")
+	slot := Slot(false, "Probe")
+	NewModuleStore(entry).StoreObject(slot, []byte("ordinary"))
+	NewDebugModuleStore(entry).StoreObject(slot, []byte("debug"))
+	for _, store := range []*ModuleStore{NewModuleStore(entry), NewDebugModuleStore(entry)} {
+		want := "ordinary"
+		if store.debug {
+			want = "debug"
+		}
+		got, ok := store.LoadObject(slot)
+		if !ok || string(got) != want {
+			t.Fatalf("%s object overwritten: %q %v", want, got, ok)
+		}
+	}
+}
+
 // A slot is built from a module name, so the store is what stands between a
 // name it cannot spell and the filesystem.
 func TestMalformedSlotsAreRejected(t *testing.T) {

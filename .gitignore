@@ -12,6 +12,7 @@ result-*
 # Fango build directories
 .fango/
 *.out/
+*.fango-debug.json
 editors/vscode/node_modules/
 
 # Claude

@@ -229,7 +229,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		// cold build checks on while they are computed.
 		if cached.object != nil {
 			i.settle()
-			baseKey, _ := moduleBaseKey(module, fixityHash, i.summaries)
+			baseKey, _ := moduleBaseKey(module, fixityHash, i.summaries, i.ck.RuntimeDebug)
 			object, hit = acceptCachedObject(cached, baseKey, module, i.summaries)
 		}
 		if hit {
@@ -308,7 +308,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	// later consumer of it, unsummarized rather than uncompilable.
 	if i.summarizable(module.Dependencies) && i.summarizable(object.StageDependencies) {
 		i.summarized[module.Name] = true
-		i.summarize(&summaryJob{module: module, owner: owner, slot: slot, fixityHash: fixityHash, publish: cacheable,
+		i.summarize(&summaryJob{debug: i.ck.RuntimeDebug, module: module, owner: owner, slot: slot, fixityHash: fixityHash, publish: cacheable,
 			object: object, unfoldable: elaborate.Unfoldable(owned, i.ck),
 			captures: maps.Clone(i.ck.CaptureSummaries), own: state.Captures, known: maps.Clone(i.summaries)})
 	}
@@ -370,6 +370,7 @@ func (i *Installer) readCached(slot string) cachedObject {
 // summaryJob fingerprints one module checked from source, then publishes it.
 // It reads only the finished object and copies taken when it was queued.
 type summaryJob struct {
+	debug         bool
 	module        modules.ResolvedModule
 	owner, slot   string
 	fixityHash    string
@@ -413,7 +414,7 @@ func (i *Installer) summarizeAll(jobs <-chan *summaryJob) {
 		job.run(known)
 		known[job.module.Name] = job.summary
 		if job.publish {
-			if base, ok := moduleBaseKey(job.module, job.fixityHash, known); ok {
+			if base, ok := moduleBaseKey(job.module, job.fixityHash, known, job.debug); ok {
 				if record, ok := encodeRecord(base, job.object, known); ok {
 					i.publish(job.owner, job.slot, job.object, record)
 				}

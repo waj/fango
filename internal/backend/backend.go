@@ -41,6 +41,7 @@ type Emitted interface {
 type Observer = compileevent.Observer
 
 type Session struct {
+	Debug        bool
 	Observe      Observer
 	Cache        Cache
 	Emitted      Emitted
@@ -90,7 +91,11 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 	}
 	cache := s.Cache
 	if cache == nil && !s.DisableCache {
-		cache = compilecache.NewEmissionStore(entry)
+		if s.Debug {
+			cache = compilecache.NewDebugEmissionStore(entry)
+		} else {
+			cache = compilecache.NewEmissionStore(entry)
+		}
 	}
 	summaries := moduleSummaries(result)
 	links := entryNativeLinks(result.Program)
@@ -324,8 +329,15 @@ func emissionRecord(result *check.Result, unit codegen.Unit, summaries map[strin
 		}
 		linked = append(linked, linkedModule{Module: name, Semantic: summary.semantic, ABI: summary.abi})
 	}
-	record := unitRecord{Schema: emissionSchema, Unit: unit.Name, Path: codegen.UnitPath(unit), Entry: unit.Entry, PrintMain: printMain,
+	record := unitRecord{Debug: unit.Debug, Schema: emissionSchema, Unit: unit.Name, Path: codegen.UnitPath(unit), Entry: unit.Entry, PrintMain: printMain,
 		Implementation: own.implementation, Semantic: own.semantic, ABI: own.abi, Linked: linked}
+	if unit.Debug {
+		for _, module := range result.Graph.Modules {
+			if module.Source != nil && module.Source.Name == unit.Source {
+				record.DebugSource = sourceDigest(module.Source.Content)
+			}
+		}
+	}
 	if unit.Entry {
 		record.EntrySymbol = result.Program.Entry
 		record.NativeLinks = links

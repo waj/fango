@@ -64,6 +64,11 @@ func TestCommentsTileWithTokens(t *testing.T) {
 	seen := 0
 	for _, root := range roots {
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			// Other packages publish cache artifacts during parallel go test.
+			// Only source files belong to this coverage check.
+			if err == nil && info.IsDir() && info.Name() == ".fango" {
+				return filepath.SkipDir
+			}
 			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".fango") {
 				return err
 			}

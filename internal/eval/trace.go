@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/waj/fango/internal/debugger"
 	"strings"
 
 	"github.com/waj/fango/internal/source"
@@ -16,8 +17,11 @@ import (
 // `Trace.capture` reports the same functions and lines as generated code
 // (doc/design/repl.md, "Call stack").
 type traceFrame struct {
-	name string // as a trace prints it
-	site source.Span
+	debugID    uint64
+	debugSite  *debugger.Site
+	debugScope *Frame
+	name       string // as a trace prints it
+	site       source.Span
 	// lambda marks a function literal's frame; literals nested in it keep
 	// its name, as Go's closure naming keeps the enclosing function's.
 	lambda bool
@@ -46,6 +50,10 @@ func (e *TraceError) Unwrap() error { return e.Err }
 // pushFrame enters a worker, named as a trace prints it.
 func (in *interp) pushFrame(name string) {
 	in.trace = append(in.trace, traceFrame{name: fangort.SymbolName(name)})
+}
+
+func (in *interp) pushDebugFrame(name string) {
+	in.trace = append(in.trace, traceFrame{name: name})
 }
 
 func (in *interp) pushLambda(label string) {

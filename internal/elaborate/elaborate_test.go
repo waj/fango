@@ -18,6 +18,14 @@ import (
 )
 
 func TestGoldens(t *testing.T) {
+	testCoreFixtures(t, false)
+}
+
+func TestDebugCoreFixtures(t *testing.T) {
+	testCoreFixtures(t, true)
+}
+
+func testCoreFixtures(t *testing.T, debug bool) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "core"))
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
@@ -37,6 +45,7 @@ func TestGoldens(t *testing.T) {
 			sup := &types.Supply{}
 			b := types.NewBuiltins(sup)
 			ck := infer.NewChecker(sup, b, infer.NewEnv())
+			ck.RuntimeDebug = debug
 			staging.Install(ck)
 			if errs := ck.InstallPrelude(); len(errs) > 0 {
 				t.Fatalf("prelude errors: %v", errs)
@@ -58,7 +67,9 @@ func TestGoldens(t *testing.T) {
 			if lintErrs := core.Lint(prog, b); len(lintErrs) > 0 {
 				t.Fatalf("core lint: %v", lintErrs)
 			}
-			testutil.Golden(t, strings.TrimSuffix(path, ".fango")+".core", core.Dump(fixtureProgram(prog, ck.PreludeOwners)))
+			if !debug {
+				testutil.Golden(t, strings.TrimSuffix(path, ".fango")+".core", core.Dump(fixtureProgram(prog, ck.PreludeOwners)))
+			}
 		})
 	}
 }

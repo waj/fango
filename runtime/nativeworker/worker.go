@@ -7,6 +7,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
+	"github.com/waj/fango/internal/debugger"
 	"io"
 	"io/fs"
 	"net"
@@ -125,6 +126,14 @@ func responseError(m nativewire.Message) error {
 		return err
 	}
 	return errors.New(m.Error)
+}
+
+func (p *proxy) DebugExchange(ctx context.Context, event debugger.Event) debugger.Command {
+	reply := p.request(nativewire.Message{Kind: "host_debug", DebugEvent: &event})
+	if reply.DebugCommand == nil {
+		return debugger.Command{Kind: "stop"}
+	}
+	return *reply.DebugCommand
 }
 
 func (p *proxy) HasInput() (bool, error) {
@@ -339,6 +348,7 @@ func execute(ctx context.Context, data []byte, env *eval.Env, caller *directCall
 	}
 	ioctx := eval.NewIOContext(strings.NewReader(""), io.Discard)
 	ioctx.Natives = caller
+	ioctx.Debug, ioctx.DebugHost = payload.Debug, host
 	ioctx.Levels = &workerLevels{host: host, active: active, outer: ctx}
 	ioctx.Args = host.Arguments()
 	ioctx.Dir = host.WorkingDirectory()
@@ -437,5 +447,5 @@ func (w *workerLevels) LevelStep(depth int, entered bool, value eval.Value, err 
 	w.inputs = append(w.inputs, cancel)
 	w.active.push(cancel)
 	w.host.setExecutionContext(ctx)
-	return eval.LevelRequest{Ctx: ctx, Expr: payload.Expr, Program: payload.Program, Binders: reply.Values, Effects: payload.Effects}
+	return eval.LevelRequest{Debug: payload.Debug, Ctx: ctx, Expr: payload.Expr, Program: payload.Program, Binders: reply.Values, Effects: payload.Effects}
 }

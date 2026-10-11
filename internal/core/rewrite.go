@@ -233,6 +233,7 @@ func (r rewriter) expr(e Expr) Expr {
 	default:
 		panic("core.Rewrite: unknown expression")
 	}
+	CopyDebug(e, out)
 	return r.post(out)
 }
 func (r rewriter) tree(t Tree) Tree {

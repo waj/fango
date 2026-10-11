@@ -28,6 +28,8 @@ type linkedModule struct {
 // and generated path, and the entry-only inputs. A lookup compares this
 // against the graph it has, and a record that disagrees is an ordinary miss.
 type unitRecord struct {
+	Debug          bool           `json:"debug,omitempty"`
+	DebugSource    string         `json:"debug_source,omitempty"`
 	Schema         int            `json:"schema"`
 	Unit           string         `json:"unit"`
 	Path           string         `json:"path"`

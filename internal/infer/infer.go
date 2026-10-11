@@ -102,10 +102,12 @@ func (e *Env) Names() []string {
 // supply, the accumulated substitution, and per-node solved types. The REPL
 // keeps one Checker across many inputs; batch compilation uses one per run.
 type Checker struct {
-	moduleCheck *moduleCheck
-	moduleName  string
-	sourceLimit *int
-	recursive   *recursiveInference
+	// RuntimeDebug retains source inspection metadata during runtime elaboration.
+	RuntimeDebug bool
+	moduleCheck  *moduleCheck
+	moduleName   string
+	sourceLimit  *int
+	recursive    *recursiveInference
 
 	Classes          map[string]*types.ClassInfo
 	Methods          map[string]*types.MethodInfo
