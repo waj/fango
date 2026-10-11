@@ -8,7 +8,10 @@ they share: header blocks, body framing, and serialization after the start
 line. `Http.Server` adds request lines and status handling. The same parser and
 serializer run over memory or sockets through `Reader` and `Writer`. A scoped `withRequest` keeps the body reader inside its
 callback. The concurrent server builds a reader and writer over each socket,
-then parses, handles, and writes each request inside the `withRequest` callback.
+then calls `serveRequest` for each exchange. That shared driver parses,
+handles, and writes inside the `withRequest` callback. It recovers protocol
+failures into error responses and reports whether the connection may continue;
+socket deadlines and connection ownership remain in the socket adapter.
 The handler can return a `Response` whose streaming body reads the request;
 serialization consumes that body before the request scope ends. HTTP parser
 state and body framing remain in Fango. Requests without body framing use a
@@ -65,7 +68,7 @@ what both share: headers, `Body`, `Error`, and `Protocol`.
 connect to an endpoint, transmit, receive, release, and read the
 configuration. Framing, header policy, URL resolution, and response parsing run
 in library code in the caller's context, so every transport (`run` over
-sockets, `stub` in memory, a future mock) runs the same HTTP code.
+sockets, `stub` for raw bytes, `mock` for server handlers) runs the same HTTP code.
 
 The operations take a connection handle rather than a callback. A resumptive
 clause must end in a tail `resume`, so it cannot hold a connection open around
@@ -92,7 +95,7 @@ header, body, and callback failures propagate without replaying the request.
 The `run` handler keeps no state: a `Socket` handle carries the live
 connection. Each operation returns a `Result`, and the caller's code raises it,
 so a failure reaches the caller's own `attempt` rather than the handler outside
-`run`, and `run` and `stub` handle `Http` alone; the program decides where
+`run`, and `run`, `stub`, and `mock` handle `Http` alone; the program decides where
 `Fail Error` is handled. Configuration is read once per request and passed to each operation
 (the endpoint and connect timeout to `connect`, a timeout to each read or
 write); only then do `configure` overrides, which sit inside `run`, reach the
@@ -112,3 +115,28 @@ typed before the request runs, cannot accept. The shared chunked and sized
 writers batch a body into 8 KiB writes instead, and the head goes out in one
 write. The response is read through `Reader.over`, whose permission keeps the
 reader inside `send`'s callback.
+
+## Mocking through framing
+
+`Client.mock` builds on the sequential `stub` transport. On the first receive,
+it parses the collected request bytes with `Server.serveRequest` and collects
+its serialized response in memory. Later receives reach EOF. The server driver
+is shared with the socket server, so invalid requests and responses get the
+same error statuses and body failures leave the same incomplete framing.
+Both sides run their real HTTP code; the mock does not construct client
+responses directly.
+
+Serialization finishes before the request reader's scope ends, so a returned
+streaming response may read the request body. The server handler is the first
+scoped callback parameter and the client action is the final ordinary callback,
+allowing `use Client.mock handler`. Handler effects can record typed request
+observations in caller-owned state. The server driver handles `Protocol`, while
+application effects propagate and the caller handles client failures.
+The residual row must remain available to the scoped callback, including its
+returned body; narrowing it using only the final action's requirements would
+drop effects that body needs.
+
+The mock buffers whole messages, uses default server framing limits, and
+supports consecutive requests and redirects. Client `configure` overrides work
+normally. Overlapping exchanges, socket timing, TLS verification, and pool reuse
+are not simulated.

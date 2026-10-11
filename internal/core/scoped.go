@@ -38,6 +38,7 @@ func checkScopedCalls(p *Prog, context []Def) []error {
 			raw := call.SourceType
 			var args []types.Type
 			var base types.Row
+			var rows []types.Type
 			for range call.Args {
 				fn, ok := raw.(*types.TFun)
 				if !ok {
@@ -45,13 +46,21 @@ func checkScopedCalls(p *Prog, context []Def) []error {
 					return
 				}
 				args, base, raw = append(args, fn.Arg), fn.Eff, fn.Ret
+				rows = append(rows, fn.Eff)
 			}
-			callback, ok := args[len(args)-1].(*types.TFun)
+			index := defs[ref.Name].ScopedParam
+			if index < 0 || index >= len(args) {
+				fail("invalid callback position")
+				return
+			}
+			callback, ok := args[index].(*types.TFun)
 			if !ok {
 				fail("missing callback signature")
 				return
 			}
-			outside := append(append([]types.Type(nil), args[:len(args)-1]...), raw, base)
+			outside := append([]types.Type{raw, base}, args[:index]...)
+			outside = append(outside, args[index+1:]...)
+			outside = append(outside, rows...)
 			var fresh []types.EffLabel
 			for _, label := range callback.Eff.Labels {
 				if label.Scoped && !types.ContainsScopedEffect(base, label.Unique) {

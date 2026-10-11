@@ -3,14 +3,14 @@
 --
 -- Code that makes requests performs the `Http` effect and `Fail Error`, and
 -- needs no `IO`: `run` connects `Http` to sockets where the program starts
--- it, and `stub` answers requests from memory, for tests. Requests follow
--- redirects, decompress gzip responses, reuse connections, and support
--- `https`. A URL without a scheme resolves against the configured base URL.
+-- it. `stub` answers raw bytes and `mock` runs server handlers in memory,
+-- for tests. Requests follow redirects, decompress gzip responses, reuse
+-- connections, and support `https`. A URL without a scheme resolves against the configured base URL.
 module Http.Client exposing
     ( Config(..), Connection, Error(..), Http, Reply(..), Request(..)
     , Response(..)
     , compressRequest, configure, defaultConfig, expectSuccess, fetch, get
-    , getBytes, getJson, getText, post, postJson, request, run, send, stub
+    , getBytes, getJson, getText, mock, post, postJson, request, run, send, stub
     , withBearer, withBody, withHeader, withResponse
     )
 
@@ -19,6 +19,7 @@ import Bytes exposing (Bytes, Source(..))
 import Fail exposing (Fail, attempt, fromResult)
 import Http exposing (Body(..), Header(..), Protocol(..))
 import Http.GZip as GZip
+import Http.Server as Server
 import Http.Wire as Wire exposing (Framing(..))
 import IO exposing (IO)
 import Json exposing (Decode, Encode)
@@ -168,7 +169,7 @@ type Endpoint = { secure : Bool, host : String, port : Int, connectTimeoutMs : I
 type Connection = Socket Net.Connection Bool | Memory Int
 
 -- Sending requests over some transport: `run` for sockets, `stub` for
--- memory.
+-- raw response bytes, and `mock` for server handlers in memory.
 effect Http
     connect : Endpoint -> Result Error Connection
     transmit : Connection -> Bytes -> Int -> Result Error ()
@@ -309,6 +310,50 @@ stub respond action =
                         Err error -> resume (Err error) with exchange
         release _ _ -> resume (Ok ()) with exchange
         currentConfig () -> resume defaultConfig with exchange
+
+-- Runs `action` against a server handler without sockets or `IO`. The
+-- client writes its real HTTP bytes, the server parses them and serializes
+-- the handler's response, and the client reads that response normally.
+-- Requests and responses are buffered in full; requests run one at a time,
+-- with no overlapping exchanges. Uses the server's default framing limits
+-- and `defaultConfig`, which `configure` adjusts for client requests.
+--
+-- The handler may read the request body or return a body that streams from
+-- it, and use the caller's effects to record requests. Server `Protocol`
+-- failures get the same error responses or truncated bodies as `serve`.
+-- Application failures propagate, and the caller handles `Fail Error`.
+-- Timing, TLS verification, and connection pooling are not simulated.
+--
+-- ```fango
+-- import Bytes
+-- import Fail
+-- import Http exposing (Body(..))
+-- import Http.Client as Client
+-- import Http.Server
+-- import Result exposing (Result(..))
+--
+-- hello : Http.Server.Request e ->{e} Http.Server.Response e
+-- hello _ = Http.Server.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString "hello") }
+--
+-- greeting =
+--     use Fail.attempt
+--     use Client.mock hello
+--     Client.getText "http://example.com/"
+--
+-- greeting == Ok "hello"
+-- ```
+{-# scoped s #-}
+mock : (Server.Request {Protocol | s} ->{Protocol | s} Server.Response {Protocol | s}) -> (() ->{Http | e} a) ->{e} a
+mock handler action =
+    config = Server.defaultConfig 0
+    answer bytes =
+        (_, rendered) = Writer.collecting { output ->
+            Reader.withBytes bytes { input ->
+                Server.serveRequest config.requestLineLimit config.headerLimit config.bodyLimit input output handler
+            }
+        }
+        Ok rendered
+    stub answer action
 
 -- Preparing requests
 

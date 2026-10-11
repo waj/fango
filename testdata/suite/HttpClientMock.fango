@@ -1,0 +1,263 @@
+module HttpClientMock exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Fail exposing (Fail)
+import Http exposing (Body(..), Header(..), Protocol(..))
+import Http.Client as Client
+import Http.GZip as GZip
+import Http.Server as Server
+import Http.Server.Route as Route
+import List
+import Maybe
+import Reader
+import Result exposing (Result(..))
+import State
+import Test
+import Url
+import Writer
+
+hello : Server.Request e ->{e} Server.Response e
+hello _ = Server.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString "hello") }
+
+echo : Server.Request e ->{e} Server.Response e
+echo request = Server.Response { status = 200, headers = [], body = StreamBody { output -> Writer.copy request.body output } }
+
+type Observation = { method : String, target : String, headers : List Header, body : Bytes }
+    deriving (Eq, Show)
+
+record : Server.Request {State.State (List Observation) | e} ->{State.State (List Observation) | e} Server.Response {State.State (List Observation) | e}
+record request =
+    (_, body) = Writer.collecting { output -> Writer.copy request.body output }
+    State.put [Observation { method = request.method, target = request.target, headers = request.headers, body = body } | State.get()]
+    Server.Response { status = 200, headers = [], body = BytesBody body }
+
+missing : Server.Request e ->{e} Server.Response e
+missing _ = Server.Response { status = 404, headers = [], body = Empty }
+
+user : List Route.Param -> Server.Request e ->{e} Server.Response e
+user params _ = Server.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString (Maybe.withDefault "" (Route.lookup "id" params))) }
+
+routes : Server.Request {Protocol | e} ->{Protocol | e} Server.Response {Protocol | e}
+routes request = Route.dispatch [Route.Route { method = "GET", pattern = "/users/:id", handler = user }] missing request
+
+redirect : Server.Request {State.State (List Observation) | e} ->{State.State (List Observation) | e} Server.Response {State.State (List Observation) | e}
+redirect request =
+    seen = record request
+    if request.target == "/old" then
+        Server.Response { status = 303, headers = [Header { name = "Location", value = "https://other.example/new" }], body = Empty }
+    else seen
+
+rejection : Http.Error -> Server.Request {Protocol | e} ->{Protocol | e} Server.Response {Protocol | e}
+rejection error _ = Http.invalid error
+
+status : Int -> Body e -> Server.Request e ->{e} Server.Response e
+status code body _ = Server.Response { status = code, headers = [], body = body }
+
+-- Returns the serialized server answer even when the exchange stops.
+raw : Int -> Int -> Int -> Bytes -> (Bytes, Maybe Bool)
+raw lineLimit headerLimit bodyLimit bytes =
+    (result, rendered) = Writer.collecting { output ->
+        Reader.withBytes bytes { input ->
+            Server.serveRequest lineLimit headerLimit bodyLimit input output echo
+        }
+    }
+    (rendered, result)
+
+errorWire : Int -> Bytes
+errorWire code = Bytes.fromString ("HTTP/1.1 " ++ show code ++ " \r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+
+attemptClient : (() ->{Fail Client.Error | e} a) ->{e} Result Client.Error a
+attemptClient action = Fail.attempt action
+
+-- The mock's own residual row is closed: the action handles its failures.
+closedGreeting : () -> Result Client.Error String
+closedGreeting() =
+    use Client.mock hello
+    use Fail.attempt
+    Client.getText "http://example.com/"
+
+tests : Test.Test {}
+tests = Test.describe "http_client_mock"
+    [ Test.test "use and consecutive requests" {
+        result =
+            use Fail.attempt
+            use Client.mock hello
+            first = Client.getText "http://example.com/a"
+            first ++ " " ++ Client.getText "https://example.com/b"
+        Expect.equal (Ok "hello hello") result
+        Expect.equal (Ok "hello") closedGreeting()
+      }
+    , Test.test "request bodies stream back within the request scope" {
+        result = Fail.attempt {
+            Client.mock echo {
+                empty = (Client.post "http://example.com/empty" Empty).body
+                bytes = (Client.post "http://example.com/bytes" (BytesBody (Bytes.fromString "bytes"))).body
+                sized = (Client.post "http://example.com/sized" (SizedBody 5 { output -> Writer.writeString output "sized" })).body
+                chunks = (Client.post "http://example.com/chunks" (StreamBody { output ->
+                        Writer.writeString output "chunk"
+                        output.flush()
+                        Writer.writeString output "ed"
+                })).body
+                [empty, bytes, sized, chunks]
+            }
+        }
+        Expect.equal (Ok [Bytes.empty, Bytes.fromString "bytes", Bytes.fromString "sized", Bytes.fromString "chunked"]) result
+      }
+    , Test.test "configuration and typed request recording" {
+        observed = State.run [] {
+            use Fail.attempt
+            use Client.mock record
+            use Client.configure { config -> { config | baseUrl = Url.parse "http://api.example/v1/", userAgent = "outer", headers = [Header { name = "X-Team", value = "core" }] } }
+            use Client.configure { config -> { config | userAgent = "inner", decompress = False } }
+            Client.request "POST" "items?q=1"
+                |> Client.withHeader "X-Team" "request"
+                |> Client.withBearer "token"
+                |> Client.withBody (BytesBody (Bytes.fromString "payload"))
+                |> Client.fetch
+                |> { reply -> reply.body }
+        }
+        Expect.equal (Ok (Bytes.fromString "payload")) observed.value
+        Expect.equal [Observation { method = "POST", target = "/v1/items?q=1", headers = [Header { name = "Host", value = "api.example" }, Header { name = "User-Agent", value = "inner" }, Header { name = "Authorization", value = "Bearer token" }, Header { name = "X-Team", value = "request" }, Header { name = "Content-Length", value = "7" }], body = Bytes.fromString "payload" }] observed.state
+      }
+    , Test.test "routes and malformed path recovery" {
+        result = Fail.attempt { Client.mock routes {
+                found = Client.getText "http://example.com/users/a%20b"
+                absent = (Client.get "http://example.com/missing").status
+                wrongMethod = Client.post "http://example.com/users/7" Empty
+                malformed = (Client.get "http://example.com/users/a%2Fb").status
+                (found, (absent, wrongMethod.status), (Http.getHeader "allow" wrongMethod.headers, malformed))
+        } }
+        Expect.equal (Ok ("a b", (404, 405), (Just "GET", 400))) result
+      }
+    , Test.test "redirects re-enter the server and strip credentials" {
+        observed = State.run [] {
+            use Fail.attempt
+            use Client.mock redirect
+            Client.request "POST" "https://example.com/old"
+                |> Client.withBearer "secret"
+                |> Client.withBody (BytesBody (Bytes.fromString "form"))
+                |> Client.fetch
+                |> { reply -> reply.status }
+        }
+        Expect.equal (Ok 200) observed.value
+        observations = List.reverse observed.state
+        Expect.equal [("POST", "/old", (Just "Bearer secret", Bytes.fromString "form")), ("GET", "/new", (Nothing, Bytes.empty))]
+            (List.map { observation -> (observation.method, observation.target, (Http.getHeader "authorization" observation.headers, observation.body)) } observations)
+      }
+    , Test.test "HEAD never runs the response body" {
+        observed = State.run False {
+            use Fail.attempt
+            use Client.mock (status 200 (SizedBody 5 { _ -> State.put True; Http.abortBody "must not run" }))
+            reply = Client.fetch (Client.request "HEAD" "http://example.com/")
+            (reply.body, Http.getHeader "content-length" reply.headers)
+        }
+        Expect.equal (Ok (Bytes.empty, Just "5")) observed.value
+        Expect.equal False observed.state
+      }
+    , Test.test "bodyless statuses" {
+        empty = Fail.attempt { Client.mock (status 200 Empty) { reply = Client.get "http://example.com/"; (reply.status, reply.body, Http.getHeader "content-length" reply.headers) } }
+        noContent = Fail.attempt { Client.mock (status 204 Empty) { reply = Client.get "http://example.com/"; (reply.status, reply.body, reply.headers) } }
+        unchanged = Fail.attempt { Client.mock (status 304 Empty) { reply = Client.get "http://example.com/"; (reply.status, reply.body, reply.headers) } }
+        Expect.equal (Ok (200, Bytes.empty, Just "0")) empty
+        Expect.equal (Ok (204, Bytes.empty, [])) noContent
+        Expect.equal (Ok (304, Bytes.empty, [])) unchanged
+      }
+    , Test.test "sized and chunked responses" {
+        sized = Fail.attempt { Client.mock (status 200 (SizedBody 3 { output -> Writer.writeString output "abc" })) { Client.getText "http://example.com/" } }
+        streamed = Fail.attempt { Client.mock (status 200 (StreamBody { output -> Writer.writeString output "a"; output.flush(); Writer.writeString output "bc" })) { Client.getText "http://example.com/" } }
+        Expect.equal (Ok "abc") sized
+        Expect.equal (Ok "abc") streamed
+      }
+    , Test.test "protocol failures get server statuses" {
+        codes = List.map { error ->
+                Fail.attempt { Client.mock (rejection error) { (Client.get "http://example.com/").status } }
+            } [Http.Malformed "bad", Http.LineTooLong, Http.HeadersTooLarge, Http.BodyTooLarge, Http.Unsupported "coding", Http.InvalidMessage "bad response", Http.BodyAborted "before response"]
+        Expect.equal [Ok 400, Ok 414, Ok 431, Ok 413, Ok 501, Ok 500, Ok 500] codes
+      }
+    , Test.test "invalid response declarations get 500" {
+        invalidStatus = Fail.attempt { Client.mock (status 199 Empty) { (Client.get "http://example.com/").status } }
+        invalidBody = Fail.attempt { Client.mock (status 204 (BytesBody (Bytes.fromString "bad"))) { (Client.get "http://example.com/").status } }
+        invalidLength = Fail.attempt { Client.mock (status 200 (SizedBody (0 - 1) { _ -> () })) { (Client.get "http://example.com/").status } }
+        invalidHeader = Fail.attempt { Client.mock { _ -> Server.Response { status = 200, headers = [Header { name = "Content-Length", value = "0" }], body = Empty } } { (Client.get "http://example.com/").status } }
+        Expect.equal [Ok 500, Ok 500, Ok 500, Ok 500] [invalidStatus, invalidBody, invalidLength, invalidHeader]
+      }
+    , Test.test "response body failures stay truncated" {
+        short = Fail.attempt { Client.mock (status 200 (SizedBody 5 { output -> Writer.writeString output "ab" })) { Client.getText "http://example.com/" } }
+        aborted = Fail.attempt { Client.mock (status 200 (StreamBody { output -> Writer.writeString output "partial"; output.flush(); Http.abortBody "failed" })) { Client.getText "http://example.com/" } }
+        Expect.equal (Err (Client.Protocol (Http.Malformed "incomplete body"))) short
+        overrun = Fail.attempt { Client.mock (status 200 (SizedBody 3 { output -> Writer.writeString output "abcd" })) { Client.getText "http://example.com/" } }
+        Expect.equal (Err (Client.Protocol (Http.Malformed "incomplete chunk size"))) aborted
+        Expect.equal (Err (Client.Protocol (Http.Malformed "incomplete body"))) overrun
+      }
+    , Test.test "gzip middleware in both directions" {
+        decoded = Fail.attempt { Client.mock (GZip.wrap hello) { Client.getText "http://example.com/" } }
+        echoed = Fail.attempt { Client.mock (GZip.wrap (GZip.decodeRequests 1024 echo)) {
+                Client.request "POST" "http://example.com/"
+                    |> Client.withBody (BytesBody (Bytes.fromString "compressed request"))
+                    |> Client.compressRequest
+                    |> Client.fetch
+                    |> { reply -> reply.body }
+        } }
+        Expect.equal (Ok "hello") decoded
+        Expect.equal (Ok (Bytes.fromString "compressed request")) echoed
+      }
+    , Test.test "application failures propagate" {
+        result : Result String (Result Client.Error Int)
+        result = Fail.attempt { attemptClient { Client.mock { _ -> Fail.fail "application" } { (Client.get "http://example.com/").status } } }
+        Expect.equal (Err "application") result
+      }
+    , Test.test "caller and server body effects share the residual row" {
+        observed = State.run [] {
+            use Fail.attempt
+            use Client.mock { request ->
+                State.put ["handler" | State.get()]
+                Server.Response { status = 200, headers = [], body = StreamBody { output ->
+                    State.put ["response" | State.get()]
+                    Writer.copy request.body output
+                } }
+            }
+            outgoing = StreamBody { output ->
+                State.put ["request" | State.get()]
+                Writer.writeString output "effectful"
+            }
+            (Client.post "http://example.com/" outgoing).body
+        }
+        Expect.equal (Ok (Bytes.fromString "effectful")) observed.value
+        Expect.equal ["request", "handler", "response"] (List.reverse observed.state)
+      }
+    , Test.test "client limits apply under the mock" {
+        bodyLimit = Fail.attempt {
+            use Client.mock hello
+            use Client.configure { config -> { config | maxBodyBytes = 4 } }
+            Client.getText "http://example.com/"
+        }
+        headLimit = Fail.attempt {
+            use Client.mock hello
+            use Client.configure { config -> { config | maxHeaderBytes = 4 } }
+            Client.getText "http://example.com/"
+        }
+        Expect.equal (Err (Client.Protocol Http.BodyTooLarge)) bodyLimit
+        Expect.equal (Err (Client.Protocol Http.LineTooLong)) headLimit
+      }
+    , Test.test "raw server exchange errors and completion" {
+        Expect.equal (Bytes.empty, Nothing) (raw 8192 65536 1024 Bytes.empty)
+        Expect.equal (errorWire 400, Just False) (raw 8192 65536 1024 (Bytes.fromString "GET / HTTP/1.1\r\n\r\n"))
+        Expect.equal (errorWire 414, Just False) (raw 4 65536 1024 (Bytes.fromString "GET / HTTP/1.1\r\nHost: x\r\n\r\n"))
+        Expect.equal (errorWire 431, Just False) (raw 8192 4 1024 (Bytes.fromString "GET / HTTP/1.1\r\nHost: x\r\n\r\n"))
+        Expect.equal (errorWire 413, Just False) (raw 8192 65536 2 (Bytes.fromString "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\nabc"))
+        Expect.equal (errorWire 501, Just False) (raw 8192 65536 1024 (Bytes.fromString "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: unknown\r\n\r\n"))
+        (_, reusable) = raw 8192 65536 1024 (Bytes.fromString "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\nabc")
+        (_, closed) = raw 8192 65536 1024 (Bytes.fromString "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        (unread, _) = Writer.collecting { output ->
+            Reader.withBytes (Bytes.fromString "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\nabc") { input ->
+                Server.serveRequest 8192 65536 1024 input output hello
+            }
+        }
+        Expect.equal (Just False) unread
+        Expect.equal (Just True) reusable
+        Expect.equal (Just False) closed
+      }
+    ]
+
+main() = Test.run tests

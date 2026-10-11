@@ -8,12 +8,13 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-func markScopedScheme(s types.Scheme, arity int) types.Scheme {
+func markScopedScheme(s types.Scheme, arity, index int) types.Scheme {
 	args, _ := peelArrows(s.Body, arity)
-	if len(args) == arity && arity > 0 {
-		if callback, ok := args[arity-1].(*types.TFun); ok {
+	if len(args) == arity && index >= 0 && index < arity {
+		if callback, ok := args[index].(*types.TFun); ok {
 			s.ScopedRow, _ = callback.Eff.Tail.(*types.TVar)
 			s.ScopedArity = arity
+			s.ScopedParam = index
 		}
 	}
 	return s
@@ -35,17 +36,22 @@ func (ck *Checker) checkScopedDeclaration(d *ast.ValueDecl, ty types.Type, tv *T
 		arity = types.IntrinsicArity(d.Name)
 	}
 	if arity == 0 {
-		return fail("A scoped runner must be an annotated function with a final callback parameter.")
+		return fail("A scoped runner must be an annotated function with a scoped callback parameter.")
 	}
 	args, result := peelArrows(ty, arity)
 	if len(args) != arity {
 		return fail("The annotation must match the runner's parameter count.")
 	}
-	fn, ok := args[arity-1].(*types.TFun)
-	if !ok || !types.Equal(fn.Eff.Tail, v) {
-		return fail("The final callback must have one argument and perform the scoped row, optionally after effects the runner handles.")
+	index := types.ScopedParameterIndex(ty, arity, v)
+	if index < 0 {
+		return fail("Exactly one callback must perform the scoped row as its tail.")
 	}
-	outside := append(append([]types.Type(nil), args[:arity-1]...), result)
+	fn, ok := args[index].(*types.TFun)
+	if !ok || !types.Equal(fn.Eff.Tail, v) {
+		return fail("The scoped callback must have one argument and perform the scoped row, optionally after effects the runner handles.")
+	}
+	outside := append([]types.Type{result}, args[:index]...)
+	outside = append(outside, args[index+1:]...)
 	for _, label := range fn.Eff.Labels {
 		outside = append(outside, label.Args...)
 	}
@@ -59,7 +65,7 @@ func (ck *Checker) checkScopedDeclaration(d *ast.ValueDecl, ty types.Type, tv *T
 		ids := map[int]bool{}
 		collectVarIDs(t, ids)
 		if ids[v.ID] {
-			return fail("The scoped row may occur only in the final callback's argument, effect row tail, and result.")
+			return fail("The scoped row may occur only in the scoped callback's argument, effect row tail, and result.")
 		}
 	}
 	if len(d.Ann.Preds) != 0 {
@@ -67,7 +73,7 @@ func (ck *Checker) checkScopedDeclaration(d *ast.ValueDecl, ty types.Type, tv *T
 	}
 	if d.Native == nil {
 		for _, eq := range declEquations(d) {
-			if _, ok := eq.Params[arity-1].(*ast.PVar); !ok {
+			if _, ok := eq.Params[index].(*ast.PVar); !ok {
 				return fail("Bind the scoped callback to a name.")
 			}
 		}
@@ -160,7 +166,8 @@ func (g *generator) scopedCall(e *ast.App, name string, sch types.Scheme) types.
 	}
 	args := appArgs(e)
 	parameterTypes, _ := peelArrows(raw, sch.ScopedArity)
-	outer = append(outer, parameterTypes[:len(parameterTypes)-1]...)
+	outer = append(outer, parameterTypes[:sch.ScopedParam]...)
+	outer = append(outer, parameterTypes[sch.ScopedParam+1:]...)
 	// Populate partial spine types for elaboration without treating a partial
 	// scoped runner as a first-class value in source.
 	spine := make([]*ast.App, len(args))

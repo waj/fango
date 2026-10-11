@@ -5,38 +5,14 @@ redirects, and connection reuse, the shared
 [bodies and errors](../stdlib/Http.fango), and
 [URLs](../stdlib/Url.fango) are implemented; the
 [HTTP design](design/http.md#the-client-transport) explains the client's
-transport effect. This document tracks what remains: mocking, and the open
-questions below. The [HTTP roadmap](roadmap-io.md) tracks the remaining server
-follow-ups.
+transport effect and [mocking through framing](design/http.md#mocking-through-framing).
+This document tracks the open questions below. The [HTTP roadmap](roadmap-io.md)
+tracks the remaining server follow-ups.
 
 ## Mocking
 
-```fango
-{-# scoped s #-}
-mock : (Server.Request s ->{s} Server.Response s)
-    -> (() ->{Http | e} a) ->{e} a
-```
-
-`mock` is a transport handler that uses `Memory` handles. It collects the bytes
-written to each handle. On the first `receive` after writing, it:
-
-1. parses the buffered request with `Server.withRequest`
-2. runs the server handler
-3. serializes the response with `Server.writeResponse` into a buffer
-4. answers this and later `receive` calls from that buffer
-
-The client side runs its real framing, so it is tested in both directions
-without sockets or `IO`. The mock buffers whole
-messages, which is fine for tests. `Http.Server.Route.dispatch` tables work as
-mocks unchanged. A test records the requests it receives through its own
-effects in the handler's row, such as State or Writer. A `Protocol` error from
-the server side (a request the parser rejects) becomes the error response the
-real server would send, so the client sees a 4xx just as it would against a
-real server.
-
-The mock waits for a test framework (see HC3). The byte-level transport, the
-`Memory` connection case, and `Client.stub` already answer requests without
-sockets; `mock` adds the server round trip.
+DONE. See [`Client.mock`](../stdlib/Http/Client.fango) and the
+[shared server exchange](design/http.md#mocking-through-framing).
 
 ## Milestones
 
@@ -52,7 +28,7 @@ follow allocation order, not that order.
 | HC7 GZip | HC2 (DONE) |
 | HC4 TLS | HC2 (DONE) |
 | HC5 Redirects and keep-alive | HC2, HC6 (DONE) |
-| HC3 Mock | HC2, the [test framework](roadmap-testing.md) |
+| HC3 Mock | HC2, the [test framework](design/testing.md) (DONE) |
 
 ### HC1 Module split
 
@@ -75,9 +51,8 @@ DONE. See the [client module](../stdlib/Http/Client.fango) and the
 
 ### HC3 Mock
 
-Waits for the [test framework](roadmap-testing.md). It adds `mock`, plus tests
-that use Route handlers as the mock, check the requests they receive, and run
-`configure` overrides under the mock.
+DONE. See [`Client.mock`](../stdlib/Http/Client.fango) and
+[mocking through framing](design/http.md#mocking-through-framing).
 
 ### HC4 TLS
 

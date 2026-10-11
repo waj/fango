@@ -112,7 +112,7 @@ func (b *moduleCheck) inferGroup(group []int) {
 		} else {
 			q.info.Scheme = ck.generalize(q.info.Type, nil)
 			if q.d.ScopedRow != "" {
-				q.info.Scheme = markScopedScheme(q.info.Scheme, len(q.d.Params))
+				q.info.Scheme = markScopedScheme(q.info.Scheme, len(q.d.Params), q.g.scopedIndex)
 			}
 		}
 	}

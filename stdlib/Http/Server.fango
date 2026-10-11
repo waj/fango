@@ -7,7 +7,7 @@
 -- framing gets its error status and closes the connection; so does a
 -- response that fails its checks (500), and a body that fails after its head
 -- was written leaves the response incomplete and closes the connection.
-module Http.Server exposing (Config(..), Request(..), Response(..), defaultConfig, serve, withRequest, writeResponse)
+module Http.Server exposing (Config(..), Request(..), Response(..), defaultConfig, serve, serveRequest, withRequest, writeResponse)
 
 import Async exposing (Async, Channel, Outcome(..), Task)
 import Basics exposing (..)
@@ -236,6 +236,34 @@ respond method output response =
         sendError output 500
         False
 
+-- Parses and answers one request over `input` and `output`, with separate
+-- request-line, header, and body limits. Answers `Nothing` at a clean end of
+-- input, or `Just` whether the connection can serve another request: the
+-- response succeeded, the request body was consumed, and neither side asked
+-- to close. A response that reads the request body is consumed within its
+-- request scope.
+--
+-- Handles `Protocol` like `serve`: failures before a response get their
+-- error status, invalid response declarations get 500, and a body failure
+-- after the head leaves the response incomplete. Other effects propagate.
+{-# scoped s #-}
+serveRequest : Int -> Int -> Int -> Reader e -> Writer e -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{e} Maybe Bool
+serveRequest lineLimit headersLimit bodyLimit input output handler =
+    handle
+        exchanged = withRequest lineLimit headersLimit bodyLimit input { request ->
+            response = handler request
+            sent = respond request.method output response
+            (sent, isClose request.headers, isClose response.headers)
+        }
+        case exchanged of
+            Nothing -> Nothing
+            Just ((sent, requestClose, responseClose), complete) ->
+                Just (sent && complete && requestClose == False && responseClose == False)
+    on
+        Http.invalid error ->
+            sendError output (errorStatus error)
+            Just False
+
 {-# scoped s #-}
 serveConnection : Config -> Net.Connection -> (Request s ->{s} Response s) ->{Async, IO, Fail Net.Error, Protocol | e} ()
 serveConnection config connection handler =
@@ -245,21 +273,15 @@ serveConnection config connection handler =
         Writer.over sink 8192 { output ->
             loop() =
                 fromResult (Net.setReadDeadline connection config.headerDeadlineMs)
-                handle
-                    exchanged = withRequest config.requestLineLimit config.headerLimit config.bodyLimit input { request ->
-                        fromResult (Net.setReadDeadline connection config.bodyDeadlineMs)
-                        response = handler request
-                        fromResult (Net.setWriteDeadline connection config.writeDeadlineMs)
-                        sent = respond request.method output response
-                        (sent, isClose request.headers, isClose response.headers)
-                    }
-                    case exchanged of
-                        Nothing -> ()
-                        Just ((sent, requestClose, responseClose), complete) ->
-                            if sent && complete && requestClose == False && responseClose == False then loop()
-                            else ()
-                on
-                    Http.invalid error -> sendError output (errorStatus error)
+                exchanged = serveRequest config.requestLineLimit config.headerLimit config.bodyLimit input output { request ->
+                    fromResult (Net.setReadDeadline connection config.bodyDeadlineMs)
+                    response = handler request
+                    fromResult (Net.setWriteDeadline connection config.writeDeadlineMs)
+                    response
+                }
+                case exchanged of
+                    Just True -> loop()
+                    _ -> ()
             loop()
         }
     }

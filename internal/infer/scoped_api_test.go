@@ -148,6 +148,8 @@ bad action = handle action { read = read } on
 
 func TestScopedDeclarationErrors(t *testing.T) {
 	for _, src := range []string{
+		"{-# scoped s #-}\nrun : (Int ->{s} Int) -> (Int ->{s} Int) ->{e} Int\nrun first second = first (second 0)\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} Int) -> Int ->{s} Int\nrun callback n = callback n\n",
 		"{-# scoped missing #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = action 0\n",
 		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{s} a\nrun action = action 0\n",
 		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = run action\n",
@@ -180,5 +182,35 @@ run action = action 0
 `)
 	if len(errs) == 0 {
 		t.Fatal("a runner that leaves a granted effect unhandled was accepted")
+	}
+}
+
+func TestScopedCallbackBeforeAction(t *testing.T) {
+	for _, prefix := range []string{"", "Int -> "} {
+		params, value := "callback action", "1"
+		if prefix != "" {
+			params, value = "number callback action", "number"
+		}
+		src := `effect Tell
+    tell : Int -> Int
+
+{-# scoped s #-}
+run : ` + prefix + `(Int ->{Tell | s} Int) -> (() ->{e} a) ->{e} (Int, a)
+run ` + params + ` =
+    value = handle callback ` + value + ` on
+        tell n -> resume (n + 1)
+    (value, action())
+`
+		ck, infos, errs := check(t, src)
+		if len(errs) != 0 {
+			t.Fatal(errs)
+		}
+		p, elabErrs := elaborate.Module(infos, ck)
+		if len(elabErrs) != 0 {
+			t.Fatal(elabErrs)
+		}
+		if errs := core.Lint(p, ck.B); len(errs) != 0 {
+			t.Fatal(errs)
+		}
 	}
 }

@@ -47,6 +47,42 @@ func TestScopedCallProof(t *testing.T) {
 	}
 }
 
+// Non-final callbacks must protect every other argument and every arrow.
+func TestScopedCallBeforeActionProof(t *testing.T) {
+	for _, index := range []int{0, 1, 2} {
+		for _, escape := range []string{"", "argument", "arrow"} {
+			t.Run(fmt.Sprintf("%d/%s", index, escape), func(t *testing.T) {
+				sup := &types.Supply{}
+				b := types.NewBuiltins(sup)
+				permission := types.Row{Labels: []types.EffLabel{{Unique: 1000, Name: "local", Scoped: true}}}
+				callback := &types.TFun{Arg: b.Unit, Ret: b.Int, Eff: permission}
+				args := []types.Type{b.Int, b.Int, b.Int}
+				args[index] = callback
+				if escape == "argument" {
+					args[(index+1)%3] = callback
+				}
+				var signature types.Type = b.Int
+				for i := 2; i >= 0; i-- {
+					fn := &types.TFun{Arg: args[i], Ret: signature}
+					if escape == "arrow" && i == 0 {
+						fn.Eff = permission
+					}
+					signature = fn
+				}
+				call := &App{CalleeKind: Worker, Callee: &VarRef{Name: "run"}, Args: make([]Expr, 3), SourceType: signature, Ty: b.Int}
+				p := &Prog{Defs: []Def{{Name: "main", Body: call}}}
+				errs := checkScopedCalls(p, []Def{{Name: "run", Params: []string{"a", "b", "c"}, Scoped: true, ScopedParam: index}})
+				if escape == "" && len(errs) != 0 {
+					t.Fatal(errs)
+				}
+				if escape != "" && !strings.Contains(fmt.Sprint(errs), "scope escapes") {
+					t.Fatal(errs)
+				}
+			})
+		}
+	}
+}
+
 func TestScopedPermissionMustErase(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)

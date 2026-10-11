@@ -286,6 +286,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 	}
 	def := core.Def{
 		Scoped:        info.Scheme.ScopedRow != nil,
+		ScopedParam:   info.Scheme.ScopedParam,
 		SourceType:    prependTypes(dictTypes, rawType),
 		Name:          info.Name,
 		Type:          prependTypes(dictTypes, defType),
@@ -334,6 +335,7 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 		if len(defs) > 0 && defs[len(defs)-1].Name == name {
 			defs[len(defs)-1].SourceType = ck.Intrinsics[name].Body
 			defs[len(defs)-1].Scoped = ck.Intrinsics[name].ScopedRow != nil
+			defs[len(defs)-1].ScopedParam = ck.Intrinsics[name].ScopedParam
 		}
 	}
 	bindRows(defs, ck)

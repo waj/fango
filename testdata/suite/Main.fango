@@ -119,6 +119,7 @@ import HandlerUnusedOuterRow
 import HigherOrder
 import HttpApi
 import HttpBodies
+import HttpClientMock
 import HttpClientRedirects
 import HttpClientStub
 import HttpFraming
@@ -410,6 +411,7 @@ main() =
             , HigherOrder.tests
             , HttpApi.tests
             , HttpBodies.tests
+            , HttpClientMock.tests
             , HttpClientRedirects.tests
             , HttpClientStub.tests
             , HttpFraming.tests

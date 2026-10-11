@@ -100,6 +100,14 @@ async function main() {
   const scopedPragma = grammar.tokenizeLine('{-# scoped s #-}').tokens;
   assert(scopedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('scoped = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
+  const mockSignature = 'mock : (Server.Request {Protocol | s} ->{Protocol | s} Server.Response {Protocol | s}) -> (() ->{Http | e} a) ->{e} a';
+  const mockTokens = grammar.tokenizeLine(mockSignature).tokens;
+  const mockScopeAt = index => mockTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+  assert(mockScopeAt(0).includes('entity.name.function.fango'));
+  assert(mockScopeAt(mockSignature.indexOf('Protocol')).includes('entity.name.type.effect.fango'));
+  assert(mockScopeAt(mockSignature.indexOf('Http | e')).includes('entity.name.type.effect.fango'));
+  const mockUse = grammar.tokenizeLine('use Client.mock serverHandler').tokens;
+  assert(mockUse.some(t => t.scopes.includes('keyword.control.use.fango')));
   const sharedPragma = grammar.tokenizeLine('{-# shared-resource #-}').tokens;
   assert(!sharedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(!grammar.tokenizeLine('{-# service #-}').tokens.some(t => t.scopes.includes('keyword.control.directive.fango')));

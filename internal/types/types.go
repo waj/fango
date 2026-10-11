@@ -154,8 +154,9 @@ func SortedRow(r Row) Row {
 // CaptureVars are independently freshened at a value occurrence; they never
 // appear in user-facing type printing.
 type Scheme struct {
-	ScopedRow    *TVar // universally bound row in the final callback parameter
+	ScopedRow    *TVar // universally bound row in the selected callback parameter
 	ScopedArity  int
+	ScopedParam  int  // zero-based callback parameter position
 	CallbackBase *Row // lower bound when invoking a scoped callback parameter
 
 	Vars        []*TVar

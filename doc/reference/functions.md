@@ -143,7 +143,7 @@ available to inference and reflection.
 
 ## Scoped callbacks
 
-A declaration pragma binds a row universally within the final callback:
+A declaration pragma binds a row universally within one selected callback:
 
 ```fango
 {-# scoped s #-}
@@ -157,10 +157,11 @@ all other effects remain in `e`. Nested calls have distinct permissions and can
 use multiple readers together through ordinary row inclusion, as the
 [two-reader fixture](../../testdata/suite/ReaderScopedMemory.fango) does.
 
-The annotated declaration must bind its final callback to a name. That callback
-has one argument and the annotated scoped row as its arrow's tail. The binder
-may occur in the callback argument and result, but not in earlier runner
-parameters, the runner result, or the runner's own arrow effects.
+The annotated declaration must bind its scoped callback to a name. The callback
+may be in any parameter position; exactly one callback must have the annotated
+scoped row as its arrow's tail. The binder may occur in that callback's
+argument and result, but not in any other runner parameter, the runner result,
+or the runner's own arrow effects.
 
 Effects listed before the tail are granted to the callback by the runner, which
 must handle them:
@@ -181,7 +182,10 @@ extending the runner's residual row.
 
 A [`use` item](syntax.md#use-items) calls a runner this way, binding the
 callback's parameter for the rest of the block:
-`use reader <- Reader.withBytes bytes`.
+`use reader <- Reader.withBytes bytes`. `use` always supplies the final
+parameter, which need not be the scoped callback. For example,
+`use Client.mock serverHandler` supplies the client action after the scoped
+server handler; see [HTTP mocking](../../stdlib/Http/Client.fango).
 
 Runners must be called by name with all parameters supplied. Partial application,
 first-class aliases, recursion, mutual recursion, class-constrained runner

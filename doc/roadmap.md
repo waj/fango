@@ -102,8 +102,9 @@ implemented over [buffered readers and writers](../stdlib/Reader.fango),
 [Net](../stdlib/Net.fango), and [Async](../stdlib/Async.fango).
 [HTTP follow-up work](roadmap-io.md) tracks transport acceptance coverage and
 future protocol variants. The [HTTP client](../stdlib/Http/Client.fango)
-is implemented; the [HTTP client roadmap](roadmap-http-client.md) covers
-mocking.
+and [mocking through framing](design/http.md#mocking-through-framing)
+are implemented; the [HTTP client roadmap](roadmap-http-client.md) covers
+remaining transport questions.
 
 ## Async task results and failure policy
 

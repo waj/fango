@@ -70,10 +70,12 @@ Functions and native handles may be shared. See [tasks](tasks.md).
 ## Scoped callback rows
 
 The [scoped declaration](../reference/functions.md#scoped-callbacks) marks a
-restricted universal row binder on a named runner's final callback. The runner
-implementation instantiates that callback's row independently at each use,
-with its residual effect row as a lower bound. Effects listed before the
-binder in the callback's arrow stay in that row at every instantiation, so the
+restricted universal row binder on one callback of a named runner. The
+annotated binder identifies the callback at any parameter position; its
+zero-based position is retained in the scheme and Core definition, including
+cached module objects. The runner instantiates that callback's row independently
+at each use, with its residual effect row as a lower bound. Effects listed before
+the binder in the callback's arrow stay in that row at every instantiation, so the
 runner's own effect checking requires it to handle them. The binder cannot
 occur in the runner's other parameters, result, residual effects, or those
 effects' type arguments.
@@ -84,14 +86,15 @@ Each saturated source call allocates a rigid permission label from the session
 supply and extends the runner's residual row with it. Distinct allocations
 coexist in ordinary effect rows. Expected scoped callback types are available
 while checking lambda parameters, so nested scopes do not infer an outer
-reader's row from the inner reader. Known record projections contribute their
-rows before closure, so a source effect cannot hide a later local-state or
-failure requirement.
+reader's row from the inner reader. All other parameters, before or after
+the selected callback, are outside the fresh scope. Known record projections
+contribute their rows before closure, so a source effect cannot hide a later
+local-state or failure requirement.
 
 A persistent `ScopeBoundary` rejects its label anywhere in the solved result,
 residual effects, or outer environment types. Its structural walk includes
 latent arrows, abstract and phantom type arguments, and effect arguments.
-Outer roots include storage slots, predicates, recursive bindings, earlier
+Outer roots include storage slots, predicates, recursive bindings, other
 runner arguments, and pending record obligations. Obligations survive local
 generalization and record solving and are rechecked before the enclosing
 declaration group is published. This checks type-level permissions; it does not

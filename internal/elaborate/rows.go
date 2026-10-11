@@ -216,7 +216,10 @@ func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, tyArgs
 		return fallback
 	}
 	scheme, ok := el.ck.Env.Lookup(name)
-	if !ok {
+	// A scoped callback can consume the residual row through its independent
+	// universal binder, including in a returned streaming body. Requirements
+	// of ordinary callbacks alone cannot narrow that row.
+	if !ok || scheme.ScopedRow != nil {
 		return fallback
 	}
 	origin := instantiateRuntimeParams(el.ck.Sub.Apply(scheme.Body), tyArgs)

@@ -49,7 +49,8 @@ type RowArgument struct {
 }
 
 type Def struct {
-	Scoped bool // SourceType binds the final callback row universally
+	Scoped      bool // SourceType binds the selected callback row universally
+	ScopedParam int  // zero-based callback parameter position
 
 	Name  string
 	Owner string     // defining source module; empty for headerless files and REPL inputs

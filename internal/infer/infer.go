@@ -718,7 +718,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 	sch := types.Scheme{Vars: scope.Minted(), Preds: scope.Preds(), Body: ty}
 	if d.ScopedRow != "" {
 		errs = append(errs, ck.checkScopedDeclaration(d, ty, scope)...)
-		sch = markScopedScheme(sch, arity)
+		sch = markScopedScheme(sch, arity, types.ScopedParameterIndex(ty, arity, scope.vars[d.ScopedRow]))
 	}
 	ck.Intrinsics[d.Name] = sch
 	ck.Env.Bind(d.Name, sch)
@@ -1191,6 +1191,7 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, mode DeclEffects) *declInferenc
 	if d.ScopedRow != "" && annScope != nil {
 		g.scopedParameter = annScope.vars[d.ScopedRow]
 		g.scopedDefinition = d.Name
+		g.scopedIndex = types.ScopedParameterIndex(annTy, len(d.Params), g.scopedParameter)
 	}
 	var ty types.Type
 	if len(d.Params) == 0 {
@@ -1302,7 +1303,7 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	info.Scheme, predErrs = ck.qualify(info.Scheme, g.preds, given, d.Ann != nil, d.NameSpan)
 	errs = append(errs, predErrs...)
 	if d.ScopedRow != "" {
-		info.Scheme = markScopedScheme(info.Scheme, len(d.Params))
+		info.Scheme = markScopedScheme(info.Scheme, len(d.Params), g.scopedIndex)
 	}
 	errs = append(errs, g.checkScopeBoundaries()...)
 	return info, errs
@@ -1507,6 +1508,7 @@ type generator struct {
 	patternBinder     string
 	annotationAmbient *types.Row
 	scopedParameter   *types.TVar
+	scopedIndex       int
 	scopedDefinition  string
 	scopeObligations  []Constraint
 	subjectHandlers   []*HandlerInfo
@@ -2682,9 +2684,9 @@ func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []a
 		}
 		g.patternBinder = oldBinder
 		g.patternPins = oldPins
-		if g.scopedParameter != nil && name == g.scopedDefinition && len(eq.Params) > 0 {
-			if p, ok := eq.Params[len(eq.Params)-1].(*ast.PVar); ok {
-				scope.names[p.Name] = types.Scheme{Vars: []*types.TVar{g.scopedParameter}, Body: paramTys[len(paramTys)-1], CallbackBase: annotationAmbient}
+		if g.scopedParameter != nil && name == g.scopedDefinition && g.scopedIndex >= 0 && g.scopedIndex < len(eq.Params) {
+			if p, ok := eq.Params[g.scopedIndex].(*ast.PVar); ok {
+				scope.names[p.Name] = types.Scheme{Vars: []*types.TVar{g.scopedParameter}, Body: paramTys[g.scopedIndex], CallbackBase: annotationAmbient}
 			}
 		}
 		savedAnnotationAmbient := g.annotationAmbient
