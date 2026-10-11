@@ -221,5 +221,53 @@ modules published are immutable and stay valid, so the retry reuses them.
 Core lint checks structural evidence summaries against installed definitions.
 Native handles check validity at runtime, using the same rules as batch programs.
 
-Future reload and editing work belongs in the
-[tooling roadmap](../roadmap-tooling.md#repl-hardening).
+## Transactional reload
+
+The session records accepted prompt imports and fixity declarations.
+`:reload` discovers a separate graph rooted in those imports and the Prelude
+and syntax roots. Local files are read again; bundled files are reparsed from
+their retained bytes because checking may rewrite a resolved AST. The candidate
+rebuilds interfaces and fixities together, prunes unreachable dependencies, and
+reapplies imports before copying prompt-owned resolver names. Vanished explicit
+selectors are pruned; all other resolution errors reject the candidate.
+
+The shared installer checks this graph in a fresh checker using the session's
+monotonic identity supply and the ordinary module-object cache. Preparation
+publishes no resolver or runtime state. Cancellation is checked between stages
+and before commit. Valid immutable cache objects may survive rejection.
+
+Checked nominal contracts are compared without source positions or allocation
+numbers. Matching types, effects, and class dictionaries retain their previous
+identities only while the nominal declarations their contracts reference also
+retain theirs. A fixed point handles recursive contracts. Reconciliation copies
+the candidate compiler graph, preserving sharing and recursive metadata, and
+rebinds reflected schemas to the adopted checker. Cached objects remain
+unchanged. Prompt-owned declarations and historical nominal metadata are merged
+after current modules pass validation; retained instances for retired types or
+classes remain available without competing with replacement instances over
+unchanged types.
+
+Runtime module definitions have session-only generation names. All module calls
+inside accepted prompt Core are frozen to those names before installation;
+direct expressions use the current mapping. Changed modules and their transitive
+dependents receive new runtime definitions, including dependents whose checked
+objects were cache hits. Unaffected modules keep their runtime generations.
+Historical helpers, dictionaries, memo cells, and worker definitions remain
+installed until session close. Source dependencies are retained for reporting
+even when inlining or sealing an effectful value removes their Core calls.
+
+Staging is retained as completed Core, without replaying prompt declarations.
+Historical stage calls receive generation names; new quotation indices are
+rebased after the retained template table. New splices see current module
+definitions; retained prompt generators keep their old helpers and resolved
+evidence. New instance selection continues to use the current declaration view.
+
+The final commit replaces graph, resolver, checker, staging, and installer state,
+then installs the prepared runtime definitions. It neither evaluates user
+expressions nor replaces the native worker. Active handler levels reject reload;
+changed sidecars or incompatible native contracts require a new session.
+Ordinary imports also refuse a worker replacement while a level is parked,
+avoiding retirement of a worker whose exchange lock is held by that level.
+Observable output and limitations belong to the
+[reload reference](../reference/repl.md#reloading-modules); further editing work
+belongs in the [tooling roadmap](../roadmap-tooling.md#repl-hardening).

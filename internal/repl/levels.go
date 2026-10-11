@@ -47,17 +47,18 @@ type binder struct {
 // savedName is what a name meant before a level's binder or level-local
 // definition replaced it. Ending that level puts it back.
 type savedName struct {
-	level     int
-	name      string
-	scheme    types.Scheme
-	hasScheme bool
-	worker    int
-	hasWorker bool
-	def       core.Def
-	hasDef    bool
-	canonical string
-	resolved  bool
-	binding   eval.Binding
+	level      int
+	name       string
+	scheme     types.Scheme
+	hasScheme  bool
+	worker     int
+	hasWorker  bool
+	def        core.Def
+	hasDef     bool
+	canonical  string
+	resolved   bool
+	binding    eval.Binding
+	references []string
 }
 
 func (s *Session) snapshot(owner int, name string) savedName {
@@ -66,10 +67,16 @@ func (s *Session) snapshot(owner int, name string) savedName {
 	u.worker, u.hasWorker = s.ck.Workers[name]
 	u.def, u.hasDef = s.promptDefs[name]
 	u.canonical, u.resolved = s.prompt.Value(name)
+	u.references = s.promptReferences[name]
 	return u
 }
 
 func (s *Session) restoreName(u savedName) {
+	if u.references == nil {
+		delete(s.promptReferences, u.name)
+	} else {
+		s.promptReferences[u.name] = u.references
+	}
 	if u.hasScheme {
 		s.ck.Env.Bind(u.name, u.scheme)
 	} else {
@@ -183,6 +190,7 @@ func (s *Session) request(ctx context.Context, e core.Expr) eval.LevelRequest {
 // own evaluator when there is none, and waits for the answer. Ctrl-C cancels
 // it. The context of an input that entered a level lives as long as the level.
 func (s *Session) evaluate(e core.Expr) (eval.LevelReply, context.CancelFunc) {
+	e = s.runtimeExpr(e)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.setCancel(cancel)
 	defer s.setCancel(nil)
@@ -449,6 +457,7 @@ func (s *Session) levelInput(text string, toks []token.Token, f *source.File, fo
 		var aux []core.Def
 		coreExpr, aux, errs = elaborate.ExprIn(e, s.activeExecutionDefs(), s.ck)
 		for i := range aux {
+			aux[i].Body = s.runtimeExpr(aux[i].Body)
 			s.env.DefineWorker(&aux[i])
 		}
 	}

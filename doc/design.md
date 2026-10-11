@@ -73,7 +73,7 @@ comment anchors, verbatim fallback, and round-trip verification.
 ## Interpreter and REPL
 
 [Interpreter and REPL](design/repl.md) — Core values, display, persistent stores,
-import increments, generations, and transactions.
+import increments, generations, transactions, and module reload.
 
 ## Testing and performance
 

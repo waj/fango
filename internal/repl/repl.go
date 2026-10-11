@@ -118,7 +118,14 @@ type Session struct {
 	// stamp numbers the values effectful declarations have computed, so an
 	// evaluator can tell a value's memo from a redefinition's; stamps are
 	// never reused.
-	stamp uint64
+	stamp            uint64
+	options          Options
+	imports          []ast.Import
+	promptFixities   []ast.Decl
+	reloadGeneration uint64
+	runtimeNames     map[string]string
+	runtimeDefs      []core.Def
+	promptReferences map[string][]string
 }
 
 func NewSessionWith(out io.Writer, opts Options) *Session {
@@ -170,23 +177,26 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	// Functions and lambdas still generalize.
 	ck.MonoValues = true
 	env := eval.NewEnv()
-	env.DefineProg(&core.Prog{ADTs: ck.ADTOrder, Defs: preludeDefs, Natives: ck.Natives})
 	ioctx := eval.NewIOContext(strings.NewReader(""), out)
 	ioctx.ErrorWriter = opts.ErrorWriter
 	s := &Session{
-		ck:         ck,
-		env:        env,
-		out:        out,
-		ioctx:      ioctx,
-		graph:      graph,
-		prompt:     graph.NewPrompt(),
-		modules:    installer,
-		stage:      stage,
-		installed:  preludeDefs,
-		promptDefs: map[string]core.Def{},
-		color:      opts.Color,
-		loading:    loading,
+		ck:               ck,
+		env:              env,
+		out:              out,
+		ioctx:            ioctx,
+		graph:            graph,
+		prompt:           graph.NewPrompt(),
+		modules:          installer,
+		stage:            stage,
+		installed:        preludeDefs,
+		promptDefs:       map[string]core.Def{},
+		color:            opts.Color,
+		loading:          loading,
+		options:          opts,
+		runtimeNames:     map[string]string{},
+		promptReferences: map[string][]string{},
 	}
+	s.installModules(preludeDefs)
 	// A value declaration that performs effects runs once when entered, so
 	// its row is granted exactly as an expression's is (doc/design.md,
 	// "Interpreter and REPL"). Its own predicates are qualified right after,
@@ -371,9 +381,12 @@ func (s *Session) command(cmd string) (quit bool) {
 		s.endLevel()
 	case cmd == ":uses":
 		s.listLevels()
+	case cmd == ":reload":
+		s.reload()
 	case cmd == ":help":
 		fmt.Fprint(s.out, `commands:
   :type <expr>   show an expression's type without evaluating
+  :reload        refresh imported local modules atomically
   :uses          list the handler levels installed with `+"`use`"+`
   :end           end the innermost handler level (also Ctrl-D)
   :help          this message
@@ -616,6 +629,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		// Collect above already recorded it, so later entries group by it.
 		// A fixity binds no name and has no type to report.
 		fmt.Fprintf(s.out, "%s %d (%s)\n", fd.Assoc, fd.Prec, fd.Op)
+		s.promptFixities = append(s.promptFixities, fd)
 		return inputDone
 	}
 	if pd, ok := m.Decls[0].(*ast.PatternDecl); ok {
@@ -756,6 +770,10 @@ func (s *Session) checkValue(vd *ast.ValueDecl, mode infer.DeclEffects) (infer.D
 // may name it; a value computed when entered is not recorded, since its
 // body cannot be evaluated again.
 func (s *Session) installValue(info infer.DeclInfo, defs []core.Def, record bool) {
+	s.recordReferences(info)
+	for i := range defs {
+		defs[i].Body = s.runtimeExpr(defs[i].Body)
+	}
 	s.ck.BindDecl(info)
 	if record {
 		s.ck.RecordChecked([]infer.DeclInfo{info})
@@ -808,10 +826,13 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	}
 	restore := s.checkpoint()
 	restoreGraph := s.graph.Checkpoint()
+	restoreModules, restoreStage := s.modules.Checkpoint(), s.stage.Checkpoint()
 	defer s.loading.clear()
 	fail := func(errs []diag.Error) inputResult {
 		restore()
 		restoreGraph()
+		restoreModules()
+		restoreStage()
 		s.loading.clear()
 		diag.Render(s.out, errs)
 		return inputDone
@@ -865,7 +886,10 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	// The worker is built, but neither installed nor swapped in, before the
 	// transaction commits: a failure here must not close the running one.
 	var exec *nativehost.Executor
-	if len(natives) > 0 || needsOpaqueWorker && s.exec == nil {
+	if s.nativeSourcesChanged(natives) || needsOpaqueWorker && s.exec == nil {
+		if len(s.levels) != 0 {
+			return fail([]diag.Error{{Title: "NATIVE WORKER IN USE", Body: "End all handler levels with :end before importing a module that replaces the native worker."}})
+		}
 		prepared, err := s.prepareNatives(natives)
 		if err != nil {
 			return fail([]diag.Error{{Title: "NATIVE WORKER ERROR", Body: err.Error()}})
@@ -874,7 +898,7 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	}
 	s.installed = append(s.installed, pending...)
 	if len(pending) > 0 {
-		s.env.DefineProg(&core.Prog{ADTs: s.ck.ADTOrder, Defs: pending, Natives: s.ck.Natives})
+		s.installModules(pending)
 	}
 	// Like a batch entry, the prompt sees instances and derivers from every
 	// module in its graph.
@@ -884,6 +908,7 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	if exec != nil {
 		s.commitNatives(natives, exec)
 	}
+	s.imports = append(s.imports, m.Imports...)
 	if s.loading != nil {
 		s.loading.finish(m.Imports, loaded)
 	} else {
@@ -903,12 +928,12 @@ func (s *Session) prepareNatives(sources []nativehost.Source) (*nativehost.Execu
 	if err != nil {
 		return nil, err
 	}
-	return nativehost.New(append(append(bundled, s.natives...), sources...))
+	return nativehost.New(append(bundled, mergeNativeSources(s.natives, sources)...))
 }
 
 // commitNatives adopts a prepared worker and retires the previous one.
 func (s *Session) commitNatives(sources []nativehost.Source, exec *nativehost.Executor) {
-	s.natives = append(s.natives, sources...)
+	s.natives = mergeNativeSources(s.natives, sources)
 	old := s.exec
 	s.exec, s.ioctx.Natives = exec, exec
 	if old != nil {
@@ -997,6 +1022,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	fails, _ := s.promptEffects(row, e.Span())
 	display := elaborate.PromptOutcome(coreExpr, row, fails, s.ck, "")
 	for i := range aux {
+		aux[i].Body = s.runtimeExpr(aux[i].Body)
 		s.env.DefineWorker(&aux[i])
 	}
 	reply, _ := s.evaluate(display)
@@ -1085,6 +1111,7 @@ func (s *Session) evalDisplay(ctx context.Context, display core.Expr) (value eva
 
 func (s *Session) activeExecutionDefs() []core.Def {
 	defs := append([]core.Def(nil), s.installed...)
+	defs = append(defs, s.runtimeDefs...)
 	names := make([]string, 0, len(s.promptDefs))
 	for name := range s.promptDefs {
 		names = append(names, name)
@@ -1135,6 +1162,9 @@ func (s *Session) installInstances(infos []infer.DeclInfo, start int) []diag.Err
 	}
 	if len(errs) > 0 {
 		return errs
+	}
+	for i := range defs {
+		defs[i].Body = s.runtimeExpr(defs[i].Body)
 	}
 	s.env.DefineProg(&core.Prog{ADTs: s.ck.ADTOrder, Defs: defs, Natives: s.ck.Natives})
 	return nil

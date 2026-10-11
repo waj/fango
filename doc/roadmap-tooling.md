@@ -67,49 +67,23 @@ reference pages, under the
 
 ## REPL hardening
 
-Fresh-session artifact reuse and atomic installation of prompt imports are
-implemented ([REPL](design/repl.md#imports-and-resolution)). The work below
-extends the session beyond them; reusing artifacts introduces no reload and
-changes no declaration a live session has already accepted.
+Fresh-session artifact reuse, atomic imports, and
+[transactional reload](design/repl.md#transactional-reload) are implemented.
+The work below extends those contracts.
 
 - Add a grouped-input mechanism for multiple top-level function equations;
   today the prompt accepts only one exhaustive equation per input.
-- Implement `:reload`, re-reading the modules a session imported after they
-  change on disk. `import` already gives the prompt a persistent module graph
-  and resolver scope, so `:load` is not needed: a named module is imported,
-  and the working directory (or the directory given to `fango repl`) is the
-  source root. The intended shape: the graph re-reads every non-bundled node,
-  compares content hashes, and uses the shared cache pipeline to prepare the
-  changed modules plus their affected dependents, committing only on success.
-  The checker gains owner/generation retraction for declaration tables,
-  instances, and staging definitions while preserving the identities and
-  declaration cutoffs needed by existing closures. Build on the implemented
-  [module-state boundary](design/pipeline.md#pipeline) rather than depending on
-  positional instance indexes; the operator
-  table is rebuilt from the current nodes plus the prompt's own fixity
-  declarations; the prompt's import list is re-applied against the new
-  interfaces and names that vanished are reported; old memo cells and
-  closures keep their old bindings, as they do under prompt redefinition.
+- Reloading changed native sidecars while retaining native heap values needs
+  an explicit worker-generation or migration contract; current reload keeps
+  the worker and rejects incompatible changes. Reclaiming unreachable historical
+  generations is also deferred; current sessions retain them until exit.
 - Decide whether the prompt should be able to see a module's private
   top-level scope, the way GHCi's `:load` puts the prompt inside a module.
   `import` shows only the public interface, which is consistent with every
   other module; debugging a private helper currently means exposing it.
-- Reconcile values, custom types, constructors, and effects by generation so
-  unchanged declarations retain identity while changed generative declarations
-  cannot be confused with old values or closures.
-- Decide dependency invalidation and whether removed declarations remain
-  addressable by existing closures only.
 - Extend interruption coverage if CPU loops gain automatic checkpoints;
   current [cancellation](../stdlib/Async.fango) requires an
   explicit checkpoint in such loops.
-- Add transcript coverage for reload, cross-generation errors, handler
-  interaction, and recovery after failures.
-- Guard an `import` that starts or rebuilds the native worker while a handler
-  level is parked in it: the parked exchange holds the executor's lock, so
-  retiring the worker from the session goroutine cannot proceed, and ending
-  the levels would discard their binders and the values effectful
-  declarations sealed in that worker. Either refuse the import until the
-  levels end or end them first and say so.
 - Decide whether leaving many [handler levels](reference/repl.md#handler-levels)
   needs something faster than one Ctrl-D or `:end` per level, once levels have
   seen use. `:type` does not yet show which of an expression's effects the

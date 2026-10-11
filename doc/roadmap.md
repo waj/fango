@@ -163,8 +163,9 @@ staging and deriving are already [reference contracts](reference/metaprogramming
 
 ## REPL hardening
 
-[Tooling](roadmap-tooling.md#repl-hardening) owns grouped equations, transactional
-reload, declaration generations, private-scope access, and history.
+[Transactional reload](design/repl.md#transactional-reload) is implemented.
+[Tooling](roadmap-tooling.md#repl-hardening) owns grouped equations, native-worker
+reload, generation reclamation, private-scope access, and history.
 
 ## Stack traces
 

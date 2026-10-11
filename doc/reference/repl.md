@@ -54,6 +54,66 @@ modules fails to load, check, or expose a requested name (`UNKNOWN IMPORT`),
 the session keeps neither the modules nor the names, and the same import can
 be retried after the file is fixed.
 
+An import that would start or replace the native worker is rejected while a
+handler level is active. End the levels with `:end`, then repeat the import.
+
+## Reloading modules
+
+`:reload` re-reads imported local modules and their dependencies from the
+session's source root. It discovers new dependencies and removes dependencies
+that are no longer reachable. Bundled source stays fixed for the session.
+Reload prepares the complete new module environment before installing it:
+syntax, resolution, type, staging, and compatibility errors leave the previous
+session available. Ctrl-C cancels preparation at a stage boundary, also leaving
+the session unchanged. Successfully checked cache artifacts can survive a
+failed reload and be reused on retry.
+
+New expressions use the updated modules. Prompt declarations keep their
+earlier module bindings, including private helpers and concrete dictionaries;
+memoized values stay memoized and effectful declarations never run again.
+Redefine a prompt declaration to use the new code. For example, after changing
+`Maths.adjust` in its source file:
+
+```text
+> f x = Maths.adjust x
+> :reload
+reloaded Maths
+retained earlier module bindings: f
+```
+
+`Maths.adjust 10` now calls the updated function; `f 10` keeps its earlier
+implementation. Ordinary polymorphic parameters still receive evidence at
+their call site. Reload lists affected retained prompt definitions so this
+difference is visible. Retained generations remain in memory until the
+session exits.
+
+Unchanged type, effect, and class contracts keep their nominal identities.
+Changing a declaration's contract creates a new identity; existing values
+cannot be passed to functions expecting the new type. Retained type/effect
+names are annotated with `before reload` when their identities change, and
+retired class names carry a generation suffix. An unrelated function-body edit
+does not change a type's identity. Prompt-owned declarations retain theirs.
+
+Import aliases and cumulative exposing lists survive reload. A removed public
+name is removed from saved explicit exposing selections and reported as
+`removed imported names: M.name`; existing definitions can still retain it.
+Wildcard selections follow the new interface. Other import errors, including
+collisions with prompt declarations, reject the reload. Fixities are rebuilt
+from current modules and accepted prompt fixity declarations; earlier prompt
+definitions keep their original grouping.
+
+End every `use` handler level with `:end` before reloading; otherwise the command
+reports `RELOAD WITH ACTIVE HANDLERS`. Reload keeps the native worker and its
+heap. Changed or additional sidecars, or incompatible native interfaces, report
+`RELOAD REQUIRES RESTART`; restart the REPL to adopt those changes. Sidecars
+still needed by retained code stay in the worker when their module leaves the
+current graph.
+
+Success prints `reloaded M, N` for changed, added, or removed local modules,
+followed by any removed-name and retained-binding reports. Unchanged inputs
+print `nothing to reload`. Failure prints diagnostics and
+`reload failed; session unchanged`. `:reload` accepts no arguments.
+
 ## Declarations and redefinition
 
 An effect header opens continuation input so indented operations can follow.
@@ -120,6 +180,7 @@ Supported commands are:
 
 ```text
 :type <expr>   show a type without evaluating
+:reload        refresh imported local modules atomically
 :uses          list the installed handler levels
 :end           end the innermost handler level (Ctrl-D also does)
 :help          show command help
@@ -134,9 +195,6 @@ installed. A blocked console `readLine` is interrupted without assigning the
 next line to the old expression. Native operations and task CPU loops that do
 not cooperate can delay the prompt; source task cancellation does not insert
 compiler polling into those loops.
-
-`:reload` is not implemented; a module edited on disk after it was imported is
-not re-read in the same session.
 
 ## Handler levels
 

@@ -12,6 +12,7 @@ I don't know a value named `y`.
    ^
 > commands:
   :type <expr>   show an expression's type without evaluating
+  :reload        refresh imported local modules atomically
   :uses          list the handler levels installed with `use`
   :end           end the innermost handler level (also Ctrl-D)
   :help          this message

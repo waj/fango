@@ -135,6 +135,13 @@ func Demangle(goFunction string) (Symbol, bool) {
 // else is unchanged. The interpreter names its frames with it, so both
 // backends print one spelling.
 func SymbolName(canonical string) string {
+	// REPL module versions have private execution names; traces retain the
+	// source spelling, just as generated worker suffixes do.
+	if at := strings.LastIndex(canonical, "$repl"); at >= 0 {
+		if _, err := strconv.ParseUint(canonical[at+5:], 10, 64); err == nil {
+			canonical = canonical[:at]
+		}
+	}
 	return unlinkSymbol(LinkName(canonical))
 }
 

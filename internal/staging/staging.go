@@ -10,6 +10,7 @@ import (
 
 	"context"
 	"fmt"
+	"maps"
 	"runtime"
 	"sort"
 	"strings"
@@ -236,6 +237,34 @@ func (s *Session) Snapshot() (SnapshotObject, []diag.Error) {
 		groups[i].End -= beforeDefs
 	}
 	return SnapshotObject{Defs: append([]core.Def(nil), s.ev.defs[beforeDefs:]...), Groups: groups}, nil
+}
+
+// Freeze completes the current declarative environment for a REPL reload.
+// Runtime values are never evaluated or copied by this operation.
+func (s *Session) Freeze() (SnapshotObject, []diag.Error) {
+	if err := s.Force(); err != nil {
+		return SnapshotObject{}, []diag.Error{{Title: "INTERNAL COMPILER ERROR", Body: err.Error()}}
+	}
+	if errs := s.ev.sync(); len(errs) != 0 {
+		return SnapshotObject{}, errs
+	}
+	return SnapshotObject{Defs: append([]core.Def(nil), s.ev.defs...), Groups: append([]Group(nil), s.ev.groups...)}, nil
+}
+
+// Checkpoint protects installed and deferred module Core during a prompt
+// import. Rebuilding the evaluator is safe: stage evaluation is pure, and
+// runtime prompt values never enter this environment.
+func (s *Session) Checkpoint() func() {
+	saved := *s.ev
+	saved.stageDependencies = maps.Clone(saved.stageDependencies)
+	saved.baseIntrinsics = maps.Clone(saved.baseIntrinsics)
+	saved.installedIntrinsics = maps.Clone(saved.installedIntrinsics)
+	return func() {
+		*s.ev = saved
+		s.ev.env = eval.NewEnv()
+		s.ev.env.Templates = s.ev.ck.Templates
+		s.ev.env.DefineProg(&core.Prog{ADTs: s.ev.ck.ADTOrder, Defs: s.ev.defs, Natives: s.ev.ck.Natives})
+	}
 }
 
 // InstallCore installs validated cached stage Core without replaying DeclInfo

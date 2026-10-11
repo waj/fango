@@ -93,6 +93,36 @@ func (i *Installer) Objects() []*ModuleObject     { return i.objects }
 func (i *Installer) States() []*infer.ModuleState { return i.states }
 func (i *Installer) Infos() []infer.DeclInfo      { return i.infos }
 
+// Checkpoint restores the installed view after a rejected import group.
+// Install has joined all background work before returning; immutable disk
+// artifacts remain valid and are deliberately not rolled back.
+func (i *Installer) Checkpoint() func() {
+	summaries, summarized, sources := maps.Clone(i.summaries), maps.Clone(i.summarized), maps.Clone(i.sources)
+	installed, states, objects, infos := i.installed, i.states, i.objects, i.infos
+	return func() {
+		i.summaries, i.summarized, i.sources = summaries, summarized, sources
+		i.installed, i.states, i.objects, i.infos = installed, states, objects, infos
+	}
+}
+
+// Adopt seeds a fresh session installer with already validated objects after
+// a REPL has reconciled their nominal identities. Artifacts keep their source
+// names and fingerprints; runtime generation names belong only to the REPL.
+func (i *Installer) Adopt(objects []*ModuleObject, units []modules.ResolvedModule) {
+	for _, unit := range units {
+		if unit.Source != nil {
+			i.sources[unit.Source.Name] = unit.Source
+		}
+	}
+	for _, object := range objects {
+		i.objects = append(i.objects, object)
+		i.states = append(i.states, object.State)
+		i.installed = append(i.installed, object.Runtime...)
+		i.summaries[object.State.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint, Unfolding: object.Unfolding}
+		i.summarized[object.State.Name] = true
+	}
+}
+
 // Install takes in one dependency-ordered group of modules under the given
 // effective fixity table. It returns the definitions the group added; the
 // caller publishes them to any runtime of its own only after it accepts the
