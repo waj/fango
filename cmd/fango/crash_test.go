@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -155,6 +156,59 @@ func runCrashing(t *testing.T, binary string, env []string) (stdout, stderr stri
 		t.Fatal(err)
 	}
 	return out.String(), errOut.String(), status
+}
+
+func TestAdvancingClockRangeFaults(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiled backend")
+	}
+	t.Parallel()
+	for _, tc := range []struct {
+		name, start, step string
+	}{
+		{"upper", "9999-12-30T23:59:59.999999999Z", "Duration.nanoseconds 1"},
+		{"lower", "0001-01-02T00:00:00Z", "Duration.nanoseconds (-1)"},
+		{"huge positive", "2026-01-01T00:00:00Z", "Duration.seconds 9223372036854775807"},
+		{"huge negative", "2026-01-01T00:00:00Z", "Duration.seconds (-9223372036854775807 - 1)"},
+		{"offset", "9999-12-30T23:59:59.999999999Z", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			action := fmt.Sprintf(`Clock.runStepped start (%s) {
+            Console.write (DT.toIso Clock.now())
+            DT.toIso Clock.now()
+        }`, tc.step)
+			wantOut, runner := tc.start, "Clock.runStepped"
+			if tc.step == "" {
+				action = `Clock.runOffset start {
+            Async.runOutcome { Async.sleep 1; DT.toIso Clock.now() }
+        }`
+				wantOut, runner = "", "Clock.runOffset"
+			}
+			source := fmt.Sprintf(`module Main exposing (main)
+import Async
+import Console
+import Fail
+import Time.Clock as Clock
+import Time.DateTime as DT
+import Time.Duration as Duration
+
+main() =
+    result = Fail.attempt {
+        start = DT.parse %q
+        %s
+    }
+    Console.write (show result)
+`, tc.start, action)
+			path := filepath.Join(t.TempDir(), "Main.fango")
+			if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, status := runCrashing(t, cliCompiledBinary(t, path), nil)
+			if status != 2 || stdout != wantOut || !strings.Contains(stderr, runner+" reading outside supported instant range") {
+				t.Fatalf("exit %d, stdout %q, stderr:\n%s", status, stdout, stderr)
+			}
+		})
+	}
 }
 
 // Trace.capture sees the same frames a crash report prints, starting at its

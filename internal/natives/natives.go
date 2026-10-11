@@ -190,7 +190,7 @@ var Table = func() map[string]Spec {
 		if name == "IO.lineText" || name == "IO.lineEnding" || name == "IO.standardHandle" {
 			ambient = false
 		}
-		timeIO := name == "Time.Zone.zoneLoadRaw" || name == "Time.Zone.zoneSystem" || name == "Time.Clock.clockRead"
+		timeIO := name == "Time.Zone.zoneLoadRaw" || name == "Time.Zone.zoneSystem" || name == "Time.Clock.clockRead" || name == "Time.Clock.clockElapsedRead"
 		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !timeIO && !file && !network && !ambient
 		t[name] = spec
 	}

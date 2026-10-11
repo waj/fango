@@ -1,8 +1,10 @@
 -- Scoped access to the current moment and a default zone. Install runSystem
--- or runSystemIn explicitly in production or runFixed in tests; withZone
--- changes only the default zone of an enclosing clock. Existing values never consult this
--- effect for arithmetic. Handlers nest and are inherited by tasks like other
--- effects, and none of them can fail.
+-- or runSystemIn explicitly in production. Tests can freeze time with
+-- runFixed, advance each reading with runStepped, or let real time pass from
+-- a chosen moment with runOffset. withZone changes only the default zone of
+-- an enclosing clock. Existing values never consult this effect for arithmetic.
+-- Handlers nest and are inherited by tasks like other effects. None carries
+-- Fail; an advancing clock outside the supported instants is a runtime fault.
 --
 -- ```fango
 -- import Time.Clock as Clock
@@ -18,11 +20,15 @@
 --     }
 -- result == Ok ("2026-01-31", "2026-02-01")
 -- ```
-module Time.Clock exposing (Clock(..), now, nowIn, runFixed, runSystem, runSystemIn, today, todayIn, withZone)
+module Time.Clock exposing (Clock(..), now, nowIn, runFixed, runOffset, runStepped, runSystem, runSystemIn, today, todayIn, withZone)
 
+import Fail
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
 import Runtime.Native
 import Time.Date as Date
 import Time.DateTime as DateTime
+import Time.Duration as Duration
 import Time.Instant as Instant
 import Time.Internal as Checked
 import Time.Zone as Zone
@@ -41,6 +47,20 @@ clockSeconds : Sample -> Int
 clockSeconds = native
 clockNanos : Sample -> Int
 clockNanos = native
+
+type Elapsed = Elapsed Runtime.Native.Any
+clockElapsedRead : Sample ->{IO} Elapsed
+clockElapsedRead = native
+clockElapsedSeconds : Elapsed -> Int
+clockElapsedSeconds = native
+clockElapsedNanos : Elapsed -> Int
+clockElapsedNanos = native
+clockRangeFault : String -> Int
+clockRangeFault = native
+
+advance runner duration value = case Fail.attempt { Instant.add duration value } of
+    Ok next -> next
+    Err _ -> Checked.Instant (clockRangeFault runner) 0
 
 -- The current moment in the default zone.
 now : () ->{Clock} DateTime.DateTime
@@ -65,6 +85,74 @@ runFixed value action =
     handle action() on
         instant () -> resume (DateTime.toInstant value)
         zone () -> resume (DateTime.zone value)
+
+-- Starts at value and advances by real elapsed time measured monotonically
+-- from runner entry, performing IO. The first reading may already be later
+-- than value. System wall-clock adjustments do not change the progression.
+-- Readings use value's zone; leaving the supported instant range is a runtime
+-- fault. Tasks inherit the same elapsed-time origin.
+--
+-- ```fango
+-- import Time.Clock as Clock
+-- import Time.DateTime as DT
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- result = Fail.attempt {
+--     start = DT.parse "2000-01-01T00:00:00Z"
+--     Clock.runOffset start { Clock.now() >= start }
+--     }
+-- result == Ok True
+-- ```
+runOffset : DateTime.DateTime -> (() ->{Clock | e} a) ->{IO | e} a
+runOffset value action =
+    anchor = clockRead()
+    initial = DateTime.toInstant value
+    handle action() on
+        instant () ->
+            elapsed = clockElapsedRead anchor
+            duration = Duration.fromParts (clockElapsedSeconds elapsed) (clockElapsedNanos elapsed)
+            resume (advance "Clock.runOffset" duration initial)
+        zone () -> resume (DateTime.zone value)
+
+-- Answers the first instant reading with value, then advances each subsequent
+-- reading by step, without IO. step is an exact signed duration: zero freezes
+-- time and a negative step moves backwards. now, nowIn, today, and todayIn
+-- each consume one reading; zone queries consume none. Readings use value's
+-- zone. A requested instant outside the supported range is a runtime fault;
+-- the last valid reading still succeeds.
+--
+-- Nested runners have independent sequences. Tasks inherit shared handler
+-- state: sequential reads advance exactly, but simultaneous reads may repeat
+-- values. Deterministic results require an ordered sequence of reads.
+--
+-- ```fango
+-- import Time.Clock as Clock
+-- import Time.DateTime as DT
+-- import Time.Duration as Duration
+-- import Fail
+-- import Result exposing (Result(..))
+--
+-- result = Fail.attempt {
+--     start = DT.parse "2026-01-31T23:59:59Z"
+--     Clock.runStepped start (Duration.seconds 1) {
+--         first = Clock.now()
+--         second = Clock.now()
+--         (DT.toIso first, DT.toIso second)
+--         }
+--     }
+-- result == Ok ("2026-01-31T23:59:59Z", "2026-02-01T00:00:00Z")
+-- ```
+runStepped : DateTime.DateTime -> Duration.Duration -> (() ->{Clock | e} a) ->{e} a
+runStepped value step action =
+    initial = DateTime.toInstant value
+    handle action() with previous = Nothing on
+        instant () ->
+            reading = case previous of
+                Nothing -> initial
+                Just last -> advance "Clock.runStepped" step last
+            resume reading with Just reading
+        zone () -> resume (DateTime.zone value) with previous
 
 -- Samples the system clock once per reading, with the machine's zone (see
 -- Time.Zone.system) as the default, detected when the handler is installed.

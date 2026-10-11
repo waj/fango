@@ -93,7 +93,7 @@ for otherwise unavailable semantics or measured performance needs.
 - [Time](../stdlib/Time.fango) provides Gregorian dates, instants, zoned
   moments, exact durations, calendar periods, and scoped clocks. Recurrence, holiday calendars,
   localized formatting, custom-pattern parsing, automatic JSON codecs, and
-  monotonic timing remain deferred until concrete consumers need them.
+  public monotonic timing APIs remain deferred until concrete consumers need them.
 
 ## HTTP and a concurrent server
 

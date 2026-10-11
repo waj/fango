@@ -81,15 +81,40 @@ Clock has two operations: the current instant and a default zone. `now` and
 `today` combine them; `nowIn` and `todayIn` take a zone explicitly, and
 `withZone` re-handles only the default zone while readings keep coming from the
 enclosing handler. Clock has no default handler; `runSystem` detects the
-machine's zone when installed and `runSystemIn` takes the default explicitly. The fixed handler is ordinary
-Fango and answers both operations from one DateTime. The system handler
-samples Go's clock once per reading into an opaque immutable sample and
+machine's zone when installed and `runSystemIn` takes the default explicitly.
+The fixed handler is ordinary Fango and answers both operations from one
+DateTime. The system handler samples Go's clock once per reading into an
+opaque immutable sample and
 extracts its two scalar fields; a host clock outside the supported instants
 is a runtime fault in the sidecar, so no handler carries a `Fail` row and a
 system clock inherits across task boundaries like any other handler. The
-reading has wall-clock semantics; it is not a monotonic elapsed-time measurement.
+system reading has wall-clock semantics; it is not a monotonic elapsed-time
+measurement.
 
-System clock reads and zone loading are excluded from compile-time evaluation.
+`runOffset` stores the starting DateTime and one native clock sample captured
+at runner entry. Each instant read adds the monotonic elapsed duration since
+that sample to the starting instant, so wall-clock adjustments do not change
+progression. Elapsed samples are immutable and expose floor seconds and a
+nonnegative nanosecond fraction; the calendar arithmetic remains in Fango.
+The starting zone is the default, and tasks inherit the same origin.
+
+`runStepped` uses ordinary Fango handler state to retain the last returned
+instant. The first read returns the starting instant; later reads add the
+signed Duration. Only instant reads advance it, so zone queries and `withZone`
+do not consume extra steps. Nested runners have independent state. Tasks share
+the inherited cell with the existing snapshot/commit synchronization, which
+does not make a whole read-and-advance atomic: concurrent reads may repeat
+values, while sequential reads have deterministic progression without IO.
+
+Both advancing runners use checked instant addition and handle its `Fail`
+locally, translating an out-of-range reading to a private native runtime fault.
+Their clauses therefore have no dependency on an outer abort handler and can
+be inherited by tasks. Stepped advancement is computed only when the next
+instant is requested, so the final valid reading succeeds even when its next
+step would leave the range.
+
+System and elapsed clock reads and zone loading are excluded from compile-time
+evaluation.
 Deterministic scalar access and timezone calculations have native registry
 adapters for the compiler's evaluator. Ordinary execution uses the same
 sidecars under the interpreter worker and generated Go.

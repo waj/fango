@@ -21,4 +21,8 @@ func installTime(t map[string]Spec) {
 	t["Time.Clock.clockRead"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) { return timenative.ClockRead(), nil }}
 	t["Time.Clock.clockSeconds"] = Spec{Arity: 1, Eval: func(_ *Runtime, a []any) (any, error) { return timenative.ClockSeconds(a[0]), nil }}
 	t["Time.Clock.clockNanos"] = Spec{Arity: 1, Eval: func(_ *Runtime, a []any) (any, error) { return timenative.ClockNanos(a[0]), nil }}
+	t["Time.Clock.clockElapsedRead"] = Spec{Arity: 1, Eval: func(_ *Runtime, a []any) (any, error) { return timenative.ClockElapsedRead(a[0]), nil }}
+	t["Time.Clock.clockElapsedSeconds"] = Spec{Arity: 1, Eval: func(_ *Runtime, a []any) (any, error) { return timenative.ClockElapsedSeconds(a[0]), nil }}
+	t["Time.Clock.clockElapsedNanos"] = Spec{Arity: 1, Eval: func(_ *Runtime, a []any) (any, error) { return timenative.ClockElapsedNanos(a[0]), nil }}
+	t["Time.Clock.clockRangeFault"] = Spec{Arity: 1, Eval: func(_ *Runtime, a []any) (any, error) { return timenative.ClockRangeFault(a[0].(string)), nil }}
 }

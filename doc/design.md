@@ -53,7 +53,7 @@ handler inheritance, goroutine scopes, and library traversal.
 [Text over byte streams](design/text-io.md) — encoding adapters, character boundaries,
 atomic reads, and text writer lifetimes.
 [Dates and clocks](design/time.md) — checked calendar values, timezone resolution,
-and scoped system/fixed clocks.
+and scoped system, fixed, stepped, and offset clocks.
 [HTTP over streams](design/http.md) — framing, connection ownership, and middleware composition.
 [JSON](design/json.md) — pull tokens, generated codecs, and streaming memory bounds.
 

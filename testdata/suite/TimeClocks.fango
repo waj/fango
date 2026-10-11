@@ -1,0 +1,159 @@
+module TimeClocks exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail exposing (Fail)
+import IO
+import Meta
+import Result exposing (Result(..))
+import Test
+import Time exposing (Error(..))
+import Time.Clock as Clock
+import Time.Date as Date
+import Time.DateTime as DT
+import Time.Duration as Duration
+import Time.Zone as Zone
+
+check : String -> Bool ->{Fail Error} ()
+check label passed = if passed then () else Fail.fail (InvalidComponent label)
+
+sequenceChecks() = Fail.attempt {
+    start = DT.parse "2026-01-31T23:59:59.5Z"
+    forward = Clock.runStepped start (Duration.milliseconds 750) {
+        first = Clock.now()
+        second = Clock.now()
+        third = Clock.now()
+        (DT.toIso first, DT.toIso second, DT.toIso third)
+    }
+    check "fractional forward" (forward == ("2026-01-31T23:59:59.5Z", "2026-02-01T00:00:00.25Z", "2026-02-01T00:00:01Z"))
+    backwards = Clock.runStepped start (Duration.milliseconds (-750)) {
+        first = Clock.now()
+        second = Clock.now()
+        third = Clock.now()
+        (first, DT.toIso second, DT.toIso third)
+    }
+    check "fractional backward" (backwards == (start, "2026-01-31T23:59:58.75Z", "2026-01-31T23:59:58Z"))
+    frozen = Clock.runStepped start Duration.zero { first = Clock.now(); (first, Clock.now()) }
+    check "zero step" (frozen == Clock.runFixed start { (Clock.now(), Clock.now()) })
+    True
+}
+
+zoneChecks() = Fail.attempt {
+    start = DT.parse "2026-01-31T23:59:59Z"
+    other = Zone.fixedOffset (-3600)
+    observations = Clock.runStepped start (Duration.seconds 1) {
+        _ = Clock.zone()
+        _ = Clock.zone()
+        first = Clock.now()
+        second = Clock.nowIn other
+        third = Clock.today()
+        fourth = Clock.todayIn other
+        fifth = Clock.withZone other { Clock.now() }
+        sixth = Clock.now()
+        ((first, DT.toIso second, third), (fourth, DT.toIso fifth, DT.toIso sixth))
+    }
+    check "mixed helpers and zone restoration" (observations == ((start, "2026-01-31T23:00:00-01:00", Date.make 2026 2 1), (Date.make 2026 1 31, "2026-01-31T23:00:03-01:00", "2026-02-01T00:00:04Z")))
+    nested = Clock.runStepped start (Duration.seconds 1) {
+        first = Clock.now()
+        inner = Clock.runStepped start (Duration.seconds (-1)) { a = Clock.now(); (a, Clock.now()) }
+        fixed = Clock.runFixed start { Clock.now() }
+        (first, inner, (fixed, Clock.now()))
+    }
+    check "independent nested sequences" (nested == (start, (start, DT.add (Duration.seconds (-1)) start), (start, DT.add (Duration.seconds 1) start)))
+    spring = case Zone.load "America/New_York" of
+        Just zone -> DT.inZone zone (DT.parse "2024-03-10T06:59:59Z")
+        Nothing -> Fail.fail (InvalidComponent "America/New_York")
+    transition = Clock.runStepped spring (Duration.seconds 1) { first = Clock.now(); (DT.toIso first, DT.toIso Clock.now()) }
+    check "elapsed step across daylight saving" (transition == ("2024-03-10T01:59:59-05:00", "2024-03-10T03:00:00-04:00"))
+    True
+}
+
+boundaryChecks() = Fail.attempt {
+    low = DT.parse "0001-01-02T00:00:00Z"
+    high = DT.parse "9999-12-30T23:59:59.999999999Z"
+    check "first read at upper boundary" (Clock.runStepped high (Duration.seconds 9223372036854775807) { Clock.now() } == high)
+    check "first read at lower boundary" (Clock.runStepped low (Duration.seconds (-9223372036854775807 - 1)) { Clock.now() } == low)
+    belowHigh = DT.add (Duration.nanoseconds (-1)) high
+    atHigh = Clock.runStepped belowHigh (Duration.nanoseconds 1) { first = Clock.now(); (first, Clock.now()) }
+    check "last valid upper read" (atHigh == (belowHigh, high))
+    aboveLow = DT.add (Duration.nanoseconds 1) low
+    atLow = Clock.runStepped aboveLow (Duration.nanoseconds (-1)) { first = Clock.now(); (first, Clock.now()) }
+    check "last valid lower read" (atLow == (aboveLow, low))
+    True
+}
+
+steppedTasks : DT.DateTime ->{IO.IO} Outcome (DT.DateTime, DT.DateTime, DT.DateTime)
+steppedTasks start = Clock.runStepped start (Duration.seconds 1) {
+    Async.runOutcome {
+        first = Clock.now()
+        task = Async.spawn { Clock.now() }
+        second = Async.await task
+        (first, second, Clock.now())
+    }
+}
+
+offsetTasks : DT.DateTime ->{IO.IO} Outcome Bool
+offsetTasks start = Clock.runOffset start {
+    Async.runOutcome {
+        Async.sleep 20
+        task = Async.spawn { Clock.now() }
+        child = Async.await task
+        DT.between start child >= Duration.milliseconds 20
+    }
+}
+
+taskChecks() = Fail.attempt {
+    start = DT.parse "2000-01-01T00:00:00-03:00"
+    check "inherited shared step" (steppedTasks start == Completed (start, DT.add (Duration.seconds 1) start, DT.add (Duration.seconds 2) start))
+    check "inherited elapsed origin" (offsetTasks start == Completed True)
+    True
+}
+
+offsetChecks() = Fail.attempt {
+    start = DT.parse "2000-01-01T00:00:00-03:00"
+    finish = DT.parse "2100-01-01T00:00:00+05:00"
+    future = Clock.runOffset finish { Clock.now() }
+    check "future origin and zone" (future >= finish && DT.zone future == DT.zone finish)
+    elapsed = Clock.runOffset start {
+        Async.runOutcome {
+            Async.sleep 20
+            first = Clock.now()
+            Async.sleep 20
+            second = Clock.nowIn Zone.utc
+            changed = Clock.withZone Zone.utc { Clock.now() }
+            nested = Clock.runOffset finish { Clock.now() }
+            restored = Clock.now()
+            (first, second, (changed, nested, restored))
+        }
+    }
+    case elapsed of
+        Completed (first, second, (changed, nested, restored)) ->
+            check "entry origin" (DT.between start first >= Duration.milliseconds 20)
+            check "real progression" (DT.between first second >= Duration.milliseconds 20)
+            check "zone conversion and restoration" (DT.zone first == DT.zone start && DT.zone second == Zone.utc && DT.zone changed == Zone.utc && DT.zone restored == DT.zone start)
+            check "nested elapsed origins" (nested >= finish && restored >= changed && restored < finish)
+        Cancelled -> Fail.fail (InvalidComponent "unexpected cancellation")
+    True
+}
+
+stagedSeconds = case Fail.attempt {
+    start = DT.parse "2026-01-01T00:00:00Z"
+    Clock.runStepped start (Duration.seconds 2) {
+        first = Clock.now()
+        Duration.toSeconds (DT.between first Clock.now())
+    }
+} of
+    Ok seconds -> seconds
+    Err _ -> -1
+
+tests : Test.Test IO.IO
+tests = Test.describe "Clock runners"
+    [ Test.test "stepped sequence" { Expect.equal (Ok True) sequenceChecks() }
+    , Test.test "stepped zones and nesting" { Expect.equal (Ok True) zoneChecks() }
+    , Test.test "stepped boundaries" { Expect.equal (Ok True) boundaryChecks() }
+    , Test.test "task inheritance" { Expect.equal (Ok True) taskChecks() }
+    , Test.test "real-time offset" { Expect.equal (Ok True) offsetChecks() }
+    , Test.test "stepped compile-time evaluation" { Expect.equal 2 $(Meta.lift stagedSeconds) }
+    ]
+
+main() = Test.run tests
