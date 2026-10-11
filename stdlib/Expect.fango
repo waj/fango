@@ -24,8 +24,11 @@ module Expect exposing
     )
 
 import Basics exposing (..)
+import List exposing (List)
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
+import String
+import Trace
 
 -- A failed expectation. A body that performs it is a test, and `Test.run`
 -- or a handler of the caller's own decides what a failure means.
@@ -40,8 +43,19 @@ type Error =
       -- The failure text. It may span several lines, separated by `\n` and
       -- without a trailing newline; a report indents each.
       message : String
+      -- Where the expectation was made: the innermost frame of the call
+      -- stack outside this module, so a test body sees its own line and a
+      -- helper defined elsewhere sees the line inside the helper.
+    , location : Maybe Trace.Frame
     }
     deriving (Eq, Show)
+
+-- The frame that made the failing expectation.
+located : () -> Maybe Trace.Frame
+located () =
+    case List.filter { frame -> String.startsWith "Expect." frame.function == False } (Trace.capture ()) of
+        [ frame | _ ] -> Just frame
+        [] -> Nothing
 
 -- Text for a value in a failure message.
 --
@@ -69,7 +83,7 @@ instance Show a => Inspect a
 -- Fails with a message that names what was expected and what was found.
 mismatch : String -> String ->{Expect} value
 mismatch expected actual =
-    fail (Error { message = "Expected: " ++ expected ++ "\nActual:   " ++ actual })
+    fail (Error { message = "Expected: " ++ expected ++ "\nActual:   " ++ actual, location = located () })
 
 -- Fails unless `actual` equals `expected`.
 --
@@ -183,7 +197,7 @@ nothing maybe =
 
 -- Fails with the message as it is.
 failWith : String ->{Expect} value
-failWith message = fail (Error { message = message })
+failWith message = fail (Error { message = message, location = located () })
 
 -- Runs the body, adding a line of context above the message of any failure
 -- it raises. As a block item, `use Expect.onFail "after parsing"` applies to
@@ -205,4 +219,4 @@ failWith message = fail (Error { message = message })
 onFail : String -> (() ->{Expect | e} value) ->{Expect | e} value
 onFail context body =
     handle body() on
-        fail error -> fail (Error { message = context ++ "\n" ++ error.message })
+        fail error -> fail { error | message = context ++ "\n" ++ error.message }

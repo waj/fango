@@ -77,6 +77,13 @@ func (s Symbol) String() string {
 
 const modulePackagePrefix = "fangobuild/modules/"
 
+// entryModule is the Fango module of the entry program, whose Go package is
+// `main` and so cannot name it; generated main sets it before running.
+var entryModule string
+
+// SetEntryModule records the entry program's module name for Demangle.
+func SetEntryModule(name string) { entryModule = name }
+
 // Demangle recovers the Fango symbol behind a Go function name as the
 // runtime reports it, such as `fangobuild/modules/Main.V_Main_dot_divide` or
 // `main.V_main.func1`. Functions outside generated Fango packages, and the
@@ -97,6 +104,7 @@ func Demangle(goFunction string) (Symbol, bool) {
 	var module string
 	switch {
 	case pkgPath == "main":
+		module = entryModule
 	case strings.HasPrefix(pkgPath, modulePackagePrefix):
 		module = strings.ReplaceAll(strings.TrimPrefix(pkgPath, modulePackagePrefix), "/", ".")
 	default:

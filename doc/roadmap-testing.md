@@ -3,30 +3,11 @@
 [Expect](../stdlib/Expect.fango) and [Test](../stdlib/Test.fango) are
 implemented: the modules document their API and report, and the
 [design](design/testing.md) records why expectations abort, why the tree is
-row-indexed, and how `Inspect` renders operands. This document owns what
-remains: failure source positions, a `fango test` command, and fuzz tests.
+row-indexed, how `Inspect` renders operands, and where failure positions come
+from. This document owns what remains: a `fango test` command and fuzz tests.
 IO-free execution and pluggable reporters are
 [implemented](design/testing.md#the-report). The main
 [roadmap](roadmap.md#test-framework) links here.
-
-## Failure source positions
-
-A failing expectation should name its `file:line`; the test name locates the
-case but not which of several expectations failed. The mechanism is the
-[stack trace](roadmap.md#stack-traces) facility: `Expect.Error` gains
-`location : Maybe Trace.Frame`, the failing helpers take the first captured
-frame whose module is not `Expect`, and the report prints `file:line` above
-the message. The report is standard output compared under both backends, so
-this waits for interpreter parity: compiled frames report the line of the
-outermost call on a Go line, the interpreter each call's own origin, which
-agree when the expectation call is the statement, the tail expression, or a
-lambda body.
-
-A compiler-solved call-site constraint after GHC's `HasCallStack` was designed
-and rejected: it would leak into signatures and interfaces, and the stack
-facility serves crashes and logging as well as tests. Helper authors who want
-a failure attributed to their caller may later get an explicit opt-in, as
-Go's `t.Helper()` is.
 
 ## Milestones
 
@@ -37,8 +18,9 @@ Go's `t.Helper()` is.
    `String` pad/split/trim fixture are `Test` suites. Call-order checks that
    printed from inside callbacks became `State` accumulators asserted with
    `Expect.equal`; no expectation beyond the first version was needed.
-3. **M3 — positions.** The trace-based location, the `Error` location, and
-   the report line, as above.
+3. **M3 — positions.** DONE: `Expect.Error` carries the failing frame from
+   the call stack and the report prints `file:line`; see the
+   [design](design/testing.md#failure-positions).
 
 ## Later
 

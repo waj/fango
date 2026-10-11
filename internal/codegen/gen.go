@@ -275,8 +275,12 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	// trace rather than Go's goroutine dump.
 	mainDecl := func(body ...goast.Stmt) goast.Decl {
 		g.usesFangort = true
-		recover := &goast.DeferStmt{Call: callExpr(selector("fangort", "RecoverMain")).(*goast.CallExpr)}
-		return funcDecl("main", append([]goast.Stmt{recover}, body...)...)
+		prologue := []goast.Stmt{&goast.DeferStmt{Call: callExpr(selector("fangort", "RecoverMain")).(*goast.CallExpr)}}
+		if unit.Name != "" {
+			// Package main cannot name the entry's module; traces learn it here.
+			prologue = append(prologue, exprStmt(callExpr(selector("fangort", "SetEntryModule"), stringLit(unit.Name))))
+		}
+		return funcDecl("main", append(prologue, body...)...)
 	}
 	switch {
 

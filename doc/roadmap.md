@@ -174,9 +174,6 @@ and [interpreter](design/repl.md#call-stack) designs and the
 [reference](reference/commands.md#runtime-failures) own the implemented
 contract. Remaining:
 
-- `Expect` failure positions from the first captured frame outside the
-  `Expect` module, printed as `file:line` above the message, once both
-  backends agree on lines; see the [testing roadmap](roadmap-testing.md#failure-source-positions).
 - Frames for one-line Go closures, which share their statement's line because
   the printer keeps short function literals on one line.
 
@@ -202,7 +199,7 @@ and [editor support](reference/commands.md#language-server-and-editor-support) a
 
 [Expect](../stdlib/Expect.fango) and [Test](../stdlib/Test.fango) are
 implemented; see the [design](design/testing.md). [Testing](roadmap-testing.md)
-owns call-site failure positions, a test command, and fuzzing.
+owns a test command and fuzzing.
 
 ## Tail calls beyond the self-call loop
 

@@ -1,5 +1,6 @@
 FAIL  failure
 
+    test_console.fango:8
     message
 
 TEST RUN FAILED

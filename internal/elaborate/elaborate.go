@@ -803,6 +803,10 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 			if x.Origin.File == nil {
 				x.Origin = e.Span()
 			}
+		case *core.Lambda:
+			// An eta-expanded partial application is a lambda whose body
+			// calls the worker; that call happened at the expression.
+			originateLambdaBody(x, e.Span())
 		}
 	}()
 	if desugared := el.ck.Desugared[e]; desugared != nil {
@@ -1469,4 +1473,26 @@ func (el *elab) apply(t types.Type) types.Type {
 		return t
 	}
 	return types.SubstRigid(t, el.bodySubst)
+}
+
+// originateLambdaBody gives the call at the end of a synthesized lambda
+// chain the position of the expression it was expanded from, leaving a call
+// that already has its own.
+func originateLambdaBody(lam *core.Lambda, sp source.Span) {
+	var body core.Expr = lam
+	for {
+		switch x := body.(type) {
+		case *core.Lambda:
+			body = x.Body
+		case *core.Let:
+			body = x.Body
+		case *core.App:
+			if x.Origin.File == nil {
+				x.Origin = sp
+			}
+			return
+		default:
+			return
+		}
+	}
 }

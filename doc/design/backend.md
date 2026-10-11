@@ -342,9 +342,11 @@ decodes lifted locals and instance methods, and collapses consecutive frames
 with one function and line, which hides the closures a single expression
 lowers to. Consequences the reference documents: a Fango-inlined helper and a
 self tail-call iteration have no frame, and a one-line Go closure shares its
-enclosing statement's line. Every generated `main` defers `RecoverMain`, and
-task goroutines defer the same recovery with the stack captured at spawn;
-`FANGO_TRACEBACK=go` leaves Go's own traceback in place.
+enclosing statement's line. Every generated `main` defers `RecoverMain` and,
+for an entry with a module header, registers the module's name, since
+package `main` cannot carry it and its initializer lambdas are named by
+module alone; task goroutines defer the same recovery with the stack
+captured at spawn. `FANGO_TRACEBACK=go` leaves Go's own traceback in place.
 
 ## Self tail-call loops
 

@@ -23,6 +23,7 @@ import Maybe exposing (Maybe(..))
 import Process
 import Result exposing (Result(..))
 import String
+import Trace
 
 -- Progress notifications from `execute`. There is no default handler;
 -- `console`, `silent`, or a custom handler chooses what to do with them.
@@ -132,8 +133,8 @@ render format state event =
         SilentFormat -> state
         ConsoleFormat ->
             case event of
-                GroupFailed path message -> printFailure path message
-                CaseFinished path (CaseFailed error) -> printFailure path error.message
+                GroupFailed path message -> printFailure path Nothing message
+                CaseFinished path (CaseFailed error) -> printFailure path error.location error.message
                 SuiteFinished summary -> printSummary summary
                 _ -> ()
             state
@@ -220,8 +221,8 @@ printNewGroups depth groups =
 printFailureEvent : Event ->{IO} ()
 printFailureEvent event =
     case event of
-        GroupFailed path message -> printFailure path message
-        CaseFinished path (CaseFailed error) -> printFailure path error.message
+        GroupFailed path message -> printFailure path Nothing message
+        CaseFinished path (CaseFailed error) -> printFailure path error.location error.message
         _ -> ()
 
 printSummary : Summary ->{IO} ()
@@ -237,11 +238,15 @@ printSummary summary =
     write ("Skipped: " ++ show summary.skipped ++ "\n")
     write ("Todo:    " ++ show summary.todo ++ "\n")
 
--- Prints one failure: the heading with the path, then the message's lines
--- indented, each part followed by a blank line.
-printFailure : List String -> String ->{IO} ()
-printFailure path message =
+-- Prints one failure: the heading with the path, then, indented, the
+-- expectation's `file:line` when it is known and the message's lines, each
+-- part followed by a blank line.
+printFailure : List String -> Maybe Trace.Frame -> String ->{IO} ()
+printFailure path location message =
     write ("FAIL  " ++ heading path ++ "\n\n")
+    case location of
+        Just frame -> write ("    " ++ frame.file ++ ":" ++ show frame.line ++ "\n")
+        Nothing -> ()
     List.each { line -> write (if line == "" then "\n" else "    " ++ line ++ "\n") } (String.split "\n" message)
     write "\n"
 
@@ -252,7 +257,9 @@ heading names =
         [] -> ""
         [name | rest] -> foldl { next acc -> acc ++ " > " ++ next } name rest
 
-type JsonCase = { path : List String, outcome : String, message : Maybe String }
+type JsonLocation = { file : String, line : Int }
+    deriving (Encode)
+type JsonCase = { path : List String, outcome : String, message : Maybe String, location : Maybe JsonLocation }
     deriving (Encode)
 type JsonGroupFailure = { path : List String, message : String }
     deriving (Encode)
@@ -284,14 +291,15 @@ usage = "Usage: tests [--format console|progress|documentation|silent] [--json P
 -- suites return normally. Unhandled effects and crashes propagate without
 -- writing a completed report.
 --
--- The JSON document has `schemaVersion: 1`, `cases`, `groupFailures`, and
+-- The JSON document has `schemaVersion: 2`, `cases`, `groupFailures`, and
 -- `summary`. Each case has a `path` array, `outcome` (`passed`, `failed`,
--- `skipped`, or `todo`), and `message` (failure text or null). Each group
--- failure has `path` and `message`. Both arrays retain execution order.
--- The summary has `passed`, `failed`, `skipped`, `todo`, and `verdict`
--- (`passed`, `failed`, or `incomplete`). No durations or source positions
--- are inferred from progress events. A JSON report can accompany any
--- console format, including `silent`.
+-- `skipped`, or `todo`), `message` (failure text or null), and `location`
+-- (an object with the failing expectation's `file` and `line`, or null).
+-- Each group failure has `path` and `message`. Both arrays retain execution
+-- order. The summary has `passed`, `failed`, `skipped`, `todo`, and
+-- `verdict` (`passed`, `failed`, or `incomplete`). No durations are
+-- inferred from progress events. A JSON report can accompany any console
+-- format, including `silent`.
 --
 -- ```sh
 -- fango run Tests.fango --format progress --json report.json
@@ -312,7 +320,7 @@ run action =
                     Just path ->
                         collected = withReport options.format action
                         document = JsonReport
-                            { schemaVersion = 1
+                            { schemaVersion = 2
                             , cases = collected.cases
                             , groupFailures = collected.groupFailures
                             , summary = jsonSummary collected.value
@@ -372,7 +380,13 @@ withReport format action =
                         message = case outcome of
                             CaseFailed error -> Just error.message
                             _ -> Nothing
-                        item = JsonCase { path = path, outcome = outcomeName outcome, message = message }
+                        location = case outcome of
+                            CaseFailed error ->
+                                case error.location of
+                                    Just frame -> Just (JsonLocation { file = frame.file, line = frame.line })
+                                    Nothing -> Nothing
+                            _ -> Nothing
+                        item = JsonCase { path = path, outcome = outcomeName outcome, message = message, location = location }
                         { state | output = output, cases = [item | state.cases] }
                     GroupFailed path message ->
                         item = JsonGroupFailure { path = path, message = message }

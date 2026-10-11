@@ -45,7 +45,7 @@ main() = Test.run suite
 	}
 	prog, executor := compileInterpreterProgram(t, path)
 	const usage = "Usage: tests [--format console|progress|documentation|silent] [--json PATH] [--help]\n"
-	const failures = "FAIL  suite > nested > fails \"é\"\n\n    line one\n    line \"two\"\n\nFAIL  suite > empty\n\n    The group has no tests.\n\n"
+	const failures = "FAIL  suite > nested > fails \"é\"\n\n    tests.fango:10\n    line one\n    line \"two\"\n\nFAIL  suite > empty\n\n    The group has no tests.\n\n"
 	const summary = "TEST RUN FAILED\n\nPassed:  1\nFailed:  2\nSkipped: 1\nTodo:    1\n"
 	const documentation = "suite\n  passes (passed)\n  nested\n    fails \"é\" (failed)\n    skip (skipped)\n    todo (todo)\n  empty\n\n"
 	cases := []struct {
@@ -100,7 +100,7 @@ main() = Test.run suite
 					if err != nil {
 						t.Fatal(err)
 					}
-					const wantJSON = `{"schemaVersion":1,"cases":[{"path":["suite","passes"],"outcome":"passed","message":null},{"path":["suite","nested","fails \"é\""],"outcome":"failed","message":"line one\nline \"two\""},{"path":["suite","nested","skip"],"outcome":"skipped","message":null},{"path":["suite","nested","todo"],"outcome":"todo","message":null}],"groupFailures":[{"path":["suite","empty"],"message":"The group has no tests."}],"summary":{"passed":1,"failed":2,"skipped":1,"todo":1,"verdict":"failed"}}`
+					const wantJSON = `{"schemaVersion":2,"cases":[{"path":["suite","passes"],"outcome":"passed","message":null,"location":null},{"path":["suite","nested","fails \"é\""],"outcome":"failed","message":"line one\nline \"two\"","location":{"file":"tests.fango","line":10}},{"path":["suite","nested","skip"],"outcome":"skipped","message":null,"location":null},{"path":["suite","nested","todo"],"outcome":"todo","message":null,"location":null}],"groupFailures":[{"path":["suite","empty"],"message":"The group has no tests."}],"summary":{"passed":1,"failed":2,"skipped":1,"todo":1,"verdict":"failed"}}`
 					var got, want any
 					if err := json.Unmarshal(data, &got); err != nil {
 						t.Fatal(err)
@@ -214,7 +214,7 @@ func TestReporterJSONVerdicts(t *testing.T) {
 					for _, item := range report.Cases {
 						outcomes = append(outcomes, item.Outcome)
 					}
-					if report.SchemaVersion != 1 || report.Summary.Verdict != tc.verdict || len(report.GroupFailures) != 0 || !reflect.DeepEqual(outcomes, tc.outcomes) {
+					if report.SchemaVersion != 2 || report.Summary.Verdict != tc.verdict || len(report.GroupFailures) != 0 || !reflect.DeepEqual(outcomes, tc.outcomes) {
 						t.Fatalf("report = %s; want verdict %s, outcomes %v", data, tc.verdict, tc.outcomes)
 					}
 				})

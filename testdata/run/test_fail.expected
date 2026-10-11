@@ -1,35 +1,42 @@
 FAIL  arithmetic > addition > is not subtraction
 
+    test_fail.fango:15
     Expected: 0
     Actual:   4
 
 FAIL  arithmetic > comparisons
 
+    test_fail.fango:19
     Expected: less than 3
     Actual:   4
 
 FAIL  arithmetic > not equal
 
+    test_fail.fango:20
     Expected: not "a"
     Actual:   "a"
 
 FAIL  arithmetic > at least
 
+    test_fail.fango:21
     Expected: at least 2
     Actual:   1
 
 FAIL  arithmetic > at most
 
+    test_fail.fango:22
     Expected: at most 2
     Actual:   3
 
 FAIL  arithmetic > greater than
 
+    test_fail.fango:23
     Expected: greater than 2
     Actual:   2
 
 FAIL  arithmetic > fail with
 
+    test_fail.fango:24
     one line
     and another
 

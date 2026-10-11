@@ -6,6 +6,7 @@ import List
 import Result exposing (Result(..))
 import State
 import Test exposing (Test, describe, only, skip, test, todo)
+import Trace
 
 -- Both helpers have closed pure result types: handling Reporter must not
 -- leave IO or Expect in their rows.
@@ -46,7 +47,7 @@ checks =
                 , Test.CaseStarted ["suite", "passes"]
                 , Test.CaseFinished ["suite", "passes"] Test.CasePassed
                 , Test.CaseStarted ["suite", "fails"]
-                , Test.CaseFinished ["suite", "fails"] (Test.CaseFailed (Expect.Error { message = "first" }))
+                , Test.CaseFinished ["suite", "fails"] (Test.CaseFailed (Expect.Error { message = "first", location = Just (Trace.Frame { function = "TestReporter.<lambda>", file = "TestReporter.fango", line = 34 }) }))
                 , Test.CaseFinished ["suite", "skipped", "never"] Test.CaseSkipped
                 , Test.CaseFinished ["suite", "skipped", "placeholder"] Test.CaseSkipped
                 , Test.CaseFinished ["suite", "later"] Test.CaseTodo

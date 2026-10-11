@@ -4,7 +4,7 @@ Architecture of the bundled [Expect](../../stdlib/Expect.fango),
 [Test](../../stdlib/Test.fango), and [Test.Reporter](../../stdlib/Test/Reporter.fango)
 modules. Their source comments document the API, report formats, JSON schema,
 and exit status; the [testing roadmap](../roadmap-testing.md)
-owns failure positions, a test command, and fuzzing.
+owns a test command and fuzzing.
 
 [Design index](../design.md).
 
@@ -40,6 +40,23 @@ the fixtures. `execute : Test e ->{Reporter | e} Summary` installs the
 The constructors are private, so fuzz cases or richer `only` semantics can
 be added without touching user code; a fuzz test is a case whose body loops
 under `Random.runSeeded`.
+
+## Failure positions
+
+`Expect.Error` carries the frame of the failing expectation: the innermost
+entry of the [call stack](repl.md#call-stack) outside the `Expect` module, so
+a test body reports its own line and a helper defined elsewhere reports the
+line inside the helper. Reading the stack keeps the expectations ordinary
+functions with no hidden argument, and both backends produce the same frame,
+since the compiled line is the outermost call on a Go line and the
+interpreter records each call's origin, which coincide where an expectation
+is a statement, a tail expression, or a lambda body. A compiler-solved
+call-site constraint in the style of GHC's `HasCallStack` was designed and
+rejected: it would have leaked into signatures and module interfaces, and the
+stack serves crashes and logging as well. `onFail` keeps the inner failure's
+frame while it prepends context. The console report prints `file:line` above
+the message and the JSON report carries it as `location`; group failures
+have none.
 
 ## Inspect
 
