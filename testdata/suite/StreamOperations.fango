@@ -1,0 +1,32 @@
+module StreamOperations exposing (tests)
+
+import Expect
+import Iterator
+import State
+import Stream
+import Test
+tests : Test.Test {}
+tests = Test.test "stream_operations" {
+    source = Stream.fromList [1, 2, 3, 4]
+    Expect.equal [1, 2, 3, 4] (Stream.toList source)
+    Expect.equal [1, 2, 3, 4] (Stream.toList source)
+    Expect.equal [2, 4] (Stream.toList (Stream.take 2 (Stream.filter { x -> x > 1 } (Stream.map { x -> x * 2 } source))))
+    Expect.equal 2 (Stream.fold { x acc -> x - acc } 0 source)
+    visited = State.run [] { Stream.forEach { value -> State.put [value | State.get()] } (Stream.take 2 (Stream.fromList [1, 2, 3, 4])) }
+    Expect.equal [1, 2] (List.reverse visited.state)
+    Expect.equal [(1, 10), (2, 20)] (Stream.toList (Stream.zip source (Stream.fromList [10, 20])))
+    Stream.withCursor (Stream.fromList [42]) { cursor ->
+        (value, next) = Expect.just (Iterator.next cursor)
+        Expect.equal 42 value
+        Expect.equal True (case Iterator.next next of
+                Nothing -> True
+                Just _ -> False
+        )
+        Expect.equal True (case Iterator.next next of
+                Nothing -> True
+                Just _ -> False
+        )
+    }
+}
+
+main() = Test.run tests

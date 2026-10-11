@@ -1,0 +1,35 @@
+module BytesScan exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Test
+
+at : Maybe Int -> String
+at value =
+    case value of
+        Nothing -> "-"
+        Just index -> show index
+
+tests : Test.Test {}
+tests = Test.test "bytes_scan" {
+    header = Bytes.fromString "Host: example\r\nAccept: */*\r\n\r\n"
+    crlf = Bytes.fromString "\r\n"
+    Expect.equal "13" (at (Bytes.indexOf crlf header))
+    Expect.equal "26" (at (Bytes.indexOfFrom 14 crlf header))
+    Expect.equal "-" (at (Bytes.indexOfFrom 99 crlf header))
+    Expect.equal "13" (at (Bytes.indexOfFrom (-5) crlf header))
+    Expect.equal "-" (at (Bytes.indexOf (Bytes.fromString "nowhere") header))
+    -- An empty needle matches at the clamped start, everywhere.
+    Expect.equal "0" (at (Bytes.indexOf Bytes.empty header))
+    Expect.equal "3" (at (Bytes.indexOfFrom 3 Bytes.empty header))
+    Expect.equal "-" (at (Bytes.indexOf crlf Bytes.empty))
+    Expect.equal "0" (at (Bytes.indexOf Bytes.empty Bytes.empty))
+    -- Overlapping occurrences: the scan resumes past the start, not past
+    -- the match, so a delimiter straddling a refill is still found.
+    aaa = Bytes.fromString "aaaa"
+    Expect.equal "0" (at (Bytes.indexOf (Bytes.fromString "aa") aaa))
+    Expect.equal "1" (at (Bytes.indexOfFrom 1 (Bytes.fromString "aa") aaa))
+    Expect.equal "-" (at (Bytes.indexOfFrom 3 (Bytes.fromString "aa") aaa))
+}
+
+main() = Test.run tests

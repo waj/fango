@@ -1,0 +1,22 @@
+module EmptyEffect exposing (tests)
+
+import Expect
+import IO
+import Test
+effect Marker a
+
+tag : Int ->{IO} Int
+tag = native
+
+marked : Int ->{Marker String} Int
+marked = native
+
+applyMarked : (Int ->{Marker String} Int) -> Int ->{Marker String} Int
+applyMarked action value = action value
+
+tests : Test.Test IO.IO
+tests = Test.test "empty_effect" {
+    Expect.equal 42 (tag 42)
+}
+
+main() = Test.run tests

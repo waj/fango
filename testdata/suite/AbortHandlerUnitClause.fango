@@ -1,0 +1,27 @@
+module AbortHandlerUnitClause exposing (tests)
+
+import Expect
+import State
+import Test
+effect Stop
+    abort stop : String -> value
+
+run action =
+    handle action() on
+        stop message -> recordText message
+
+recordText : String ->{State.State (List String)} ()
+recordText value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} ()
+fixtureBody() = run { _ -> stop "stopped" }
+
+observations : () -> List String
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "abort_handler_unit_clause" {
+    Expect.equal ["stopped"] observations()
+}
+
+main() = Test.run tests

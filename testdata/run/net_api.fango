@@ -1,3 +1,0 @@
-import Net exposing (Kind(..))
-
-main = ConnectionRefused

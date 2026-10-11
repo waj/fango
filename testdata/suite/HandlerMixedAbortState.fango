@@ -1,0 +1,30 @@
+module HandlerMixedAbortState exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import State exposing (State, get, put)
+import Test
+
+effect Fail error
+    abort fail : error -> value
+
+-- A resumptive application and an abort-only one share a cell. The abort
+-- clause sees the snapshot at the abort and bypasses `return`; normal
+-- completion runs `return` with the final state.
+guarded action =
+    handle action() with cell = 0 on
+        get () -> resume cell with cell
+        put n -> resume () with n
+
+        fail : String -> a
+        fail message -> Err (message ++ " at " ++ show cell)
+        return value -> Ok (value, cell)
+
+tests : Test.Test {}
+tests = Test.test "handler_mixed_abort_state" {
+    Expect.equal (Ok (14, 7)) (guarded { put 3; put (get() + 4); get() * 2 })
+    Expect.equal (Err "too big at 3") (guarded { put 3; if get() > 2 then fail "too big" else get() })
+    Expect.equal (Err "early at 0") (guarded { if True then fail "early" else 0 })
+}
+
+main() = Test.run tests

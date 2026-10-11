@@ -1,0 +1,50 @@
+module StdlibDict exposing (tests)
+
+import Dict
+import Expect
+import List
+import Maybe exposing (Maybe(..))
+import Test
+
+-- Give the empty dictionary a concrete type for the rendering and lookup checks.
+noEntries : Dict.Dict String Int
+noEntries = Dict.empty
+
+tests : Test.Test {}
+tests = Test.test "stdlib_dict" {
+    d = Dict.fromList [("b", 2), ("a", 1), ("c", 3)]
+    Expect.equal "Dict [\"a\" = 1, \"b\" = 2, \"c\" = 3]" (show d)
+    Expect.equal "Dict []" (show noEntries)
+    Expect.equal "Dict [\"k\" = 1]" (show (Dict.singleton "k" 1))
+    Expect.equal 3 (Dict.size d)
+    Expect.equal 0 (Dict.size noEntries)
+    Expect.equal True (Dict.isEmpty noEntries)
+    Expect.equal False (Dict.isEmpty d)
+    Expect.equal (Just 1) (Dict.get "a" d)
+    Expect.equal Nothing (Dict.get "z" d)
+    Expect.equal Nothing (Dict.get "a" noEntries)
+    Expect.equal True (Dict.member "b" d)
+    Expect.equal False (Dict.member "z" d)
+    -- traversals are ascending whatever the insertion order was
+    Expect.equal ["a", "b", "c"] (Dict.keys d)
+    Expect.equal [1, 2, 3] (Dict.values d)
+    Expect.equal [("a", 1), ("b", 2), ("c", 3)] (Dict.toList d)
+    Expect.equal [] (Dict.keys noEntries)
+    -- insert replaces the value of a key already present
+    replaced = Dict.insert "a" 99 d
+    Expect.equal "Dict [\"a\" = 99, \"b\" = 2, \"c\" = 3]" (show replaced)
+    Expect.equal 3 (Dict.size replaced)
+    -- later entries win in fromList
+    Expect.equal "Dict [\"a\" = 2]" (show (Dict.fromList [("a", 1), ("a", 2)]))
+    -- Eq compares entries, not tree shape: these two trees have different
+    -- shapes and must still be equal. A derived structural Eq would say False.
+    ascending = Dict.fromList [("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)]
+    descending = Dict.fromList [("e", 5), ("d", 4), ("c", 3), ("b", 2), ("a", 1)]
+    Expect.equal descending ascending
+    Expect.notEqual (Dict.remove "a" ascending) ascending
+    Expect.equal (Dict.remove "a" (Dict.singleton "a" 1)) noEntries
+    -- Show at a second instantiation
+    Expect.equal "Dict [1 = [10], 2 = [20, 21]]" (show (Dict.fromList [(2, [20, 21]), (1, [10])]))
+}
+
+main() = Test.run tests

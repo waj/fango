@@ -1,0 +1,28 @@
+module AdtPartialCtor exposing (tests)
+
+import Expect
+import Test
+type Pair = Pair Int Int deriving (Eq, Show)
+
+mk = Pair 1
+
+apply f x = f x
+
+swap p =
+    case p of
+        Pair a b -> Pair b a
+
+tests : Test.Test {}
+tests = Test.test "adt_partial_ctor" {
+    p = apply mk 2
+    q = swap p
+    r = apply (Pair 9) 8
+    Expect.equal (Pair 2 1) q
+    Expect.equal (Pair 9 8) r
+    case q of
+        Pair a b ->
+            case r of
+                Pair c d -> Expect.equal 2198 (a * 1000 + b * 100 + c * 10 + d)
+}
+
+main() = Test.run tests

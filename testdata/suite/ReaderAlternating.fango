@@ -1,0 +1,57 @@
+module ReaderAlternating exposing (tests)
+
+import Bytes exposing (Bytes, Source(..))
+import Expect
+import IO
+import Reader exposing (Reader)
+import Test
+
+-- Two buffered readers driven at once, which is what binding the record's
+-- fields to their own activation buys. Each `refill` reaches its own source
+-- even though the inner scope handles the same effect and is innermost while
+-- both are in use.
+
+effect FeedA
+    nextA : () -> Maybe Bytes
+
+effect FeedB
+    nextB : () -> Maybe Bytes
+
+sourceA : Source FeedA
+sourceA = Source { pull = { _ -> nextA() } }
+
+sourceB : Source FeedB
+sourceB = Source { pull = { _ -> nextB() } }
+
+step : Bytes -> Maybe Bytes
+step text = if Bytes.length text == 0 then Nothing else Just (Bytes.slice 0 2 text)
+
+after : Bytes -> Bytes
+after text = Bytes.slice 2 (Bytes.length text) text
+
+fixtureBody : () ->{IO} (List (Maybe Bytes), Bool)
+fixtureBody() =
+    handle
+        handle
+            Reader.over sourceA { left ->
+                Reader.over sourceB { right ->
+                    a = Reader.readExactly left 3
+                    b = Reader.readExactly right 3
+                    c = Reader.readUpTo left 99
+                    d = Reader.readUpTo right 99
+                    -- A memory reader nested inside both keeps its own buffer.
+                    e = Reader.overBytes (Bytes.fromString "zz") { inner -> Reader.readUpTo inner 99 }
+                    ([a, b, Just c, Just d, Just e], Reader.atEnd left)
+                }
+            }
+        with b = Bytes.fromString "wxyz" on
+            nextB () -> resume (step b) with after b
+    with a = Bytes.fromString "abcdef" on
+        nextA () -> resume (step a) with after a
+
+tests : Test.Test IO.IO
+tests = Test.test "reader_alternating" {
+    Expect.equal ([Just (Bytes.fromString "abc"), Just (Bytes.fromString "wxy"), Just (Bytes.fromString "d"), Just (Bytes.fromString "z"), Just (Bytes.fromString "zz")], False) fixtureBody()
+}
+
+main() = Test.run tests

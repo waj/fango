@@ -1,0 +1,19 @@
+module ClassesNested exposing (tests)
+
+import Expect
+import Test
+import Text.Builder
+
+type Wrap a = Wrap a
+type Box a = Box a
+
+instance Show (Box (Wrap Int))
+    showTo built value = Text.Builder.append (show value) built
+    show b = "box of wrapped ints"
+
+tests : Test.Test {}
+tests = Test.test "classes_nested" {
+    Expect.equal "box of wrapped ints" (show (Box (Wrap 1)))
+}
+
+main() = Test.run tests

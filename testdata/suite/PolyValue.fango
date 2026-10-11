@@ -1,0 +1,19 @@
+module PolyValue exposing (tests)
+
+import Expect
+import Test
+type Opt a = None | Some a deriving (Eq, Show)
+
+none = None
+
+pick m d =
+    case m of
+        None -> d
+        Some x -> x
+
+tests : Test.Test {}
+tests = Test.test "poly_value" {
+    Expect.equal 7 (pick none 7)
+}
+
+main() = Test.run tests

@@ -1,0 +1,12 @@
+module AnnFloatForces exposing (tests)
+
+import Expect
+import Test
+x : Float
+x = 1
+tests : Test.Test {}
+tests = Test.test "ann_float_forces" {
+    Expect.equal 1.0 x
+}
+
+main() = Test.run tests

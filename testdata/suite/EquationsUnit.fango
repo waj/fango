@@ -1,0 +1,25 @@
+module EquationsUnit exposing (tests)
+
+import Expect
+import Test
+-- `()` is an exhaustive Unit pattern. The attached `f()` spelling still means
+-- a sole Unit argument; a spaced `()` is an ordinary first parameter.
+attached() = 1
+
+spaced : () -> Int -> Int
+spaced () n = n + 1
+
+both : () -> () -> Int
+both () () = 2
+
+tests : Test.Test {}
+tests = Test.test "equations_unit" {
+    Expect.equal 1 attached()
+    Expect.equal 42 (spaced () 41)
+    Expect.equal 2 (both () ())
+    Expect.equal 9 (case () of
+            () -> 9
+    )
+}
+
+main() = Test.run tests

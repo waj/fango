@@ -1,0 +1,55 @@
+module MetaBackticks exposing (tests)
+
+import Expect
+import Meta exposing (Code)
+import Test
+
+quote x = x
+
+add : Code -> Code -> Code
+add left right = `$(left) + $(right)`
+
+withHole : Code
+withHole = `$(`6`) * 7`
+
+withBinding : Code
+withBinding = `{
+    x = 6
+    x * 7
+}()`
+
+withCase : Code
+withCase = `case True of
+        True ->
+            value = 42
+            value
+        False -> 0
+`
+
+withIf : Code
+withIf = `if True then
+        42
+    else
+        0
+`
+
+withComments : Code
+withComments = `
+    -- A comment containing ` does not close the quotation.
+    {- Nor does a block comment containing `. -}
+    "`"
+`
+
+tests : Test.Test {}
+tests = Test.test "meta_backticks" {
+    Expect.equal 42 (quote 42)
+    Expect.equal 42 $(add `20` `22`)
+    Expect.equal 42 $(withHole)
+    Expect.equal 42 $(withBinding)
+    Expect.equal 42 $(withCase)
+    Expect.equal 42 $(withIf)
+    Expect.equal "`" $(withComments)
+    Expect.equal '`' $(`'`'`)
+}
+
+main() = Test.run tests

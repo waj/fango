@@ -1,0 +1,52 @@
+module HttpApi exposing (tests)
+
+import Bytes
+import Expect
+import Http exposing (Body(..))
+import Http.GZip
+import Http.Server
+import Http.Server.Route as Route
+import IO
+import List exposing (List)
+import Reader
+import Result exposing (Result(..))
+import Test
+import Writer
+
+hello : List Route.Param -> Http.Server.Request e ->{e} Http.Server.Response e
+hello params _ = Http.Server.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString (show params)) }
+
+missing : Http.Server.Request e ->{e} Http.Server.Response e
+missing _ = Http.Server.Response { status = 404, headers = [], body = Empty }
+
+fixtureBody : () ->{IO.IO} Result Http.Error Bytes.Bytes
+fixtureBody() =
+    handle
+        Reader.overBytes (Bytes.fromString "GET /hello HTTP/1.1\r\nHost: example\r\nAccept-Encoding: gzip\r\n\r\n") { input ->
+            (_, rendered) = Writer.collecting { output ->
+                Http.Server.withRequest 8192 65536 1024 input { request ->
+                    route = Route.Route
+                        { method = "GET"
+                        , pattern = "/:name"
+                        , handler = hello
+                        }
+                    response = Http.GZip.wrap (Route.dispatch [route] missing) request
+                    Http.Server.writeResponse request.method output response
+                }
+            }
+            Ok rendered
+        }
+    on
+        Http.invalid error -> Err error
+
+tests : Test.Test IO.IO
+tests = Test.test "http_api" {
+    expected = Bytes.concat
+        [ Bytes.fromString "HTTP/1.1 200 \r\nContent-Encoding: gzip\r\nVary: Accept-Encoding\r\nTransfer-Encoding: chunked\r\n\r\n3C\r\n"
+        , Bytes.fromList [31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 138, 14, 72, 44, 74, 204, 85, 168, 86, 200, 75, 204, 77, 85, 176, 85, 80, 2, 209, 74, 58, 10, 101, 137, 57, 165, 96, 126, 70, 106, 78, 78, 190, 146, 66, 109, 44, 32, 0, 0, 255, 255, 216, 135, 229, 125, 42, 0, 0, 0]
+        , Bytes.fromString "\r\n0\r\n\r\n"
+        ]
+    Expect.equal (Ok expected) fixtureBody()
+}
+
+main() = Test.run tests

@@ -1,0 +1,11 @@
+module HigherOrder exposing (tests)
+
+import Expect
+import Test
+apply2 f x = f (f x)
+tests : Test.Test {}
+tests = Test.test "higher_order" {
+    Expect.equal 20 (apply2 { n -> n * 2 } 5)
+}
+
+main() = Test.run tests

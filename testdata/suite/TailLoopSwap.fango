@@ -1,0 +1,16 @@
+module TailLoopSwap exposing (tests)
+
+import Expect
+import Test
+-- Interdependent permuted arguments: y flows into x while x + y flows into
+-- y, so the jump must reassign simultaneously (evaluate every argument
+-- before updating any parameter). A sequential rewrite would corrupt x.
+step : Int -> Int -> Int -> Int
+step n x y = if n < 1 then x else step (n - 1) y (x + y)
+
+tests : Test.Test {}
+tests = Test.test "tail_loop_swap" {
+    Expect.equal 12586269025 (step 50 0 1)
+}
+
+main() = Test.run tests

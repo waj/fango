@@ -1,0 +1,26 @@
+module ReaderScopedMemory exposing (tests)
+
+import Bytes
+import Expect
+import Reader exposing (Reader)
+import Test
+
+parsePair : Reader e -> Reader e ->{e} String
+parsePair first second =
+    a = Reader.readUpTo first 1
+    b = Reader.readUpTo second 1
+    c = Reader.readUpTo first 99
+    d = Reader.readUpTo second 99
+    Bytes.toStringLossy (Bytes.concat [a, b, c, d])
+
+parsed : String
+parsed = Reader.withBytes (Bytes.fromString "abc") { first ->
+    Reader.withBytes (Bytes.fromString "XYZ") { second -> parsePair first second }
+}
+
+tests : Test.Test {}
+tests = Test.test "reader_scoped_memory" {
+    Expect.equal "aXbcYZ" parsed
+}
+
+main() = Test.run tests

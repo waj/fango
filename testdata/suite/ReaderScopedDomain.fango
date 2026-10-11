@@ -1,0 +1,69 @@
+module ReaderScopedDomain exposing (tests)
+
+import Bytes
+import Expect
+import Fail
+import IO
+import Reader
+import Runtime.Local
+import Test
+
+effect Database
+    lookup : () -> String
+
+parse : () ->{Database} String
+parse() = Reader.withBytes (Bytes.fromString "abc") { first ->
+    Reader.withBytes (Bytes.fromString "XYZ") { second ->
+        a = Reader.readUpTo first 1
+        b = Reader.readUpTo second 1
+        Bytes.toStringLossy (Bytes.append a b) ++ lookup()
+    }
+}
+
+interpreted : String
+interpreted = handle parse() on
+    lookup () -> resume "db"
+
+-- An older reader may be returned through an inner scope.
+outerReader : String
+outerReader = Reader.withBytes (Bytes.fromString "old") { outer ->
+    recovered = Reader.withBytes Bytes.empty { _ -> outer }
+    Bytes.toStringLossy (Reader.readUpTo recovered 99)
+}
+
+-- A library wrapper preserves the scoped callback contract across calls.
+{-# scoped s #-}
+withText : String -> (Reader.Reader s ->{s} a) ->{e} a
+withText text action = Reader.withBytes (Bytes.fromString text) action
+
+readAll : Reader.Reader e ->{e} String
+readAll reader = Bytes.toStringLossy (Reader.readUpTo reader 99)
+
+withDomain : (() ->{e} String) ->{e} String
+withDomain action = withText "generic" { reader -> readAll reader ++ action() }
+
+generic : String
+generic = handle withDomain lookup on
+    lookup () -> resume "db"
+
+counter : Int
+counter = Runtime.Local.run 0 { cell ->
+    cell.write (cell.read() + 1)
+    cell.read()
+}
+
+tests : Test.Test IO.IO
+tests = Test.test "reader_scoped_domain" {
+    Expect.equal "aXdb" interpreted
+    Expect.equal "old" outerReader
+    Expect.equal "named" (withText "named" readAll)
+    Expect.equal "genericdb" generic
+    Expect.equal 1 counter
+    observed = Reader.withBytes (Bytes.fromString "io") { r ->
+        ignore (Fail.attempt { IO.write IO.stdout "" })
+        Bytes.toStringLossy (Reader.readUpTo r 99)
+    }
+    Expect.equal "io" observed
+}
+
+main() = Test.run tests

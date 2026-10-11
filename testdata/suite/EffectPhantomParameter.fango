@@ -1,0 +1,19 @@
+module EffectPhantomParameter exposing (tests)
+
+import Expect
+import Test
+effect Tag value
+    ping : () -> ()
+
+run _ = ping ()
+
+fixtureBody() =
+    handle run () on
+        ping () -> resume ()
+
+tests : Test.Test {}
+tests = Test.test "effect_phantom_parameter" {
+    Expect.equal () fixtureBody()
+}
+
+main() = Test.run tests

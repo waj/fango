@@ -1,0 +1,25 @@
+module WriterScopedPure exposing (tests)
+
+import Bytes
+import Expect
+import Reader
+import Test
+import Writer
+
+assembled : Bytes.Bytes
+assembled =
+    (_, contents) = Writer.collecting { writer ->
+        Writer.writeString writer "abc"
+        Reader.overBytes (Bytes.fromString "XYZ") { reader ->
+            Writer.write writer (Reader.readUpTo reader 2)
+        }
+        writer.flush()
+    }
+    contents
+
+tests : Test.Test {}
+tests = Test.test "writer_scoped_pure" {
+    Expect.equal (Bytes.fromString "abcXY") assembled
+}
+
+main() = Test.run tests

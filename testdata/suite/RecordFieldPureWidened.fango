@@ -1,0 +1,26 @@
+module RecordFieldPureWidened exposing (tests)
+
+import Expect
+import Test
+-- The same covariant widening as `record_field_widened_row`, at a field whose
+-- arrow is closed and pure. The row a use site allows is an upper bound, so a
+-- stored `() -> Int` is usable in a body that performs `Extra`; the projection
+-- is what adapts, supplying the evidence the wider arrow takes while the
+-- binder keeps the shape the constructor stored.
+effect Extra
+    bump : Int -> Int
+
+type R = { f : () -> Int }
+
+consume : R ->{Extra} Int
+consume r = r.f() + bump 1
+
+tests : Test.Test {}
+tests = Test.test "record_field_pure_widened" {
+    answer =
+        handle consume (R { f = { _ -> 5 } }) on
+            bump n -> resume (n + 1)
+    Expect.equal 7 answer
+}
+
+main() = Test.run tests

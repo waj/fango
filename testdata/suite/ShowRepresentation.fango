@@ -1,0 +1,47 @@
+module ShowRepresentation exposing (tests)
+
+import Dict
+import Expect
+import Test
+import Text.Builder
+
+-- Show is the representation: strings and characters quoted and escaped,
+-- nested constructors and negative numbers parenthesized as arguments.
+-- Display is output: strings and characters as themselves, everything else
+-- through Show.
+type Person = { name : String, initial : Char, age : Int } deriving (Eq, Show)
+type Shape = Circle Float | Labeled String Shape | Origin deriving (Show)
+
+-- A type may display differently from its representation.
+type Money = Money Int deriving (Show)
+
+instance Display Money
+    displayTo built money = case money of
+        Money cents -> Text.Builder.appendInt cents (Text.Builder.append "$" built)
+
+report : Display a => a -> String
+report value = display value
+
+tests : Test.Test {}
+tests = Test.test "show_representation" {
+    Expect.equal "raw\ttext" (display "raw\ttext")
+    Expect.equal "c" (display 'c')
+    Expect.equal "\"quoted \\\"x\\\"\\n\"" (display (show "quoted \"x\"\n"))
+    Expect.equal "'q'" (display (show 'q'))
+    Expect.equal "Person { name = \"Ada\", initial = 'A', age = -3 }" (display (Person { name = "Ada", initial = 'A', age = -3 }))
+    Expect.equal "Just (Just (-1))" (display (Just (Just (-1))))
+    Expect.equal "Just (-1.5)" (display (Just (-1.5)))
+    Expect.equal "[\"a\", \"\"]" (display ["a", ""])
+    Expect.equal "Just (Person { name = \"B\", initial = 'b', age = 2 })" (display (Just (Person { name = "B", initial = 'b', age = 2 })))
+    Expect.equal "Labeled \"x\" (Circle (-2))" (display (Labeled "x" (Circle (-2.0))))
+    Expect.equal "Labeled \"x\" Origin" (display (Labeled "x" Origin))
+    Expect.equal "Just [Just 1]" (display (Just [Just 1]))
+    Expect.equal "Just (Dict [\"k\" = \"v\"])" (display (Just (Dict.fromList [("k", "v")])))
+    Expect.equal "(\"pair\", 'p')" (display ("pair", 'p'))
+    Expect.equal "$250" (display (Money 250))
+    Expect.equal "Just (Money 250)" (display (Just (Money 250)))
+    Expect.equal "reported" (report "reported")
+    Expect.equal "$5" (report (Money 5))
+}
+
+main() = Test.run tests

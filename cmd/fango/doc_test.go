@@ -305,43 +305,13 @@ func TestDocStrictReportsGaps(t *testing.T) {
 	}
 }
 
-// The library's examples are programs: each fenced block runs as its own
-// function under both backends, and every assertion line holds.
-func TestDocExamplesHold(t *testing.T) {
-	t.Parallel()
-	stdout, stderr, code := runDoc(t, "--stdlib")
-	if code != 0 {
-		t.Fatalf("doc: %s", stderr)
-	}
-	doc := decodeDoc(t, stdout)
-	var texts []string
-	for _, m := range doc.Modules {
-		texts = append(texts, m.Documentation)
-		for _, d := range m.Declarations {
-			if d.TargetID == "" {
-				texts = append(texts, d.Documentation)
-			}
-		}
-	}
-	program, expected, assertions := exampleProgram(texts)
-	if assertions < 10 {
-		t.Fatalf("only %d example assertions:\n%s", assertions, program)
-	}
-	path := filepath.Join(t.TempDir(), "examples.fango")
-	if err := os.WriteFile(path, []byte(program), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{}, expected)
-}
-
-// exampleProgram turns fenced `fango` blocks into one program. A block's
-// imports are its own, as a reader would copy them; they are hoisted to the
-// program. Its other top-level items are local declarations when their first
-// line binds a name with `=` or `:`, and Bool assertions otherwise;
-// continuation lines are indented.
-func exampleProgram(texts []string) (program, expected string, assertions int) {
-	imports := map[string]bool{"import IO": true, "import Fail": true}
-	var functions, calls, results []string
+// exampleTestModule turns the library's fenced examples into Test cases in
+// the combined suite. Bindings remain local to their example; each assertion
+// must be True. Example computations retain a closed IO row so generic
+// async callbacks cannot acquire the test runner's aborting Expect effect.
+func exampleTestModule(texts []string) (program string, assertions, cases int) {
+	imports := map[string]bool{"import IO": true, "import Fail": true, "import Test": true, "import Expect": true}
+	var functions, tests []string
 	for _, text := range texts {
 		for _, block := range fencedBlocks(text) {
 			var items [][]string
@@ -357,8 +327,8 @@ func exampleProgram(texts []string) (program, expected string, assertions int) {
 				}
 			}
 			name := fmt.Sprintf("example%d", len(functions)+1)
-			// Give pure and effectful blocks the same concrete IO budget without
-			// changing output. A concrete annotation also bounds fresh permissions.
+			// Bound fresh permissions with the same concrete IO budget for
+			// pure and effectful examples, as the old differential runner did.
 			body := []string{"    ignore (Fail.attempt { IO.write IO.stdout \"\" })"}
 			var checks []string
 			for _, item := range items {
@@ -368,7 +338,7 @@ func exampleProgram(texts []string) (program, expected string, assertions int) {
 					}
 					continue
 				}
-				checks = append(checks, strings.Join(item, "\n        "))
+				checks = append(checks, strings.Join(item, "\n            "))
 			}
 			if len(checks) == 0 {
 				continue
@@ -376,14 +346,16 @@ func exampleProgram(texts []string) (program, expected string, assertions int) {
 			assertions += len(checks)
 			body = append(body, "    [ "+strings.Join(checks, "\n    , ")+"\n    ]")
 			functions = append(functions, name+" : () ->{IO} List Bool\n"+name+" _ =\n"+strings.Join(body, "\n")+"\n")
-			calls = append(calls, name+" ()")
-			results = append(results, "["+strings.TrimSuffix(strings.Repeat("True, ", len(checks)), ", ")+"]")
+			expected := "[" + strings.TrimSuffix(strings.Repeat("True, ", len(checks)), ", ") + "]"
+			tests = append(tests, fmt.Sprintf("Test.test \"%s\" { Expect.equal %s (%s ()) }", name, expected, name))
 		}
 	}
 	var b strings.Builder
+	b.WriteString("module LibraryExamples exposing (tests)\n\n")
 	b.WriteString(mergeImports(imports))
-	b.WriteString("\n" + strings.Join(functions, "\n") + "\nmain() = print [" + strings.Join(calls, ", ") + "]\n")
-	return b.String(), "[" + strings.Join(results, ", ") + "]\n", assertions
+	b.WriteString("\n" + strings.Join(functions, "\n"))
+	b.WriteString("\ntests : Test.Test IO\ntests = Test.describe \"Standard library documentation\"\n    [ " + strings.Join(tests, "\n    , ") + "\n    ]\n")
+	return b.String(), assertions, len(tests)
 }
 
 // mergeImports combines the blocks' imports into one per module, exposing

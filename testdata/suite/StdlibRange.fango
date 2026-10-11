@@ -1,0 +1,22 @@
+module StdlibRange exposing (tests)
+
+import Expect
+import List
+import Range
+import State
+import Test
+
+mark : (Num a, Ord a) => a ->{State.State (List String)} ()
+mark value = State.put [if value < 2 then "a" else "b" | State.get()]
+
+visited : (() ->{State.State (List String)} ()) -> List String
+visited action = List.reverse (State.run [] action).state
+
+tests : Test.Test {}
+tests = Test.test "stdlib_range" {
+    Expect.equal ["a", "a", "b"] (visited { Range.each mark 0 2 })
+    Expect.equal ["a", "a", "b"] (visited { Range.each mark 0.0 2.0 })
+    Expect.equal [] (visited { Range.each { _ -> State.put ["bad" | State.get()] } 3 2 })
+}
+
+main() = Test.run tests

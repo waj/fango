@@ -1,0 +1,32 @@
+module ReaderPureOperations exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Reader exposing (Reader)
+import Stream
+import Test
+
+-- A lawful exhausted reader needs no mutable state or IO.
+emptyReader : Reader {}
+emptyReader =
+    { buffered = { _ -> Bytes.empty }
+    , refill = { _ -> False }
+    , skip = { _ -> 0 }
+    }
+
+-- Exact pure annotations catch accidental IO on the traversal helpers too.
+summary : (Bool, Bool, List Bytes)
+summary = (Reader.ensure emptyReader 0, Reader.atEnd emptyReader, Stream.toList (Reader.chunks emptyReader))
+
+visit : ()
+visit = Reader.forEachChunk emptyReader { _ -> () }
+
+tests : Test.Test {}
+tests = Test.test "reader_pure_operations" {
+    Expect.equal (True, True, []) summary
+    Expect.equal () visit
+    Expect.equal Nothing (Reader.readExactly emptyReader 1)
+    Expect.equal (Reader.Ended Bytes.empty) (Reader.readUntil emptyReader (Bytes.fromString "\n") 20)
+}
+
+main() = Test.run tests

@@ -1,0 +1,19 @@
+module LocalStateStaging exposing (tests)
+
+import Expect
+import Meta
+import Runtime.Local
+import Test
+
+compute : Int
+compute = Runtime.Local.run 1 { cell ->
+    cell.write 7
+    cell.read()
+}
+
+tests : Test.Test {}
+tests = Test.test "local_state_staging" {
+    Expect.equal 7 $(Meta.lift compute)
+}
+
+main() = Test.run tests

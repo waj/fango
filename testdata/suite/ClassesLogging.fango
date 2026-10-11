@@ -1,0 +1,49 @@
+module ClassesLogging exposing (tests)
+
+import Expect
+import Test
+class LogValue a
+    logValue : a -> String
+
+type Credentials = Credentials String String deriving (Show)
+
+instance LogValue Credentials
+    logValue credentials = case credentials of
+        Credentials username _ -> username ++ " [password omitted]"
+
+instance Show a => LogValue a
+    logValue x = show x
+
+instance LogValue Int
+    logValue x = "integer " ++ show x
+
+type Hidden = Hidden String
+instance LogValue Hidden
+    logValue x = "hidden"
+
+class Audit a
+    audit : a -> String
+instance LogValue a => Audit a
+    audit x = logValue x
+
+log : LogValue a => a -> String
+log x = logValue x
+
+forward x = logValue x
+localForward x =
+    render y = logValue y
+    render x
+
+tests : Test.Test {}
+tests = Test.test "classes_logging" {
+    credentials = Credentials "alice" "secret"
+    Expect.equal "integer 42" (log 42)
+    Expect.equal "alice [password omitted]" (log credentials)
+    Expect.equal "alice [password omitted]" (forward credentials)
+    Expect.equal "alice [password omitted]" (localForward credentials)
+    Expect.equal "integer 7" (audit 7)
+    Expect.equal "alice [password omitted]" (audit credentials)
+    Expect.equal "hidden" (log (Hidden "not showable"))
+}
+
+main() = Test.run tests

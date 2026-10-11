@@ -1,0 +1,39 @@
+module StreamCursor exposing (tests)
+
+import Expect
+import Iterator
+import Maybe exposing (Maybe(..))
+import State
+import Stream
+import Test
+
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator state a e ->{e} b
+foldCursor combine initial cursor = case Iterator.next cursor of
+    Nothing -> initial
+    Just (value, next) -> foldCursor combine (combine value initial) next
+
+eachCursor : (a ->{e} ()) -> Iterator.Iterator state a e ->{e} ()
+eachCursor action cursor = case Iterator.next cursor of
+    Nothing -> ()
+    Just (value, next) ->
+        action value
+        eachCursor action next
+
+recordInt : Int ->{State.State (List Int)} ()
+recordInt value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List Int)} ()
+fixtureBody() =
+    source = Stream.fromList [10, 20, 30]
+    Stream.withCursor source (eachCursor recordInt)
+    recordInt (Stream.withCursor source (foldCursor { value sum -> value + sum } 0))
+
+observations : () -> List Int
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "stream_cursor" {
+    Expect.equal [10, 20, 30, 60] observations()
+}
+
+main() = Test.run tests

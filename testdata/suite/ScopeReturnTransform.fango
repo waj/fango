@@ -1,0 +1,55 @@
+module ScopeReturnTransform exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+-- A failure raised by a handler's return transformation is still an exit from
+-- the enclosing scope, so the release runs before it reaches the outer clause.
+
+effect Fail error
+    abort fail : error -> value
+
+effect Note
+    say : String -> ()
+
+attempt action =
+    handle action() on
+        fail error -> Err error
+        return value -> Ok value
+
+open label =
+    note ("open " ++ label)
+    label
+
+close label = note ("close " ++ label)
+
+noted token = say ("note " ++ token)
+
+failingReturn token =
+    handle noted token on
+        say message ->
+            note message
+            resume ()
+        return _ -> fail ("return failed for " ++ token)
+
+note : String ->{State.State (List String)} ()
+note value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} Result String ()
+fixtureBody() =
+    attempt { Runtime.Scope.bracket { open "a" } close failingReturn }
+
+observations : () -> (Result String (), List String)
+observations() =
+    observed = State.run [] fixtureBody
+    (observed.value, List.reverse observed.state)
+
+tests : Test.Test {}
+tests = Test.test "scope_return_transform" {
+    Expect.equal (Err "return failed for a", ["open a", "note a", "close a"]) observations()
+}
+
+main() = Test.run tests

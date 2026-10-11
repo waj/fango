@@ -1,0 +1,19 @@
+module ErrMetaNative exposing (tests)
+
+import Expect
+import Meta exposing (Code)
+import Random
+import Test
+
+roll : Int
+roll = Random.runSeeded 1 { _ -> Random.int 1 6 }
+
+pick : Int -> Code
+pick n = if n > 3 then `"high"` else `"low"`
+
+tests : Test.Test {}
+tests = Test.test "err_meta_native" {
+    Expect.equal "low" $(pick roll)
+}
+
+main() = Test.run tests

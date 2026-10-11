@@ -1,0 +1,58 @@
+module ShowBuilder exposing (tests)
+
+import Basics exposing (showArg, showArgTo, showTo)
+import Dict
+import Expect
+import Meta
+import Test
+import Text.Builder as Builder
+
+type Tree = Leaf String | Branch Tree Tree deriving (Show)
+type Label = { title : String, tree : Tree } deriving (Show)
+
+type Custom = Custom Int
+instance Show Custom
+    showTo built (Custom value) = Builder.appendInt value (Builder.append "custom:" built)
+    showArgTo built value = Builder.append ")" (showTo (Builder.append "(" built) value)
+    show (Custom value) = "custom:" ++ show value
+    showArg value = "(" ++ show value ++ ")"
+
+type Default = Default
+instance Show Default
+    showTo built Default = Builder.append "default" built
+
+agrees : Show a => a -> Bool
+agrees value =
+    prefix = Builder.append "prefix:" Builder.empty
+    Builder.toString (showTo prefix value) == "prefix:" ++ show value
+        && Builder.toString (showArgTo prefix value) == "prefix:" ++ showArg value
+        && Builder.toString prefix == "prefix:"
+
+tests : Test.Test {}
+tests = Test.test "show_builder" {
+    tree = Branch (Leaf "\#{x}\n") (Leaf "二")
+    Expect.equal True (agrees tree)
+    Expect.equal True (agrees (Label { title = "name", tree = tree }))
+    Expect.equal True (agrees [tree, Leaf ""])
+    Expect.equal True (agrees (tree, "quoted", '\''))
+    Expect.equal True (agrees (Dict.fromList [("a", tree)]))
+    Expect.equal True (agrees (-9223372036854775807 - 1))
+    Expect.equal True (agrees (-1.25))
+    Expect.equal True (agrees (-0.0))
+    Expect.equal True (agrees (1.0 / 0.0))
+    Expect.equal True (agrees (0.0 / 0.0))
+    Expect.equal True (agrees "\t\r\"\\\#{literal}")
+    Expect.equal True (agrees '"')
+    Expect.equal True (agrees True)
+    Expect.equal True (agrees ())
+    Expect.equal True (agrees (Custom 7))
+    Expect.equal True (agrees Default)
+    Expect.equal "Just (custom:7)" (show (Just (Custom 7)))
+    Expect.equal "default" (showArg Default)
+    Expect.equal "custom:7" (display (Custom 7))
+    Expect.equal "[custom:7]" "[#{Custom 7}]"
+    Expect.equal True $(Meta.lift (show (Just ["\#{staged}", "二"]) == "Just [\"\\\#{staged}\", \"二\"]"))
+    Expect.equal True $(Meta.lift ("#{Just (-1.25)}" == "Just (-1.25)"))
+}
+
+main() = Test.run tests

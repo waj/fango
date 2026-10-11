@@ -1,0 +1,17 @@
+module PolyPartial exposing (tests)
+
+import Expect
+import Test
+type Opt a = None | Some a deriving (Eq, Show)
+
+wrap : a -> Opt a
+wrap x = Some x
+
+apply f x = f x
+
+tests : Test.Test {}
+tests = Test.test "poly_partial" {
+    Expect.equal (Some 3) (apply wrap 3)
+}
+
+main() = Test.run tests

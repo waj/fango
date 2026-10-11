@@ -1,0 +1,29 @@
+module HandlerScopedBinding exposing (tests)
+
+import Expect
+import Test
+effect Counter
+    step : () -> Int
+
+type CounterHandle e = { next : () ->{e} Int }
+
+{-# scoped s #-}
+counting : (CounterHandle s ->{s} a) ->{e} a
+counting action =
+    handle action { next = { _ -> step() } } with n = 0 on
+        step () -> resume n with n + 1
+
+answer : (Int, Int, Int)
+answer = counting { counter ->
+    first = counter.next()
+    middle = handle counter.next() on
+        step () -> resume 99
+    (first, middle, counter.next())
+}
+
+tests : Test.Test {}
+tests = Test.test "handler_scoped_binding" {
+    Expect.equal (0, 1, 2) answer
+}
+
+main() = Test.run tests

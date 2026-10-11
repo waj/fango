@@ -1,0 +1,20 @@
+module StdlibModby exposing (tests)
+
+import Basics exposing (modBy, remainderBy)
+import Expect
+import Test
+
+tests : Test.Test {}
+tests = Test.test "stdlib_modby" {
+    Expect.equal 1 (modBy 3 7)
+    Expect.equal 2 (modBy 3 (-4))
+    Expect.equal (-2) (modBy (-3) 4)
+    Expect.equal (-1) (modBy (-3) (-4))
+    Expect.equal 0 (modBy 4 8)
+    Expect.equal 1 (remainderBy 3 7)
+    Expect.equal (-1) (remainderBy 3 (-4))
+    Expect.equal 1 (remainderBy (-3) 4)
+    Expect.equal (-1) (remainderBy (-3) (-4))
+}
+
+main() = Test.run tests

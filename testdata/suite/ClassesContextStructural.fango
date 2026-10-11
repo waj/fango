@@ -1,0 +1,35 @@
+module ClassesContextStructural exposing (tests)
+
+import Expect
+import Test
+import Text.Builder
+
+type Box a = Box a
+instance Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
+    show x = "box fallback"
+instance Show a => Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
+    show x = case x of
+        Box value -> "box " ++ show value
+type Wrapper a = Wrapper (Box a) deriving (Show)
+type Foo = Foo
+
+render x = show (Box x)
+localRender x =
+    inner y = show (Box y)
+    inner x
+method : Show (Box a) => Box a -> String
+method = show
+
+tests : Test.Test {}
+tests = Test.test "classes_context_structural" {
+    Expect.equal "box 42" (render 42)
+    Expect.equal "box fallback" (render Foo)
+    Expect.equal "box fallback" (localRender Foo)
+    Expect.equal "box fallback" (method (Box Foo))
+    Expect.equal "Wrapper box 42" (show (Wrapper (Box 42)))
+    Expect.equal "Wrapper box fallback" (show (Wrapper (Box Foo)))
+}
+
+main() = Test.run tests

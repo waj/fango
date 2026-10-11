@@ -1,0 +1,55 @@
+module StringInterpolation exposing (tests)
+
+import Expect
+import Fail
+import Result exposing (Result(..))
+import State
+import Test
+import Text.Builder
+
+type Money = Money Int deriving (Show)
+instance Display Money
+    displayTo built (Money cents) = Text.Builder.appendInt cents (Text.Builder.append "$" built)
+
+render : Display a => a -> String
+render value = "value=#{value}"
+
+effect Tick
+    next : () -> Int
+
+ordered() =
+    handle "#{next()}:#{next()}:#{next()}" with count = 0 on
+        next () -> resume (count + 1) with count + 1
+
+stop : () ->{Fail.Fail String} Int
+stop() = Fail.fail "stopped"
+
+later() = State.put True; 2
+
+tests : Test.Test {}
+tests = Test.test "string_interpolation" {
+    name = "Ada"
+    Expect.equal "Hello, Ada!" "Hello, #{name}!"
+    Expect.equal "1 -2 1.25 True False () 二" "#{1} #{-2} #{1.25} #{True} #{False} #{()} #{'二'}"
+    Expect.equal "$250 / $5" "#{Money 250} / #{display (Money 5)}"
+    Expect.equal "value=Just \"a\"" (render (Just "a"))
+    Expect.equal "yes / nested 3" "#{if True then "yes" else "no"} / #{"nested #{3}"}"
+    Expect.equal "6" "#{{ x = 2; x * 3 }()}"
+    Expect.equal "\#{literal} / \#{nested} / }" "\#{literal} / #{"\#{nested}"} / #{"}"}"
+    Expect.equal "\"\\\#{literal}\"" (show "\#{literal}")
+    Expect.equal "1:2:3" ordered()
+    displayTo value = "shadow"
+    Expect.equal "4" "#{4}"
+    base = Text.Builder.append "prefix" Text.Builder.empty
+    left = Text.Builder.append "-left" base
+    right = Text.Builder.appendChar '二' base
+    Expect.equal "prefix|prefix-left|prefix二" "#{Text.Builder.toString base}|#{Text.Builder.toString left}|#{Text.Builder.toString right}"
+    failed = State.run False { Fail.attempt { "#{stop()}#{later()}" } }
+    Expect.equal (Err "stopped") failed.value
+    Expect.equal False failed.state
+    local prefix = "#{prefix}:#{name}"
+    Expect.equal "captured:Ada" (local "captured")
+    Expect.equal "staged 3" $(`"staged #{1 + 2}"`)
+}
+
+main() = Test.run tests

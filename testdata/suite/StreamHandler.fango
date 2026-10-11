@@ -1,0 +1,29 @@
+module StreamHandler exposing (tests)
+
+import Expect
+import State
+import Stream
+import Test
+
+effect Observe
+    observe : Int -> ()
+
+recordInt : Int ->{State.State (List Int)} ()
+recordInt value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List Int)} ()
+fixtureBody() =
+    handle Stream.forEach observe (Stream.fromList [1]) on
+        observe value ->
+            recordInt value
+            resume ()
+
+observations : () -> List Int
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "stream_handler" {
+    Expect.equal [1] observations()
+}
+
+main() = Test.run tests

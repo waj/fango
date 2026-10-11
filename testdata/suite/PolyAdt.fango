@@ -1,0 +1,18 @@
+module PolyAdt exposing (tests)
+
+import Expect
+import Test
+type Opt a = None | Some a deriving (Eq, Show)
+
+withDefault : a -> Opt a -> a
+withDefault d m =
+    case m of
+        None -> d
+        Some x -> x
+
+tests : Test.Test {}
+tests = Test.test "poly_adt" {
+    Expect.equal 42 (withDefault 0 (Some 42))
+}
+
+main() = Test.run tests

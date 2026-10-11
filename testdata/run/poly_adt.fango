@@ -1,9 +1,0 @@
-type Opt a = None | Some a deriving (Eq, Show)
-
-withDefault : a -> Opt a -> a
-withDefault d m =
-    case m of
-        None -> d
-        Some x -> x
-
-main = print (withDefault 0 (Some 42))

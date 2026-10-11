@@ -1,8 +1,0 @@
-type Opt a = None | Some a deriving (Eq, Show)
-
-wrap : a -> Opt a
-wrap x = Some x
-
-apply f x = f x
-
-main = print (apply wrap 3)

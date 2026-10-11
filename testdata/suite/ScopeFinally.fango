@@ -1,0 +1,48 @@
+module ScopeFinally exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+-- `finally` has no resource, so it places no restriction on the result it
+-- returns: a scope over Unit can hand back a function.
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() on
+        fail error -> Err error
+        return value -> Ok value
+
+adder : Int -> Int -> Int
+adder base offset = base + offset
+
+buildAdder : () ->{State.State (List String)} Int -> Int
+buildAdder() =
+    Runtime.Scope.finally { _ -> adder 10 } { _ -> note "cleanup built" }
+
+note : String ->{State.State (List String)} ()
+note value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} (Int, Result String String, String)
+fixtureBody() =
+    add = buildAdder()
+    value = add 5
+    outcome = attempt { Runtime.Scope.finally { fail "inside" } { note "cleanup failed path" } }
+    plain = Runtime.Scope.finally { "plain" } { note "cleanup plain" }
+    (value, outcome, plain)
+
+observations : () -> ((Int, Result String String, String), List String)
+observations() =
+    observed = State.run [] fixtureBody
+    (observed.value, List.reverse observed.state)
+
+tests : Test.Test {}
+tests = Test.test "scope_finally" {
+    Expect.equal ((15, Err "inside", "plain"), ["cleanup built", "cleanup failed path", "cleanup plain"]) observations()
+}
+
+main() = Test.run tests

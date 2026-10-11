@@ -1,0 +1,20 @@
+module ClassesRepeatedVar exposing (tests)
+
+import Expect
+import Test
+import Text.Builder
+
+type Pair a b = Pair a b
+
+instance Show a => Show (Pair a a)
+    showTo built value = Text.Builder.append (show value) built
+    show p = case p of
+        Pair x y -> "twins " ++ show x ++ " " ++ show y
+
+tests : Test.Test {}
+tests = Test.test "classes_repeated_var" {
+    Expect.equal "twins 1 2" (show (Pair 1 2))
+    Expect.equal "twins \"x\" \"y\"" (show (Pair "x" "y"))
+}
+
+main() = Test.run tests

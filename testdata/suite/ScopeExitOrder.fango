@@ -1,0 +1,84 @@
+module ScopeExitOrder exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+-- The two nestings of a cleanup scope and a handler have different traces.
+-- A scope inside a handler releases before the handler's abort clause runs;
+-- a scope around a handler releases after that clause produced the answer.
+
+effect Fail error
+    abort fail : error -> value
+
+effect Note
+    say : String -> ()
+
+open label =
+    note ("open " ++ label)
+    label
+
+close label = note ("close " ++ label)
+
+report : Result String String ->{State.State (List Observation)} ()
+report outcome = record (Outcome outcome)
+
+failingBody token =
+    note ("body " ++ token)
+    fail "requested"
+
+scopeInsideHandler() =
+    handle Runtime.Scope.bracket { _ -> open "inner-first" } close failingBody on
+        fail error ->
+            note ("clause sees " ++ error)
+            Err error
+        return value -> Ok value
+
+handlerInsideScope() =
+    Runtime.Scope.bracket { _ -> open "outer-first" } close { token ->
+        handle failingBody token on
+            fail error ->
+                note ("clause sees " ++ error)
+                Err error
+            return value -> Ok value
+    }
+
+noted token =
+    say token
+    say token
+
+-- A resumptive handler's operation clauses also run inside the scope.
+counted() =
+    Runtime.Scope.bracket { _ -> open "counted" } close { token ->
+        handle noted token on
+            say message ->
+                note ("note " ++ message)
+                resume ()
+            return _ -> Ok "noted"
+    }
+
+type Observation = Trace String | Outcome (Result String String) deriving (Eq, Show)
+
+record : Observation ->{State.State (List Observation)} ()
+record value = State.put [value | State.get()]
+
+note : String ->{State.State (List Observation)} ()
+note value = record (Trace value)
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    report scopeInsideHandler()
+    report handlerInsideScope()
+    report counted()
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "scope_exit_order" {
+    Expect.equal [Trace "open inner-first", Trace "body inner-first", Trace "close inner-first", Trace "clause sees requested", Outcome (Err "requested"), Trace "open outer-first", Trace "body outer-first", Trace "clause sees requested", Trace "close outer-first", Outcome (Err "requested"), Trace "open counted", Trace "note counted", Trace "note counted", Trace "close counted", Outcome (Ok "noted")] observations()
+}
+
+main() = Test.run tests

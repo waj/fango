@@ -573,7 +573,7 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 			defer executor.Close()
 			ioctx.Natives = executor
 		}
-		_, err := eval.ForceIO(context.Background(), "main", env, ioctx)
+		_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
 		var exitErr *natives.ExitError
 		switch {
 		case errors.As(err, &exitErr):
@@ -588,7 +588,7 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 		}
 		mainTy := prog.Defs[len(prog.Defs)-1].Type
 		for _, d := range prog.Defs {
-			if d.Name == "main" {
+			if d.Name == prog.Entry {
 				mainTy = d.Type
 			}
 		}
@@ -705,6 +705,7 @@ func TestEmitDeterministicAndFormatted(t *testing.T) {
 func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
 	t.Parallel()
 	paths := []string{
+		filepath.Join("..", "..", "testdata", "suite", "Main.fango"),
 		filepath.Join("..", "..", "testdata", "run", "poly_eq_nested.fango"),
 		filepath.Join("..", "..", "testdata", "run", "async_workers.fango"),
 		// Compile-time evaluation is pure, bounded, and native-restricted, so

@@ -1,0 +1,48 @@
+module ClassesScalarSafety exposing (tests)
+
+import Expect
+import State
+import Test
+import Text.Builder
+
+type Count = Count Int deriving (Show)
+unwrap count = case count of
+    Count value -> value
+instance Num Count
+    fromInt value = Count value
+    (+) x y = Count (unwrap x + unwrap y + 100)
+    (-) x y = Count (unwrap x - unwrap y)
+    (*) x y = Count (unwrap x * unwrap y)
+    negate x = Count (0 - unwrap x)
+
+double x = x + x
+combine x y = x * y + 3
+next : Int ->{State.State (List Int)} Int
+next value =
+    State.put [value | State.get()]
+    value
+
+type Box a = Box a
+instance Show a => Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
+    show box = case box of
+        Box value -> "generic " ++ show value
+-- The structural constraint keeps render out of scalar specialization, so
+-- both variants must still receive the composed Box evidence for their own
+-- element type.
+render : (Num a, Show (Box a)) => a -> String
+render value = show (Box (value + 1))
+
+tests : Test.Test {}
+tests = Test.test "classes_scalar_safety" {
+    Expect.equal 104 (unwrap (double (Count 2)))
+    Expect.equal 4 (double 2)
+    Expect.equal 5.0 (double 2.5)
+    observed = State.run [] { combine (next 6) (next 7) }
+    Expect.equal 45 observed.value
+    Expect.equal [6, 7] (List.reverse observed.state)
+    Expect.equal "generic 3" (render 2)
+    Expect.equal "generic 3.5" (render 2.5)
+}
+
+main() = Test.run tests

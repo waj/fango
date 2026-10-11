@@ -1,0 +1,18 @@
+module JsonWitnessOperator exposing (tests)
+
+import Expect
+import Json
+import Result exposing (Result(..))
+import Test
+
+(@) : Int -> Int -> Int
+(@) left right = left + right
+infixl 5 (@)
+
+tests : Test.Test {}
+tests = Test.test "json_witness_operator" {
+    Expect.equal 3 (1 @ 2)
+    Expect.equal 4 (Expect.ok (Json.parse @Int "4"))
+}
+
+main() = Test.run tests

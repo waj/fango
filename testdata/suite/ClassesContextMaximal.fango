@@ -1,0 +1,30 @@
+module ClassesContextMaximal exposing (tests)
+
+import Expect
+import Test
+class Inspect a
+    inspect : a -> String
+instance (Eq a, Show a) => Inspect a
+    inspect x = "both"
+instance Ord a => Inspect a
+    inspect x = "ord"
+instance Show a => Inspect a
+    inspect x = "show"
+instance Inspect a
+    inspect x = "default"
+
+class Label a
+    label : a -> String
+instance Eq a => Label a
+    label x = "eq"
+instance Show a => Label a
+    label x = "show"
+
+tests : Test.Test {}
+tests = Test.test "classes_context_maximal" {
+    Expect.equal "ord" (inspect 42)
+    Expect.equal "both" (inspect True)
+    Expect.equal "show" (label 42)
+}
+
+main() = Test.run tests

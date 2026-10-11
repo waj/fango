@@ -1,0 +1,36 @@
+module AsyncPayloads exposing (tests)
+
+import Async
+import Bytes
+import Expect
+import IO
+import List
+import State
+import Test
+
+type Payload = Payload (List Int) Bytes.Bytes
+shared = [10, 11, 21]
+
+worker : Payload ->{Async.Async} (Int, Bytes.Bytes)
+worker payload = case payload of
+    Payload numbers bytes ->
+        ignore Async.cancelled()
+        result = State.run 0 { _ ->
+            List.each { n -> State.put (State.get() + n) } numbers
+            State.get()
+        }
+        (result.value, bytes)
+
+fixtureBody : () ->{IO.IO} Async.Outcome (List (Int, Int))
+fixtureBody() = Async.runOutcome { _ ->
+    tasks = List.map { _ -> Async.spawn { _ -> worker (Payload shared (Bytes.fromString "abc")) } } [1, 2, 3, 4]
+    List.map { task ->
+        case Async.await task of
+            (number, bytes) -> (number, Bytes.length bytes)
+    } tasks
+}
+
+tests : Test.Test IO.IO
+tests = Test.test "async_payloads" { Expect.equal (Async.Completed [(42, 3), (42, 3), (42, 3), (42, 3)]) fixtureBody() }
+
+main() = Test.run tests

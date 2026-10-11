@@ -1,0 +1,23 @@
+module ScopeStaging exposing (tests)
+
+import Expect
+import Meta exposing (Code)
+import Runtime.Scope
+import Test
+
+-- A cleanup scope whose constituents are pure is stage-safe: the compiler can
+-- run it while expanding a splice. Resources and entropy stay forbidden there
+-- because they are effects, not because a scope is special.
+
+counted : Int -> Int
+counted start = Runtime.Scope.bracket { _ -> start } { _ -> () } { seed -> seed * 3 + 1 }
+
+folded : Code
+folded = `$(Meta.lift (counted 7))`
+
+tests : Test.Test {}
+tests = Test.test "scope_staging" {
+    Expect.equal 22 $(folded)
+}
+
+main() = Test.run tests

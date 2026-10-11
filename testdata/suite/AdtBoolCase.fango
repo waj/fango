@@ -1,0 +1,22 @@
+module AdtBoolCase exposing (tests)
+
+import Expect
+import Test
+label b = case b of
+    True -> "yes"
+    False -> "no"
+
+pick b n =
+    case b of
+        True ->
+            case n of
+                0 -> "zero"
+                _ -> "some"
+        False -> label b
+
+tests : Test.Test {}
+tests = Test.test "adt_bool_case" {
+    Expect.equal "zerosomeno" (pick True 0 ++ pick True 3 ++ pick False 9)
+}
+
+main() = Test.run tests

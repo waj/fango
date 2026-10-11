@@ -1,0 +1,127 @@
+module HttpClientRedirects exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Fail exposing (Fail)
+import Http exposing (Body(..))
+import Http.Client as Client
+import Result exposing (Result(..))
+import State
+import String
+import Test
+import Url
+import Writer
+
+-- The request line and the headers that matter here.
+summary : String -> (String, List String)
+summary request =
+    case String.split "\r\n" request of
+        [line | rest] ->
+            kept = List.filter { h -> String.startsWith "Authorization" h || String.startsWith "Content-Length" h || String.startsWith "Host" h } rest
+            (line, kept)
+        [] -> ("", [])
+
+redirect : Int -> String -> String
+redirect status location = "HTTP/1.1 " ++ show status ++ " Moved\r\nLocation: " ++ location ++ "\r\nContent-Length: 0\r\n\r\n"
+
+ok : String -> String
+ok text = "HTTP/1.1 200 OK\r\nContent-Length: " ++ show (String.length text) ++ "\r\n\r\n" ++ text
+
+-- Routes by request line and records the line and selected headers.
+server : Bytes ->{State.State (List (String, List String))} Result Client.Error Bytes
+server raw =
+    request = Bytes.toStringLossy raw
+    State.put [summary request | State.get()]
+    line = case String.split "\r\n" request of
+        [first | _] -> first
+        [] -> ""
+    response =
+        if String.contains " /old " line then redirect 301 "/new"
+        else if String.contains " /see-other " line then redirect 303 "/result"
+        else if String.contains " /temporary " line then redirect 307 "/kept"
+        else if String.contains " /elsewhere " line then redirect 302 "http://other.example.com/landing"
+        else if String.contains " /downgrade " line then redirect 302 "http://example.com/plain"
+        else if String.contains " /loop " line then redirect 302 "loop"
+        else ok ("at " ++ line)
+    Ok (Bytes.fromString response)
+
+describe : Client.Reply -> (Int, Url.Url, Bytes)
+describe reply = (reply.status, reply.url, reply.body)
+
+permanent : () ->{State.State (List (String, List String))} Result Client.Error (Int, Url.Url, Bytes)
+permanent() = Fail.attempt { Client.stub server { describe (Client.get "http://example.com/old") } }
+
+seeOther : () ->{State.State (List (String, List String))} Result Client.Error (Int, Url.Url, Bytes)
+seeOther() = Fail.attempt {
+    Client.stub server {
+        describe (Client.post "http://example.com/see-other" (BytesBody (Bytes.fromString "form")))
+    }
+}
+
+temporary : () ->{State.State (List (String, List String))} Result Client.Error (Int, Url.Url, Bytes)
+temporary() = Fail.attempt {
+    Client.stub server {
+        describe (Client.post "http://example.com/temporary" (BytesBody (Bytes.fromString "data")))
+    }
+}
+
+streamRedirect : () ->{State.State (List (String, List String))} Result Client.Error (Int, Url.Url, Bytes)
+streamRedirect() = Fail.attempt {
+    Client.stub server {
+        describe (Client.post "http://example.com/temporary" (StreamBody { w -> Writer.writeString w "stream" }))
+    }
+}
+
+otherOrigin : () ->{State.State (List (String, List String))} Result Client.Error (Int, Url.Url, Bytes)
+otherOrigin() = Fail.attempt {
+    Client.stub server {
+        describe (Client.fetch (Client.withBearer "secret" (Client.request "GET" "http://example.com/elsewhere")))
+    }
+}
+
+downgrade : () ->{State.State (List (String, List String))} Result Client.Error (Int, Url.Url, Bytes)
+downgrade() = Fail.attempt { Client.stub server { describe (Client.get "https://example.com/downgrade") } }
+
+redirectLimit : () ->{State.State (List (String, List String))} Result Client.Error (Int, Url.Url, Bytes)
+redirectLimit() = Fail.attempt {
+    Client.stub server {
+        Client.configure { c -> { c | maxRedirects = 2 } } { describe (Client.get "http://example.com/loop") }
+    }
+}
+
+noRedirects : () ->{State.State (List (String, List String))} Result Client.Error (Int, Url.Url, Bytes)
+noRedirects() = Fail.attempt {
+    Client.stub server {
+        Client.configure { c -> { c | maxRedirects = 0 } } { describe (Client.get "http://example.com/old") }
+    }
+}
+
+tests : Test.Test {}
+tests = Test.test "http_client_redirects" {
+    permanentResult = State.run [] permanent
+    Expect.equal (Ok (200, Expect.just (Url.parse "http://example.com/new"), Bytes.fromString "at GET /new HTTP/1.1")) permanentResult.value
+    Expect.equal [("GET /old HTTP/1.1", ["Host: example.com"]), ("GET /new HTTP/1.1", ["Host: example.com"])] (List.reverse permanentResult.state)
+    seeOtherResult = State.run [] seeOther
+    Expect.equal (Ok (200, Expect.just (Url.parse "http://example.com/result"), Bytes.fromString "at GET /result HTTP/1.1")) seeOtherResult.value
+    Expect.equal [("POST /see-other HTTP/1.1", ["Host: example.com", "Content-Length: 4"]), ("GET /result HTTP/1.1", ["Host: example.com"])] (List.reverse seeOtherResult.state)
+    temporaryResult = State.run [] temporary
+    Expect.equal (Ok (200, Expect.just (Url.parse "http://example.com/kept"), Bytes.fromString "at POST /kept HTTP/1.1")) temporaryResult.value
+    Expect.equal [("POST /temporary HTTP/1.1", ["Host: example.com", "Content-Length: 4"]), ("POST /kept HTTP/1.1", ["Host: example.com", "Content-Length: 4"])] (List.reverse temporaryResult.state)
+    streamRedirectResult = State.run [] streamRedirect
+    Expect.equal (Ok (307, Expect.just (Url.parse "http://example.com/temporary"), Bytes.fromString "")) streamRedirectResult.value
+    Expect.equal [("POST /temporary HTTP/1.1", ["Host: example.com"])] (List.reverse streamRedirectResult.state)
+    otherOriginResult = State.run [] otherOrigin
+    Expect.equal (Ok (200, Expect.just (Url.parse "http://other.example.com/landing"), Bytes.fromString "at GET /landing HTTP/1.1")) otherOriginResult.value
+    Expect.equal [("GET /elsewhere HTTP/1.1", ["Host: example.com", "Authorization: Bearer secret"]), ("GET /landing HTTP/1.1", ["Host: other.example.com"])] (List.reverse otherOriginResult.state)
+    downgradeResult = State.run [] downgrade
+    Expect.equal (Ok (302, Expect.just (Url.parse "https://example.com/downgrade"), Bytes.fromString "")) downgradeResult.value
+    Expect.equal [("GET /downgrade HTTP/1.1", ["Host: example.com"])] (List.reverse downgradeResult.state)
+    redirectLimitResult = State.run [] redirectLimit
+    Expect.equal (Err Client.TooManyRedirects) redirectLimitResult.value
+    Expect.equal [("GET /loop HTTP/1.1", ["Host: example.com"]), ("GET /loop HTTP/1.1", ["Host: example.com"]), ("GET /loop HTTP/1.1", ["Host: example.com"])] (List.reverse redirectLimitResult.state)
+    noRedirectsResult = State.run [] noRedirects
+    Expect.equal (Ok (301, Expect.just (Url.parse "http://example.com/old"), Bytes.fromString "")) noRedirectsResult.value
+    Expect.equal [("GET /old HTTP/1.1", ["Host: example.com"])] (List.reverse noRedirectsResult.state)
+}
+
+main() = Test.run tests

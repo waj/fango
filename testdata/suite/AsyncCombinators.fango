@@ -1,0 +1,177 @@
+module AsyncCombinators exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail
+import IO
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+type Observation
+    = ListOutcome (Async.Outcome (List Int))
+    | FirstOutcome (Maybe (Int, Async.Outcome Int))
+    | FirstValue (Maybe (Int, Int))
+    | PairOutcome (Async.Outcome (Result String (Int, String)))
+    | GroupOutcome (Async.Outcome (Result String (List Int)))
+    | ChannelOutcome (Async.Outcome (Maybe Int))
+    | Trace String
+    | GroupResult (Result String (List Int))
+    | DataOutcome (Async.Outcome (Result String (List (Result String Int))))
+    | FirstChannelOutcome (Async.Outcome (Maybe (Int, Async.Outcome (Maybe Int))))
+    | FirstChannelValue (Async.Outcome (Maybe (Int, Maybe Int)))
+    deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordListOutcome : Async.Outcome (List Int) ->{IO, State.State (List Observation)} ()
+recordListOutcome value = record (ListOutcome value)
+
+recordFirstOutcome : Maybe (Int, Async.Outcome Int) ->{IO, State.State (List Observation)} ()
+recordFirstOutcome value = record (FirstOutcome value)
+
+recordFirstValue : Maybe (Int, Int) ->{IO, State.State (List Observation)} ()
+recordFirstValue value = record (FirstValue value)
+
+recordPairOutcome : Async.Outcome (Result String (Int, String)) ->{IO, State.State (List Observation)} ()
+recordPairOutcome value = record (PairOutcome value)
+
+recordGroupOutcome : Async.Outcome (Result String (List Int)) ->{IO, State.State (List Observation)} ()
+recordGroupOutcome value = record (GroupOutcome value)
+
+recordChannelOutcome : Async.Outcome (Maybe Int) ->{IO, State.State (List Observation)} ()
+recordChannelOutcome value = record (ChannelOutcome value)
+
+recordTrace : String ->{IO, State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordGroupResult : Result String (List Int) ->{IO, State.State (List Observation)} ()
+recordGroupResult value = record (GroupResult value)
+
+recordDataOutcome : Async.Outcome (Result String (List (Result String Int))) ->{IO, State.State (List Observation)} ()
+recordDataOutcome value = record (DataOutcome value)
+
+recordFirstChannelOutcome : Async.Outcome (Maybe (Int, Async.Outcome (Maybe Int))) ->{IO, State.State (List Observation)} ()
+recordFirstChannelOutcome value = record (FirstChannelOutcome value)
+
+recordFirstChannelValue : Async.Outcome (Maybe (Int, Maybe Int)) ->{IO, State.State (List Observation)} ()
+recordFirstChannelValue value = record (FirstChannelValue value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    recordListOutcome (Async.runOutcome {
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            first = Async.spawn {
+                ignore (Async.receive ready)
+                ignore (Async.receive gate)
+                1
+            }
+            second = Async.spawn { ignore (Async.send ready ()); 42 }
+            recordFirstOutcome (Async.awaitAnyOutcome [first, second])
+            recordFirstValue (Async.awaitAny [second])
+            emptyTasks : List (Async.Task Int)
+            emptyTasks = []
+            recordFirstOutcome (Async.awaitAnyOutcome emptyTasks)
+            recordFirstValue (Async.awaitAny emptyTasks)
+            Async.awaitAll [Async.completed 1, Async.completed 2]
+    })
+    success = computeSuccess()
+    recordPairOutcome success
+    ordered = computeOrdered()
+    recordGroupOutcome ordered
+    empty = computeEmpty()
+    recordGroupOutcome empty
+    recordChannelOutcome (Async.runOutcome {
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            outsideGate = Async.channel 0
+            outside = Async.spawn { Async.receive outsideGate }
+            result = Fail.attempt {
+                Async.all [ {
+                              Runtime.Scope.finally {
+                                  ignore (Async.send ready ())
+                                  ignore (Async.receive gate)
+                                  1
+                              } { recordTrace "failed siblings drained" }
+                            }
+                          , { ignore (Async.receive ready); Fail.fail "second failed"; 2 }
+                          ]
+            }
+            recordGroupResult result
+            ignore (Async.send outsideGate 9)
+            Async.await outside
+    })
+    data = computeData()
+    recordDataOutcome data
+    recordFirstChannelOutcome cancelledFirstOutcome()
+    recordFirstChannelValue cancelledFirstValue()
+
+computeSuccess : () ->{IO} Outcome (Result String (Int, String))
+computeSuccess() = Async.runOutcome { Fail.attempt { Async.both { 7 } { "value" } } }
+
+computeOrdered : () ->{IO} Outcome (Result String (List Int))
+computeOrdered() = Async.runOutcome {
+    ready = Async.channel 0
+    Fail.attempt {
+        Async.all [ { ignore (Async.receive ready); 1 }
+                  , { ignore (Async.send ready ()); 2 }
+                  , { 3 }
+                  ]
+    }
+}
+
+computeEmpty : () ->{IO} Outcome (Result String (List Int))
+computeEmpty() = Async.runOutcome { Fail.attempt { Async.all [] } }
+
+computeData : () ->{IO} Outcome (Result String (List (Result String Int)))
+computeData() = Async.runOutcome { Fail.attempt { Async.all [{ Err "ordinary data" }] } }
+
+cancelledFirstOutcome : () ->{IO} Async.Outcome (Maybe (Int, Async.Outcome (Maybe Int)))
+cancelledFirstOutcome() = Async.runOutcome {
+    gate : Async.Channel Int
+    gate = Async.channel 0
+    cancelled = Async.spawn { Async.receive gate }
+    Async.cancel cancelled
+    Async.awaitAnyOutcome [cancelled]
+}
+
+cancelledFirstValue : () ->{IO} Async.Outcome (Maybe (Int, Maybe Int))
+cancelledFirstValue() = Async.runOutcome {
+    gate : Async.Channel Int
+    gate = Async.channel 0
+    cancelled = Async.spawn { Async.receive gate }
+    Async.cancel cancelled
+    Async.awaitAny [cancelled]
+}
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_combinators" {
+    Expect.equal [ FirstOutcome (Just (1, Async.Completed 42))
+                 , FirstValue (Just (0, 42))
+                 , FirstOutcome Nothing
+                 , FirstValue Nothing
+                 , ListOutcome (Async.Completed [1, 2])
+                 , PairOutcome (Async.Completed (Ok (7, "value")))
+                 , GroupOutcome (Async.Completed (Ok [1, 2, 3]))
+                 , GroupOutcome (Async.Completed (Ok []))
+                 , Trace "failed siblings drained"
+                 , GroupResult (Err "second failed")
+                 , ChannelOutcome (Async.Completed (Just 9))
+                 , DataOutcome (Async.Completed (Ok [Err "ordinary data"]))
+                 , FirstChannelOutcome (Async.Completed (Just (0, Async.Cancelled)))
+                 , FirstChannelValue Async.Cancelled
+                 ] observations()
+}
+
+main() = Test.run tests

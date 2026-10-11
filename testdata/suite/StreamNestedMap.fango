@@ -1,0 +1,21 @@
+module StreamNestedMap exposing (tests)
+
+import Expect
+import State
+import Stream
+import Test
+
+double x = x * 2
+
+tests : Test.Test {}
+tests = Test.test "stream_nested_map" {
+    visited = State.run [] {
+        Stream.fromList [1, 2, 3]
+            |> Stream.map double
+            |> Stream.map double
+            |> Stream.forEach { value -> State.put [value | State.get()] }
+    }
+    Expect.equal [4, 8, 12] (List.reverse visited.state)
+}
+
+main() = Test.run tests

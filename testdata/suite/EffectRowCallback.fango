@@ -1,0 +1,39 @@
+module EffectRowCallback exposing (tests)
+
+import Expect
+import State
+import Test
+effect Put a
+    put : a -> ()
+
+run action = action()
+
+-- Each handler names the application it takes; label order never decides.
+observeStrings : (() ->{Put String, State.State (List Observation) | e} a) ->{State.State (List Observation) | e} a
+observeStrings action = handle action() on
+    put text -> recordText text; resume ()
+
+observeBools : (() ->{Put Bool, State.State (List Observation) | e} a) ->{State.State (List Observation) | e} a
+observeBools action = handle action() on
+    put flag -> recordBool flag; resume ()
+
+type Observation = Text String | Flag Bool deriving (Eq, Show)
+
+recordText : String ->{State.State (List Observation)} ()
+recordText value = State.put [Text value | State.get()]
+
+recordBool : Bool ->{State.State (List Observation)} ()
+recordBool value = State.put [Flag value | State.get()]
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() = observeBools { observeStrings { run { _ -> put True; put "answer" } } }
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "effect_row_callback" {
+    Expect.equal [Flag True, Text "answer"] observations()
+}
+
+main() = Test.run tests

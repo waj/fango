@@ -1,3 +1,0 @@
-id x = x
-
-main = print 1

@@ -1,1 +1,0 @@
-main = print (({ x y -> x * y }) 6 7)

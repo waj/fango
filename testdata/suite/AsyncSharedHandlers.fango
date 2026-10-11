@@ -1,0 +1,88 @@
+module AsyncSharedHandlers exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail exposing (Fail)
+import IO
+import Result exposing (Result(..))
+import State
+import Test
+
+effect Counter
+    next : () -> Int
+
+effect Stop
+    abort stop : () -> value
+
+withCounter body =
+    handle body() with count = 0 on
+        next () -> resume count with count + 1
+        return value -> (value, count)
+
+runStrings : (() ->{Async.Async, IO | e} a) ->{IO | e} Outcome a
+runStrings body = Async.runOutcome body
+
+parallel body = Async.await (Async.spawn body)
+
+type Observation
+    = CounterOutcome (Async.Outcome (Int, Int), Int)
+    | TaskCounterOutcome (Async.Outcome ((Int, Int), Int))
+    | Value Int
+    | Trace String
+    deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordCounterOutcome : (Async.Outcome (Int, Int), Int) ->{IO, State.State (List Observation)} ()
+recordCounterOutcome value = record (CounterOutcome value)
+
+recordTaskCounterOutcome : Async.Outcome ((Int, Int), Int) ->{IO, State.State (List Observation)} ()
+recordTaskCounterOutcome value = record (TaskCounterOutcome value)
+
+recordValue : Int ->{IO, State.State (List Observation)} ()
+recordValue value = record (Value value)
+
+recordTrace : String ->{IO, State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    recordCounterOutcome parentCounter()
+    recordTaskCounterOutcome childCounter()
+    handle
+        ignore (runStrings { _ ->
+                value = parallel { _ -> 42 }
+                recordValue value
+                stop()
+        })
+    on
+        stop () -> recordTrace "parent stopped"
+
+parentCounter : () ->{IO} (Async.Outcome (Int, Int), Int)
+parentCounter() = withCounter { _ ->
+    runStrings { _ ->
+        first = parallel { _ -> next() }
+        second = parallel { _ -> next() }
+        (first, second)
+    }
+}
+
+childCounter : () ->{IO} Async.Outcome ((Int, Int), Int)
+childCounter() = runStrings { _ -> parallel { _ -> withCounter { _ -> (next(), next()) } } }
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_shared_handlers" {
+    Expect.equal [ CounterOutcome (Async.Completed (0, 1), 2)
+                 , TaskCounterOutcome (Async.Completed ((0, 1), 2))
+                 , Value 42
+                 , Trace "parent stopped"
+                 ] observations()
+}
+
+main() = Test.run tests

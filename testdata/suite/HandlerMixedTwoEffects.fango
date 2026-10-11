@@ -1,0 +1,72 @@
+module HandlerMixedTwoEffects exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import State
+import Test
+
+effect Emit
+    emit : String -> ()
+
+effect Fail error
+    abort fail : error -> value
+
+-- A stateless mixed handler: `emit` resumes after printing through the
+-- enclosing observation effect, `fail` aborts with the common answer.
+logged : (() ->{Emit, Fail String, State.State (List Observation) | e} a) ->{State.State (List Observation) | e} Result String a
+logged action =
+    handle action() on
+        emit text -> recordTrace ("log: " ++ text); resume ()
+
+        fail : String -> a
+        fail message -> Err message
+        return value -> Ok value
+
+-- A clause never reaches a sibling application: this `emit` clause's `fail`
+-- goes to the caller's `Fail String` handler, not to the `Fail Int` beside it.
+escalating : (() ->{Emit, Fail Int | e} a) ->{Fail String | e} Result String a
+escalating action =
+    handle action() on
+        emit text -> if text == "boom" then fail ("escalated " ++ text) else resume ()
+
+        fail : Int -> a
+        fail code -> Err ("code " ++ show code)
+        return value -> Ok value
+
+type Observation = Trace String | ResultValue (Result String Int) | NestedResult (Result String (Result String Int)) deriving (Eq, Show)
+
+record : Observation ->{State.State (List Observation)} ()
+record value = State.put [value | State.get()]
+
+recordTrace : String ->{State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordResultValue : Result String Int ->{State.State (List Observation)} ()
+recordResultValue value = record (ResultValue value)
+
+recordNestedResult : Result String (Result String Int) ->{State.State (List Observation)} ()
+recordNestedResult value = record (NestedResult value)
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    recordResultValue (logged { emit "one"; emit "two"; 3 })
+    recordResultValue (logged { emit "one"; if True then fail "stop" else 0 })
+    recordNestedResult (logged { escalating { emit "fine"; if True then fail 7 else 0 } })
+    recordNestedResult (logged { escalating { emit "boom"; 1 } })
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "handler_mixed_two_effects" {
+    Expect.equal [ Trace "log: one"
+                 , Trace "log: two"
+                 , ResultValue (Ok 3)
+                 , Trace "log: one"
+                 , ResultValue (Err "stop")
+                 , NestedResult (Ok (Err "code 7"))
+                 , NestedResult (Err "escalated boom")
+                 ] observations()
+}
+
+main() = Test.run tests

@@ -1,0 +1,45 @@
+module ReaderChunks exposing (tests)
+
+import Bytes exposing (Bytes, Source(..))
+import Expect
+import IO
+import Reader exposing (Reader)
+import State
+import Stream
+import Test
+
+-- Streaming steps share this reader's scoped cursor.
+
+effect Feed
+    next : () -> Maybe Bytes
+
+paced : Source {Feed | e}
+paced = Source { pull = { _ -> next() } }
+
+{-# scoped s #-}
+drive : List Bytes -> (Reader s ->{s} a) ->{e} a
+drive pieces action =
+    handle Reader.over paced action with rest = pieces on
+        next () ->
+            case rest of
+                [] -> resume Nothing with []
+                [chunk | more] -> resume (Just chunk) with more
+
+pieces : List Bytes
+pieces = [Bytes.fromString "ab", Bytes.empty, Bytes.fromString "cde", Bytes.fromString "f"]
+
+tests : Test.Test IO.IO
+tests = Test.test "reader_chunks" {
+    Expect.equal [Bytes.fromString "abcdef"] (Reader.overBytes (Bytes.fromString "abcdef") { input -> Stream.toList (Reader.chunks input) })
+    expected = [Bytes.fromString "ab", Bytes.fromString "cde", Bytes.fromString "f"]
+    Expect.equal expected (drive pieces { input -> Stream.toList (Reader.chunks input) })
+    visited = State.run [] { drive pieces { input -> Reader.forEachChunk input { chunk -> State.put [chunk | State.get()] } } }
+    Expect.equal expected (List.reverse visited.state)
+    Expect.equal (Bytes.fromString "abcdef") (drive pieces { input -> Bytes.concat (Stream.toList (Reader.chunks input)) })
+    Expect.equal (Just (Bytes.fromString "abc"), [Bytes.fromString "de", Bytes.fromString "f"]) (drive pieces { input ->
+            (Reader.readExactly input 3, Stream.toList (Reader.chunks input))
+    })
+    Expect.equal [] (Reader.overBytes Bytes.empty { input -> Stream.toList (Reader.chunks input) })
+}
+
+main() = Test.run tests

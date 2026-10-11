@@ -1,0 +1,36 @@
+module ClassesOrdered exposing (tests)
+
+import Expect
+import Test
+type Count = Count Int deriving (Show)
+
+unwrap x = case x of
+    Count n -> n
+
+instance Num Count
+    fromInt x = Count x
+    (+) x y = Count (unwrap x + unwrap y)
+    (-) x y = Count (unwrap x - unwrap y)
+    (*) x y = Count (unwrap x * unwrap y)
+    negate x = Count (0 - unwrap x)
+
+-- Both literal patterns match. The first branch must win.
+instance Eq Count
+    (==) x y = True
+
+type Pair a = Pair Bool a
+
+choose : (Num a, Eq a) => Pair a -> String
+choose pair = case pair of
+    Pair True 0 -> "first"
+    Pair True 1 -> "second"
+    Pair False item -> "false"
+    _ -> "fallback"
+
+tests : Test.Test {}
+tests = Test.test "classes_ordered" {
+    Expect.equal "first" (choose (Pair True (Count 100)))
+    Expect.equal "false" (choose (Pair False (Count 100)))
+}
+
+main() = Test.run tests

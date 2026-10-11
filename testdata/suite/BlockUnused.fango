@@ -1,0 +1,13 @@
+module BlockUnused exposing (tests)
+
+import Expect
+import Test
+v =
+    unused = 41
+    7
+fixtureBody() = v
+
+tests : Test.Test {}
+tests = Test.test "block_unused" { Expect.equal 7 fixtureBody() }
+
+main() = Test.run tests

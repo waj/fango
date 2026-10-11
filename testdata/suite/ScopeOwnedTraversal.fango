@@ -1,0 +1,37 @@
+module ScopeOwnedTraversal exposing (tests)
+
+import Expect
+import Iterator
+import Runtime.Scope
+import State
+import Stream
+import Test
+
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator state a e ->{e} b
+foldCursor combine initial cursor = case Iterator.next cursor of
+    Nothing -> initial
+    Just (value, next) -> foldCursor combine (combine value initial) next
+
+produce = Stream.fromList [10, 20]
+
+total : () -> Int
+total() = Stream.withCursor produce { cursor -> foldCursor { element acc -> element + acc } 0 cursor }
+
+recordInt : Int ->{State.State (List Int)} ()
+recordInt value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List Int)} ()
+fixtureBody() = Runtime.Scope.bracket total { value ->
+    recordInt value
+    recordInt total()
+} recordInt
+
+observations : () -> List Int
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "scope_owned_traversal" {
+    Expect.equal [30, 30, 30] observations()
+}
+
+main() = Test.run tests

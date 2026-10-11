@@ -1,0 +1,37 @@
+module StdlibStringSpan exposing (tests)
+
+import Expect
+import Fail
+import List
+import Result exposing (Result(..))
+import State
+import String
+import Test
+
+beforeSpace char = char /= ' '
+
+trace : Char ->{State.State (List Char)} Bool
+trace char =
+    State.put [char | State.get()]
+    char /= '!'
+
+tests : Test.Test {}
+tests = Test.test "stdlib_string_span" {
+    Expect.equal ("", "") (String.span beforeSpace "")
+    Expect.equal ("", " hello") (String.span beforeSpace " hello")
+    Expect.equal ("hello", "") (String.span beforeSpace "hello")
+    Expect.equal ("hello", " world") (String.span beforeSpace "hello world")
+    Expect.equal ("é😀", " rest") (String.span beforeSpace "é😀 rest")
+    Expect.equal ("é😀", "") (String.span beforeSpace "é😀")
+    -- Visit the rejected scalar once, and never visit the following suffix.
+    visited = State.run [] { String.span trace "é😀!unvisited" }
+    Expect.equal ("é😀", "!unvisited") visited.value
+    Expect.equal ['é', '😀', '!'] (List.reverse visited.state)
+    empty = State.run [] { String.span trace "" }
+    Expect.equal ("", "") empty.value
+    Expect.equal [] empty.state
+    -- Callback failures propagate out of span.
+    Expect.equal (Err "stopped") (Fail.attempt { String.span { _ -> Fail.fail "stopped" } "abc" })
+}
+
+main() = Test.run tests

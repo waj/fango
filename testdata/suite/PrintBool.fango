@@ -1,0 +1,10 @@
+module PrintBool exposing (tests)
+
+import Expect
+import Test
+tests : Test.Test {}
+tests = Test.test "print_bool" {
+    Expect.equal True (1 == 1)
+}
+
+main() = Test.run tests

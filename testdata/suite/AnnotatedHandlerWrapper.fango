@@ -1,0 +1,40 @@
+module AnnotatedHandlerWrapper exposing (tests)
+
+import Expect
+import State
+import Test
+-- An explicitly annotated handler wrapper with an open effect-row tail: the
+-- handled body's residual observation effect flows through the annotation's row variable.
+effect Ask
+    ask : () -> String
+
+run : (() ->{Ask | e} a) ->{e} a
+run action =
+    handle action() on
+        ask () -> resume "yes"
+
+query() =
+    answer = ask()
+    recordText answer
+    if answer == "yes" then 40 else 0
+
+type Observation = Text String | Integer Int deriving (Eq, Show)
+
+recordText : String ->{State.State (List Observation)} ()
+recordText value = State.put [Text value | State.get()]
+
+recordInt : Int ->{State.State (List Observation)} ()
+recordInt value = State.put [Integer value | State.get()]
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() = recordInt (run query + 2)
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "annotated_handler_wrapper" {
+    Expect.equal [Text "yes", Integer 42] observations()
+}
+
+main() = Test.run tests

@@ -1,0 +1,32 @@
+module ClassesContextStaging exposing (tests)
+
+import Expect
+import Test
+class Inspect a
+    inspect : a -> String
+
+instance Inspect a
+    inspect _ = "fallback"
+
+early() = inspect True
+fixedCode() = if early() == "fallback" then `"fallback"` else `"show"`
+callerCode x = if inspect x == "fallback" then `"fallback"` else `"show"`
+
+before = $(callerCode True)
+
+instance Show a => Inspect a
+    inspect _ = "show"
+
+after = $(callerCode True)
+fixed = $(fixedCode())
+
+tests : Test.Test {}
+tests = Test.test "classes_context_staging" {
+    Expect.equal "fallback" before
+    Expect.equal "show" after
+    Expect.equal "fallback" fixed
+    Expect.equal "fallback" early()
+    Expect.equal "show" (inspect True)
+}
+
+main() = Test.run tests

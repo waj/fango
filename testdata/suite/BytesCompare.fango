@@ -1,0 +1,29 @@
+module BytesCompare exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Test
+
+tests : Test.Test {}
+tests = Test.test "bytes_compare" {
+    Expect.equal (Bytes.fromString "abc") (Bytes.fromString "abc")
+    Expect.notEqual (Bytes.fromString "abd") (Bytes.fromString "abc")
+    Expect.equal Bytes.empty Bytes.empty
+    Expect.equal True (Bytes.fromString "abc" /= Bytes.fromString "ab")
+    -- Lexicographic on unsigned bytes: a prefix orders before its extension.
+    Expect.equal True (Bytes.fromString "ab" < Bytes.fromString "abc")
+    Expect.equal True (Bytes.fromString "abc" <= Bytes.fromString "abc")
+    Expect.equal True (Bytes.empty < Bytes.fromString "a")
+    Expect.equal True (Bytes.fromList [128] > Bytes.fromList [127])
+    Expect.equal True (Bytes.fromList [128] > Bytes.fromList [0])
+    -- Show is a quoted escaped form at every position.
+    Expect.equal "\"plain\"" (show (Bytes.fromString "plain"))
+    Expect.equal "\"\\\"\\\\\\n\\t\\r\"" (show (Bytes.fromList [34, 92, 10, 9, 13]))
+    Expect.equal "\"\\x00\\x1F\\x7F\\xFF\"" (show (Bytes.fromList [0, 31, 127, 255]))
+    Expect.equal "\"\"" (show Bytes.empty)
+    Expect.equal "[\"a\", \"\\x01\"]" (show [Bytes.fromString "a", Bytes.fromList [1]])
+    Expect.equal "Just \"a\\nb\"" (show (Just (Bytes.fromString "a\nb")))
+    Expect.equal "\"x\"!" (show (Bytes.fromString "x") ++ "!")
+}
+
+main() = Test.run tests

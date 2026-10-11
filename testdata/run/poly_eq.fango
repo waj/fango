@@ -1,2 +1,0 @@
-type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
-main = print (Link 1 (Link 2 Empty) == Link 1 (Link 2 Empty))

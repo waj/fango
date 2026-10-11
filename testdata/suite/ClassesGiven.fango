@@ -1,0 +1,34 @@
+module ClassesGiven exposing (tests)
+
+import Expect
+import Test
+import Text.Builder
+
+-- A polymorphic function uses the evidence its caller supplies, so the same
+-- body selects different instances at different instantiations. The two
+-- instances share a head and differ only in context, which is what context
+-- precedence resolves.
+type Box a = Box a
+type Opaque = Opaque
+
+instance Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
+    show box = "fallback"
+instance Show a => Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
+    show box = case box of
+        Box value -> "generic " ++ show value
+
+render : Show (Box a) => Box a -> String
+render box = show box
+renderer : Show (Box a) => Box a -> String
+renderer = show
+
+tests : Test.Test {}
+tests = Test.test "classes_given" {
+    Expect.equal "generic \"hi\"" (render (Box "hi"))
+    Expect.equal "fallback" (render (Box Opaque))
+    Expect.equal "generic 2" (renderer (Box 2))
+}
+
+main() = Test.run tests

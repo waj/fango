@@ -1,0 +1,33 @@
+module UnitCallbackHandler exposing (tests)
+
+import Expect
+import State
+import Test
+effect Console
+    emit : String -> ()
+
+program : () ->{Console} ()
+program() = emit "handled"
+
+collect : (() ->{Console} ()) ->{State.State (List String)} ()
+collect action =
+    handle action() on
+        emit text ->
+            recordText text
+            resume ()
+
+recordText : String ->{State.State (List String)} ()
+recordText value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} ()
+fixtureBody() = collect program
+
+observations : () -> List String
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "unit_callback_handler" {
+    Expect.equal ["handled"] observations()
+}
+
+main() = Test.run tests

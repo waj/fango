@@ -1,0 +1,12 @@
+module NetApi exposing (tests)
+
+import Expect
+import Net exposing (Kind(..))
+import Test
+
+fixtureBody() = ConnectionRefused
+
+tests : Test.Test {}
+tests = Test.test "net_api" { Expect.equal "ConnectionRefused" (show fixtureBody()) }
+
+main() = Test.run tests

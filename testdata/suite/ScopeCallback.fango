@@ -1,0 +1,58 @@
+module ScopeCallback exposing (tests)
+
+import Expect
+import List exposing (List(..))
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+-- A scope inside a higher-order callback, with a direct callback and an
+-- aborting one in the same program, so both calling conventions are adapted
+-- around the same generic traversal.
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() on
+        fail error -> Err error
+        return value -> Ok value
+
+open label =
+    note ("open " ++ label)
+    label
+
+close label = note ("close " ++ label)
+
+scoped : String ->{State.State (List String)} String
+scoped label = Runtime.Scope.bracket { _ -> open label } close { token -> "<" ++ token ++ ">" }
+
+guarded label =
+    Runtime.Scope.bracket { _ -> open label } close { token ->
+        if token == "stop" then fail "stopped" else "<" ++ token ++ ">"
+    }
+
+collect : (String ->{e} String) -> List String ->{e} String
+collect step labels = List.foldl { label sofar -> sofar ++ step label } "" labels
+
+note : String ->{State.State (List String)} ()
+note value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} (String, Result String String)
+fixtureBody() =
+    first = collect { label -> scoped label } ["a", "b"]
+    second = attempt { collect { label -> guarded label } ["c", "stop", "d"] }
+    (first, second)
+
+observations : () -> ((String, Result String String), List String)
+observations() =
+    observed = State.run [] fixtureBody
+    (observed.value, List.reverse observed.state)
+
+tests : Test.Test {}
+tests = Test.test "scope_callback" {
+    Expect.equal (("<a><b>", Err "stopped"), ["open a", "close a", "open b", "close b", "open c", "close c", "open stop", "close stop"]) observations()
+}
+
+main() = Test.run tests

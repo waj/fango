@@ -1,5 +1,0 @@
-v =
-    go n =
-        if n < 1 then 0 else n + go (n - 1)
-    go 4
-main = print v

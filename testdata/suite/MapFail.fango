@@ -1,0 +1,36 @@
+module MapFail exposing (tests)
+
+import Expect
+import Fail exposing (Fail, fail)
+import Result exposing (Result(..))
+import State
+import Test
+
+mapFail : (err1 -> err2) -> (() ->{Fail err1} value) ->{Fail err2} value
+mapFail f body =
+    handle body() on
+        fail error -> fail (f error)
+
+mapFailWithEffects : (err1 -> err2) -> (() ->{Fail err1 | e} value) ->{Fail err2 | e} value
+mapFailWithEffects f body =
+    handle body() on
+        fail error -> fail (f error)
+
+reject : () ->{Fail Int} Int
+reject() = fail 42
+
+accept : () ->{Fail Int} Int
+accept() = if True then 7 else fail 0
+
+tests : Test.Test {}
+tests = Test.test "map_fail" {
+    Expect.equal (Err "42") (Fail.attempt { mapFail show reject })
+    Expect.equal (Ok 7) (Fail.attempt { mapFail show accept })
+    Expect.equal (Err 43) (Fail.attempt { mapFail { n -> n + 1 } reject })
+    Expect.equal (Err "43") (Fail.attempt { mapFail show { mapFail { n -> n + 1 } reject } })
+    observed = State.run False { Fail.attempt { mapFailWithEffects show { State.put True; reject() } } }
+    Expect.equal (Err "42") observed.value
+    Expect.equal True observed.state
+}
+
+main() = Test.run tests

@@ -1,0 +1,73 @@
+module EffectRowStatementOrder exposing (tests)
+
+import Expect
+import Fail
+import IO
+import State
+import Test
+-- An annotated body may call a `{e}` function before one that also performs
+-- `Exception ex`. The inclusion `{e} ⊆ ambient` waits for the label-bearing
+-- call instead of closing the surrounding row on statement order, so
+-- `bracket` acquires through a pure-row callback and still throws.
+effect Exception ex
+    abort throw : ex -> a
+
+finally : (() ->{Exception ex | e} a) -> (() ->{e} ()) ->{Exception ex | e} a
+finally action cleanup =
+    handle action() on
+        throw msg ->
+            cleanup()
+            throw msg
+        return result ->
+            cleanup()
+            result
+
+bracket : (() ->{e} a) -> (a ->{Exception ex | e} b) -> (a ->{e} ()) ->{Exception ex | e} b
+bracket acquire action release =
+    resource = acquire()
+    finally { _ -> action resource } { _ -> release resource }
+
+catch : (() ->{Exception ex | e} a) -> (ex ->{e} a) ->{e} a
+catch action handler =
+    handle action() on
+        throw msg -> handler msg
+        return result -> result
+
+open name =
+    recordText ("open " ++ name)
+    name
+
+close name = recordText ("close " ++ name)
+
+-- The surrounding row may also hold more than a callee's: `report` performs
+-- `IO` of its own while calling back into a `{Exception ex | e}` function.
+report : (() ->{Exception ex | e} ()) -> (() ->{e} ()) ->{IO, Exception ex | e} ()
+report risky plain =
+    plain()
+    risky()
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+
+recordText : String ->{State.State (List String)} ()
+recordText value = State.put [value | State.get()]
+
+fixtureBody : () ->{IO, State.State (List String)} ()
+fixtureBody() =
+    catch
+        { _ ->
+            bracket { _ -> open "one" } { name -> recordText ("use " ++ name) } close
+            report { _ -> recordText "risky" } { _ -> recordText "plain" }
+            recordText "reported"
+            bracket { _ -> open "two" } { _ -> throw "boom" } close
+            recordText "unreachable"
+        }
+        { msg -> recordText ("caught " ++ msg) }
+
+observations : () ->{IO} List String
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "effect_row_statement_order" {
+    Expect.equal ["open one", "use one", "close one", "plain", "risky", "reported", "open two", "close two", "caught boom"] observations()
+}
+
+main() = Test.run tests

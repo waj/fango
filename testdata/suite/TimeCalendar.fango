@@ -1,0 +1,111 @@
+module TimeCalendar exposing (tests)
+
+import Expect
+import Fail exposing (Fail)
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Test
+import Time exposing (Error(..), Weekday(..))
+import Time.Date as Date
+import Time.Duration as Duration
+import Time.Period as Period
+import Time.TimeOfDay as TOD
+
+check : String -> Bool ->{Fail Error} ()
+check label passed = if passed then () else Fail.fail (InvalidComponent label)
+
+failed result = case result of
+    Err _ -> True
+    Ok _ -> False
+
+years y =
+    if y > 9999 then () else
+        first = Date.make y 1 1
+        last = Date.make y 12 31
+        check "year cycle" (Date.components first == (y, 1, 1) && Date.components last == (y, 12, 31))
+        check "year length" (Date.daysBetween first last == (if Date.isLeapYear y then 365 else 364))
+        check "epoch roundtrip" (Date.fromEpochDays (Date.toEpochDays first) == first)
+        months y 1
+        years (y + 97)
+
+months y m =
+    if m > 12 then () else
+        date = Date.make y m 1
+        final = Date.endOfMonth date
+        check "month cycle" (Date.components final == (y, m, Date.daysInMonth date))
+        check "month roundtrip" (Date.parse (Date.toIso final) == final)
+        check "month start" (Date.beginningOfMonth final == date)
+        months y (m + 1)
+
+fixtureBody : () -> Result Error Bool
+fixtureBody() = Fail.attempt {
+    years 1
+    check "epoch" (Date.toEpochDays (Date.make 1970 1 1) == 0)
+    check "pre epoch" (Date.toEpochDays (Date.make 1969 12 31) == -1)
+    check "upper range" (Date.toEpochDays (Date.make 9999 12 31) == 2932896)
+    check "leap centuries" (Date.isLeapYear 2000 && Date.isLeapYear 2400 && Date.isLeapYear 1900 == False && Date.isLeapYear 2100 == False)
+    check "leap clamp" ((Date.make 2024 2 29 |> Date.addYears 1 |> Date.toIso) == "2025-02-28")
+    jan = Date.make 2026 1 31
+    check "clamp" (Date.toIso (Date.addMonths 1 jan) == "2026-02-28")
+    check "negative months" (Date.toIso (Date.addMonths (-1) jan) == "2025-12-31")
+    check "combined" (Date.toIso (Date.advance (Period.combine (Period.months 1) (Period.months 1)) jan) == "2026-03-31")
+    check "sequential" (Date.toIso (Date.addMonths 1 (Date.addMonths 1 jan)) == "2026-03-28")
+    check "month then days" (Date.toIso (Date.advance (Period.combine (Period.days 1) (Period.months 1)) jan) == "2026-03-01")
+    check "weekday epoch" (Date.weekday (Date.make 1970 1 1) == Thursday)
+    check "week default" (Date.toIso (Date.beginningOfWeek jan) == "2026-01-26")
+    check "week custom" (Date.toIso (Date.beginningOfWeekOn Sunday jan) == "2026-01-25")
+    check "week origin" (Date.beginningOfWeek (Date.make 1 1 1) == Date.make 1 1 1 && Date.weekday (Date.make 1 1 1) == Monday)
+    check "week before origin" (Fail.attempt { Date.beginningOfWeekOn Sunday (Date.make 1 1 3) } == Err OutOfRange)
+    check "strict next" (Date.daysBetween jan (Date.nextWeekday Saturday jan) == 7)
+    check "strict previous" (Date.daysBetween jan (Date.previousWeekday Saturday jan) == -7)
+    check "quarter start" (Date.toIso (Date.beginningOfQuarter (Date.make 2024 5 8)) == "2024-04-01")
+    check "quarter end" (Date.toIso (Date.endOfQuarter (Date.make 2024 11 8)) == "2024-12-31")
+    check "year end" (Date.toIso (Date.endOfYear jan) == "2026-12-31")
+    check "format date" (Date.format "%d/%m/%Y %% %F" jan == "31/01/2026 % 2026-01-31")
+    check "unknown token verbatim" (Date.format "%H %:x %" jan == "%H %:x %")
+    check "bad day" (Fail.attempt { Date.make 2026 2 29 } == Err (InvalidComponent "day"))
+    check "bad date text" (failed (Fail.attempt { Date.parse "2026-1-01" }))
+    check "nonexistent date text" (Fail.attempt { Date.parse "2026-02-29" } == Err (InvalidText "2026-02-29"))
+    check "unicode date" (failed (Fail.attempt { Date.parse "２０２６-01-01" }))
+    check "date low" (Fail.attempt { Date.make 1 1 1 |> Date.addDays (-1) } == Err OutOfRange)
+    check "date high" (Fail.attempt { Date.make 9999 12 31 |> Date.addDays 1 } == Err OutOfRange)
+    hi = 9223372036854775807
+    lo = -9223372036854775807 - 1
+    check "huge day count" (Fail.attempt { Date.addDays hi jan } == Err OutOfRange && Fail.attempt { Date.addDays lo jan } == Err OutOfRange)
+    check "huge week count" (Fail.attempt { Date.addWeeks lo jan } == Err OutOfRange)
+    check "huge month count" (Fail.attempt { Date.addMonths hi jan } == Err OutOfRange && Fail.attempt { Date.addYears lo jan } == Err OutOfRange)
+    clock = TOD.parse "23:59:59.000000001"
+    check "clock roundtrip" (TOD.toIso clock == "23:59:59.000000001")
+    check "clock trim" (TOD.toIso (TOD.parse "01:02:03.120000000") == "01:02:03.12")
+    check "clock format" (TOD.format "%T %N %%" clock == "23:59:59 000000001 %")
+    check "clock unknown token" (TOD.format "%Y" clock == "%Y")
+    check "24 rejected" (Fail.attempt { TOD.parse "24:00:00" } == Err (InvalidText "24:00:00"))
+    check "leap second rejected" (failed (Fail.attempt { TOD.parse "23:59:60" }))
+    check "precision rejected" (failed (Fail.attempt { TOD.parse "00:00:00.1234567890" }))
+    check "empty fraction" (failed (Fail.attempt { TOD.parse "00:00:00." }))
+    check "bad hour" (Fail.attempt { TOD.make 24 0 0 0 } == Err (InvalidComponent "hour"))
+    check "duration minimum nanos" (Duration.toNanoseconds (Duration.nanoseconds lo) == Just lo)
+    check "duration maximum nanos" (Duration.toNanoseconds (Duration.nanoseconds hi) == Just hi)
+    check "duration minimum micros" (Duration.toMicroseconds (Duration.microseconds lo) == Just lo)
+    check "duration maximum millis" (Duration.toMilliseconds (Duration.milliseconds hi) == Just hi)
+    check "truncate negatives" (Duration.toSeconds (Duration.milliseconds (-1500)) == -1)
+    check "normalize" (Duration.parts (Duration.fromParts 0 (-1)) == (-1, 999999999))
+    check "carry" (Duration.add (Duration.fromParts lo 900000000) (Duration.fromParts (-1) 100000000) == Duration.seconds lo)
+    check "borrow" (Duration.parts (Duration.subtract (Duration.fromParts (-1) 900000000) (Duration.seconds hi)) == (hi, 100000000))
+    check "negate fractional minimum" (Duration.parts (Duration.negate (Duration.fromParts lo 1)) == (hi, 999999999))
+    check "scale fractional minimum" (Duration.scale (-1) (Duration.fromParts lo 1) == Duration.fromParts hi 999999999)
+    check "scale nanos" (Duration.scale hi (Duration.nanoseconds 1) == Duration.nanoseconds hi)
+    check "scale fraction" (Duration.scale 3 (Duration.milliseconds (-1500)) == Duration.milliseconds (-4500))
+    check "scale zero" (Duration.scale 0 (Duration.seconds lo) == Duration.zero)
+    check "negate wraps" (Duration.negate (Duration.seconds lo) == Duration.seconds lo)
+    check "conversion overflow" (Duration.toNanoseconds (Duration.seconds hi) == Nothing && Duration.toNanoseconds (Duration.fromParts 9223372036 854775808) == Nothing)
+    check "conversion limit" (Duration.toNanoseconds (Duration.fromParts 9223372036 854775807) == Just hi && Duration.toMilliseconds (Duration.fromParts (-9223372036854775) 1) == Just (-9223372036854774999))
+    check "period years" (Period.totalMonths (Period.years 3) == 36 && Period.totalDays (Period.weeks (-2)) == -14)
+    check "period negative" (Period.negate (Period.combine (Period.months 2) (Period.days (-3))) == Period.combine (Period.months (-2)) (Period.days 3))
+    True
+}
+
+tests : Test.Test {}
+tests = Test.test "time_calendar" { Expect.equal (Ok True) fixtureBody() }
+
+main() = Test.run tests

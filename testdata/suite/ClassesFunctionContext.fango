@@ -1,0 +1,20 @@
+module ClassesFunctionContext exposing (tests)
+
+import Expect
+import Test
+class Label a
+    label : a -> String
+instance Label a
+    label value = "label"
+type Function a = Function (a -> a)
+instance Label (a -> a) => Label (Function a)
+    label function = case function of
+        Function f -> label f
+identity : Int -> Int
+identity x = x
+tests : Test.Test {}
+tests = Test.test "classes_function_context" {
+    Expect.equal "label" (label (Function identity))
+}
+
+main() = Test.run tests

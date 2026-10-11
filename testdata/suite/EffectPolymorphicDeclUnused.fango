@@ -1,0 +1,15 @@
+module EffectPolymorphicDeclUnused exposing (tests)
+
+import Expect
+import Test
+effect Fail error
+    throw : error -> value
+
+fixtureBody() = ()
+
+tests : Test.Test {}
+tests = Test.test "effect_polymorphic_decl_unused" {
+    Expect.equal () fixtureBody()
+}
+
+main() = Test.run tests

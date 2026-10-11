@@ -1,0 +1,25 @@
+module FailureReportStoredRetained exposing (tests)
+
+import Expect
+import Fail
+import IO
+import Result exposing (Result(..))
+import Runtime.Scope
+import Test
+
+type Port = { emit : String ->{IO} () }
+
+effect Release
+    abort release : (String ->{IO} ()) -> ()
+
+fixtureBody() =
+    report = Runtime.Scope.bracket { _ -> Port { emit = { _ -> ignore (Fail.attempt { IO.write IO.stdout "" }) } } } { _ -> () } { port ->
+        handle Fail.attemptReport { _ -> Runtime.Scope.finally { _ -> Fail.fail "body" } { _ -> release port.emit } } on
+            release _ -> Ok ()
+    }
+    ()
+
+tests : Test.Test IO.IO
+tests = Test.test "failure_report_stored_retained" { Expect.equal () fixtureBody() }
+
+main() = Test.run tests

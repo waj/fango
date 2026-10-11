@@ -1,0 +1,26 @@
+module EffectfulFunctionAdtOperator exposing (tests)
+
+import Expect
+import Test
+effect Expectation
+    log : String -> String
+
+type Test = TestCase (() ->{Expectation} ())
+
+test : (() ->{Expectation} ()) -> Test
+test action = TestCase action
+
+viaOperator : Test
+viaOperator = TestCase <| { _ -> () }
+
+viaWorker : Test
+viaWorker = test { _ -> () }
+
+fixtureBody() = ()
+
+tests : Test.Test {}
+tests = Test.test "effectful_function_adt_operator" {
+    Expect.equal () fixtureBody()
+}
+
+main() = Test.run tests

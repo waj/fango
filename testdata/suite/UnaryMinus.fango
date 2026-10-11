@@ -1,0 +1,10 @@
+module UnaryMinus exposing (tests)
+
+import Expect
+import Test
+fixtureBody() = -5 + 2
+
+tests : Test.Test {}
+tests = Test.test "unary_minus" { Expect.equal (-3) fixtureBody() }
+
+main() = Test.run tests

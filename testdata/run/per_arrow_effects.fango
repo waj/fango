@@ -1,9 +1,0 @@
-make : () ->{IO} (() ->{IO} ())
-make() =
-    print "create"
-    { _ -> print "apply" }
-
-main() =
-    callback = make()
-    print "between"
-    callback()

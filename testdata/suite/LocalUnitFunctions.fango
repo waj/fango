@@ -1,0 +1,27 @@
+module LocalUnitFunctions exposing (tests)
+
+import Expect
+import State
+import Test
+doSomething : () ->{State.State (List String)} ()
+doSomething() = recordText "saved"
+
+recordText : String ->{State.State (List String)} ()
+recordText value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} ()
+fixtureBody() =
+    saved : () ->{State.State (List String)} ()
+    saved() = if True then doSomething() else doSomething()
+    saved()
+    saved()
+
+observations : () -> List String
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "local_unit_functions" {
+    Expect.equal ["saved", "saved"] observations()
+}
+
+main() = Test.run tests

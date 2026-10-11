@@ -1,0 +1,22 @@
+module AdtRecursive exposing (tests)
+
+import Expect
+import Test
+type Nat = Zero | Succ Nat deriving (Eq, Show)
+
+depth n =
+    case n of
+        Succ rest -> 1 + depth rest
+        Zero -> 0
+
+double n =
+    case n of
+        Zero -> Zero
+        Succ rest -> Succ (Succ (double rest))
+
+tests : Test.Test {}
+tests = Test.test "adt_recursive" {
+    Expect.equal 4 (depth (double (Succ (Succ Zero))))
+}
+
+main() = Test.run tests

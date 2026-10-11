@@ -1,0 +1,37 @@
+module BytesText exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Test
+
+text : Maybe String -> String
+text value =
+    case value of
+        Nothing -> "<not text>"
+        Just s -> s
+
+tests : Test.Test {}
+tests = Test.test "bytes_text" {
+    Expect.equal [65, 90] (Bytes.toList (Bytes.fromString "AZ"))
+    Expect.equal [] (Bytes.toList Bytes.empty)
+    -- fromList truncates each element to its low eight bits.
+    Expect.equal [0, 65, 255, 0, 44, 255] (Bytes.toList (Bytes.fromList [0, 65, 255, 256, 300, -1]))
+    Expect.equal [] (Bytes.toList (Bytes.fromList []))
+    -- Multi-byte scalars are bytes here, not characters.
+    naive = Bytes.fromString "año"
+    Expect.equal 4 (Bytes.length naive)
+    Expect.equal "año" (text (Bytes.toString naive))
+    Expect.equal "año" (Bytes.toStringLossy naive)
+    -- A lone continuation byte is not text.
+    broken = Bytes.fromList [104, 105, 255, 33]
+    Expect.equal "<not text>" (text (Bytes.toString broken))
+    Expect.equal "hi�!" (Bytes.toStringLossy broken)
+    Expect.equal 6 (Bytes.length (Bytes.fromString (Bytes.toStringLossy broken)))
+    -- Cutting a scalar in half is invalid too, and lossy replaces the piece.
+    half = Bytes.slice 0 2 naive
+    Expect.equal "<not text>" (text (Bytes.toString half))
+    Expect.equal "a�" (Bytes.toStringLossy half)
+    Expect.equal "" (text (Bytes.toString Bytes.empty))
+}
+
+main() = Test.run tests

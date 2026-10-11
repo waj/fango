@@ -1,0 +1,33 @@
+module StatePublication exposing (tests)
+
+import Expect
+import Fail
+import Result exposing (Result(..))
+import Test
+
+effect Counter
+    next : Bool -> Int
+
+sequence() =
+    first = next False
+    last = next True
+    (first, last)
+
+rejectingRunner() =
+    handle sequence() with count = 10 on
+        next reject ->
+            if reject then Fail.fail "rejected" else resume count with count + 1
+        return value -> (value, count)
+
+success() =
+    handle (next False, next False) with count = 1 on
+        next _ -> resume count with count + 1
+        return value -> (value, count)
+
+tests : Test.Test {}
+tests = Test.test "state_publication" {
+    Expect.equal (Err "rejected") (Fail.attempt rejectingRunner)
+    Expect.equal ((1, 2), 3) success()
+}
+
+main() = Test.run tests

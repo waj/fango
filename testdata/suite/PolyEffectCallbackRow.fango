@@ -1,0 +1,20 @@
+module PolyEffectCallbackRow exposing (tests)
+
+import Expect
+import Test
+effect Read a
+    read : () -> a
+
+effect Apply
+    apply : a -> (() ->{Read a} a) -> a
+
+tests : Test.Test {}
+tests = Test.test "poly_effect_callback_row" {
+    result = handle apply 42 { _ -> read() } on
+        apply value f -> resume (handle f() on
+                read () -> resume value
+        )
+    Expect.equal 42 result
+}
+
+main() = Test.run tests

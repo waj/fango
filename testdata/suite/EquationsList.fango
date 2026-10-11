@@ -1,0 +1,26 @@
+module EquationsList exposing (tests)
+
+import Expect
+-- Recursive list equations: one group, three rows, source order.
+import List exposing (List, range)
+import Test
+
+count : List Int -> Int
+count [] = 0
+count [_] = 1
+count [_ | rest] = 1 + count rest
+
+sumOf : List Int -> Int
+sumOf [] = 0
+sumOf [only] = only
+sumOf [first | rest] = first + sumOf rest
+
+tests : Test.Test {}
+tests = Test.test "equations_list" {
+    Expect.equal 0 (count [])
+    Expect.equal 1 (count [7])
+    Expect.equal 5 (count (range 1 5))
+    Expect.equal 15 (sumOf (range 1 5))
+}
+
+main() = Test.run tests

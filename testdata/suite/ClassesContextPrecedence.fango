@@ -1,0 +1,28 @@
+module ClassesContextPrecedence exposing (tests)
+
+import Expect
+import Test
+class Inspect a
+    inspect : a -> String
+
+instance Inspect String
+    inspect x = "\"" ++ x ++ "\""
+instance Show a => Inspect a
+    inspect x = show x
+instance Inspect a
+    inspect _ = "<inspect not implemented>"
+
+type Foo = Foo
+forward x = inspect x
+method = inspect
+
+tests : Test.Test {}
+tests = Test.test "classes_context_precedence" {
+    Expect.equal "42" (inspect 42)
+    Expect.equal "\"Hola\"" (inspect "Hola")
+    Expect.equal "<inspect not implemented>" (inspect Foo)
+    Expect.equal "\"SECRET\"" (forward "SECRET")
+    Expect.equal "<inspect not implemented>" (method Foo)
+}
+
+main() = Test.run tests

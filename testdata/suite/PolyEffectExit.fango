@@ -1,0 +1,21 @@
+module PolyEffectExit exposing (tests)
+
+import Expect
+import Fail
+import Result exposing (Result(..))
+import Test
+
+effect Echo
+    echo : a -> a
+
+run good value =
+    handle echo value on
+        echo x -> if good then resume x else Fail.fail "stopped"
+
+tests : Test.Test {}
+tests = Test.test "poly_effect_exit" {
+    Expect.equal (Ok 42) (Fail.attempt { _ -> run True 42 })
+    Expect.equal (Err "stopped") (Fail.attempt { _ -> run False 42 })
+}
+
+main() = Test.run tests

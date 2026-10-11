@@ -1,0 +1,22 @@
+module ReturnedEffectfulCallback exposing (tests)
+
+import Expect
+import Test
+effect Counter
+    readCounter : () -> Int
+
+keep : (() ->{e} Int) -> () ->{e} Int
+keep action = action
+
+leak =
+    handle keep { _ -> readCounter() } with state = 0 on
+        readCounter () -> resume state with state
+
+fixtureBody() =
+    handle leak() on
+        readCounter () -> resume 41
+
+tests : Test.Test {}
+tests = Test.test "returned_effectful_callback" { Expect.equal 41 fixtureBody() }
+
+main() = Test.run tests

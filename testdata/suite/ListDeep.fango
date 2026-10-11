@@ -1,0 +1,26 @@
+module ListDeep exposing (tests)
+
+import Expect
+-- A list long enough to span many chunks of the array-backed representation,
+-- built, traversed, dropped into from every direction, and rebuilt. An
+-- accidental quadratic in cons or tail shows up here as a timeout.
+import List
+import Test
+
+length values = List.foldl { _ acc -> acc + 1 } 0 values
+
+reverse values = List.foldl { v acc -> [v | acc] } [] values
+
+tests : Test.Test {}
+tests = Test.test "list_deep" {
+    xs = List.range 1 5000
+    Expect.equal 5000 (length xs)
+    Expect.equal 12502500 (List.foldl { v acc -> v + acc } 0 xs)
+    ys = reverse xs
+    Expect.equal 5000 (length ys)
+    Expect.equal 12502500 (List.foldl { v acc -> v + acc } 0 ys)
+    Expect.equal xs (reverse ys)
+    Expect.equal xs xs
+}
+
+main() = Test.run tests

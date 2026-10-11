@@ -1,0 +1,26 @@
+module ListNanEq exposing (tests)
+
+import Expect
+-- Derived list equality is structural, element by element. A representation
+-- that answered from identity would call this list equal to itself, because
+-- it is the same list; Float equality says otherwise.
+import List
+import Test
+
+nan = 0.0 / 0.0
+
+empty : List.List Float
+empty = []
+
+tests : Test.Test {}
+tests = Test.test "list_nan_eq" {
+    withNan = [1.0, nan, 3.0]
+    plain = [1.0, 2.0, 3.0]
+    Expect.notEqual withNan withNan
+    Expect.equal plain plain
+    Expect.notEqual plain withNan
+    Expect.equal empty empty
+    Expect.notEqual [nan] [nan]
+}
+
+main() = Test.run tests

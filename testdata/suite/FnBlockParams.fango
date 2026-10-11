@@ -1,0 +1,14 @@
+module FnBlockParams exposing (tests)
+
+import Expect
+import Test
+norm x y =
+    sx = x * x
+    sy = y * y
+    sx + sy
+tests : Test.Test {}
+tests = Test.test "fn_block_params" {
+    Expect.equal 25 (norm 3 4)
+}
+
+main() = Test.run tests

@@ -1,0 +1,26 @@
+module ScopedResponse exposing (tests)
+
+import Bytes
+import Expect
+import Reader
+import Test
+
+type Reply e = { render : () ->{e} Bytes.Bytes }
+
+{-# scoped s #-}
+run : (Reader.Reader s ->{s} Reply s) -> Bytes.Bytes
+run handler =
+    Reader.withBytes (Bytes.fromString "abc") { reader ->
+        reply = handler reader
+        reply.render()
+    }
+
+make : Reader.Reader e ->{e} Reply e
+make reader = { render = { Reader.readUpTo reader 3 } }
+
+tests : Test.Test {}
+tests = Test.test "scoped_response" {
+    Expect.equal (Just "abc") (Bytes.toString (run make))
+}
+
+main() = Test.run tests

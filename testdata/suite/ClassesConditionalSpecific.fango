@@ -1,0 +1,20 @@
+module ClassesConditionalSpecific exposing (tests)
+
+import Expect
+import Test
+import Text.Builder
+
+type Tag a b = Tag a b
+
+instance Show b => Show (Tag Int b)
+    showTo built value = Text.Builder.append (show value) built
+    show t = case t of
+        Tag n x -> "tag " ++ show n ++ " " ++ show x
+
+tests : Test.Test {}
+tests = Test.test "classes_conditional_specific" {
+    Expect.equal "tag 1 \"payload\"" (show (Tag 1 "payload"))
+    Expect.equal "tag 2 True" (show (Tag 2 True))
+}
+
+main() = Test.run tests

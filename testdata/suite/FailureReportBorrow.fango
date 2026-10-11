@@ -1,0 +1,29 @@
+module FailureReportBorrow exposing (tests)
+
+import Expect
+import Fail
+import IO
+import Result exposing (Result(..))
+import Runtime.Scope
+import Test
+
+type Port = { emit : String ->{IO} () }
+
+effect Release
+    abort release : (String ->{IO} ()) -> ()
+
+fixtureBody : () -> String
+fixtureBody() =
+    primary = Runtime.Scope.bracket { _ -> Port { emit = { _ -> ignore (Fail.attempt { IO.write IO.stdout "" }) } } } { _ -> () } { port ->
+        report = handle Fail.attemptReport { _ -> Runtime.Scope.finally { _ -> Fail.fail "body" } { _ -> release port.emit } } on
+            release _ -> Ok ()
+        case report of
+            Err failure -> failure.primary
+            Ok _ -> "success"
+    }
+    primary
+
+tests : Test.Test {}
+tests = Test.test "failure_report_borrow" { Expect.equal "body" fixtureBody() }
+
+main() = Test.run tests

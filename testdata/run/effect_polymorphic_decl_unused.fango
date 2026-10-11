@@ -1,4 +1,0 @@
-effect Fail error
-    throw : error -> value
-
-main = ()

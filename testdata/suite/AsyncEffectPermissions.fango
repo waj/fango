@@ -1,0 +1,62 @@
+module AsyncEffectPermissions exposing (tests)
+
+import Async exposing (Async, Task)
+import Expect
+import Fail exposing (Fail)
+import IO
+import Result exposing (Result(..))
+import State
+import Test
+
+effect Lookup
+    lookup : () -> Int
+
+spawnAny : (() ->{e} a) ->{Async | e} Task a
+spawnAny body = Async.spawn body
+
+pureParent : () ->{Async} Task Int
+pureParent() = spawnAny { 42 }
+
+domainParent : () ->{Async, Lookup} Task Int
+domainParent() = spawnAny { lookup() }
+
+ioParent : () ->{Async, IO, State.State (List Observation)} ()
+ioParent() = ignore (spawnAny { recordTrace "child IO" })
+
+type Observation = Trace String | PairOutcome (Async.Outcome (Int, Int)) deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordTrace : String ->{IO, State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordPairOutcome : Async.Outcome (Int, Int) ->{IO, State.State (List Observation)} ()
+recordPairOutcome value = record (PairOutcome value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    recordPairOutcome domainOutcomes()
+    Async.run ioParent
+
+domainOutcomes : () ->{IO} Async.Outcome (Int, Int)
+domainOutcomes() = Async.runOutcome {
+    first = pureParent()
+    second = handle domainParent() on
+        lookup () -> resume 7
+    (Async.await first, Async.await second)
+}
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_effect_permissions" {
+    Expect.equal [ PairOutcome (Async.Completed (42, 7))
+                 , Trace "child IO"
+                 ] observations()
+}
+
+main() = Test.run tests

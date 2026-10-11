@@ -1,0 +1,40 @@
+module TestEffectfulBody exposing (tests)
+
+import Expect
+import Fail exposing (Fail, attempt, fail)
+import Result exposing (Result(..))
+import State exposing (State(..))
+import Test exposing (Test, describe, test)
+
+-- Test bodies perform effects besides Expect. A body handles Fail itself to
+-- assert on the outcome, and the suite's row carries State, which the caller
+-- handles around the whole run.
+
+checked : Int ->{Fail String} Int
+checked n = if n > 0 then n else fail "not positive"
+
+suite : Test (State Int)
+suite =
+    describe "effects"
+        [ test "a body handles the code's own effect" {
+            Expect.equal (Ok 2) (attempt { checked 2 })
+            Expect.equal (Err "not positive") (attempt { checked 0 })
+        }
+        , test "a body uses the caller's handler" {
+            put (get () + 1)
+            Expect.equal 1 (get ())
+        }
+        , test "state carries across tests" {
+            put (get () + 1)
+            Expect.equal 2 (get ())
+        }
+        ]
+
+tests : Test {}
+tests = Test.test "test_effectful_body" {
+    result = State.run 0 { Test.silent { Test.execute suite } }
+    Expect.equal (Test.Summary { passed = 3, failed = 0, skipped = 0, todo = 0, verdict = Test.RunPassed }) result.value
+    Expect.equal 2 result.state
+}
+
+main() = Test.run tests

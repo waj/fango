@@ -1,0 +1,71 @@
+module HttpBodies exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Http exposing (Body(..), Protocol(..))
+import Http.Server
+import IO
+import List
+import Test
+import Writer exposing (Writer)
+
+written : String -> Writer {Protocol | e} -> Http.Server.Response {Protocol | e} ->{Protocol | e} String
+written method output response =
+    Http.Server.writeResponse method output response
+    "ok"
+
+-- Reports a protocol failure after whatever was written before it.
+attempt : String -> Writer {Protocol | e} -> Http.Server.Response {Protocol | e} ->{e} String
+attempt method output response =
+    handle written method output response on
+        Http.invalid error -> show error
+
+report : (String, Bytes) -> String
+report (outcome, wire) = outcome ++ " " ++ show wire
+
+respond : Int -> Body e -> Http.Server.Response e
+respond status body = Http.Server.Response { status = status, headers = [], body = body }
+
+fixtureBody : () ->{IO.IO} List String
+fixtureBody() =
+    observed0 = report (Writer.collecting { o ->
+            attempt "GET" o (respond 200 (SizedBody 5 { w ->
+                        Writer.writeString w "ab"
+                        Writer.writeString w "cde"
+            }))
+    })
+    observed1 = report (Writer.collecting { o ->
+            attempt "GET" o (respond 200 (SizedBody 3 { w ->
+                        Writer.writeString w "ab"
+                        Writer.writeString w "cd"
+            }))
+    })
+    observed2 = report (Writer.collecting { o -> attempt "GET" o (respond 200 (SizedBody 3 { w -> Writer.writeString w "ab" })) })
+    observed3 = report (Writer.collecting { o -> attempt "HEAD" o (respond 200 (SizedBody 3 { _ -> Http.abortBody "HEAD runs no body" })) })
+    observed4 = report (Writer.collecting { o -> attempt "GET" o (respond 204 (SizedBody 0 { _ -> () })) })
+    observed5 = report (Writer.collecting { o -> attempt "GET" o (respond 200 (SizedBody (0 - 1) { _ -> () })) })
+    observed6 = report (Writer.collecting { o ->
+            attempt "GET" o (respond 200 (StreamBody { w ->
+                        Writer.writeString w "partial"
+                        w.flush()
+                        Http.abortBody "source failed"
+            }))
+    })
+    observed7 = report (Writer.collecting { o ->
+            attempt "GET" o (respond 200 (StreamBody { w ->
+                        List.each { piece -> Writer.writeString w piece } ["a", "b", "c", "d"]
+            }))
+    })
+    observed8 = report (Writer.collecting { o ->
+            attempt "GET" o (respond 200 (StreamBody { w ->
+                        Writer.writeString w "a"
+                        w.flush()
+                        Writer.writeString w "b"
+            }))
+    })
+    [observed0, observed1, observed2, observed3, observed4, observed5, observed6, observed7, observed8]
+
+tests : Test.Test IO.IO
+tests = Test.test "http_bodies" { Expect.equal ["ok \"HTTP/1.1 200 \\r\\nContent-Length: 5\\r\\n\\r\\nabcde\"", "InvalidMessage \"body exceeds its declared length\" \"HTTP/1.1 200 \\r\\nContent-Length: 3\\r\\n\\r\\n\"", "InvalidMessage \"body is shorter than its declared length\" \"HTTP/1.1 200 \\r\\nContent-Length: 3\\r\\n\\r\\nab\"", "ok \"HTTP/1.1 200 \\r\\nContent-Length: 3\\r\\n\\r\\n\"", "InvalidMessage \"message cannot carry a body\" \"\"", "InvalidMessage \"declared body length is negative\" \"\"", "BodyAborted \"source failed\" \"HTTP/1.1 200 \\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n7\\r\\npartial\\r\\n\"", "ok \"HTTP/1.1 200 \\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n4\\r\\nabcd\\r\\n0\\r\\n\\r\\n\"", "ok \"HTTP/1.1 200 \\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n1\\r\\na\\r\\n1\\r\\nb\\r\\n0\\r\\n\\r\\n\""] fixtureBody() }
+
+main() = Test.run tests

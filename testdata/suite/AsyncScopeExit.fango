@@ -1,0 +1,129 @@
+module AsyncScopeExit exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail
+import IO
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+blocked ready gate label () = Runtime.Scope.finally {
+    ignore (Async.send ready ())
+    Async.receive gate
+} { recordTrace label }
+
+type Observation
+    = Trace String
+    | ValueOutcome (Async.Outcome Int)
+    | ChannelOutcome (Async.Outcome (Maybe Int))
+    | TaskOutcome (Async.Outcome (Async.Outcome (Maybe Int)))
+    | UnitOutcome (Async.Outcome ())
+    deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordTrace : String ->{IO, State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordValueOutcome : Async.Outcome Int ->{IO, State.State (List Observation)} ()
+recordValueOutcome value = record (ValueOutcome value)
+
+recordChannelOutcome : Async.Outcome (Maybe Int) ->{IO, State.State (List Observation)} ()
+recordChannelOutcome value = record (ChannelOutcome value)
+
+recordTaskOutcome : Async.Outcome (Async.Outcome (Maybe Int)) ->{IO, State.State (List Observation)} ()
+recordTaskOutcome value = record (TaskOutcome value)
+
+recordUnitOutcome : Async.Outcome () ->{IO, State.State (List Observation)} ()
+recordUnitOutcome value = record (UnitOutcome value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    recordValueOutcome rootDrains()
+    recordValueOutcome taskDrains()
+    recordChannelOutcome scopeDrains()
+    recordTaskOutcome scopeCancels()
+    recordUnitOutcome (Async.runOutcome {
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            ignore (Async.spawn (blocked ready gate "outer task drained"))
+            ignore (Async.receive ready)
+            Async.scope {
+                target = Async.spawn { Async.receive gate }
+                Async.cancel target
+                ignore (Async.await target)
+            }
+            recordTrace "unreachable"
+    })
+
+rootDrains : () ->{IO, State.State (List Observation)} Async.Outcome Int
+rootDrains() = Async.runOutcome {
+    ready = Async.channel 0
+    gate : Async.Channel Int
+    gate = Async.channel 0
+    ignore (Async.spawn (blocked ready gate "root drained"))
+    ignore (Async.receive ready)
+    42
+}
+
+taskDrains : () ->{IO, State.State (List Observation)} Async.Outcome Int
+taskDrains() = Async.runOutcome {
+    ready = Async.channel 0
+    gate : Async.Channel Int
+    gate = Async.channel 0
+    parent = Async.spawn {
+        ignore (Async.spawn (blocked ready gate "task drained"))
+        ignore (Async.receive ready)
+        7
+    }
+    Async.await parent
+}
+
+scopeDrains : () ->{IO, State.State (List Observation)} Async.Outcome (Maybe Int)
+scopeDrains() = Async.runOutcome {
+    gate = Async.channel 0
+    outside = Async.spawn { Async.receive gate }
+    value = Async.scope {
+        ready = Async.channel 0
+        inner : Async.Channel Int
+        inner = Async.channel 0
+        ignore (Async.spawn (blocked ready inner "scope drained"))
+        ignore (Async.receive ready)
+        11
+    }
+    ignore (Async.send gate value)
+    Async.await outside
+}
+
+scopeCancels : () ->{IO} Async.Outcome (Async.Outcome (Maybe Int))
+scopeCancels() = Async.runOutcome {
+    gate : Async.Channel Int
+    gate = Async.channel 0
+    task = Async.scope { Async.spawn { Async.receive gate } }
+    Async.awaitOutcome task
+}
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_scope_exit" {
+    Expect.equal [ Trace "root drained"
+                 , ValueOutcome (Async.Completed 42)
+                 , Trace "task drained"
+                 , ValueOutcome (Async.Completed 7)
+                 , Trace "scope drained"
+                 , ChannelOutcome (Async.Completed (Just 11))
+                 , TaskOutcome (Async.Completed Async.Cancelled)
+                 , Trace "outer task drained"
+                 , UnitOutcome Async.Cancelled
+                 ] observations()
+}
+
+main() = Test.run tests

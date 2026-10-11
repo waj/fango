@@ -1,0 +1,29 @@
+module PolyEffectCallbackAsync exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import IO
+import Result exposing (Result(..))
+import Test
+
+effect Read a
+    read : () -> a
+
+effect Apply
+    apply : a -> (() ->{Read a} a) -> a
+
+fixtureBody : () ->{IO.IO} Int
+fixtureBody() = handle apply 42 { _ -> read() } on
+    apply value f -> resume (
+        handle
+            case Async.runOutcome { _ -> Async.await (Async.spawn f) } of
+                Completed result -> result
+                _ -> value
+        on
+            read () -> resume value
+    )
+
+tests : Test.Test IO.IO
+tests = Test.test "poly_effect_callback_async" { Expect.equal 42 fixtureBody() }
+
+main() = Test.run tests

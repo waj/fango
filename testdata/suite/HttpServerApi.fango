@@ -1,0 +1,34 @@
+module HttpServerApi exposing (tests)
+
+import Async
+import Bytes
+import Expect
+import Fail
+import Http exposing (Body(..))
+import Http.Server
+import IO
+import Net
+import Result exposing (Result(..))
+import Test
+
+hello : Http.Server.Request e ->{e} Http.Server.Response e
+hello request = Http.Server.Response
+    { status = 200
+    , headers = []
+    , body = BytesBody (Bytes.fromString request.target)
+    }
+
+fixtureBody : () ->{IO.IO} Result Net.Error (Async.Outcome ())
+fixtureBody() = Fail.attempt {
+    Async.runOutcome {
+        stop = Async.channel 1
+        ignore (Async.send stop ())
+        config = Http.Server.defaultConfig 0
+        Http.Server.serve { config | workers = 2 } stop hello
+    }
+}
+
+tests : Test.Test IO.IO
+tests = Test.test "http_server_api" { Expect.equal (Ok (Async.Completed ())) fixtureBody() }
+
+main() = Test.run tests

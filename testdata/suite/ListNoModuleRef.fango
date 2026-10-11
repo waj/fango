@@ -1,0 +1,28 @@
+module ListNoModuleRef exposing (tests)
+
+import Expect
+import Test
+-- Bracket syntax alone: this file builds and matches lists without ever naming
+-- the List module, which is the case where the bundled type contributes only
+-- its runtime representation and no module-level reference.
+sum values =
+    case values of
+        [] -> 0
+        [value | rest] -> value + sum rest
+
+firstTwo values =
+    case values of
+        [] -> "none"
+        [_] -> "one"
+        [_, _ | _] -> "many"
+
+tests : Test.Test {}
+tests = Test.test "list_no_module_ref" {
+    Expect.equal 10 (sum [1, 2, 3, 4])
+    Expect.equal "none" (firstTwo [])
+    Expect.equal "one" (firstTwo [9])
+    Expect.equal "many" (firstTwo [9, 8, 7])
+    Expect.equal 3 (sum [0, 1, 2])
+}
+
+main() = Test.run tests

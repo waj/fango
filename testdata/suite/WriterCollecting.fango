@@ -1,0 +1,52 @@
+module WriterCollecting exposing (tests)
+
+import Bytes exposing (Bytes, Sink(..))
+import Expect
+import Fail exposing (Fail, attempt, fail)
+import Result exposing (Result(..))
+import State
+import Test
+import Writer exposing (Writer)
+
+-- Collecting uses scoped local state and publishes the buffer only after success.
+
+render : Writer e ->{e} Int
+render output =
+    Writer.writeString output "status"
+    output.flush()
+    Writer.write output (Bytes.fromString ": ")
+    Writer.writeString output "ok"
+    2
+
+trace : Sink {State.State (List Bytes), Fail String}
+trace = Sink { write = { chunk -> State.put [chunk | State.get()] } }
+
+-- A body that aborts never reaches the return clause, so nothing is flushed
+-- and no reader receives a truncated message. A caller that wants that
+-- guarantee for a whole body writes into `collecting` instead.
+partial : Bool -> Writer e ->{Fail String | e} ()
+partial ok output =
+    Writer.writeString output "head"
+    if ok then () else fail "stopped"
+    Writer.writeString output "tail"
+
+tests : Test.Test {}
+tests = Test.test "writer_collecting" {
+    Expect.equal (2, Bytes.fromString "status: ok") (Writer.collecting render)
+    Expect.equal ((), Bytes.fromString "abc") (Writer.collecting { output ->
+            Writer.writeString output "a"
+            output.flush()
+            Writer.writeString output "b"
+            Writer.writeString output "c"
+    })
+    Expect.equal ((), Bytes.empty) (Writer.collecting { _ -> () })
+    success = State.run [] { attempt { Writer.over trace 99 (partial True) } }
+    Expect.equal (Ok ()) success.value
+    Expect.equal [Bytes.fromString "headtail"] (List.reverse success.state)
+    failed = State.run [] { attempt { Writer.over trace 99 (partial False) } }
+    Expect.equal (Err "stopped") failed.value
+    Expect.equal [] failed.state
+    Expect.equal (Err "stopped") (attempt { Writer.collecting (partial False) })
+}
+
+main() = Test.run tests

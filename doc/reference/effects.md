@@ -65,7 +65,7 @@ effect as potentially overlapping and unifies their arguments. An incompatible
 overlap, such as `{Put a, Put Bool}` for an unknown `a`, reports `EFFECT MISMATCH`.
 Annotation type variables are fixed while checking a definition, so `Fail err1`
 and `Fail err2` can remain separate applications. A handler can translate one
-into the other, as in the [failure mapping fixture](../../testdata/run/map_fail.fango).
+into the other, as in the [failure mapping fixture](../../testdata/suite/MapFail.fango).
 
 The order of labels never chooses an application. An application whose
 argument is still unknown, met by a row holding several applications of its
@@ -512,7 +512,7 @@ clauses. The permission cannot leave the handler through its result, residual
 row, or outer storage. Abort-only effects cannot be bound this way.
 
 A scoped runner can pass such a closure to its consumer through a row-indexed
-record. The [scoped binding fixture](../../testdata/run/handler_scoped_binding.fango)
+record. The [scoped binding fixture](../../testdata/suite/HandlerScopedBinding.fango)
 shows a counter retaining its original activation beneath another Counter
 handler. Attempting to pass the stateful operation as `() -> Int` is rejected
 with `HANDLER BINDING EFFECTS`; the local permission is never erased to claim

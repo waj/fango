@@ -1,0 +1,39 @@
+module DiscardBinding exposing (tests)
+
+import Expect
+import State
+import Test
+type Pair = Pair Int Int
+
+loud : Int ->{State.State (List Observation)} Int
+loud n =
+    recordInt n
+    n * 2
+
+inline : () ->{State.State (List Observation)} ()
+inline () = _ = loud 3; recordText "inline"
+
+type Observation = Text String | Integer Int deriving (Eq, Show)
+
+recordText : String ->{State.State (List Observation)} ()
+recordText value = State.put [Text value | State.get()]
+
+recordInt : Int ->{State.State (List Observation)} ()
+recordInt value = State.put [Integer value | State.get()]
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    _ = loud 1
+    Pair _ _ = Pair (loud 2) 0
+    recordText "done"
+    inline()
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "discard_binding" {
+    Expect.equal [Integer 1, Integer 2, Text "done", Integer 3, Text "inline"] observations()
+}
+
+main() = Test.run tests

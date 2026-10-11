@@ -1,0 +1,11 @@
+module FnString exposing (tests)
+
+import Expect
+import Test
+greet name = "hello " ++ name
+tests : Test.Test {}
+tests = Test.test "fn_string" {
+    Expect.equal "hello fango" (greet "fango")
+}
+
+main() = Test.run tests

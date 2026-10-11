@@ -1,0 +1,17 @@
+module PolyEffectEcho exposing (tests)
+
+import Expect
+import Test
+effect Echo
+    echo : a -> a
+
+apply f x = f x
+
+tests : Test.Test {}
+tests = Test.test "poly_effect_echo" {
+    Expect.equal 42 (handle if apply echo True then apply echo 42 else 0 on
+            echo x -> resume x
+    )
+}
+
+main() = Test.run tests

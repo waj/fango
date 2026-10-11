@@ -1,0 +1,43 @@
+module NativeStorage exposing (tests)
+
+import Expect
+import IO
+import Runtime.Native
+import Test
+
+{-# resource #-}
+type Box a = Box Runtime.Native.Any
+
+box : a ->{IO} Box a
+box = native
+
+read : Box a ->{IO} a
+read = native
+
+store : Box a -> a ->{IO} ()
+store = native
+
+type Record = { number : Int, text : String }
+type Tree = Leaf Int | Branch Tree Tree deriving (Show)
+
+tests : Test.Test IO.IO
+tests = Test.test "native_storage" {
+    integer = box 42
+    text = box "hello"
+    record = box (Record { number = 7, text = "record" })
+    tree = box (Branch (Leaf 1) (Branch (Leaf 2) (Leaf 3)))
+    unit = box ()
+    function = box { x -> x + 1 }
+    Expect.equal 42 (read integer)
+    Expect.equal "hello" (read text)
+    r = read record
+    Expect.equal 7 r.number
+    Expect.equal "record" r.text
+    Expect.equal "Branch (Leaf 1) (Branch (Leaf 2) (Leaf 3))" (show (read tree))
+    read unit
+    Expect.equal 10 (read function 9)
+    store integer 43
+    Expect.equal 43 (read integer)
+}
+
+main() = Test.run tests

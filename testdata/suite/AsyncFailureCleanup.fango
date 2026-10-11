@@ -1,0 +1,120 @@
+module AsyncFailureCleanup exposing (tests)
+
+import Async exposing (Outcome(..), Task)
+import Expect
+import Fail
+import IO
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+type Observation
+    = GroupOutcome (Async.Outcome (Result String (List Int)))
+    | Trace String
+    | CancelledGroupOutcome (Async.Outcome (Async.Outcome (Result String (List (Maybe Int)))))
+    | CancelledTaskOutcome (Async.Outcome (Async.Outcome (Result String (Maybe Int))))
+    deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordGroupOutcome : Async.Outcome (Result String (List Int)) ->{IO, State.State (List Observation)} ()
+recordGroupOutcome value = record (GroupOutcome value)
+
+recordTrace : String ->{IO, State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordCancelledGroupOutcome : Async.Outcome (Async.Outcome (Result String (List (Maybe Int)))) ->{IO, State.State (List Observation)} ()
+recordCancelledGroupOutcome value = record (CancelledGroupOutcome value)
+
+recordCancelledTaskOutcome : Async.Outcome (Async.Outcome (Result String (Maybe Int))) ->{IO, State.State (List Observation)} ()
+recordCancelledTaskOutcome value = record (CancelledTaskOutcome value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    recordGroupOutcome (Async.runOutcome {
+            cleanupStarted = Async.channel 0
+            cleanupRelease = Async.channel 0
+            runSlow = Async.channel 0
+            slowFinished = Async.channel 0
+            coordinator = Async.spawn {
+                ignore (Async.receive cleanupStarted)
+                ignore (Async.send runSlow ())
+                ignore (Async.receive slowFinished)
+                ignore (Async.send cleanupRelease ())
+            }
+            result = Fail.attempt {
+                Async.all [ {
+                              ignore (Async.receive runSlow)
+                              recordTrace "sibling still running during failure cleanup"
+                              ignore (Async.send slowFinished ())
+                              1
+                            }
+                          , {
+                              Runtime.Scope.finally { Fail.fail "failed"; 2 } {
+                                  ignore (Async.send cleanupStarted ())
+                                  ignore (Async.receive cleanupRelease)
+                                  recordTrace "failure cleanup finished"
+                              }
+                            }
+                          ]
+            }
+            ignore (Async.await coordinator)
+            result
+    })
+    recordCancelledGroupOutcome (Async.runOutcome {
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            group : Task (Result String (List (Maybe Int)))
+            group = Async.spawn {
+                Fail.attempt {
+                    Async.all [ {
+                                  Runtime.Scope.finally {
+                                      ignore (Async.send ready ())
+                                      Async.receive gate
+                                  } { recordTrace "cancelled combinator drained" }
+                                }
+                              ]
+                }
+            }
+            ignore (Async.receive ready)
+            Async.cancel group
+            Async.awaitOutcome group
+    })
+    recordCancelledTaskOutcome cancelledCleanupFailure()
+
+cancelledCleanupFailure : () ->{IO} Async.Outcome (Async.Outcome (Result String (Maybe Int)))
+cancelledCleanupFailure() = Async.runOutcome {
+    ready = Async.channel 0
+    gate : Async.Channel Int
+    gate = Async.channel 0
+    task = Async.spawnAttempt {
+        Runtime.Scope.finally {
+            ignore (Async.send ready ())
+            Async.receive gate
+        } { Fail.fail "suppressed beneath cancellation" }
+    }
+    ignore (Async.receive ready)
+    Async.cancel task
+    Async.awaitOutcome task
+}
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_failure_cleanup" {
+    Expect.equal [ Trace "sibling still running during failure cleanup"
+                 , Trace "failure cleanup finished"
+                 , GroupOutcome (Async.Completed (Err "failed"))
+                 , Trace "cancelled combinator drained"
+                 , CancelledGroupOutcome (Async.Completed Async.Cancelled)
+                 , CancelledTaskOutcome (Async.Completed Async.Cancelled)
+                 ] observations()
+}
+
+main() = Test.run tests

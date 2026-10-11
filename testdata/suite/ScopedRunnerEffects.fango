@@ -1,0 +1,56 @@
+module ScopedRunnerEffects exposing (tests)
+
+import Bytes
+import Expect
+import Fail exposing (Fail)
+import Reader exposing (Reader)
+import Result exposing (Result(..))
+import State
+import Test
+
+-- The runner hands its callback `Fail String` and handles it itself, so the
+-- failure never reaches the runner's caller.
+{-# scoped s #-}
+guarded : String -> (Reader s ->{Fail String | s} a) ->{e} Result String a
+guarded text action =
+    Reader.withBytes (Bytes.fromString text) { reader ->
+        Fail.attempt { action reader }
+    }
+
+effect Log
+    log : String -> ()
+
+-- The callback still sees the caller's own effects through the residual row.
+outer : () ->{Log} Result String Bytes.Bytes
+outer() =
+    guarded "abc" { reader ->
+        first = Reader.readUpTo reader 1
+        log "read one byte"
+        first
+    }
+
+note : String ->{State.State (List String)} ()
+note value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} (Result String Bytes.Bytes, Result String Bytes.Bytes, Result String Bytes.Bytes)
+fixtureBody() =
+    first = guarded "hello" { reader -> Reader.readUpTo reader 3 }
+    second = guarded "hello" { reader ->
+        bytes = Reader.readUpTo reader 2
+        if Bytes.length bytes == 2 then Fail.fail "stop" else bytes
+    }
+    third = handle outer() on
+        log message -> note message; resume ()
+    (first, second, third)
+
+observations : () -> ((Result String Bytes.Bytes, Result String Bytes.Bytes, Result String Bytes.Bytes), List String)
+observations() =
+    observed = State.run [] fixtureBody
+    (observed.value, List.reverse observed.state)
+
+tests : Test.Test {}
+tests = Test.test "scoped_runner_effects" {
+    Expect.equal ((Ok (Bytes.fromString "hel"), Err "stop", Ok (Bytes.fromString "a")), ["read one byte"]) observations()
+}
+
+main() = Test.run tests

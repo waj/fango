@@ -1,0 +1,18 @@
+module PolyEffectNested exposing (tests)
+
+import Expect
+import Test
+type Key a = Key a
+
+effect Echo
+    echo : Key a -> Key a
+
+tests : Test.Test {}
+tests = Test.test "poly_effect_nested" {
+    result = handle echo (Key 42) on
+        echo (Key n) -> resume (Key n)
+    case result of
+        Key n -> Expect.equal 42 n
+}
+
+main() = Test.run tests

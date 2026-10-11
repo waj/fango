@@ -1,0 +1,28 @@
+module ClassesLocals exposing (tests)
+
+import Expect
+import Test
+type Box a = Box a deriving (Eq, Show)
+type Phantom a = Phantom deriving (Eq, Show)
+
+make x =
+    same : Eq a => a -> a -> Bool
+    same l r = l == r
+    captured y = same x y
+    captured
+
+render p = show p
+
+phantom : Phantom ()
+phantom = Phantom
+
+tests : Test.Test {}
+tests = Test.test "classes_locals" {
+    compare = make (Box "hello")
+    Expect.equal True (compare (Box "hello"))
+    Expect.equal False (compare (Box "bye"))
+    Expect.equal "Box (Box \"text\")" (render (Box (Box "text")))
+    Expect.equal "Phantom" (show phantom)
+}
+
+main() = Test.run tests

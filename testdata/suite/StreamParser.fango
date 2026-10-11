@@ -1,0 +1,51 @@
+module StreamParser exposing (tests)
+
+import Expect
+import Iterator
+import Stream
+import String
+import Test
+
+isDigit char = char >= '0' && char <= '9'
+digit char = case String.toInt (String.fromChar char) of
+    Just value -> value
+    Nothing -> 0
+
+numberTail value cursor = case Iterator.next cursor of
+    Nothing -> (value, Nothing, cursor)
+    Just (char, next) ->
+        if isDigit char then numberTail (value * 10 + digit char) next
+        else (value, Just char, next)
+
+numberStep (pending, cursor) =
+    token = case pending of
+        Just char -> Just (char, cursor)
+        Nothing -> Iterator.next cursor
+    case token of
+        Nothing -> Nothing
+        Just (char, next) ->
+            if isDigit char then
+                (value, lookahead, rest) = numberTail (digit char) next
+                Just (value, (lookahead, rest))
+            else numberStep (Nothing, next)
+
+numbers : Stream.Stream state Char e -> Stream.Stream (Maybe Char, Iterator.Iterator state Char e) Int e
+numbers source = Stream.unfold (Nothing, Iterator.start source.initial source.step) numberStep
+
+expandStep (pending, cursor) = case pending of
+    Just value -> Just (value, (Nothing, cursor))
+    Nothing -> case Iterator.next cursor of
+        Nothing -> Nothing
+        Just (value, next) -> Just (value, (Just (value * 10), next))
+
+expand : Stream.Stream state Int e -> Stream.Stream (Maybe Int, Iterator.Iterator state Int e) Int e
+expand source = Stream.unfold (Nothing, Iterator.start source.initial source.step) expandStep
+
+tests : Test.Test {}
+tests = Test.test "stream_parser" {
+    input = Stream.fromList ['1', '2', '+', '3', ' ', '4', '5']
+    Expect.equal [12, 3, 45] (Stream.toList (numbers input))
+    Expect.equal [12, 120, 3, 30, 45] (Stream.toList (Stream.take 5 (expand (numbers input))))
+}
+
+main() = Test.run tests

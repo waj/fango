@@ -1,0 +1,63 @@
+module AsyncHandlers exposing (tests)
+
+import Async
+import Expect
+import Fail exposing (Fail)
+import IO
+import Result exposing (Result(..))
+import Test
+
+effect Database
+    lookup : Int -> String
+
+effect Stop
+    abort stop : String -> value
+
+withDatabase body =
+    handle body() on
+        lookup id -> resume "Alice"
+
+withBrokenDatabase body =
+    handle body() on
+        lookup id -> Fail.fail "unavailable"
+
+withStoppingDatabase body =
+    handle body() on
+        lookup id -> stop "stopped"
+
+withStop body =
+    handle body() on
+        stop reason -> Err reason
+        return value -> Ok value
+
+query : () ->{Database, Fail String} String
+query () =
+    name = lookup 42
+    if name == "" then Fail.fail "empty" else name
+
+parallel action = Async.await (Async.spawn action)
+
+successful : () ->{IO.IO} Async.Outcome (Result String String)
+successful() = withDatabase { Async.runOutcome { Async.await (Async.spawnAttempt query) } }
+
+broken : () ->{IO.IO} Async.Outcome (Result String String)
+broken() = Async.runOutcome { Async.await (Async.spawnAttempt { withBrokenDatabase query }) }
+
+stopped : () ->{IO.IO} Async.Outcome String
+stopped() = Async.runOutcome {
+    parallel {
+        result = withStop { withStoppingDatabase { lookup 42 } }
+        case result of
+            Ok value -> value
+            Err reason -> reason
+    }
+}
+
+tests : Test.Test IO.IO
+tests = Test.test "async_handlers" {
+    Expect.equal (Async.Completed (Ok "Alice")) successful()
+    Expect.equal (Async.Completed (Err "unavailable")) broken()
+    Expect.equal (Async.Completed "stopped") stopped()
+}
+
+main() = Test.run tests

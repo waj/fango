@@ -1,0 +1,27 @@
+module StateIndependentResult exposing (tests)
+
+import Expect
+import Fail exposing (attempt, fail)
+import Random exposing (int)
+import Result exposing (Result(..))
+import Test
+
+-- A partial operation accepts fresh evidence at its next application.
+-- It does not retain the runner used for the preceding draw.
+makeDraw() =
+    ignored = Random.int 1 2
+    Random.int 1
+
+draw = Random.runSeeded 0 makeDraw
+
+tests : Test.Test {}
+tests = Test.test "state_independent_result" {
+    Expect.equal 1 (Random.runSeeded 5 { _ -> draw 1 })
+    result = attempt { _ ->
+        handle draw 1 on
+            int lo hi -> fail "fresh handler"
+    }
+    Expect.equal (Err "fresh handler") result
+}
+
+main() = Test.run tests

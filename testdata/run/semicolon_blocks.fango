@@ -1,3 +1,0 @@
-increment = { a b -> print a; b + 1 }
-
-main() = print (increment 10 41)

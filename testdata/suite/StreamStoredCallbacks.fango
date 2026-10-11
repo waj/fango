@@ -1,0 +1,81 @@
+module StreamStoredCallbacks exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import State
+import Stream
+import Test
+
+type Box e = Box (Int ->{e} Int)
+
+runBox : Box e -> Int ->{e} Int
+runBox (Box action) value = action value
+
+makeBox : () ->{State.State (List Observation)} Box {State.State (List Observation)}
+makeBox() =
+    recordTrace "factory"
+    Box { value ->
+        recordValue value
+        value + 1
+    }
+
+type Chain e = End | Link (Box e) (Chain e)
+
+runChain : Chain e -> Int ->{e} Int
+runChain chain value = case chain of
+    End -> value
+    Link box rest -> runChain rest (runBox box value)
+
+class Invoke a
+    invoke : a -> Int ->{State.State (List Observation)} Int
+
+instance Invoke (Box {State.State (List Observation)})
+    invoke = runBox
+
+once action = Stream.unfold False { done ->
+    if done then Nothing else Just (action(), True)
+}
+
+emit : Invoke a => a -> Stream.Stream Bool Int {State.State (List Observation)}
+emit stored = once { _ -> invoke stored 4 }
+
+type Observation = Trace String | Value Int deriving (Eq, Show)
+
+record : Observation ->{State.State (List Observation)} ()
+record value = State.put [value | State.get()]
+
+recordTrace : String ->{State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordValue : Int ->{State.State (List Observation)} ()
+recordValue value = record (Value value)
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    box = makeBox()
+    source = once { _ -> runBox box 4 }
+    Stream.forEach recordValue source
+    Stream.forEach recordValue source
+    chain = Link box (Link box End)
+    Stream.forEach recordValue (once { _ -> runChain chain 6 })
+    Stream.forEach recordValue (emit box)
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "stream_stored_callbacks" {
+    Expect.equal [ Trace "factory"
+                 , Value 4
+                 , Value 5
+                 , Value 4
+                 , Value 5
+                 , Value 6
+                 , Value 7
+                 , Value 8
+                 , Value 4
+                 , Value 5
+                 ] observations()
+}
+
+main() = Test.run tests

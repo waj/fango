@@ -1,0 +1,33 @@
+module EquationsLiterals exposing (tests)
+
+import Expect
+import Test
+-- Overlapping rows are selected in source order, pins included.
+limit = 3
+
+grade : Int -> String
+grade 0 = "zero"
+grade ^limit = "limit"
+grade 1 = "one"
+grade _ = "many"
+
+sign : Float -> String
+sign 0.0 = "zero"
+sign _ = "other"
+
+initial : Char -> String
+initial 'a' = "first"
+initial _ = "later"
+
+tests : Test.Test {}
+tests = Test.test "equations_literals" {
+    Expect.equal "zero" (grade 0)
+    Expect.equal "one" (grade 1)
+    Expect.equal "limit" (grade 3)
+    Expect.equal "many" (grade 9)
+    Expect.equal "zero" (sign 0.0)
+    Expect.equal "first" (initial 'a')
+    Expect.equal "later" (initial 'z')
+}
+
+main() = Test.run tests

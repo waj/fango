@@ -1,0 +1,31 @@
+module FailCaseBinding exposing (tests)
+
+import Expect
+import Fail
+import Result exposing (Result(..))
+import Test
+
+type Problem = Problem
+
+type Box = Box Int
+
+choose flag =
+    boxed =
+        case flag of
+            True -> Box 7
+            False -> Fail.fail Problem
+    case boxed of
+        Box value -> show value
+
+report flag =
+    case Fail.attempt { _ -> choose flag } of
+        Ok value -> value
+        Err _ -> "failed"
+
+tests : Test.Test {}
+tests = Test.test "fail_case_binding" {
+    Expect.equal "7" (report True)
+    Expect.equal "failed" (report False)
+}
+
+main() = Test.run tests

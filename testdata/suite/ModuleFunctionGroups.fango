@@ -1,0 +1,71 @@
+module ModuleFunctionGroups exposing (tests)
+
+import Fail
+import List
+import Expect
+import Result exposing (Result(..))
+import Test
+
+first value = later value
+later value = value
+
+isEven 0 = True
+isEven n = isOdd (n - 1)
+isOdd 0 = False
+isOdd n = isEven (n - 1)
+
+applyLater values = List.map increment values
+increment value = value + 1
+
+nullary() = answer()
+answer() = 42
+
+infixl 6 (<~>)
+operatorCaller x = x <~> 1
+(<~>) x y = x + y
+
+left : a -> Bool -> a
+left value stop = if stop then value else right value True
+right : a -> Bool -> a
+right value stop = if stop then value else left value True
+
+fallible : Int ->{Fail.Fail String} ()
+fallible n =
+    go remaining = alternate remaining
+    if n == 0 then Fail.fail "zero" else go (n - 1)
+alternate n = fallible n
+
+selfFallible n =
+    go remaining = selfFallible remaining
+    if n == 0 then Fail.fail "self" else if n < 0 then () else go (n - 1)
+
+annotatedFallible n =
+    go : Int ->{Fail.Fail String} ()
+    go remaining = annotatedAlternate remaining
+    if n == 0 then Fail.fail "annotated" else go (n - 1)
+annotatedAlternate n = annotatedFallible n
+
+returnedCallback n =
+    go : Int ->{Fail.Fail String} (() -> Int)
+    go remaining =
+        value = returnedCallback remaining
+        { _ -> value }
+    if n == 0 then Fail.fail "returned" else if n < 0 then 7 else (go (n - 1))()
+
+tests : Test.Test {}
+tests = Test.test "module_function_groups" {
+    Expect.equal (42) (first 42)
+    Expect.equal ("independent") (first "independent")
+    Expect.equal ([True, False, True, False, True]) (List.map isEven [0, 1, 2, 3, 4])
+    Expect.equal ([2, 3, 4]) (applyLater [1, 2, 3])
+    Expect.equal (42) (nullary())
+    Expect.equal (42) (operatorCaller 41)
+    Expect.equal ("mutual") (left "mutual" False)
+    Expect.equal (42) (right 42 False)
+    Expect.equal (Err "zero") (Fail.attempt ({ _ -> fallible 3 }))
+    Expect.equal (Err "self") (Fail.attempt ({ _ -> selfFallible 3 }))
+    Expect.equal (Err "annotated") (Fail.attempt ({ _ -> annotatedFallible 3 }))
+    Expect.equal (Err "returned") (Fail.attempt ({ _ -> returnedCallback 3 }))
+}
+
+main() = Test.run tests

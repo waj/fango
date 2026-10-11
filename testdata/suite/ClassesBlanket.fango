@@ -1,0 +1,28 @@
+module ClassesBlanket exposing (tests)
+
+import Expect
+import List
+import Random
+import Test
+
+class Inspect a
+    inspect : a -> String
+
+instance Show a => Inspect a
+    inspect x = show x
+
+instance Inspect String
+    inspect x = "\"" ++ x ++ "\""
+
+forward x = inspect x
+method = inspect
+
+tests : Test.Test {}
+tests = Test.test "classes_blanket" {
+    Expect.equal "42" (inspect 42)
+    Expect.equal "\"Hola\"" (inspect "Hola")
+    Expect.equal "\"STRING\"" (forward "STRING")
+    Expect.equal "\"VALUE\"" (method "VALUE")
+}
+
+main() = Test.run tests

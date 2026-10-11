@@ -1,0 +1,22 @@
+module PolyNested exposing (tests)
+
+import Expect
+import Test
+type Opt a = None | Some a deriving (Eq, Show)
+type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
+
+heads : Chain (Opt Int) -> Int
+heads xs =
+    case xs of
+        Empty -> 0
+        Link (Some n) rest -> n + heads rest
+        Link None rest -> heads rest
+
+tests : Test.Test {}
+tests = Test.test "poly_nested" {
+    xs = Link (Some 40) (Link None (Link (Some 2) Empty))
+    Expect.equal (Link (Some 40) (Link None (Link (Some 2) Empty))) xs
+    Expect.equal 42 (heads xs)
+}
+
+main() = Test.run tests

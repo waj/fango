@@ -1,0 +1,17 @@
+module NativeStringUnchecked exposing (tests)
+
+import Expect
+import String
+import Test
+
+raw : () -> String
+raw = native
+
+-- The native deliberately violates its String contract. The boundary trusts
+-- its bytes; inspecting their length must not add a UTF-8 scan or panic.
+tests : Test.Test {}
+tests = Test.test "native_string_unchecked" {
+    Expect.equal 6 (String.byteLength raw())
+}
+
+main() = Test.run tests

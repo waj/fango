@@ -1,0 +1,86 @@
+module LocalWorker exposing (tests)
+
+import Expect
+import Fail exposing (Fail)
+import Result exposing (Result(..))
+import Runtime.Local
+import Test
+
+effect Probe
+    value : () -> Int
+
+type Fns = Done | Push (() -> Int) Fns
+
+capture : Int -> Fns
+capture step =
+    loop : Int -> Fns -> Fns
+    loop n fs =
+        if n == 0 then fs
+        else
+            saved : () -> Int
+            saved() = n + step
+            loop (n - 1) (Push saved fs)
+    loop 3 Done
+
+collect : Fns -> Int -> Int
+collect fs acc =
+    case fs of
+        Done -> acc
+        Push f rest -> collect rest (acc + f())
+
+count : Int -> Int
+count step =
+    loop : Int -> Int -> Int
+    loop n acc = if n == 0 then acc else loop (n - 1) (acc + step)
+    loop 2000000 0
+
+make : Int -> Int -> Int -> Int
+make step =
+    loop : Int -> Int -> Int
+    loop n acc = if n == 0 then acc else loop (n - 1) (acc + step)
+    loop
+
+makePartial : Int -> Int -> Int
+makePartial step =
+    loop : Int -> Int -> Int
+    loop n acc = if n == 0 then acc else loop (n - 1) (acc + step)
+    loop 100
+
+exitLoop() =
+    loop : Int ->{Probe, Fail Int} Int
+    loop n = if n == 0 then Fail.fail value() else loop (n - 1)
+    loop 2000000
+
+makeReader() =
+    handle
+        {
+            saved : () ->{Probe} Int
+            saved() = value()
+            saved
+        }()
+    on
+        value () -> resume 1
+
+tests : Test.Test {}
+tests = Test.test "local_worker" {
+    Expect.equal 6000000 (count 3)
+    Expect.equal 36 (collect (capture 10) 0)
+    first = make 3
+    second = make 7
+    Expect.equal (31, 71) (first 10 1, second 10 1)
+    Expect.equal 210 (makePartial 2 10)
+    Expect.equal (Err 9) (Fail.attempt { handle exitLoop() on value () -> resume 9 })
+    saved = makeReader()
+    Expect.equal 2 (handle saved() on value () -> resume 2)
+    Expect.equal 10000 (Runtime.Local.run 0 { cell ->
+        stop = cell.read()
+        loop n =
+            if n == stop then cell.read()
+            else
+                cell.write (cell.read() + 1)
+                loop (n - 1)
+        loop 10000
+    })
+}
+
+main() = Test.run tests

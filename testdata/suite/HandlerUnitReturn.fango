@@ -1,0 +1,64 @@
+module HandlerUnitReturn exposing (tests)
+
+import Expect
+import State
+import Test
+-- Return transformations that produce Unit, and that ignore the handled
+-- value or the final state. The handler's Go closure declares fangort.Unit,
+-- so its body must return the singleton rather than the bare return an
+-- ordinary Direct worker uses, and bindings the transformation never reads
+-- have to stay legal Go.
+effect Ask
+    ask : () -> String
+
+effect Fail err
+    abort fail : err -> a
+
+effect Counter
+    step : () -> Int
+
+answering action =
+    handle action() on
+        ask () -> resume "yes"
+        return _ -> recordText "answered"
+
+ignoring action =
+    handle action() on
+        ask () -> resume "no"
+        return unused -> 5
+
+rescuing action handler =
+    handle action() on
+        fail err -> handler err
+        return _ -> ()
+
+counting action =
+    handle action() with count = 0 on
+        step () -> resume count with count + 1
+        return _ -> recordText "counted"
+
+type Observation = Text String | Integer Int deriving (Eq, Show)
+
+recordText : String ->{State.State (List Observation)} ()
+recordText value = State.put [Text value | State.get()]
+
+recordInt : Int ->{State.State (List Observation)} ()
+recordInt value = State.put [Integer value | State.get()]
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    answering { _ -> recordText ("asked " ++ ask()) }
+    recordInt (ignoring { _ -> ask() })
+    rescuing { _ -> fail "stopped" } { err -> recordText ("rescued " ++ err) }
+    rescuing { _ -> recordText "quiet" } { err -> recordText ("rescued " ++ err) }
+    counting { _ -> recordInt (step() + step()) }
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "handler_unit_return" {
+    Expect.equal [Text "asked yes", Text "answered", Integer 5, Text "rescued stopped", Text "quiet", Integer 1, Text "counted"] observations()
+}
+
+main() = Test.run tests

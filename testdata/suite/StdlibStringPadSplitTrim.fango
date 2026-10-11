@@ -1,0 +1,60 @@
+module StdlibStringPadSplitTrim exposing (suite)
+
+import Expect
+import List
+import String
+import Test exposing (Test, describe, test)
+
+suite : Test {}
+suite =
+    describe "String"
+        [ describe "split"
+            [ test "n occurrences give n + 1 pieces" {
+                Expect.equal ["a", "b", "c"] (String.split "," "a,b,c")
+                Expect.equal ["a"] (String.split "," "a")
+                Expect.equal [""] (String.split "," "")
+                Expect.equal 1 (List.length (String.split "," ""))
+                Expect.equal ["", "a"] (String.split "," ",a")
+                Expect.equal ["a", ""] (String.split "," "a,")
+                Expect.equal ["a", "", "b"] (String.split "," "a,,b")
+                Expect.equal 3 (List.length (String.split "," "a,,b"))
+                Expect.equal ["", ""] (String.split "," ",")
+                Expect.equal 2 (List.length (String.split "," ","))
+                Expect.equal ["a", "b", "c"] (String.split "::" "a::b::c")
+            }
+            , test "a separator longer than what remains does not slice out of range" {
+                Expect.equal ["abc"] (String.split "abcd" "abc")
+                Expect.equal ["x", "y"] (String.split "abcd" "xabcdy")
+            }
+            , test "an empty separator yields the text unchanged" {
+                Expect.equal ["abc"] (String.split "" "abc")
+            }
+            ]
+        , describe "trim"
+            [ test "removes surrounding whitespace" {
+                Expect.equal "hi" (String.trim "  hi  ")
+                Expect.equal "hi" (String.trim "hi")
+                Expect.equal "" (String.trim "")
+                Expect.equal "" (String.trim "   ")
+                Expect.equal "hi" (String.trim "\t\n\r hi \r\n\t")
+            }
+            , test "keeps inner whitespace" { Expect.equal "a b" (String.trim "a b") }
+            ]
+        , describe "padding"
+            [ test "pads to the width on either side" {
+                Expect.equal "...ab" (String.padLeft 5 '.' "ab")
+                Expect.equal "ab..." (String.padRight 5 '.' "ab")
+            }
+            , test "leaves text at or over the width alone" {
+                Expect.equal "ab" (String.padLeft 2 '.' "ab")
+                Expect.equal "ab" (String.padLeft 1 '.' "ab")
+                Expect.equal "ab" (String.padLeft 0 '.' "ab")
+                Expect.equal "ab" (String.padLeft (-3) '.' "ab")
+            }
+            , test "measures Unicode scalars, not bytes" {
+                Expect.equal "..éé" (String.padLeft 4 '.' "éé")
+                Expect.equal 6 (String.byteLength (String.padLeft 4 '.' "éé"))
+            }
+            ]
+        ]
+main() = Test.run suite

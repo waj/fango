@@ -1,0 +1,25 @@
+module ClassesEffectValue exposing (tests)
+
+import Expect
+import State
+import Test
+class Echo a
+    echo : a ->{State.State (List String)} a
+instance Echo Int
+    echo = { value ->
+        State.put ["called" | State.get()]
+        value
+    }
+argument : Int
+argument = 42
+tests : Test.Test {}
+tests = Test.test "classes_effect_value" {
+    observed = State.run [] {
+        State.put ["start"]
+        echo argument
+    }
+    Expect.equal 42 observed.value
+    Expect.equal ["start", "called"] (List.reverse observed.state)
+}
+
+main() = Test.run tests

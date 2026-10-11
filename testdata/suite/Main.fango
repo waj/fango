@@ -1,0 +1,570 @@
+module Main exposing (main)
+
+import AbortCleanupCallback
+import AbortHandlerUnitClause
+import AdtArea
+import AdtBoolCase
+import AdtCaseExprPos
+import AdtCaseLiterals
+import AdtPartialCtor
+import AdtRecursive
+import AdtShowEq
+import AnnArity
+import AnnFloatForces
+import AnnTypevar
+import AnnotatedHandlerWrapper
+import AsyncCancelPolicy
+import AsyncChannels
+import AsyncCombinators
+import AsyncDomainSetup
+import AsyncEffectPermissions
+import AsyncFailureCleanup
+import AsyncHandlers
+import AsyncInlineIo
+import AsyncParallelMap
+import AsyncPayloads
+import AsyncRace
+import AsyncRootCleanup
+import AsyncRun
+import AsyncScopeExit
+import AsyncSharedHandlers
+import AsyncTaskCancellation
+import AsyncValuePolicy
+import AsyncValues
+import AttemptInsideScopedRunner
+import Attributes
+import BackendLatentCallbacks
+import BlockUnused
+import BoolOps
+import BoolShortCircuit
+import BytesCompare
+import BytesDerived
+import BytesScan
+import BytesText
+import ClassesBlanket
+import ClassesCompose
+import ClassesComposeWhole
+import ClassesConditionalSpecific
+import ClassesContextMaximal
+import ClassesContextOrder
+import ClassesContextPrecedence
+import ClassesContextStaging
+import ClassesContextStructural
+import ClassesDefaults
+import ClassesDerive
+import ClassesDeriveContext
+import ClassesDeriveOrd
+import ClassesEffectValue
+import ClassesEffects
+import ClassesFunctionContext
+import ClassesGiven
+import ClassesLocals
+import ClassesLogging
+import ClassesNested
+import ClassesNumeric
+import ClassesOrdered
+import ClassesRecordFields
+import ClassesRepeatedVar
+import ClassesScalarSafety
+import ClassesSimple
+import ClassesSpecific
+import ClassesStructuralEvidence
+import ClassesUnitName
+import ClosureCapture
+import CompositionalCallbacks
+import ControlledWorkerArgument
+import DiscardBinding
+import DivDefault
+import EffectApiMemoryReader
+import EffectParameterizedRunner
+import EffectPhantomParameter
+import EffectPolymorphicDeclUnused
+import EffectRowApplications
+import EffectRowCallback
+import EffectRowNestedArguments
+import EffectRowSharedCallback
+import EffectRowStatementOrder
+import EffectfulFunctionAdtOperator
+import EmptyEffect
+import EquationTwoProducts
+import EquationsHandlerGroups
+import EquationsList
+import EquationsLiterals
+import EquationsRecordLambda
+import EquationsUnit
+import ErrMetaNative
+import ErrPrintLambda
+import FailCaseBinding
+import FailModule
+import FailureReportBorrow
+import FailureReportResourceRetained
+import FailureReportStoredRetained
+import FileGenericWrapper
+import Firstclass
+import FloatInf
+import FloatNan
+import FloatRuntimeAdd
+import FnBlockParams
+import FnString
+import HandlerMixedAbortState
+import HandlerMixedTwoEffects
+import HandlerScopedBinding
+import HandlerSignatureSingle
+import HandlerTwoEffectsSharedState
+import HandlerTwoFailApplications
+import HandlerTwoStateApplications
+import HandlerUnitReturn
+import HandlerUnusedOuterRow
+import HigherOrder
+import HttpApi
+import HttpBodies
+import HttpClientRedirects
+import HttpClientStub
+import HttpFraming
+import HttpGzip
+import HttpServerApi
+import IfLayout
+import IfPrint
+import IteratorHelpers
+import IteratorStored
+import JsonBuffered
+import JsonChunkResume
+import JsonResumable
+import JsonScan
+import JsonScanOrder
+import JsonSpans
+import JsonStreaming
+import JsonText
+import JsonValue
+import JsonWindows
+import JsonWitnessOperator
+import LambdaDirect
+import ListDeep
+import ListNanEq
+import ListNoModuleRef
+import ListOfFunctions
+import ListShare
+import LocalFnRec
+import LocalStateStaging
+import LocalUnitFunctions
+import LocalWorker
+import MapFail
+import MetaBackticks
+import MetaDeriver
+import MetaLocalFunction
+import MetaReflect
+import Minint
+import ModuleFunctionGroups
+import NativePhantom
+import NativeStorage
+import NativeStringUnchecked
+import Negative
+import NetApi
+import Oversat
+import PatternBindings
+import PerArrowEffects
+import PerformDirectInExit
+import PolyAbortRow
+import PolyAdt
+import PolyEffectCallback
+import PolyEffectCallbackAsync
+import PolyEffectCallbackRow
+import PolyEffectEcho
+import PolyEffectExit
+import PolyEffectNested
+import PolyEffectStructuralRow
+import PolyEq
+import PolyFailureRebuild
+import PolyFailureStructural
+import PolyLiftedLocal
+import PolyNested
+import PolyNumber
+import PolyPartial
+import PolyShow
+import PolyShowNested
+import PolyTwoTypes
+import PolyUnused
+import PolyValue
+import PostfixUnitCall
+import Precedence
+import PrintBool
+import PrintInt
+import PrintString
+import ReaderAlternating
+import ReaderChunks
+import ReaderMemory
+import ReaderPureOperations
+import ReaderScopedDomain
+import ReaderScopedMemory
+import RecordFieldPureWidened
+import RecordFieldWidenedEvidence
+import RecordFieldWidenedRow
+import RecordPinChar
+import RecordsInferred
+import RecordsInferredAcrossLocal
+import RecordsNominal
+import RecordsOrder
+import RegexNoPrelude
+import RegexQuotation
+import ResourceSafeResults
+import ReturnedEffectfulCallback
+import RowArgumentClosed
+import RowPolymorphicMap
+import ScopeCallback
+import ScopeExitOrder
+import ScopeFinally
+import ScopeLifecycle
+import ScopeOpenRow
+import ScopeOwnedTraversal
+import ScopeReturnTransform
+import ScopeReturnedCallback
+import ScopeStaging
+import ScopeState
+import ScopedResponse
+import ScopedRunnerEffects
+import SemicolonBlocks
+import ShowBuilder
+import ShowRepresentation
+import StateIndependentResult
+import StatePublication
+import StdlibDict
+import StdlibDictBalance
+import StdlibDictFolds
+import StdlibDictUpdate
+import StdlibListCombinators
+import StdlibListEffectOrder
+import StdlibMaybe
+import StdlibModby
+import StdlibQuotientby
+import StdlibRandomSystem
+import StdlibRange
+import StdlibStringPadSplitTrim
+import StdlibStringSpan
+import StdlibStringTofloat
+import StdlibStringToint
+import StdlibStringUnicode
+import StdlibWordsFoldl
+import StreamCleanup
+import StreamCursor
+import StreamDemand
+import StreamEvidenceShadow
+import StreamExplicitState
+import StreamHandler
+import StreamNestedMap
+import StreamOperations
+import StreamParser
+import StreamRecovery
+import StreamStaging
+import StreamStoredCallbacks
+import StringBuilderShared
+import StringInterpolation
+import StringInterpolationNoPrelude
+import SubsumptionSharedOpenRow
+import TailLoopSwap
+import TailLoopUnitarg
+import Test
+import TestEffectfulBody
+import TestReporter
+import TextBuilder
+import TextBuilderTasks
+import TextEncoding
+import TextReaderWindows
+import TextWriter
+import TimeCalendar
+import TimeZones
+import Tuples
+import UnaryMinus
+import UnitCallbackHandler
+import UrlReference
+import UseBlocks
+import UserOperators
+import ValueRepresentation
+import WriterCollecting
+import WriterScopedPure
+import WriterWindow
+
+main() =
+    Test.run (Test.describe "Fango"
+            [ TestEffectfulBody.tests
+            , TestReporter.checks
+            , StdlibRandomSystem.tests
+            , FileGenericWrapper.tests
+            , AbortCleanupCallback.tests
+            , AbortHandlerUnitClause.tests
+            , AdtArea.tests
+            , AdtBoolCase.tests
+            , AdtCaseExprPos.tests
+            , AdtCaseLiterals.tests
+            , AdtPartialCtor.tests
+            , AdtRecursive.tests
+            , AdtShowEq.tests
+            , AnnArity.tests
+            , AnnFloatForces.tests
+            , AnnTypevar.tests
+            , AnnotatedHandlerWrapper.tests
+            , AsyncCancelPolicy.tests
+            , AsyncChannels.tests
+            , AsyncCombinators.tests
+            , AsyncDomainSetup.tests
+            , AsyncEffectPermissions.tests
+            , AsyncFailureCleanup.tests
+            , AsyncHandlers.tests
+            , AsyncInlineIo.tests
+            , AsyncParallelMap.tests
+            , AsyncPayloads.tests
+            , AsyncRace.tests
+            , AsyncRootCleanup.tests
+            , AsyncRun.tests
+            , AsyncScopeExit.tests
+            , AsyncSharedHandlers.tests
+            , AsyncTaskCancellation.tests
+            , AsyncValuePolicy.tests
+            , AsyncValues.tests
+            , AttemptInsideScopedRunner.tests
+            , Attributes.tests
+            , BackendLatentCallbacks.tests
+            , BlockUnused.tests
+            , BoolOps.tests
+            , BoolShortCircuit.tests
+            , BytesCompare.tests
+            , BytesDerived.tests
+            , BytesScan.tests
+            , BytesText.tests
+            , ClassesBlanket.tests
+            , ClassesCompose.tests
+            , ClassesComposeWhole.tests
+            , ClassesConditionalSpecific.tests
+            , ClassesContextMaximal.tests
+            , ClassesContextOrder.tests
+            , ClassesContextPrecedence.tests
+            , ClassesContextStaging.tests
+            , ClassesContextStructural.tests
+            , ClassesDefaults.tests
+            , ClassesDerive.tests
+            , ClassesDeriveContext.tests
+            , ClassesDeriveOrd.tests
+            , ClassesEffectValue.tests
+            , ClassesEffects.tests
+            , ClassesFunctionContext.tests
+            , ClassesGiven.tests
+            , ClassesLocals.tests
+            , ClassesLogging.tests
+            , ClassesNested.tests
+            , ClassesNumeric.tests
+            , ClassesOrdered.tests
+            , ClassesRecordFields.tests
+            , ClassesRepeatedVar.tests
+            , ClassesScalarSafety.tests
+            , ClassesSimple.tests
+            , ClassesSpecific.tests
+            , ClassesStructuralEvidence.tests
+            , ClassesUnitName.tests
+            , ClosureCapture.tests
+            , CompositionalCallbacks.tests
+            , ControlledWorkerArgument.tests
+            , DiscardBinding.tests
+            , DivDefault.tests
+            , EffectApiMemoryReader.tests
+            , EffectParameterizedRunner.tests
+            , EffectPhantomParameter.tests
+            , EffectPolymorphicDeclUnused.tests
+            , EffectRowApplications.tests
+            , EffectRowCallback.tests
+            , EffectRowNestedArguments.tests
+            , EffectRowSharedCallback.tests
+            , EffectRowStatementOrder.tests
+            , EffectfulFunctionAdtOperator.tests
+            , EmptyEffect.tests
+            , EquationTwoProducts.tests
+            , EquationsHandlerGroups.tests
+            , EquationsList.tests
+            , EquationsLiterals.tests
+            , EquationsRecordLambda.tests
+            , EquationsUnit.tests
+            , ErrMetaNative.tests
+            , ErrPrintLambda.tests
+            , FailCaseBinding.tests
+            , FailModule.tests
+            , FailureReportBorrow.tests
+            , FailureReportResourceRetained.tests
+            , FailureReportStoredRetained.tests
+            , Firstclass.tests
+            , FloatInf.tests
+            , FloatNan.tests
+            , FloatRuntimeAdd.tests
+            , FnBlockParams.tests
+            , FnString.tests
+            , HandlerMixedAbortState.tests
+            , HandlerMixedTwoEffects.tests
+            , HandlerScopedBinding.tests
+            , HandlerSignatureSingle.tests
+            , HandlerTwoEffectsSharedState.tests
+            , HandlerTwoFailApplications.tests
+            , HandlerTwoStateApplications.tests
+            , HandlerUnitReturn.tests
+            , HandlerUnusedOuterRow.tests
+            , HigherOrder.tests
+            , HttpApi.tests
+            , HttpBodies.tests
+            , HttpClientRedirects.tests
+            , HttpClientStub.tests
+            , HttpFraming.tests
+            , HttpGzip.tests
+            , HttpServerApi.tests
+            , IfLayout.tests
+            , IfPrint.tests
+            , IteratorHelpers.tests
+            , IteratorStored.tests
+            , JsonBuffered.tests
+            , JsonChunkResume.tests
+            , JsonResumable.tests
+            , JsonScan.tests
+            , JsonScanOrder.tests
+            , JsonSpans.tests
+            , JsonStreaming.tests
+            , JsonText.tests
+            , JsonValue.tests
+            , JsonWindows.tests
+            , JsonWitnessOperator.tests
+            , LambdaDirect.tests
+            , ListDeep.tests
+            , ListNanEq.tests
+            , ListNoModuleRef.tests
+            , ListOfFunctions.tests
+            , ListShare.tests
+            , LocalFnRec.tests
+            , LocalStateStaging.tests
+            , LocalUnitFunctions.tests
+            , LocalWorker.tests
+            , MapFail.tests
+            , MetaBackticks.tests
+            , MetaDeriver.tests
+            , MetaLocalFunction.tests
+            , MetaReflect.tests
+            , Minint.tests
+            , ModuleFunctionGroups.tests
+            , NativePhantom.tests
+            , NativeStorage.tests
+            , NativeStringUnchecked.tests
+            , Negative.tests
+            , NetApi.tests
+            , Oversat.tests
+            , PatternBindings.tests
+            , PerArrowEffects.tests
+            , PerformDirectInExit.tests
+            , PolyAbortRow.tests
+            , PolyAdt.tests
+            , PolyEffectCallback.tests
+            , PolyEffectCallbackAsync.tests
+            , PolyEffectCallbackRow.tests
+            , PolyEffectEcho.tests
+            , PolyEffectExit.tests
+            , PolyEffectNested.tests
+            , PolyEffectStructuralRow.tests
+            , PolyEq.tests
+            , PolyFailureRebuild.tests
+            , PolyFailureStructural.tests
+            , PolyLiftedLocal.tests
+            , PolyNested.tests
+            , PolyNumber.tests
+            , PolyPartial.tests
+            , PolyShow.tests
+            , PolyShowNested.tests
+            , PolyTwoTypes.tests
+            , PolyUnused.tests
+            , PolyValue.tests
+            , PostfixUnitCall.tests
+            , Precedence.tests
+            , PrintBool.tests
+            , PrintInt.tests
+            , PrintString.tests
+            , ReaderAlternating.tests
+            , ReaderChunks.tests
+            , ReaderMemory.tests
+            , ReaderPureOperations.tests
+            , ReaderScopedDomain.tests
+            , ReaderScopedMemory.tests
+            , RecordFieldPureWidened.tests
+            , RecordFieldWidenedEvidence.tests
+            , RecordFieldWidenedRow.tests
+            , RecordPinChar.tests
+            , RecordsInferred.tests
+            , RecordsInferredAcrossLocal.tests
+            , RecordsNominal.tests
+            , RecordsOrder.tests
+            , RegexNoPrelude.tests
+            , RegexQuotation.tests
+            , ResourceSafeResults.tests
+            , ReturnedEffectfulCallback.tests
+            , RowArgumentClosed.tests
+            , RowPolymorphicMap.tests
+            , ScopeCallback.tests
+            , ScopeExitOrder.tests
+            , ScopeFinally.tests
+            , ScopeLifecycle.tests
+            , ScopeOpenRow.tests
+            , ScopeOwnedTraversal.tests
+            , ScopeReturnTransform.tests
+            , ScopeReturnedCallback.tests
+            , ScopeStaging.tests
+            , ScopeState.tests
+            , ScopedResponse.tests
+            , ScopedRunnerEffects.tests
+            , SemicolonBlocks.tests
+            , ShowBuilder.tests
+            , ShowRepresentation.tests
+            , StateIndependentResult.tests
+            , StatePublication.tests
+            , StdlibDict.tests
+            , StdlibDictBalance.tests
+            , StdlibDictFolds.suite
+            , StdlibDictUpdate.suite
+            , StdlibListCombinators.tests
+            , StdlibListEffectOrder.tests
+            , StdlibMaybe.tests
+            , StdlibModby.tests
+            , StdlibQuotientby.tests
+            , StdlibRange.tests
+            , StdlibStringPadSplitTrim.suite
+            , StdlibStringSpan.tests
+            , StdlibStringTofloat.tests
+            , StdlibStringToint.tests
+            , StdlibStringUnicode.tests
+            , StdlibWordsFoldl.tests
+            , StreamCleanup.tests
+            , StreamCursor.tests
+            , StreamDemand.tests
+            , StreamEvidenceShadow.tests
+            , StreamExplicitState.tests
+            , StreamHandler.tests
+            , StreamNestedMap.tests
+            , StreamOperations.tests
+            , StreamParser.tests
+            , StreamRecovery.tests
+            , StreamStaging.tests
+            , StreamStoredCallbacks.tests
+            , StringBuilderShared.tests
+            , StringInterpolation.tests
+            , StringInterpolationNoPrelude.tests
+            , SubsumptionSharedOpenRow.tests
+            , TailLoopSwap.tests
+            , TailLoopUnitarg.tests
+            , TextBuilder.tests
+            , TextBuilderTasks.tests
+            , TextEncoding.tests
+            , TextReaderWindows.tests
+            , TextWriter.tests
+            , TimeCalendar.tests
+            , TimeZones.tests
+            , Tuples.tests
+            , UnaryMinus.tests
+            , UnitCallbackHandler.tests
+            , UrlReference.tests
+            , UseBlocks.tests
+            , UserOperators.tests
+            , ValueRepresentation.tests
+            , WriterCollecting.tests
+            , WriterScopedPure.tests
+            , WriterWindow.tests
+            ]
+    )

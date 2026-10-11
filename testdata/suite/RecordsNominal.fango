@@ -1,0 +1,23 @@
+module RecordsNominal exposing (tests)
+
+import Expect
+import Test
+type Counts = { lines : Int, words : Int, bytes : Int } deriving (Eq, Show)
+type Box a = { value : a } deriving (Eq, Show)
+
+bump : Counts -> Counts
+bump counts = { counts | lines = counts.lines + 1, bytes = counts.bytes + 2 }
+
+unbox : Box a -> a
+unbox box = box.value
+
+tests : Test.Test {}
+tests = Test.test "records_nominal" {
+    zero = Counts { words = 2, lines = 0, bytes = 3 }
+    next = bump zero
+    Expect.equal "Counts { lines = 1, words = 2, bytes = 5 }" (show next)
+    Expect.equal (Counts { lines = 1, words = 2, bytes = 5 }) next
+    Expect.equal "generic" (unbox (Box { value = "generic" }))
+}
+
+main() = Test.run tests

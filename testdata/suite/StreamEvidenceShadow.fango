@@ -1,0 +1,24 @@
+module StreamEvidenceShadow exposing (tests)
+
+import Expect
+import Stream
+import Test
+
+effect Reader
+    ask : () -> Int
+
+-- Neither Reader is used by production; nested same-effect activations must
+-- not become duplicate captures on a ordinary callback.
+description() =
+    handle
+        handle Stream.fromList [7] on
+            ask () -> resume 2
+    on
+        ask () -> resume 1
+
+tests : Test.Test {}
+tests = Test.test "stream_evidence_shadow" {
+    Expect.equal [7] (Stream.toList description())
+}
+
+main() = Test.run tests

@@ -1,0 +1,10 @@
+module DivDefault exposing (tests)
+
+import Expect
+import Test
+tests : Test.Test {}
+tests = Test.test "div_default" {
+    Expect.equal 0.5 (1 / 2)
+}
+
+main() = Test.run tests

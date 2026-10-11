@@ -1,0 +1,32 @@
+module ClassesNumeric exposing (tests)
+
+import Expect
+import Test
+type Count = Count Int deriving (Eq, Show)
+
+unwrap x = case x of
+    Count n -> n
+
+instance Num Count
+    fromInt x = Count x
+    (+) x y = Count (unwrap x + unwrap y)
+    (-) x y = Count (unwrap x - unwrap y)
+    (*) x y = Count (unwrap x * unwrap y)
+    negate x = Count (0 - unwrap x)
+
+describe : (Num a, Eq a) => a -> String
+describe n = case n of
+    0 -> "zero"
+    _ -> "nonzero"
+
+value : Count
+value = 21 + 21
+
+tests : Test.Test {}
+tests = Test.test "classes_numeric" {
+    Expect.equal (Count 42) value
+    Expect.equal "nonzero" (describe value)
+    Expect.equal "zero" (describe (Count 0))
+}
+
+main() = Test.run tests

@@ -1,0 +1,24 @@
+module RecordPinChar exposing (tests)
+
+import Expect
+import Test
+type Item = { marker : Char, count : Int, label : String } deriving (Eq, Show)
+
+expected = 'λ'
+
+classify : Item -> String
+classify item =
+    case item of
+        Item { count = 0 } -> "empty"
+        Item { marker = ^expected } -> item.label
+        _ -> "other"
+
+tests : Test.Test {}
+tests = Test.test "record_pin_char" {
+    Expect.equal "empty" (classify (Item { marker = 'x', count = 0, label = "zero" }))
+    Expect.equal "unicode" (classify (Item { label = "unicode", marker = 'λ', count = 2 }))
+    Expect.equal "other" (classify (Item { marker = '二', count = 1, label = "two" }))
+    Expect.equal "Item { marker = 'λ', count = 3, label = \"line\" }" (show (Item { marker = 'λ', count = 3, label = "line" }))
+}
+
+main() = Test.run tests

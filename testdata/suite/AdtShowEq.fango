@@ -1,0 +1,25 @@
+module AdtShowEq exposing (tests)
+
+import Expect
+import Test
+type MaybeInt = NothingI | JustI Int deriving (Eq, Show)
+
+type Wrap = Wrap MaybeInt String deriving (Eq, Show)
+
+flip m =
+    case m of
+        NothingI -> JustI 0
+        JustI n -> JustI (n + 1)
+
+tests : Test.Test {}
+tests = Test.test "adt_show_eq" {
+    a = Wrap (JustI 41) "hi"
+    b = Wrap (flip (JustI 40)) "hi"
+    Expect.equal b a
+    Expect.equal False (a /= b)
+    Expect.equal "Wrap (JustI 41) \"hi\"" (show b)
+    Expect.equal "JustI 0" (show (flip NothingI))
+    Expect.notEqual (Wrap NothingI "hi") a
+}
+
+main() = Test.run tests

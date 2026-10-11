@@ -1,0 +1,29 @@
+module StdlibStringToint exposing (tests)
+
+import Expect
+import String
+import Test
+
+tests : Test.Test {}
+tests = Test.test "stdlib_string_toint" {
+    Expect.equal (Just 7) (String.toInt "007")
+    Expect.equal (Just 0) (String.toInt "0")
+    Expect.equal (Just (-42)) (String.toInt "-42")
+    Expect.equal (Just 17) (String.toInt "+17")
+    Expect.equal Nothing (String.toInt "")
+    Expect.equal Nothing (String.toInt "-")
+    Expect.equal Nothing (String.toInt "+")
+    Expect.equal Nothing (String.toInt "12x")
+    Expect.equal Nothing (String.toInt " 1")
+    Expect.equal (Just 9223372036854775807) (String.toInt "9223372036854775807")
+    Expect.equal Nothing (String.toInt "9223372036854775808")
+    Expect.equal (Just (-9223372036854775807 - 1)) (String.toInt "-9223372036854775808")
+    Expect.equal Nothing (String.toInt "-9223372036854775809")
+    Expect.equal Nothing (String.toInt "92233720368547758070")
+    Expect.equal 0 (String.length "")
+    Expect.equal 5 (String.length "hello")
+    Expect.equal 1 (String.length "二")
+    Expect.equal 3 (String.byteLength "二")
+}
+
+main() = Test.run tests

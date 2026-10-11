@@ -1,0 +1,53 @@
+module UserOperators exposing (tests)
+
+-- An operator is an ordinary declaration, so a user module can introduce
+-- one, give it a fixity, and pass it as a value.
+import List exposing (List(..), foldl, range)
+import Expect
+import Test
+
+(<+>) : Int -> Int -> Int
+(<+>) a b = a * 10 + b
+infixl 5 (<+>)
+
+(===) : Int -> Int -> Bool
+(===) a b = a == b
+infix 4 (===)
+
+double : Int -> Int
+double n = n * 2
+
+type Money = Money Int deriving (Show)
+
+cents : Money -> Int
+cents m = case m of
+    Money c -> c
+
+-- A user type implements the standard classes under their operator names.
+instance Num Money
+    fromInt n = Money n
+    (+) x y = Money (cents x + cents y)
+    (-) x y = Money (cents x - cents y)
+    (*) x y = Money (cents x * cents y)
+    negate x = Money (0 - cents x)
+
+instance Eq Money
+    (==) x y = cents x == cents y
+
+tests : Test.Test {}
+tests = Test.test "user_operators" {
+    -- Operators as first-class values, through a class dictionary.
+    Expect.equal 15 (foldl (+) 0 (range 1 5))
+    Expect.equal 100 (foldl (<+>) 0 (range 1 4))
+    -- User fixities, and their interaction with Basics'.
+    Expect.equal 12 (3 |> double |> double)
+    Expect.equal 33 (1 + 2 <+> 3)
+    Expect.equal True (1 <+> 2 === 12)
+    -- The standard classes on a user type, spelled as operators.
+    Expect.equal "Money 375" (show (Money 250 + Money 125))
+    Expect.equal True (Money 250 == Money 250)
+    -- Prefix minus still routes to the named `negate` method.
+    Expect.equal "Money (-250)" (show (-(Money 250)))
+}
+
+main() = Test.run tests

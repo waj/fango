@@ -1,0 +1,13 @@
+module AnnTypevar exposing (tests)
+
+import Expect
+import Test
+id : a -> a
+id x = x
+
+tests : Test.Test {}
+tests = Test.test "ann_typevar" {
+    Expect.equal 5 (id 5)
+}
+
+main() = Test.run tests

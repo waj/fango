@@ -1,0 +1,39 @@
+module TextBuilderTasks exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail exposing (Fail)
+import IO
+import List
+import Result exposing (Result(..))
+import String
+import Test
+import Text.Builder as Builder
+
+-- Tasks extending one shared version each get their own text; whichever
+-- extends the buffer in place, the others copy the shared prefix.
+extend : Builder.Builder -> String -> String
+extend base suffix = Builder.toString (List.foldl { _ builder -> Builder.append suffix builder } base (List.range 1 200))
+
+observations : () ->{IO.IO} (Async.Outcome (List String), String)
+observations() =
+    base = Builder.append "shared:" Builder.empty
+    outcome = Async.runOutcome {
+        tasks = List.map { suffix -> Async.spawn { extend base suffix } } ["a", "b", "c", "d"]
+        List.map { task -> Async.await task } tasks
+    }
+    (outcome, Builder.toString base)
+
+tests : Test.Test IO.IO
+tests = Test.test "text_builder_tasks" {
+    (outcome, original) = observations()
+    texts = Expect.just (case outcome of
+            Completed values -> Just values
+            _ -> Nothing
+    )
+    Expect.equal [207, 207, 207, 207] (List.map String.length texts)
+    Expect.equal ["shared:a", "shared:b", "shared:c", "shared:d"] (List.map { text -> String.slice 0 8 text } texts)
+    Expect.equal "shared:" original
+}
+
+main() = Test.run tests

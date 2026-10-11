@@ -1,0 +1,27 @@
+module ClassesEffects exposing (tests)
+
+import Expect
+import Test
+effect Ask
+    ask : () -> Int
+
+class Read a
+    read : a ->{Ask} Int
+
+instance Read Int
+    read x = x + ask()
+
+query : Read a => a ->{Ask} Int
+query x = read x
+
+argument : Int
+argument = 2
+
+tests : Test.Test {}
+tests = Test.test "classes_effects" {
+    Expect.equal 42 (handle query argument on
+            ask () -> resume 40
+    )
+}
+
+main() = Test.run tests

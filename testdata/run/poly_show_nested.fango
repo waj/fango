@@ -1,3 +1,0 @@
-type Opt a = None | Some a deriving (Eq, Show)
-type Pair a b = MkPair a b deriving (Eq, Show)
-main = print (MkPair (Some (0 - 1)) "hi")

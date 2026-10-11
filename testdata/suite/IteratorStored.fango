@@ -1,0 +1,23 @@
+module IteratorStored exposing (tests)
+
+import Expect
+import Iterator
+import Maybe exposing (Maybe(..))
+import State
+import Stream
+import Test
+
+retain cursor = 42
+save cursor = State.put (Just { _ -> retain cursor })
+
+escape() =
+    State.run Nothing { _ ->
+        Stream.withCursor (Stream.fromList [1]) save
+    }
+
+tests : Test.Test {}
+tests = Test.test "iterator_stored" {
+    Expect.equal "unreachable" "unreachable"
+}
+
+main() = Test.run tests

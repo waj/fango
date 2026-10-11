@@ -1,0 +1,71 @@
+module ScopeLifecycle exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() on
+        fail error -> Err error
+        return value -> Ok value
+
+open label =
+    note ("open " ++ label)
+    label
+
+close label = note ("close " ++ label)
+
+describe : Result String String ->{State.State (List Observation)} ()
+describe outcome = record (Outcome outcome)
+
+type Observation = Trace String | Outcome (Result String String) deriving (Eq, Show)
+
+record : Observation ->{State.State (List Observation)} ()
+record value = State.put [value | State.get()]
+
+note : String ->{State.State (List Observation)} ()
+note value = record (Trace value)
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    describe (attempt { _ ->
+            Runtime.Scope.bracket { _ -> open "a" } close { token -> "used " ++ token }
+    })
+    describe (attempt { _ ->
+            Runtime.Scope.bracket
+                { _ ->
+                    note "opening b"
+                    fail "cannot open b"
+                }
+                close
+                { token -> "used " ++ token }
+    })
+    describe (attempt { _ ->
+            Runtime.Scope.bracket { _ -> open "c" } close { token ->
+                inner = attempt { _ -> fail "inner" }
+                describe inner
+                "used " ++ token
+            }
+    })
+    describe (attempt { _ ->
+            Runtime.Scope.bracket { _ -> open "outer" } close { outer ->
+                Runtime.Scope.bracket { _ -> open "inner" } close { inner ->
+                    outer ++ "/" ++ inner
+                }
+            }
+    })
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "scope_lifecycle" {
+    Expect.equal [Trace "open a", Trace "close a", Outcome (Ok "used a"), Trace "opening b", Outcome (Err "cannot open b"), Trace "open c", Outcome (Err "inner"), Trace "close c", Outcome (Ok "used c"), Trace "open outer", Trace "open inner", Trace "close inner", Trace "close outer", Outcome (Ok "outer/inner")] observations()
+}
+
+main() = Test.run tests

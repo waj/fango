@@ -1,0 +1,29 @@
+module ScopeReturnedCallback exposing (tests)
+
+import Expect
+import Runtime.Scope
+import State
+import Test
+
+type Port = { emit : String ->{State.State (List String)} (), label : String }
+
+openPort : String -> Port
+openPort label = Port { emit = { message -> recordText (label ++ ": " ++ message) }, label = label }
+
+recordText : String ->{State.State (List String)} ()
+recordText value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} ()
+fixtureBody() =
+    leaked = Runtime.Scope.bracket { _ -> openPort "a" } { port -> recordText ("close " ++ port.label) } { port -> port.emit }
+    leaked "after close"
+
+observations : () -> List String
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "scope_returned_callback" {
+    Expect.equal ["close a", "a: after close"] observations()
+}
+
+main() = Test.run tests

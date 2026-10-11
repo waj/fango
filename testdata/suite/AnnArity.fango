@@ -1,0 +1,12 @@
+module AnnArity exposing (tests)
+
+import Expect
+import Test
+add : Int -> Int -> Int
+add x = { y -> x + y }
+tests : Test.Test {}
+tests = Test.test "ann_arity" {
+    Expect.equal 3 (add 1 2)
+}
+
+main() = Test.run tests

@@ -1,0 +1,47 @@
+module StdlibListEffectOrder exposing (tests)
+
+-- map and filter visit left to right; foldr visits right to left because it
+-- folds the rest of the list before combining. Assert both results and visits.
+import Expect
+import List
+import State
+import Test
+
+visit : Int ->{State.State (List Int)} ()
+visit value = State.put [value | State.get()]
+
+noisyDouble : Int ->{State.State (List Int)} Int
+noisyDouble n =
+    visit n
+    n * 2
+
+noisyKeep : Int ->{State.State (List Int)} Bool
+noisyKeep n =
+    visit n
+    n > 2
+
+noisySub : Int -> Int ->{State.State (List Int)} Int
+noisySub value acc =
+    visit value
+    value - acc
+
+tests : Test.Test {}
+tests = Test.test "stdlib_list_effect_order" {
+    xs = [1, 2, 3, 4]
+    mapped = State.run [] { List.map noisyDouble xs }
+    Expect.equal [2, 4, 6, 8] mapped.value
+    Expect.equal xs (List.reverse mapped.state)
+    kept = State.run [] { List.filter noisyKeep xs }
+    Expect.equal [3, 4] kept.value
+    Expect.equal xs (List.reverse kept.state)
+    foldedRight = State.run [] { List.foldr noisySub 0 xs }
+    Expect.equal (-2) foldedRight.value
+    Expect.equal [4, 3, 2, 1] (List.reverse foldedRight.state)
+    foldedLeft = State.run [] { List.foldl noisySub 0 xs }
+    Expect.equal 2 foldedLeft.value
+    Expect.equal xs (List.reverse foldedLeft.state)
+    each = State.run [] { List.each visit xs }
+    Expect.equal xs (List.reverse each.state)
+}
+
+main() = Test.run tests

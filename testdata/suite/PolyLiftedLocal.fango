@@ -1,0 +1,14 @@
+module PolyLiftedLocal exposing (tests)
+
+import Expect
+import Test
+tests : Test.Test {}
+tests = Test.test "poly_lifted_local" {
+    k = 30
+    id2 y = y
+    keep y = k + id2 y
+    a = id2 12
+    Expect.equal 42 (keep a)
+}
+
+main() = Test.run tests

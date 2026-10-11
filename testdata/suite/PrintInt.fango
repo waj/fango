@@ -1,0 +1,10 @@
+module PrintInt exposing (tests)
+
+import Expect
+import Test
+tests : Test.Test {}
+tests = Test.test "print_int" {
+    Expect.equal 3 (1 + 2)
+}
+
+main() = Test.run tests

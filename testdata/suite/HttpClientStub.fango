@@ -1,0 +1,236 @@
+module HttpClientStub exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Fail exposing (Fail)
+import Http exposing (Body(..))
+import Http.Client as Client
+import Http.GZip as GZip
+import Json
+import Result exposing (Result(..))
+import State
+import Test
+import Url
+import Writer
+
+-- Records request bytes as values and answers with `wire`.
+answer : String -> Bytes ->{State.State (List Bytes)} Result Client.Error Bytes
+answer wire request =
+    State.put [request | State.get()]
+    Ok (Bytes.fromString wire)
+
+compressed : String -> Bytes
+compressed text =
+    (_, bytes) = Writer.collecting { w ->
+        case GZip.encoding (BytesBody (Bytes.fromString text)) of
+            StreamBody emit -> emit w
+            _ -> ()
+    }
+    bytes
+
+-- Answers with a gzip-encoded body.
+answerGzip : String -> Bytes ->{State.State (List Bytes)} Result Client.Error Bytes
+answerGzip text request =
+    State.put [request | State.get()]
+    body = compressed text
+    Ok (Bytes.append (Bytes.fromString ("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: " ++ show (Bytes.length body) ++ "\r\n\r\n")) body)
+
+reply : Client.Reply -> (Int, List Http.Header, Bytes)
+reply r = (r.status, r.headers, r.body)
+
+contentLength : () ->{State.State (List Bytes)} Result Client.Error (Int, List Http.Header, Bytes)
+contentLength() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello") {
+        reply (Client.get "http://example.com/a?b=1")
+    }
+}
+
+chunked : () ->{State.State (List Bytes)} Result Client.Error (Int, List Http.Header, Bytes)
+chunked() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n") {
+        reply (Client.get "http://example.com:8080/")
+    }
+}
+
+closeDelimited : () ->{State.State (List Bytes)} Result Client.Error (Int, List Http.Header, Bytes)
+closeDelimited() = Fail.attempt {
+    Client.stub (answer "HTTP/1.0 200 OK\r\n\r\nuntil close") {
+        reply (Client.get "http://[::1]/")
+    }
+}
+
+head : () ->{State.State (List Bytes)} Result Client.Error (Int, List Http.Header, Bytes)
+head() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n") {
+        reply (Client.fetch (Client.request "HEAD" "http://example.com/"))
+    }
+}
+
+configuredPost : () ->{State.State (List Bytes)} Result Client.Error (Int, List Http.Header, Bytes)
+configuredPost() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 204 No Content\r\n\r\n") {
+        Client.configure { c -> { c | baseUrl = Url.parse "http://api.example.com/v1/", headers = [Http.Header { name = "X-Team", value = "core" }] } } {
+            body = StreamBody { w ->
+                Writer.writeString w "a"
+                Writer.writeString w "b"
+            }
+            reply (Client.request "POST" "items" |> Client.withBody body |> Client.withBearer "token" |> Client.fetch)
+        }
+    }
+}
+
+sizedPost : () ->{State.State (List Bytes)} Result Client.Error (Int, List Http.Header, Bytes)
+sizedPost() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok") {
+        reply (Client.post "http://example.com/upload" (SizedBody 3 { w -> Writer.writeString w "xyz" }))
+    }
+}
+
+jsonBodyMismatch : () ->{State.State (List Bytes)} Result Client.Error Int
+jsonBodyMismatch() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n{\"id\": 7}    ") {
+        Client.postJson @Int "http://example.com/n" ["a", "b"]
+    }
+}
+
+jsonList : () ->{State.State (List Bytes)} Result Client.Error (List Int)
+jsonList() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n[1,2]\n") {
+        Client.getJson @(List Int) "http://example.com/n"
+    }
+}
+
+decodedGzip : () ->{State.State (List Bytes)} Result Client.Error (Int, List Http.Header, Bytes)
+decodedGzip() = Fail.attempt {
+    Client.stub (answerGzip "decoded body") {
+        reply (Client.get "http://example.com/z")
+    }
+}
+
+encodedGzip : () ->{State.State (List Bytes)} Result Client.Error (List Http.Header, Bool)
+encodedGzip() = Fail.attempt {
+    Client.stub (answerGzip "kept encoded") {
+        r = Client.fetch (Client.withHeader "Accept-Encoding" "gzip" (Client.request "GET" "http://example.com/z"))
+        (r.headers, r.body == compressed "kept encoded")
+    }
+}
+
+invalidGzip : () ->{State.State (List Bytes)} Result Client.Error (Int, List Http.Header, Bytes)
+invalidGzip() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 4\r\n\r\nnope") {
+        reply (Client.get "http://example.com/z")
+    }
+}
+
+bodyLimit : () ->{State.State (List Bytes)} Result Client.Error Client.Reply
+bodyLimit() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n123456") {
+        Client.configure { c -> { c | maxBodyBytes = 4 } } { Client.get "http://example.com/big" }
+    }
+}
+
+badStatus : () ->{State.State (List Bytes)} Result Client.Error String
+badStatus() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\n\r\ngone") {
+        Client.getText "http://example.com/missing"
+    }
+}
+
+invalidJson : () ->{State.State (List Bytes)} Result Client.Error Int
+invalidJson() = Fail.attempt {
+    Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nnope!") {
+        Client.getJson @Int "http://example.com/n"
+    }
+}
+
+timedOut : () -> Result Client.Error String
+timedOut() = Fail.attempt { Client.stub { _ -> Err Client.Timeout } { Client.getText "http://example.com/" } }
+
+invalidStatus : () ->{State.State (List Bytes)} Result Client.Error String
+invalidStatus() = Fail.attempt { Client.stub (answer "HTTP/1.1 2OO OK\r\n\r\n") { Client.getText "http://example.com/" } }
+
+incompleteBody : () ->{State.State (List Bytes)} Result Client.Error String
+incompleteBody() = Fail.attempt { Client.stub (answer "HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nshort") { Client.getText "http://example.com/" } }
+
+relativeUrl : () ->{State.State (List Bytes)} Result Client.Error String
+relativeUrl() = Fail.attempt { Client.stub (answer "") { Client.getText "relative" } }
+
+credentialsInUrl : () ->{State.State (List Bytes)} Result Client.Error String
+credentialsInUrl() = Fail.attempt { Client.stub (answer "") { Client.getText "http://user:pw@example.com/" } }
+
+unsupportedScheme : () ->{State.State (List Bytes)} Result Client.Error String
+unsupportedScheme() = Fail.attempt { Client.stub (answer "") { Client.getText "ftp://example.com/" } }
+
+managedLengthHeader : () ->{State.State (List Bytes)} Result Client.Error Client.Reply
+managedLengthHeader() = Fail.attempt {
+    Client.stub (answer "") {
+        Client.fetch (Client.withHeader "Content-Length" "3" (Client.request "GET" "http://example.com/"))
+    }
+}
+
+tests : Test.Test {}
+tests = Test.test "http_client_stub" {
+    contentLengthResult = State.run [] contentLength
+    Expect.equal (Ok (200, [Http.Header { name = "Content-Length", value = "5" }], Bytes.fromString "hello")) contentLengthResult.value
+    Expect.equal [Bytes.fromString "GET /a?b=1 HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse contentLengthResult.state)
+    chunkedResult = State.run [] chunked
+    Expect.equal (Ok (200, [Http.Header { name = "Transfer-Encoding", value = "chunked" }], Bytes.fromString "abcde")) chunkedResult.value
+    Expect.equal [Bytes.fromString "GET / HTTP/1.1\r\nHost: example.com:8080\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse chunkedResult.state)
+    closeDelimitedResult = State.run [] closeDelimited
+    Expect.equal (Ok (200, [], Bytes.fromString "until close")) closeDelimitedResult.value
+    Expect.equal [Bytes.fromString "GET / HTTP/1.1\r\nHost: [::1]\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse closeDelimitedResult.state)
+    headResult = State.run [] head
+    Expect.equal (Ok (200, [Http.Header { name = "Content-Length", value = "5" }], Bytes.fromString "")) headResult.value
+    Expect.equal [Bytes.fromString "HEAD / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse headResult.state)
+    configuredPostResult = State.run [] configuredPost
+    Expect.equal (Ok (204, [], Bytes.fromString "")) configuredPostResult.value
+    Expect.equal [Bytes.fromString "POST /v1/items HTTP/1.1\r\nHost: api.example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\nX-Team: core\r\nAuthorization: Bearer token\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n0\r\n\r\n"] (List.reverse configuredPostResult.state)
+    sizedPostResult = State.run [] sizedPost
+    Expect.equal (Ok (200, [Http.Header { name = "Content-Length", value = "2" }], Bytes.fromString "ok")) sizedPostResult.value
+    Expect.equal [Bytes.fromString "POST /upload HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\nContent-Length: 3\r\n\r\nxyz"] (List.reverse sizedPostResult.state)
+    jsonBodyMismatchResult = State.run [] jsonBodyMismatch
+    Expect.equal (Err (Client.BadBody (Json.Error { message = "Expected JSON number", offset = 0, line = 1, column = 1, path = "" }))) jsonBodyMismatchResult.value
+    Expect.equal [Bytes.fromString "POST /n HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\nAccept: application/json\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n9\r\n[\"a\",\"b\"]\r\n0\r\n\r\n"] (List.reverse jsonBodyMismatchResult.state)
+    jsonListResult = State.run [] jsonList
+    Expect.equal (Ok [1, 2]) jsonListResult.value
+    Expect.equal [Bytes.fromString "GET /n HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\nAccept: application/json\r\n\r\n"] (List.reverse jsonListResult.state)
+    decodedGzipResult = State.run [] decodedGzip
+    Expect.equal (Ok (200, [], Bytes.fromString "decoded body")) decodedGzipResult.value
+    Expect.equal [Bytes.fromString "GET /z HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse decodedGzipResult.state)
+    encodedGzipResult = State.run [] encodedGzip
+    Expect.equal (Ok ([Http.Header { name = "Content-Encoding", value = "gzip" }, Http.Header { name = "Content-Length", value = "36" }], True)) encodedGzipResult.value
+    Expect.equal [Bytes.fromString "GET /z HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse encodedGzipResult.state)
+    invalidGzipResult = State.run [] invalidGzip
+    Expect.equal (Err (Client.Protocol (Http.Malformed "invalid gzip body: unexpected EOF"))) invalidGzipResult.value
+    Expect.equal [Bytes.fromString "GET /z HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse invalidGzipResult.state)
+    bodyLimitResult = State.run [] bodyLimit
+    Expect.equal (Err (Client.Protocol Http.BodyTooLarge)) bodyLimitResult.value
+    Expect.equal [Bytes.fromString "GET /big HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse bodyLimitResult.state)
+    badStatusResult = State.run [] badStatus
+    Expect.equal (Err (Client.BadStatus (Client.Reply { url = Url.Url { scheme = Just "http", userinfo = Nothing, host = Just "example.com", port = Nothing, path = "/missing", query = Nothing, fragment = Nothing }, status = 404, headers = [Http.Header { name = "Content-Length", value = "4" }], body = Bytes.fromString "gone" }))) badStatusResult.value
+    Expect.equal [Bytes.fromString "GET /missing HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse badStatusResult.state)
+    invalidJsonResult = State.run [] invalidJson
+    Expect.equal (Err (Client.BadBody (Json.Error { message = "Invalid JSON literal", offset = 1, line = 1, column = 2, path = "" }))) invalidJsonResult.value
+    Expect.equal [Bytes.fromString "GET /n HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\nAccept: application/json\r\n\r\n"] (List.reverse invalidJsonResult.state)
+    Expect.equal (Err Client.Timeout) timedOut()
+    invalidStatusResult = State.run [] invalidStatus
+    Expect.equal (Err (Client.Protocol (Http.Malformed "invalid status code"))) invalidStatusResult.value
+    Expect.equal [Bytes.fromString "GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse invalidStatusResult.state)
+    incompleteBodyResult = State.run [] incompleteBody
+    Expect.equal (Err (Client.Protocol (Http.Malformed "incomplete body"))) incompleteBodyResult.value
+    Expect.equal [Bytes.fromString "GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: fango\r\nAccept-Encoding: gzip\r\n\r\n"] (List.reverse incompleteBodyResult.state)
+    relativeUrlResult = State.run [] relativeUrl
+    Expect.equal (Err (Client.InvalidUrl "relative")) relativeUrlResult.value
+    Expect.equal [] (List.reverse relativeUrlResult.state)
+    credentialsInUrlResult = State.run [] credentialsInUrl
+    Expect.equal (Err (Client.InvalidUrl "credentials belong in a header, not the URL")) credentialsInUrlResult.value
+    Expect.equal [] (List.reverse credentialsInUrlResult.state)
+    unsupportedSchemeResult = State.run [] unsupportedScheme
+    Expect.equal (Err (Client.InvalidUrl "ftp://example.com/")) unsupportedSchemeResult.value
+    Expect.equal [] (List.reverse unsupportedSchemeResult.state)
+    managedLengthHeaderResult = State.run [] managedLengthHeader
+    Expect.equal (Err (Client.Protocol (Http.InvalidMessage "the client manages the Content-Length header"))) managedLengthHeaderResult.value
+    Expect.equal [] (List.reverse managedLengthHeaderResult.state)
+}
+
+main() = Test.run tests

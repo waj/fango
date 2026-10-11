@@ -1,0 +1,13 @@
+{-# no-prelude #-}
+module RegexNoPrelude exposing (tests)
+
+import Expect
+import Regex
+import Test
+
+fixtureBody() = Regex.matches /é+/ "éé"
+
+tests : Test.Test {}
+tests = Test.test "regex_no_prelude" { Expect.equal True fixtureBody() }
+
+main() = Test.run tests

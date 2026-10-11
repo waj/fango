@@ -1,5 +1,0 @@
-import Async
-
-main() =
-    r = Async.runOutcome { Async.spawn { print "Hola" } }
-    print "DONE"

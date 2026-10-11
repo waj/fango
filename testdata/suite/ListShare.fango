@@ -1,0 +1,35 @@
+module ListShare exposing (tests)
+
+import Expect
+-- Consing twice onto one list must produce independent lists and leave the
+-- shared tail untouched. This is the behavior a slice-backed prepend that
+-- wrote into its tail's storage would get wrong; the bundled List is
+-- array-backed, so nothing else in the suite covers it.
+import List
+import Test
+
+drop values =
+    case values of
+        [] -> []
+        [_ | rest] -> rest
+
+tests : Test.Test {}
+tests = Test.test "list_share" {
+    xs = [1, 2, 3]
+    a = [10 | xs]
+    b = [20 | xs]
+    c = [30 | a]
+    d = [40 | drop xs]
+    -- Read them out of construction order: a later cons must not have
+    -- clobbered an earlier one's slot.
+    Expect.equal [40, 2, 3] d
+    Expect.equal [20, 1, 2, 3] b
+    Expect.equal [30, 10, 1, 2, 3] c
+    Expect.equal [10, 1, 2, 3] a
+    Expect.equal [1, 2, 3] xs
+    Expect.equal 6 (List.foldl { v acc -> v + acc } 0 xs)
+    Expect.equal [10, 1, 2, 3] a
+    Expect.notEqual b a
+}
+
+main() = Test.run tests

@@ -1,0 +1,37 @@
+module StreamStaging exposing (tests)
+
+import Expect
+import Iterator
+import Maybe exposing (Maybe(..))
+import Meta exposing (Code)
+import Stream
+import Test
+
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator state a e ->{e} b
+foldCursor combine initial cursor = case Iterator.next cursor of
+    Nothing -> initial
+    Just (value, next) -> foldCursor combine (combine value initial) next
+
+produce = Stream.fromList [10, 20, 30]
+
+total : () -> Int
+total() = Stream.withCursor produce { cursor -> foldCursor { element acc -> element + acc } 0 cursor }
+
+-- A producer factory may already be memoized by an earlier expansion. Its
+-- next traversal must use the lowering installed for the current operand.
+first : Code
+first = `$(Meta.lift total())`
+
+answer : Code
+answer = `$(first) + $(Meta.lift total())`
+
+seven : Int
+seven = 7
+
+tests : Test.Test {}
+tests = Test.test "stream_staging" {
+    Expect.equal 120 $(answer)
+    Expect.equal 7 $(Meta.lift (Stream.withCursor (Stream.fromList [seven]) { cursor -> foldCursor { element acc -> element + acc } 0 cursor }))
+}
+
+main() = Test.run tests

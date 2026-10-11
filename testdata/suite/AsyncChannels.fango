@@ -1,0 +1,136 @@
+module AsyncChannels exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail exposing (Fail)
+import IO
+import Result exposing (Result(..))
+import State
+import Test
+
+runStrings : (() ->{Async.Async, IO | e} a) ->{IO | e} Outcome a
+runStrings body = Async.runOutcome body
+
+type Observation
+    = IntChannelOutcome (Async.Outcome (Maybe Int))
+    | Sent Bool
+    | ReceivedInt (Maybe Int)
+    | TextChannelOutcome (Async.Outcome (Maybe String))
+    | ReceivedText (Maybe String)
+    | Trace String
+    | TaskOutcome (Async.Outcome Int)
+    | CancelledTaskOutcome (Async.Outcome (Async.Outcome (Maybe Int)))
+    deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordIntChannelOutcome : Async.Outcome (Maybe Int) ->{IO, State.State (List Observation)} ()
+recordIntChannelOutcome value = record (IntChannelOutcome value)
+
+recordSent : Bool ->{IO, State.State (List Observation)} ()
+recordSent value = record (Sent value)
+
+recordReceivedInt : Maybe Int ->{IO, State.State (List Observation)} ()
+recordReceivedInt value = record (ReceivedInt value)
+
+recordTextChannelOutcome : Async.Outcome (Maybe String) ->{IO, State.State (List Observation)} ()
+recordTextChannelOutcome value = record (TextChannelOutcome value)
+
+recordReceivedText : Maybe String ->{IO, State.State (List Observation)} ()
+recordReceivedText value = record (ReceivedText value)
+
+recordTrace : String ->{IO, State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordTaskOutcome : Async.Outcome Int ->{IO, State.State (List Observation)} ()
+recordTaskOutcome value = record (TaskOutcome value)
+
+recordCancelledTaskOutcome : Async.Outcome (Async.Outcome (Maybe Int)) ->{IO, State.State (List Observation)} ()
+recordCancelledTaskOutcome value = record (CancelledTaskOutcome value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    recordIntChannelOutcome (runStrings { _ ->
+            ch = Async.channel 0
+            sender = Async.spawn { _ -> Async.send ch 42 }
+            value = Async.receive ch
+            sent = Async.await sender
+            Async.close ch
+            recordSent sent
+            recordReceivedInt (Async.receive ch)
+            value
+    })
+    escaped = bufferedChannel()
+    case escaped of
+        Completed ch ->
+            recordTextChannelOutcome (runStrings { _ ->
+                    first = Async.receive ch
+                    second = Async.receive ch
+                    recordReceivedText first
+                    recordReceivedText second
+                    recordSent (Async.send ch "c")
+                    Async.receive ch
+            })
+        _ -> recordTrace "unexpected"
+    task = completedTask()
+    case task of
+        Completed savedTask ->
+            recordTaskOutcome (Async.wait savedTask)
+            recordTaskOutcome (Async.wait savedTask)
+        _ -> recordTrace "unexpected"
+    recordCancelledTaskOutcome awaitedCancellation()
+    recordTaskOutcome propagatedCancellation()
+
+awaitedCancellation : () ->{IO} Async.Outcome (Async.Outcome (Maybe Int))
+awaitedCancellation() = runStrings { _ ->
+    ch : Async.Channel Int
+    ch = Async.channel 0
+    child = Async.spawn { _ -> Async.receive ch }
+    Async.cancel child
+    Async.awaitOutcome child
+}
+
+propagatedCancellation : () ->{IO} Async.Outcome Int
+propagatedCancellation() = runStrings { _ ->
+    gate : Async.Channel Int
+    gate = Async.channel 0
+    child = Async.spawn { ignore (Async.receive gate); 1 }
+    Async.cancel child
+    Async.await child
+}
+
+bufferedChannel : () ->{IO} Async.Outcome (Async.Channel String)
+bufferedChannel() = runStrings { _ ->
+    ch = Async.channel 2
+    ignore (Async.send ch "a")
+    ignore (Async.send ch "b")
+    Async.close ch
+    ch
+}
+
+completedTask : () ->{IO} Async.Outcome (Async.Task Int)
+completedTask() = runStrings { _ -> Async.completed 7 }
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_channels" {
+    Expect.equal [ Sent True
+                 , ReceivedInt Nothing
+                 , IntChannelOutcome (Async.Completed (Just 42))
+                 , ReceivedText (Just "a")
+                 , ReceivedText (Just "b")
+                 , Sent False
+                 , TextChannelOutcome (Async.Completed Nothing)
+                 , TaskOutcome (Async.Completed 7)
+                 , TaskOutcome (Async.Completed 7)
+                 , CancelledTaskOutcome (Async.Completed Async.Cancelled)
+                 , TaskOutcome Async.Cancelled
+                 ] observations()
+}
+
+main() = Test.run tests

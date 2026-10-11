@@ -1,4 +1,0 @@
-id : a -> a
-id x = x
-
-main = print (id 5)

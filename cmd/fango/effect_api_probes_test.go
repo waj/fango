@@ -2,20 +2,8 @@ package main
 
 import (
 	"bytes"
-	"path/filepath"
 	"testing"
 )
-
-// These programs exercise scoped memory readers and domain effects in both
-// synchronous backends, including inherited handlers in Async children.
-func TestEffectAPIProbes(t *testing.T) {
-	for _, name := range []string{"effect_api_memory_reader", "reader_pure_operations", "reader_scoped_memory", "reader_scoped_domain", "async_domain_setup"} {
-		t.Run(name, func(t *testing.T) {
-			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
-			runDifferentialCase(t, path, cliRunner(path))
-		})
-	}
-}
 
 // Scoped memory constructors discharge their local cursor permission.
 func TestReaderConstructorsArePure(t *testing.T) {

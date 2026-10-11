@@ -1,0 +1,45 @@
+module WriterWindow exposing (tests)
+
+import Bytes exposing (Bytes, Sink(..))
+import Expect
+import State
+import Test
+import Writer exposing (Writer)
+
+-- Each observed Bytes value is one underlying write, including flush boundaries.
+sink : Sink {State.State (List Bytes)}
+sink = Sink { write = { chunk -> State.put [chunk | State.get()] } }
+
+{-# scoped s #-}
+written : Int -> (Writer s ->{s} ()) -> List Bytes
+written window action = List.reverse (State.run [] { Writer.over sink window action }).state
+
+tests : Test.Test {}
+tests = Test.test "writer_window" {
+    window = written 8 { output ->
+        Writer.writeString output "abc"
+        Writer.writeString output "de"
+        Writer.writeString output "fghij"
+        Writer.writeString output "k"
+    }
+    Expect.equal [Bytes.fromString "abcdefghij", Bytes.fromString "k"] window
+    Expect.equal [10, 1] (List.map Bytes.length window)
+    -- An emit larger than the window remains one write.
+    Expect.equal [Bytes.fromString "abcdefghij"] (written 4 { output -> Writer.writeString output "abcdefghij" })
+    -- Repeated flushing of an empty buffer writes nothing.
+    Expect.equal [Bytes.fromString "ab", Bytes.fromString "c"] (written 99 { output ->
+            Writer.writeString output "ab"
+            output.flush()
+            output.flush()
+            Writer.writeString output "c"
+    })
+    -- A zero window forwards every nonempty emit separately.
+    Expect.equal [Bytes.fromString "a", Bytes.fromString "b"] (written 0 { output ->
+            Writer.write output (Bytes.fromString "a")
+            Writer.write output Bytes.empty
+            Writer.write output (Bytes.fromString "b")
+    })
+    Expect.equal [] (written 8 { _ -> () })
+}
+
+main() = Test.run tests

@@ -1,0 +1,31 @@
+module AttemptInsideScopedRunner exposing (tests)
+
+import Expect
+import Fail exposing (Fail)
+import Result exposing (Result(..))
+import Test
+
+type Outer = Outer deriving (Show)
+type Inner = Inner deriving (Show)
+
+failInner : () ->{Fail Inner} Int
+failInner () = Fail.fail Inner
+
+-- The callback's row holds `Fail Outer` from the runner and `Fail Inner` from
+-- its body; the inner attempt handles the one its result names.
+{-# scoped s #-}
+serve : (Int ->{s} Int) ->{Fail Outer | e} Int
+serve handler = handler 1
+
+tests : Test.Test {}
+tests = Test.test "attempt_inside_scoped_runner" {
+    Expect.equal 42 (Expect.ok (Fail.attempt {
+                serve { n ->
+                    case Fail.attempt { failInner () } of
+                        Ok v -> v
+                        Err Inner -> n + 41
+                }
+    }))
+}
+
+main() = Test.run tests

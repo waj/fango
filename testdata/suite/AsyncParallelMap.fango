@@ -1,0 +1,17 @@
+module AsyncParallelMap exposing (tests)
+
+import Async
+import Expect
+import List
+import Test
+
+tests : Test.Test {}
+tests = Test.test "async_parallel_map" {
+    scale = Async.parMap { n -> n * 3 }
+    Expect.equal [3, 6, 9, 12] (scale [1, 2, 3, 4])
+    Expect.equal ["4", "2", "1"] (Async.parMap { n -> show n } [4, 2, 1])
+    Expect.equal [] (Async.parMap { n -> n + 1 } [])
+    Expect.equal [[11, 12], [21, 22]] (Async.parMap { n -> Async.parMap { m -> n + m } [1, 2] } [10, 20])
+}
+
+main() = Test.run tests

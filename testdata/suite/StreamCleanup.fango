@@ -1,0 +1,68 @@
+module StreamCleanup exposing (tests)
+
+import Expect
+import Fail
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Stream
+import Test
+
+withSource label action = Runtime.Scope.finally { _ ->
+    recordTrace label
+    action (Stream.fromList [1, 2])
+} { _ -> recordTrace "close" }
+
+type Observation = Trace String | Values (List Int) | ResultValues (Result String (List Int)) deriving (Eq, Show)
+
+record : Observation ->{State.State (List Observation)} ()
+record value = State.put [value | State.get()]
+
+recordTrace : String ->{State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordValues : List Int ->{State.State (List Observation)} ()
+recordValues value = record (Values value)
+
+recordResultValues : Result String (List Int) ->{State.State (List Observation)} ()
+recordResultValues value = record (ResultValues value)
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    recordValues (withSource "early" { source -> Stream.toList (Stream.take 1 source) })
+    recordValues (withSource "exhaust" Stream.toList)
+    withSource "unused" { _ -> () }
+    recordResultValues (Fail.attempt { _ ->
+            Runtime.Scope.finally { _ ->
+                source = Stream.unfold 0 { state ->
+                    if state == 0 then Just (3, 1) else Fail.fail "body"
+                }
+                Stream.toList source
+            } { _ -> recordTrace "failed producer closed" }
+    })
+    recordResultValues (Fail.attempt { _ ->
+            Runtime.Scope.finally { _ ->
+                Stream.toList (Stream.take 1 (Stream.fromList [4, 5]))
+            } { _ -> Fail.fail "cleanup" }
+    })
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "stream_cleanup" {
+    Expect.equal [ Trace "early"
+                 , Trace "close"
+                 , Values [1]
+                 , Trace "exhaust"
+                 , Trace "close"
+                 , Values [1, 2]
+                 , Trace "unused"
+                 , Trace "close"
+                 , Trace "failed producer closed"
+                 , ResultValues (Err "body")
+                 , ResultValues (Err "cleanup")
+                 ] observations()
+}
+
+main() = Test.run tests

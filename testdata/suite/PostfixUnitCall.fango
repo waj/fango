@@ -1,0 +1,12 @@
+module PostfixUnitCall exposing (tests)
+
+import Expect
+import Test
+value() = 24
+
+tests : Test.Test {}
+tests = Test.test "postfix_unit_call" {
+    Expect.equal 24 value()
+}
+
+main() = Test.run tests

@@ -1,0 +1,82 @@
+module UrlReference exposing (tests)
+
+import Expect
+import List exposing (List)
+import Maybe exposing (Maybe(..))
+import Test
+import Url exposing (Component(..))
+
+-- RFC 3986 §5.4 against the base `http://a/b/c/d;p?q`.
+examples : List (String, String)
+examples =
+    [ ("g:h", "g:h"), ("g", "http://a/b/c/g"), ("./g", "http://a/b/c/g"), ("g/", "http://a/b/c/g/")
+    , ("/g", "http://a/g"), ("//g", "http://g"), ("?y", "http://a/b/c/d;p?y"), ("g?y", "http://a/b/c/g?y")
+    , ("#s", "http://a/b/c/d;p?q#s"), ("g#s", "http://a/b/c/g#s"), ("g?y#s", "http://a/b/c/g?y#s")
+    , (";x", "http://a/b/c/;x"), ("g;x", "http://a/b/c/g;x"), ("g;x?y#s", "http://a/b/c/g;x?y#s")
+    , ("", "http://a/b/c/d;p?q"), (".", "http://a/b/c/"), ("./", "http://a/b/c/"), ("..", "http://a/b/")
+    , ("../", "http://a/b/"), ("../g", "http://a/b/g"), ("../..", "http://a/"), ("../../", "http://a/")
+    , ("../../g", "http://a/g"), ("../../../g", "http://a/g"), ("../../../../g", "http://a/g")
+    , ("/./g", "http://a/g"), ("/../g", "http://a/g"), ("g.", "http://a/b/c/g."), (".g", "http://a/b/c/.g")
+    , ("g..", "http://a/b/c/g.."), ("..g", "http://a/b/c/..g"), ("./../g", "http://a/b/g")
+    , ("./g/.", "http://a/b/c/g/"), ("g/./h", "http://a/b/c/g/h"), ("g/../h", "http://a/b/c/h")
+    , ("g;x=1/./y", "http://a/b/c/g;x=1/y"), ("g;x=1/../y", "http://a/b/c/y")
+    , ("g?y/./x", "http://a/b/c/g?y/./x"), ("g?y/../x", "http://a/b/c/g?y/../x")
+    , ("g#s/./x", "http://a/b/c/g#s/./x"), ("g#s/../x", "http://a/b/c/g#s/../x"), ("http:g", "http:g")
+    ]
+
+resolved : String -> String
+resolved reference =
+    case (Url.parse "http://a/b/c/d;p?q", Url.parse reference) of
+        (Just base, Just ref) -> Url.toString (Url.resolve base ref)
+        _ -> "unparsed"
+
+mismatches : List (String, String) -> List String
+mismatches cases =
+    List.foldr { (reference, want) found ->
+        got = resolved reference
+        if got == want then found else [reference ++ " gave " ++ got | found]
+    } [] cases
+
+roundTrip : String -> String
+roundTrip raw =
+    case Url.parse raw of
+        Just url -> Url.toString url
+        Nothing -> "invalid: " ++ raw
+
+tests : Test.Test {}
+tests = Test.test "url_reference" {
+    Expect.equal [] (mismatches examples)
+    Expect.equal (Just (Url.Url { scheme = Just "https", userinfo = Just "user:pw", host = Just "2001:db8::1", port = Just 8443, path = "/p%20q", query = Just "a=b", fragment = Just "top" })) (Url.parse "https://user:pw@[2001:DB8::1]:8443/p%20q?a=b#top")
+    Expect.equal "http://example.com/A?B#C" (roundTrip "HTTP://Example.COM/A?B#C")
+    Expect.equal "http://[::1]/" (roundTrip "http://[::1]/")
+    Expect.equal "mailto:a@b" (roundTrip "mailto:a@b")
+    Expect.equal "/relative/path?q" (roundTrip "/relative/path?q")
+    Expect.equal "?only" (roundTrip "?only")
+    Expect.equal "#frag" (roundTrip "#frag")
+    Expect.equal "http://h/p" (roundTrip "http://h:/p")
+    Expect.equal "invalid: a b" (roundTrip "a b")
+    Expect.equal "invalid: http://h:65536/" (roundTrip "http://h:65536/")
+    Expect.equal "invalid: http://h/%zz" (roundTrip "http://h/%zz")
+    Expect.equal "invalid: http://exa mple/" (roundTrip "http://exa mple/")
+    Expect.equal "invalid: 1http://h" (roundTrip "1http://h")
+    Expect.equal "x:y:z" (roundTrip "x:y:z")
+    Expect.equal "invalid: http://[::1" (roundTrip "http://[::1")
+    Expect.equal "invalid: http://exámple.com/" (roundTrip "http://exámple.com/")
+    Expect.equal "//host" (roundTrip "//host")
+    Expect.equal "a%20b%2Fc%3Fd" (Url.percentEncode PathSegment "a b/c?d")
+    Expect.equal "x%3D1%26y%2Bz%20%C3%A9" (Url.percentEncode QueryPart "x=1&y+z é")
+    Expect.equal "a%20b/?%23" (Url.percentEncode FragmentPart "a b/?#")
+    Expect.equal (Just "café/") (Url.percentDecode "caf%C3%A9%2F")
+    Expect.equal Nothing (Url.percentDecode "%zz")
+    Expect.equal Nothing (Url.percentDecode "%C3")
+    url = Expect.just (Url.parse "http://h/search?q=a+b&empty&x=%41&&e=caf%C3%A9")
+    Expect.equal [("q", "a b"), ("empty", ""), ("x", "A"), ("e", "café")] (Url.queryParams url)
+    Expect.equal "http://h/search?q=a+b&empty&x=%41&&e=caf%C3%A9&name=Ada%20Lovelace&tag=a%26b%3Dc" (Url.toString (Url.withQuery [("name", "Ada Lovelace"), ("tag", "a&b=c")] url))
+    Expect.equal "http://h/search/v1/a%2Fb/c%20d?q=a+b&empty&x=%41&&e=caf%C3%A9" (Url.toString (Url.appendPath ["v1", "a/b", "c d"] url))
+    Expect.equal "/search?q=a+b&empty&x=%41&&e=caf%C3%A9" (Url.requestTarget url)
+    host = Expect.just (Url.parse "http://h")
+    Expect.equal "/" (Url.requestTarget host)
+    Expect.equal "http://h/x?a=1" (Url.toString (Url.withQuery [("a", "1")] (Url.appendPath ["x"] host)))
+}
+
+main() = Test.run tests

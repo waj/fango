@@ -1,0 +1,22 @@
+module ClassesSimple exposing (tests)
+
+import Expect
+import Test
+class Twice a
+    twice : a -> a
+
+instance Twice Int
+    twice x = x + x
+
+applyTwice : Twice a => a -> a
+applyTwice x = twice x
+
+answer : Int
+answer = applyTwice 21
+
+tests : Test.Test {}
+tests = Test.test "classes_simple" {
+    Expect.equal 42 answer
+}
+
+main() = Test.run tests

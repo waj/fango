@@ -1,0 +1,26 @@
+module ResourceSafeResults exposing (tests)
+
+import Expect
+import Runtime.Scope
+import Test
+
+type Box a = Box a
+
+{-# resource #-}
+type Handle = Handle Int
+
+withHandle action = Runtime.Scope.bracket { _ -> Handle 1 } { _ -> () } action
+
+identity value = value
+invoke callback value = callback value
+
+fixtureBody() =
+    callback = withHandle { resource -> identity { _ -> 42 } }
+    wrapped = withHandle { resource -> Box { _ -> 17 } }
+    case wrapped of
+        Box other -> invoke callback () + other()
+
+tests : Test.Test {}
+tests = Test.test "resource_safe_results" { Expect.equal 59 fixtureBody() }
+
+main() = Test.run tests

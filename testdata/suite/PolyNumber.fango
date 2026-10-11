@@ -1,0 +1,17 @@
+module PolyNumber exposing (tests)
+
+import Expect
+import Test
+double x = x + x
+
+addOne x = x + 1
+
+tests : Test.Test {}
+tests = Test.test "poly_number" {
+    a = double 20 + addOne 1
+    b = double 0.75
+    c = addOne 1.5
+    Expect.equal 4.0 (b + c)
+}
+
+main() = Test.run tests

@@ -1,0 +1,12 @@
+module ClosureCapture exposing (tests)
+
+import Expect
+import Test
+addn n = { m -> n + m }
+add5 = addn 5
+tests : Test.Test {}
+tests = Test.test "closure_capture" {
+    Expect.equal 42 (add5 37)
+}
+
+main() = Test.run tests

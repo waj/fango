@@ -1,0 +1,79 @@
+module ScopeState exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import Runtime.Scope
+import State exposing (State)
+import Test
+
+-- A cleanup scope composes with a parameterized handler in both nestings, and
+-- the state cell survives the scope it encloses.
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() on
+        fail error -> Err error
+        return value -> Ok value
+
+open label =
+    note ("open " ++ label)
+    label
+
+close label = note ("close " ++ label)
+
+runCounter : Int -> (() ->{State Int | e} a) ->{e} State.StateResult Int a
+runCounter = State.run
+
+bump : () ->{State Int} Int
+bump() =
+    current = State.get()
+    State.put (current + 1)
+    current
+
+countingBody token =
+    first = bump()
+    second = bump()
+    token ++ " " ++ show first ++ show second
+
+-- The scope runs inside the state handler.
+scopeInsideState() =
+    runCounter 0 { _ -> Runtime.Scope.bracket { _ -> open "inner" } close countingBody }
+
+-- The state handler runs inside the scope.
+stateInsideScope() =
+    Runtime.Scope.bracket { _ -> open "outer" } close { token ->
+        runCounter 7 { _ -> countingBody token }
+    }
+
+failingCount token =
+    ignored = bump()
+    fail ("stopped at " ++ token ++ show ignored)
+
+note : String ->{State.State (List String)} ()
+note value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} ((String, Int), (String, Int), Result String String)
+fixtureBody() =
+    first = scopeInsideState()
+    second = stateInsideScope()
+    outcome = attempt {
+        Runtime.Scope.bracket { open "failing" } close { token ->
+            inner = runCounter 3 { failingCount token }
+            inner.value
+        }
+    }
+    ((first.value, first.state), (second.value, second.state), outcome)
+
+observations : () -> (((String, Int), (String, Int), Result String String), List String)
+observations() =
+    observed = State.run [] fixtureBody
+    (observed.value, List.reverse observed.state)
+
+tests : Test.Test {}
+tests = Test.test "scope_state" {
+    Expect.equal ((("inner 01", 2), ("outer 78", 9), Err "stopped at failing3"), ["open inner", "close inner", "open outer", "close outer", "open failing", "close failing"]) observations()
+}
+
+main() = Test.run tests

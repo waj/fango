@@ -1,0 +1,41 @@
+module PolyFailureStructural exposing (tests)
+
+import Expect
+import Fail
+import Failure
+import Result exposing (Result(..))
+import Runtime.Scope
+import Test
+
+type Box a = Box a deriving (Show)
+
+effect Close a
+    abort close : Box (List a) -> ()
+
+effect Cleanup
+    cleanup : a -> ()
+
+tests : Test.Test {}
+tests = Test.test "poly_failure_structural" {
+    report : Result (Fail.Report String) ()
+    report = Fail.attemptReport {
+        handle cleanup 42 on
+            cleanup value -> resume (
+                handle
+                    Runtime.Scope.finally { Fail.fail "body" } { close (Box [value]) }
+                on
+                    close _ -> ()
+            )
+    }
+    failure = Expect.err report
+    Expect.equal "body" failure.primary
+    Expect.equal 1 (List.length failure.suppressed)
+    List.each { suppressed ->
+        argument : Maybe (Box (List Int))
+        argument = Failure.argument 0 suppressed
+        Box values = Expect.just argument
+        Expect.equal [42] values
+    } failure.suppressed
+}
+
+main() = Test.run tests

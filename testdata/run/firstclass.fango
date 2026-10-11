@@ -1,3 +1,0 @@
-add x y = x + y
-f = add
-main = print (f 2 3)

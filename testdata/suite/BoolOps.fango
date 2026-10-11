@@ -1,0 +1,27 @@
+module BoolOps exposing (tests)
+
+import Expect
+import Test
+-- `&&` binds tighter than `||`, and both bind looser than comparisons.
+mixed : Int -> Bool
+mixed n = n > 0 && n < 10 || n == 100
+
+isVowel : Int -> Bool
+isVowel byte =
+    byte == 97 || byte == 101 || byte == 105 || byte == 111 || byte == 117
+
+tests : Test.Test {}
+tests = Test.test "bool_ops" {
+    Expect.equal True (True && True)
+    Expect.equal False (True && False)
+    Expect.equal True (False || True)
+    Expect.equal False (False || False)
+    Expect.equal True (mixed 5)
+    Expect.equal True (mixed 100)
+    Expect.equal False (mixed 50)
+    Expect.equal True (isVowel 101)
+    Expect.equal False (isVowel 98)
+    Expect.equal "both" (if isVowel 97 && mixed 5 then "both" else "not both")
+}
+
+main() = Test.run tests

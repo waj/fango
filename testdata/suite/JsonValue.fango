@@ -1,0 +1,14 @@
+module JsonValue exposing (tests)
+
+import Expect
+import Json
+import Result exposing (Result(..))
+import Test
+
+tests : Test.Test {}
+tests = Test.test "json_value" {
+    value = Expect.ok (Json.parse @Json.Value "{\"x\": [1, true, null]}")
+    Expect.equal "{\"x\":[1,true,null]}" (Expect.ok (Json.stringify value))
+}
+
+main() = Test.run tests

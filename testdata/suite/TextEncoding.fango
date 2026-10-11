@@ -1,0 +1,41 @@
+module TextEncoding exposing (tests)
+
+import Bytes
+import Char
+import Encoding exposing (Error(..))
+import Expect
+import List
+import Result exposing (Result(..))
+import String
+import Test
+
+tests : Test.Test {}
+tests = Test.test "text_encoding" {
+    Expect.equal 128512 (Char.toCode '😀')
+    Expect.equal (Just '😀') (Char.fromCode 128512)
+    Expect.equal [Nothing, Nothing, Nothing, Nothing] (List.map Char.fromCode [-1, 55296, 57343, 1114112])
+    Expect.equal True (case List.map Char.fromCode [0, 55295, 57344, 1114111] of
+            [Just a, Just b, Just c, Just d] -> List.map Char.toCode [a, b, c, d] == [0, 55295, 57344, 1114111]
+            _ -> False
+    )
+    Expect.equal "é😀二" (String.fromList ['é', '😀', '二'])
+    Expect.equal "é😀二" (String.concat ["", "é", "😀", "", "二"])
+    Expect.equal True (String.fromList [] == "" && String.concat [] == "")
+    bytes = Bytes.fromList (List.range 0 255)
+    roundtrip = case Encoding.decode Encoding.latin1 bytes of
+        Err _ -> False
+        Ok text -> String.length text == 256 && Encoding.encode Encoding.latin1 text == Ok bytes
+    Expect.equal True roundtrip
+    Expect.equal (Err (Unrepresentable '😀')) (Encoding.encode Encoding.latin1 "é😀")
+    Expect.equal (Err (InvalidSequence 1)) (Encoding.decode Encoding.utf8 (Bytes.fromList [97, 255]))
+    Expect.equal (Err (IncompleteSequence 1)) (Encoding.decode Encoding.utf8 (Bytes.fromList [97, 226, 130]))
+    Expect.equal (Ok "�") (Encoding.decode Encoding.utf8 (Bytes.fromString "�"))
+    Expect.equal True (case Encoding.decode Encoding.utf8 (Bytes.append (Bytes.fromList [239, 187, 191]) (Bytes.fromString "é")) of
+            Err _ -> False
+            Ok text -> case String.uncons text of
+                Nothing -> False
+                Just part -> Char.toCode part.first == 65279 && part.rest == "é"
+    )
+}
+
+main() = Test.run tests

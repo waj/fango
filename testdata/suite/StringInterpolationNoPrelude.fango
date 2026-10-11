@@ -1,0 +1,11 @@
+{-# no-prelude #-}
+module StringInterpolationNoPrelude exposing (tests)
+
+import Expect
+import Test
+fixtureBody() = "#{True} #{'二'}"
+
+tests : Test.Test {}
+tests = Test.test "string_interpolation_no_prelude" { Expect.equal "True 二" fixtureBody() }
+
+main() = Test.run tests

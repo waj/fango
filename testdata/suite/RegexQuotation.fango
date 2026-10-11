@@ -1,0 +1,16 @@
+module RegexQuotation exposing (tests)
+
+import Expect
+import Regex
+import Test
+
+regex = $(`/\d+/`)
+valid = $(if Regex.matches /(?i)abc/ "ABC" then `True` else `False`)
+
+tests : Test.Test {}
+tests = Test.test "regex_quotation" {
+    Expect.equal True (Regex.matches regex "123")
+    Expect.equal True valid
+}
+
+main() = Test.run tests

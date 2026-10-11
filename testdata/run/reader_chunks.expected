@@ -1,8 +1,0 @@
-["abcdef"]
-["ab", "cde", "f"]
-"ab"
-"cde"
-"f"
-"abcdef"
-(Just "abc", ["de", "f"])
-[]

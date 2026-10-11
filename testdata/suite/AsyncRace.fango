@@ -1,0 +1,124 @@
+module AsyncRace exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail
+import IO
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+type Observation
+    = RaceOutcome (Async.Outcome (Result String Int))
+    | Trace String
+    | ChannelRaceOutcome (Async.Outcome (Result String (Maybe Int)))
+    | DataRaceOutcome (Async.Outcome (Result String (Result String Int)))
+    | GroupOutcome (Async.Outcome (Result String (List (Maybe Int))))
+    deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordRaceOutcome : Async.Outcome (Result String Int) ->{IO, State.State (List Observation)} ()
+recordRaceOutcome value = record (RaceOutcome value)
+
+recordTrace : String ->{IO, State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordChannelRaceOutcome : Async.Outcome (Result String (Maybe Int)) ->{IO, State.State (List Observation)} ()
+recordChannelRaceOutcome value = record (ChannelRaceOutcome value)
+
+recordDataRaceOutcome : Async.Outcome (Result String (Result String Int)) ->{IO, State.State (List Observation)} ()
+recordDataRaceOutcome value = record (DataRaceOutcome value)
+
+recordGroupOutcome : Async.Outcome (Result String (List (Maybe Int))) ->{IO, State.State (List Observation)} ()
+recordGroupOutcome value = record (GroupOutcome value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    recordRaceOutcome (Async.runOutcome {
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            Fail.attempt {
+                Async.race [ {
+                               Runtime.Scope.finally {
+                                   ignore (Async.send ready ())
+                                   ignore (Async.receive gate)
+                                   1
+                               } { recordTrace "race loser drained" }
+                             }
+                           , { ignore (Async.receive ready); 42 }
+                           , { ignore (Async.receive gate); Fail.fail "late failure"; 3 }
+                           ]
+            }
+    })
+    recordRaceOutcome (Async.runOutcome {
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            Fail.attempt {
+                Async.race [ {
+                               Runtime.Scope.finally {
+                                   ignore (Async.send ready ())
+                                   ignore (Async.receive gate)
+                                   1
+                               } { recordTrace "timeout loser drained" }
+                             }
+                           , { ignore (Async.receive ready); Fail.fail "timeout"; 2 }
+                           ]
+            }
+    })
+    empty = computeEmpty()
+    recordRaceOutcome empty
+    cancelledRace = computeCancelledRace()
+    recordChannelRaceOutcome cancelledRace
+    returned = computeReturned()
+    recordDataRaceOutcome returned
+    cancelledAll = computeCancelledAll()
+    recordGroupOutcome cancelledAll
+
+computeEmpty : () ->{IO} Outcome (Result String Int)
+computeEmpty() = Async.runOutcome { Fail.attempt { Async.race [] } }
+
+computeCancelledRace : () ->{IO} Outcome (Result String (Maybe Int))
+computeCancelledRace() = Async.runOutcome {
+    gate : Async.Channel Int
+    gate = Async.channel 0
+    task = Async.spawn { Async.receive gate }
+    Async.cancel task
+    Fail.attempt { Async.race [{ Async.await task }] }
+}
+
+computeReturned : () ->{IO} Outcome (Result String (Result String Int))
+computeReturned() = Async.runOutcome { Fail.attempt { Async.race [{ Err "ordinary data" }] } }
+
+computeCancelledAll : () ->{IO} Outcome (Result String (List (Maybe Int)))
+computeCancelledAll() = Async.runOutcome {
+    gate : Async.Channel Int
+    gate = Async.channel 0
+    task = Async.spawn { Async.receive gate }
+    Async.cancel task
+    Fail.attempt { Async.all [{ Async.await task }] }
+}
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_race" {
+    Expect.equal [ Trace "race loser drained"
+                 , RaceOutcome (Async.Completed (Ok 42))
+                 , Trace "timeout loser drained"
+                 , RaceOutcome (Async.Completed (Err "timeout"))
+                 , RaceOutcome Async.Cancelled
+                 , ChannelRaceOutcome Async.Cancelled
+                 , DataRaceOutcome (Async.Completed (Ok (Err "ordinary data")))
+                 , GroupOutcome Async.Cancelled
+                 ] observations()
+}
+
+main() = Test.run tests

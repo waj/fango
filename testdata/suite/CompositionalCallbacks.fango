@@ -1,0 +1,133 @@
+module CompositionalCallbacks exposing (tests)
+
+import Expect
+import Runtime.Scope
+import State
+import Test
+
+effect Boom
+    abort boom : () -> Int
+
+effect Ask
+    ask : () -> Int
+
+useAsk : (() ->{Ask} Int) ->{Ask} Int
+useAsk action = action()
+
+asking() = ask()
+
+runAsk action =
+    handle useAsk action on
+        ask () -> resume 7
+
+pure() = 1
+emit() =
+    recordText "emit"
+    2
+fail() = boom()
+
+pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
+pair left right = left() + right()
+
+type Tree e = Leaf (() ->{e} Int) | Branch (List (Tree e))
+leaf : (() ->{e} Int) -> Tree e
+leaf action = Leaf action
+branch : List (Tree e) -> Tree e
+branch children = Branch children
+
+run : Tree e ->{e} Int
+run tree =
+    case tree of
+        Leaf action -> action()
+        Branch children -> List.foldl { child total -> total + run child } 0 children
+
+quiet = leaf pure
+loud = leaf emit
+
+type Box a = Box a
+
+boxed = Box pure
+
+useBox : Box (() ->{State.State (List Observation)} Int) ->{State.State (List Observation)} Int
+useBox box =
+    case box of
+        Box action -> action()
+
+useFunctions : List (() ->{State.State (List Observation)} Int) ->{State.State (List Observation)} Int
+useFunctions actions = List.foldl { action total -> total + action() } 0 actions
+
+functions = [pure, pure]
+
+consumeObserved : (() ->{State.State (List Observation)} Int) ->{State.State (List Observation)} Int
+consumeObserved action = action()
+
+usePure : ((() -> Int) ->{State.State (List Observation)} Int) ->{State.State (List Observation)} Int
+usePure consumer = consumer pure
+
+type Record e = { action : () ->{e} Int }
+
+runRecord : Record e ->{e} Int
+runRecord record = record.action()
+
+runRecords : List (Record e) ->{e} Int
+runRecords records = List.foldl { record total -> total + runRecord record } 0 records
+
+quietRecord = Record { action = pure }
+
+staged : Int ->{State.State (List Observation)} Int -> Int
+staged first =
+    recordInt first
+    { second -> first + second }
+
+scoped() = Runtime.Scope.bracket pure { _ -> recordText "release" } { _ ->
+    pair emit fail
+}
+
+type Observation = Text String | Integer Int deriving (Eq, Show)
+
+recordText : String ->{State.State (List Observation)} ()
+recordText value = State.put [Text value | State.get()]
+
+recordInt : Int ->{State.State (List Observation)} ()
+recordInt value = State.put [Integer value | State.get()]
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    recordInt (pair pure emit)
+    recordInt (pair emit pure)
+    recordInt (run (branch [quiet, loud]))
+    recordInt (run (branch [loud, quiet]))
+    recordInt (useBox boxed)
+    recordInt (useFunctions functions)
+    recordInt (useFunctions [pure, emit])
+    recordInt (useFunctions [emit, pure])
+    recordInt (if True then pure else emit)()
+    recordInt (runAsk pure)
+    recordInt (runAsk asking)
+    recordInt (usePure consumeObserved)
+    recordInt (runRecords [quietRecord, Record { action = emit }])
+    recordInt (runRecords [Record { action = emit }, quietRecord])
+    recordInt (runRecord { quietRecord | action = pure })
+    later = staged 10
+    recordInt (later 2)
+    tests =
+        [ leaf { _ -> 4 }
+        , leaf { _ -> 5 }
+        ]
+    recordInt (run (branch tests))
+    answer =
+        handle scoped() on
+            boom () -> 9
+    recordInt answer
+    3 |> { n -> n + 1 } |> recordInt
+    recordInt <| 5 + 1
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "compositional_callbacks" {
+    Expect.equal [Text "emit", Integer 3, Text "emit", Integer 3, Text "emit", Integer 3, Text "emit", Integer 3, Integer 1, Integer 2, Text "emit", Integer 3, Text "emit", Integer 3, Integer 1, Integer 1, Integer 7, Integer 1, Text "emit", Integer 3, Text "emit", Integer 3, Integer 1, Integer 10, Integer 12, Integer 9, Text "emit", Text "release", Integer 9, Integer 4, Integer 6] observations()
+}
+
+main() = Test.run tests

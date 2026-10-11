@@ -1,0 +1,20 @@
+module EffectParameterizedRunner exposing (tests)
+
+import Expect
+import Test
+effect Read a
+    read : Type a -> Int
+
+action() = read @Int + read @Bool
+
+withValue : Type a -> Int -> (() ->{Read a | e} Int) ->{e} Int
+withValue witness value body =
+    handle body() on
+        read _ -> resume value
+
+fixtureBody() = withValue @Int 1 { withValue @Bool 2 action }
+
+tests : Test.Test {}
+tests = Test.test "effect_parameterized_runner" { Expect.equal 3 fixtureBody() }
+
+main() = Test.run tests

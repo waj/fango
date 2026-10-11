@@ -1,0 +1,37 @@
+module ReaderMemory exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Reader exposing (Reader)
+import Test
+
+-- Parsing propagates exactly the reader's effects.
+parse : Reader e ->{e} (Maybe Bytes, Bytes, Bool)
+parse input =
+    head = Reader.readExactly input 5
+    rest = Reader.readUpTo input 99
+    (head, rest, Reader.atEnd input)
+
+tests : Test.Test {}
+tests = Test.test "reader_memory" {
+    Expect.equal (Just (Bytes.fromString "hello"), Bytes.fromString ", world", True)
+        (Reader.overBytes (Bytes.fromString "hello, world") parse)
+    Expect.equal (Nothing, Bytes.empty, True) (Reader.overBytes Bytes.empty parse)
+    -- A failed readExactly consumes nothing.
+    Expect.equal (Nothing, Bytes.fromString "abc")
+        (Reader.overBytes (Bytes.fromString "abc") { input ->
+            (Reader.readExactly input 99, Reader.readUpTo input 99)
+        })
+    -- Counts outside the buffer are clamped rather than rejected.
+    Expect.equal (Just Bytes.empty, Bytes.empty, Bytes.fromString "ab")
+        (Reader.overBytes (Bytes.fromString "abc") { input ->
+            (Reader.readExactly input 0, Reader.readUpTo input (-1), Reader.readUpTo input 2)
+        })
+    -- ensure grows the buffer and consumes nothing.
+    Expect.equal (True, False, Bytes.fromString "abc")
+        (Reader.overBytes (Bytes.fromString "abc") { input ->
+            (Reader.ensure input 3, Reader.ensure input 4, Reader.readUpTo input 99)
+        })
+}
+
+main() = Test.run tests

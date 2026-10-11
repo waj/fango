@@ -1,0 +1,18 @@
+module AdtArea exposing (tests)
+
+import Expect
+import Test
+type Shape = Circle Float | Rect Float Float deriving (Eq, Show)
+
+area : Shape -> Float
+area shape =
+    case shape of
+        Circle r -> r * r * 3.14159
+        Rect w h -> w * h
+
+tests : Test.Test {}
+tests = Test.test "adt_area" {
+    Expect.equal 12.56636 (area (Circle 2.0))
+}
+
+main() = Test.run tests

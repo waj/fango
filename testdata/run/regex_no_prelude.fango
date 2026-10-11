@@ -1,4 +1,0 @@
-{-# no-prelude #-}
-import Regex
-
-main = Regex.matches /é+/ "éé"

@@ -1,0 +1,56 @@
+module TextWriter exposing (tests)
+
+import Bytes
+import Encoding exposing (Error(..))
+import Expect
+import Fail
+import IO
+import Result exposing (Result(..))
+import Runtime.Local
+import Test
+import Text.Writer as TextWriter
+import Writer
+
+stop : () ->{Fail.Fail String} ()
+stop() = Fail.fail "stopped"
+
+fixtureBody : () ->{IO.IO} List Bool
+fixtureBody() =
+    observed0 = (Writer.collecting { bytes -> TextWriter.over bytes { text ->
+        TextWriter.write text "é\r\n"
+        TextWriter.writeChar text '😀'
+        TextWriter.flush text
+        7 } } == (7, Bytes.fromString "é\r\n😀"))
+    observed1 = (TextWriter.collecting { text ->
+        TextWriter.write text "é"
+        TextWriter.writeChar text '😀'
+        TextWriter.flush text
+        7 } == (7, "é😀"))
+    observed2 = (Fail.attempt { Writer.collecting { bytes -> TextWriter.overWith Encoding.latin1 bytes { text ->
+        TextWriter.write text "é"
+        rejected = TextWriter.tryWrite text "a😀"
+        TextWriter.writeChar text 'ÿ'
+        rejected } } } == Ok (Err (Unrepresentable '😀'), Bytes.fromList [233, 255]))
+    observed3 = (Fail.attempt { Writer.collecting { bytes -> TextWriter.overWith Encoding.latin1 bytes { text ->
+        TextWriter.write text "a😀" } } } == Err (Unrepresentable '😀'))
+    observed4 = (Runtime.Local.run (0, 0) { counts ->
+        parent = Writer.Writer
+            { emit = { _ ->
+                (writes, flushes) = counts.read()
+                counts.write (writes + 1, flushes)
+              }
+            , flush = {
+                (writes, flushes) = counts.read()
+                counts.write (writes, flushes + 1)
+              }
+            }
+        outcome = Fail.attempt { TextWriter.over parent { text ->
+            TextWriter.write text "ok"
+            stop() } }
+        (outcome, counts.read()) } == (Err "stopped", (1, 0)))
+    [observed0, observed1, observed2, observed3, observed4]
+
+tests : Test.Test IO.IO
+tests = Test.test "text_writer" { Expect.equal [True, True, True, True, True] fixtureBody() }
+
+main() = Test.run tests

@@ -1,0 +1,25 @@
+module ClassesUnitName exposing (tests)
+
+import Expect
+import Test
+type Unit = Unit
+type Box a = Box a
+class Label a
+    label : a -> String
+instance Label ()
+    label value = "builtin"
+instance Label Unit
+    label value = "custom"
+instance Label (Box ())
+    label value = "boxed builtin"
+instance Label (Box Unit)
+    label value = "boxed custom"
+tests : Test.Test {}
+tests = Test.test "classes_unit_name" {
+    Expect.equal "builtin" (label ())
+    Expect.equal "custom" (label Unit)
+    Expect.equal "boxed builtin" (label (Box ()))
+    Expect.equal "boxed custom" (label (Box Unit))
+}
+
+main() = Test.run tests

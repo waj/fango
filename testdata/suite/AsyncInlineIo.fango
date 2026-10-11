@@ -1,0 +1,36 @@
+module AsyncInlineIo exposing (tests)
+
+import Async
+import Expect
+import Fail
+import IO
+import Result exposing (Result(..))
+import State
+import Test
+
+type Observation = Trace String deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordTrace : String ->{IO, State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    r = Async.runOutcome { Async.spawn { recordTrace "Hola" } }
+    recordTrace "DONE"
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_inline_io" {
+    Expect.equal [ Trace "Hola"
+                 , Trace "DONE"
+                 ] observations()
+}
+
+main() = Test.run tests

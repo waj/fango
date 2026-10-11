@@ -1,0 +1,46 @@
+module JsonStreaming exposing (tests)
+
+import Bytes
+import Expect
+import Json
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import State
+import Stream
+import Test
+import Writer
+
+effect Rows
+    nextRow : Int -> Maybe Int
+
+-- The document is written while rows are read, one at a time.
+observations : () -> State.StateResult (List Int) (Result Json.Error (), Bytes.Bytes)
+observations() =
+    State.run [] {
+        handle
+            Writer.collecting { w ->
+                Json.withWriter w {
+                    rows = Stream.unfold 0 { i ->
+                        case nextRow i of
+                            Just v -> Just (v, i + 1)
+                            Nothing -> Nothing
+                    }
+                    Json.object [("rows", { Json.array rows }), ("done", { Json.encodeValue True })]
+                }
+            }
+        on
+            nextRow i ->
+                State.put [i | State.get()]
+                resume (if i < 3 then Just (i * 10) else Nothing)
+    }
+
+tests : Test.Test {}
+tests = Test.test "json_streaming" {
+    observed = observations()
+    (outcome, bytes) = observed.value
+    Expect.equal (Ok ()) outcome
+    Expect.equal (Bytes.fromString "{\"rows\":[0,10,20],\"done\":true}") bytes
+    Expect.equal [0, 1, 2, 3] (List.reverse observed.state)
+}
+
+main() = Test.run tests

@@ -1,0 +1,77 @@
+module AsyncRun exposing (tests)
+
+import Async
+import Expect
+import Fail
+import IO
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import Test
+
+blocked ready gate label () = Runtime.Scope.finally {
+    ignore (Async.send ready ())
+    ignore (Async.receive gate)
+} { recordTrace label }
+
+type Observation = Trace String | RootResult (Result String ()) deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordTrace : String ->{IO, State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordRootResult : Result String () ->{IO, State.State (List Observation)} ()
+recordRootResult value = record (RootResult value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    Async.run {
+        ready = Async.channel 0
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        ignore (Async.spawn (blocked ready gate "cancel cleanup"))
+        ignore (Async.receive ready)
+        task = Async.spawn { Async.receive gate }
+        Async.cancel task
+        ignore (Async.await task)
+        recordTrace "unreachable"
+    }
+    recordTrace "after cancellation"
+    recordRootResult (Fail.attempt {
+            use Async.run
+            ready = Async.channel 0
+            gate : Async.Channel Int
+            gate = Async.channel 0
+            ignore (Async.spawn (blocked ready gate "abort cleanup"))
+            ignore (Async.receive ready)
+            Fail.fail "root failed"
+    })
+    use Async.run
+    gate = Async.channel 0
+    task = Async.spawn {
+        ignore (Async.receive gate)
+        recordTrace "joined"
+    }
+    recordTrace "body"
+    ignore (Async.send gate ())
+    ignore (Async.await task)
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_run" {
+    Expect.equal [ Trace "cancel cleanup"
+                 , Trace "after cancellation"
+                 , Trace "abort cleanup"
+                 , RootResult (Err "root failed")
+                 , Trace "body"
+                 , Trace "joined"
+                 ] observations()
+}
+
+main() = Test.run tests

@@ -1,0 +1,11 @@
+module Negative exposing (tests)
+
+import Expect
+import Test
+low = 2 - 5
+fixtureBody() = low * low - low
+
+tests : Test.Test {}
+tests = Test.test "negative" { Expect.equal 12 fixtureBody() }
+
+main() = Test.run tests

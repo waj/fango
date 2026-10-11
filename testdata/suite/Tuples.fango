@@ -1,0 +1,59 @@
+module Tuples exposing (tests)
+
+import Expect
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Test
+import Tuple exposing (first, second, swap)
+
+pair : (Int, String)
+pair = (1, "one")
+
+triple : (Int, String, Bool)
+triple = (2, "two", True)
+
+nested : ((Int, Int), Int)
+nested = ((1, 2), 3)
+
+-- A tuple parameter and a class context in one annotation: the parser has to
+-- tell `(Show a, Show b) =>` from the tuple that follows it.
+render : (Show a, Show b) => (a, b) -> String
+render p =
+    case p of
+        (a, b) -> show a ++ "/" ++ show b
+
+sumBoth : (Int, Int) -> Int
+sumBoth p =
+    case p of
+        (a, b) -> a + b
+
+pick : (Int, Int, Int) -> Int
+pick t =
+    case t of
+        (1, b, _) -> b
+        (_, _, c) -> c
+
+tests : Test.Test {}
+tests = Test.test "tuples" {
+    Expect.equal "(1, \"one\")" (show pair)
+    Expect.equal "(2, \"two\", True)" (show triple)
+    Expect.equal "((1, 2), 3)" (show nested)
+    Expect.equal "1/\"one\"" (render pair)
+    Expect.equal 7 (sumBoth (3, 4))
+    Expect.equal 20 (pick (1, 20, 30))
+    Expect.equal 30 (pick (9, 20, 30))
+    Expect.equal 1 (first pair)
+    Expect.equal "one" (second pair)
+    Expect.equal "(\"one\", 1)" (show (swap pair))
+    Expect.equal "[(1, 2), (3, 4)]" (show [(1, 2), (3, 4)])
+    Expect.equal "Just (1, 2)" (show (Just (1, 2)))
+    (x, y) = pair
+    Expect.equal 1 x
+    Expect.equal "one" y
+    Expect.equal True (pair == (1, "one"))
+    Expect.equal False (pair == (1, "two"))
+    Expect.equal True (pair < (1, "two"))
+    Expect.equal True ((1, 2, 3) < (1, 2, 4))
+}
+
+main() = Test.run tests

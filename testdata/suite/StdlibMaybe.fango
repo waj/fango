@@ -1,0 +1,23 @@
+module StdlibMaybe exposing (tests)
+
+import Expect
+import Maybe exposing (Maybe(..), withDefault)
+import Test
+
+just : Maybe Int
+just = Just 42
+
+none : Maybe Int
+none = Nothing
+
+tests : Test.Test {}
+tests = Test.test "stdlib_maybe" {
+    Expect.equal "Just 42" (show just)
+    Expect.equal "Nothing" (show none)
+    Expect.equal (Just 42) just
+    Expect.notEqual (Just 1) none
+    Expect.equal 7 (withDefault 0 (Just 7))
+    Expect.equal 0 (withDefault 0 none)
+}
+
+main() = Test.run tests

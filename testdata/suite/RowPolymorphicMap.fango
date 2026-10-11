@@ -1,0 +1,31 @@
+module RowPolymorphicMap exposing (tests)
+
+import Expect
+import State
+import Test
+type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
+
+map : (a ->{e} b) -> Chain a ->{e} Chain b
+map fn values =
+    case values of
+        Empty -> Empty
+        Link x xs -> Link (fn x) (map fn xs)
+
+increment x = x + 1
+
+announce : Int ->{State.State (List Int)} Int
+announce x =
+    State.put [x | State.get()]
+    x + 10
+
+numbers = Link 1 (Link 2 Empty)
+
+tests : Test.Test {}
+tests = Test.test "row_polymorphic_map" {
+    Expect.equal (Link 2 (Link 3 Empty)) (map increment numbers)
+    observed = State.run [] { map announce numbers }
+    Expect.equal (Link 11 (Link 12 Empty)) observed.value
+    Expect.equal [1, 2] (List.reverse observed.state)
+}
+
+main() = Test.run tests

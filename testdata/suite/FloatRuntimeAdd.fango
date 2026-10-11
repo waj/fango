@@ -1,0 +1,11 @@
+module FloatRuntimeAdd exposing (tests)
+
+import Expect
+import Test
+tenth = 0.1
+tests : Test.Test {}
+tests = Test.test "float_runtime_add" {
+    Expect.equal 0.30000000000000004 (tenth + 0.2)
+}
+
+main() = Test.run tests

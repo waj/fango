@@ -1,0 +1,16 @@
+module ClassesDerive exposing (tests)
+
+import Expect
+import Test
+type Box a = Box a deriving (Eq, Show)
+
+equalBoxes : Eq (Box a) => Box a -> Box a -> Bool
+equalBoxes x y = x == y
+
+tests : Test.Test {}
+tests = Test.test "classes_derive" {
+    Expect.equal True (equalBoxes (Box 2) (Box 2))
+    Expect.equal "Box \"hello\"" (show (Box "hello"))
+}
+
+main() = Test.run tests

@@ -1,0 +1,11 @@
+module Oversat exposing (tests)
+
+import Expect
+import Test
+mk x = { y -> x + y }
+tests : Test.Test {}
+tests = Test.test "oversat" {
+    Expect.equal 42 (mk 40 2)
+}
+
+main() = Test.run tests

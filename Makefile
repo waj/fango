@@ -1,7 +1,7 @@
 # Convenience wrappers for the repository verification gates; see
 # doc/design.md, "Testing and performance".
 
-.PHONY: build install install-lib test test-short test-grammar test-perf update-goldens update-baselines fmt fmt-fango vet check-files ci clean
+.PHONY: build install install-lib test test-suite test-short test-grammar test-perf update-goldens update-baselines fmt fmt-fango vet check-files ci clean
 
 build:
 	go build -o fango ./cmd/fango
@@ -47,6 +47,11 @@ install-lib:
 # This includes the full compiler/interpreter differential suite.
 test:
 	go test -parallel 16 $$(go list ./... | grep -v benchmarks)
+
+# The compatible language/library cases and documentation examples share one
+# compiled executable and one interpreter run. Included in test and ci.
+test-suite:
+	go test ./cmd/fango -run '^TestSuite$$' -count=1 -v
 
 # The TextMate grammar in editors/vscode/ encodes exact lexer rules, so a
 # change to the surface syntax must be re-checked against it: this tokenizes

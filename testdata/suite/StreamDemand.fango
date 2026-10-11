@@ -1,0 +1,79 @@
+module StreamDemand exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import State
+import Stream
+import Test
+
+produce label values = Stream.unfold (False, values) { (started, pending) ->
+    if started then () else recordTrace label
+    case pending of
+        [] -> Nothing
+        [value | rest] ->
+            recordValue value
+            Just (value, (True, rest))
+}
+
+makeMap() =
+    recordTrace "construct callback"
+    { value ->
+        recordTrace "map"
+        value * 10
+    }
+
+type Observation = Value Int | Trace String | Values (List Int) | Pairs (List (Int, Int)) deriving (Eq, Show)
+
+record : Observation ->{State.State (List Observation)} ()
+record value = State.put [value | State.get()]
+
+recordValue : Int ->{State.State (List Observation)} ()
+recordValue value = record (Value value)
+
+recordTrace : String ->{State.State (List Observation)} ()
+recordTrace value = record (Trace value)
+
+recordValues : List Int ->{State.State (List Observation)} ()
+recordValues value = record (Values value)
+
+recordPairs : List (Int, Int) ->{State.State (List Observation)} ()
+recordPairs value = record (Pairs value)
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    source = produce "start" [1, 2, 3]
+    mapped = Stream.map makeMap() source
+    recordTrace "constructed"
+    recordValues (Stream.toList (Stream.take 0 mapped))
+    recordValues (Stream.toList (Stream.take (-1) mapped))
+    recordValues (Stream.toList (Stream.take 1 mapped))
+    recordValues (Stream.toList (Stream.take 1 mapped))
+    recordPairs (Stream.toList (Stream.zip (produce "left" [4, 5, 6]) (produce "right" [7])))
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "stream_demand" {
+    Expect.equal [ Trace "construct callback"
+                 , Trace "constructed"
+                 , Values []
+                 , Values []
+                 , Trace "start"
+                 , Value 1
+                 , Trace "map"
+                 , Values [10]
+                 , Trace "start"
+                 , Value 1
+                 , Trace "map"
+                 , Values [10]
+                 , Trace "left"
+                 , Value 4
+                 , Trace "right"
+                 , Value 7
+                 , Value 5
+                 , Pairs [(4, 7)]
+                 ] observations()
+}
+
+main() = Test.run tests

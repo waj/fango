@@ -155,7 +155,7 @@ At each call, `s` contains a fresh local permission plus the runner's residual
 row `e`. The callback may use both. The runner discharges its fresh permission;
 all other effects remain in `e`. Nested calls have distinct permissions and can
 use multiple readers together through ordinary row inclusion, as the
-[two-reader fixture](../../testdata/run/reader_scoped_memory.fango) does.
+[two-reader fixture](../../testdata/suite/ReaderScopedMemory.fango) does.
 
 The annotated declaration must bind its final callback to a name. That callback
 has one argument and the annotated scoped row as its arrow's tail. The binder

@@ -1,0 +1,30 @@
+module PolyAbortRow exposing (tests)
+
+import Expect
+import Fail exposing (Fail, attempt, fail)
+import List exposing (each)
+import Result exposing (Result(..))
+import State
+import Test
+
+checkAll : List Int ->{Fail String, State.State (List Int) | e} ()
+checkAll xs = each { x -> if x > 2 then fail "big" else note x } xs
+
+note : Int ->{State.State (List Int)} ()
+note value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List Int)} Result String ()
+fixtureBody() =
+    attempt { checkAll [1, 3] }
+
+observations : () -> (Result String (), List Int)
+observations() =
+    observed = State.run [] fixtureBody
+    (observed.value, List.reverse observed.state)
+
+tests : Test.Test {}
+tests = Test.test "poly_abort_row" {
+    Expect.equal (Err "big", [1]) observations()
+}
+
+main() = Test.run tests

@@ -1,0 +1,46 @@
+module ClassesStructuralEvidence exposing (tests)
+
+import Expect
+import Test
+import Text.Builder
+
+type Box a = Box a
+instance Show a => Show (Box a)
+    showTo built value = Text.Builder.append (show value) built
+    show box = case box of
+        Box value -> "box " ++ show value
+type Wrapper a = Wrapper (Box a)
+instance Show (Box a) => Show (Wrapper a)
+    showTo built value = Text.Builder.append (show value) built
+    show wrapper = case wrapper of
+        Wrapper box -> show box
+
+type Derived a = Derived (Box a) deriving (Show)
+type Record a = { value : Box a } deriving (Show)
+type Tree a = Leaf a | Branch (Tree a) (Tree a) deriving (Eq, Show)
+
+render x = show (Box x)
+method : Show (Box a) => Box a -> String
+method = show
+localRender x =
+    renderLocal y = show (Box y)
+    renderLocal x
+captured x =
+    renderCaptured suffix = show (Box x) ++ suffix
+    renderCaptured "!"
+
+tests : Test.Test {}
+tests = Test.test "classes_structural_evidence" {
+    Expect.equal "box \"value\"" (render "value")
+    Expect.equal "box \"value\"" (localRender "value")
+    Expect.equal "box \"value\"!" (captured "value")
+    Expect.equal "box \"value\"" (method (Box "value"))
+    Expect.equal "box \"value\"" (show (Wrapper (Box "value")))
+    Expect.equal "Derived box \"value\"" (show (Derived (Box "value")))
+    Expect.equal "Record { value = box \"value\" }" (show (Record { value = Box "value" }))
+    Expect.equal "box 42" (show (Wrapper (Box 42)))
+    Expect.equal "Branch (Leaf 1) (Leaf 2)" (show (Branch (Leaf 1) (Leaf 2)))
+    Expect.equal (Branch (Leaf True) (Leaf False)) (Branch (Leaf True) (Leaf False))
+}
+
+main() = Test.run tests

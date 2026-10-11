@@ -1,0 +1,28 @@
+module ClassesDeriveOrd exposing (tests)
+
+import Expect
+import Test
+-- Ord derives all four comparisons at once: constructors order by
+-- declaration position, then fields lexicographically.
+type Suit = Clubs | Diamonds | Hearts | Spades deriving (Eq, Ord, Show)
+
+type Card = { suit : Suit, rank : Int } deriving (Eq, Ord, Show)
+
+type Wrapper a = Wrapper a Int deriving (Eq, Ord, Show)
+
+tests : Test.Test {}
+tests = Test.test "classes_derive_ord" {
+    Expect.equal True (Clubs < Spades)
+    Expect.equal False (Spades < Clubs)
+    Expect.equal True (Hearts <= Hearts)
+    Expect.equal False (Hearts >= Spades)
+    Expect.equal True (Diamonds > Clubs)
+    Expect.equal True (Card { suit = Clubs, rank = 9 } < Card { suit = Clubs, rank = 10 })
+    Expect.equal False (Card { suit = Hearts, rank = 2 } < Card { suit = Clubs, rank = 10 })
+    Expect.equal True (Card { suit = Hearts, rank = 2 } == Card { suit = Hearts, rank = 2 })
+    Expect.equal True (Wrapper "a" 2 < Wrapper "a" 3)
+    Expect.equal False (Wrapper "b" 1 <= Wrapper "a" 9)
+    Expect.equal "Wrapper 'x' 1" (show (Wrapper 'x' 1))
+}
+
+main() = Test.run tests

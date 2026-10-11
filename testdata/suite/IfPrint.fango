@@ -1,0 +1,13 @@
+module IfPrint exposing (tests)
+
+import Expect
+import State
+import Test
+x = 3
+tests : Test.Test {}
+tests = Test.test "if_print" {
+    observed = State.run [] { if x < 5 then State.put ["small" | State.get()] else State.put ["big" | State.get()] }
+    Expect.equal ["small"] (List.reverse observed.state)
+}
+
+main() = Test.run tests

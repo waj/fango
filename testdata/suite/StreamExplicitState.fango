@@ -1,0 +1,52 @@
+module StreamExplicitState exposing (tests)
+
+import Expect
+import Iterator
+import Result exposing (Result(..))
+import State
+import Stream
+import Test
+
+step n = if n > 5 then Nothing else Just (n, n + 1)
+type Observation = Values (List Int) | Pairs (List (Int, Int)) | Value Int deriving (Eq, Show)
+
+record : Observation ->{State.State (List Observation)} ()
+record value = State.put [value | State.get()]
+
+recordValues : List Int ->{State.State (List Observation)} ()
+recordValues value = record (Values value)
+
+recordPairs : List (Int, Int) ->{State.State (List Observation)} ()
+recordPairs value = record (Pairs value)
+
+recordValue : Int ->{State.State (List Observation)} ()
+recordValue value = record (Value value)
+
+fixtureBody : () ->{State.State (List Observation)} ()
+fixtureBody() =
+    source = Stream.unfold 1 step
+    recordValues (Stream.toList (Stream.take 2 (Stream.filter { n -> n > 2 } source)))
+    recordPairs (Stream.toList (Stream.zip source (Stream.fromList [10, 20])))
+    Stream.withCursor source { cursor ->
+        case Iterator.next cursor of
+            Nothing -> ()
+            Just (value, next) ->
+                recordValue value
+                case Iterator.next next of
+                    Nothing -> ()
+                    Just (second, _) -> recordValue second
+    }
+
+observations : () -> List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test {}
+tests = Test.test "stream_explicit_state" {
+    Expect.equal [ Values [3, 4]
+                 , Pairs [(1, 10), (2, 20)]
+                 , Value 1
+                 , Value 2
+                 ] observations()
+}
+
+main() = Test.run tests

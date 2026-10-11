@@ -1,0 +1,14 @@
+module LocalFnRec exposing (tests)
+
+import Expect
+import Test
+v =
+    go n =
+        if n < 1 then 0 else n + go (n - 1)
+    go 4
+tests : Test.Test {}
+tests = Test.test "local_fn_rec" {
+    Expect.equal 10 v
+}
+
+main() = Test.run tests

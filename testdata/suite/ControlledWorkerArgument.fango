@@ -1,0 +1,24 @@
+module ControlledWorkerArgument exposing (tests)
+
+import Expect
+import Test
+effect Stop
+    abort stop : String -> value
+
+type Box = Box (() ->{Stop} ())
+
+consume : Int -> Box -> ()
+consume _ (Box action) =
+    handle action() on
+        stop _ -> ()
+
+run = consume 0
+
+fixtureBody() = ()
+
+tests : Test.Test {}
+tests = Test.test "controlled_worker_argument" {
+    Expect.equal () fixtureBody()
+}
+
+main() = Test.run tests

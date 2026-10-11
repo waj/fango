@@ -1,0 +1,35 @@
+module HttpFraming exposing (tests)
+
+import Bytes
+import Expect
+import Http exposing (Protocol(..))
+import Http.Server
+import Reader
+import Test
+import Writer
+
+inspect : String -> String
+inspect wire =
+    handle
+        Reader.overBytes (Bytes.fromString wire) { input ->
+            result = Http.Server.withRequest 8192 65536 1024 input { request ->
+                (_, body) = Writer.collecting { output ->
+                    Reader.forEachChunk request.body (Writer.write output)
+                }
+                (request.method, request.target, body)
+            }
+            show result
+        }
+    on
+        Http.invalid error -> show error
+
+tests : Test.Test {}
+tests = Test.test "http_framing" {
+    Expect.equal "Just ((\"GET\", \"/a\", \"\"), True)" (inspect "GET /a HTTP/1.1\r\nHost: x\r\n\r\n")
+    Expect.equal "Just ((\"POST\", \"/fixed\", \"abc\"), True)" (inspect "POST /fixed HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\nabc")
+    Expect.equal "Just ((\"POST\", \"/chunk\", \"abc\"), True)" (inspect "POST /chunk HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n1\r\nc\r\n0\r\n\r\n")
+    Expect.equal "Malformed \"incomplete body\"" (inspect "POST /short HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nabc")
+    Expect.equal "Malformed \"HTTP/1.1 requires one Host header\"" (inspect "GET /bad HTTP/1.1\r\nHost: x\r\nHost: y\r\n\r\n")
+}
+
+main() = Test.run tests

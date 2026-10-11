@@ -1,0 +1,12 @@
+module FloatNan exposing (tests)
+
+import Expect
+import Test
+tests : Test.Test {}
+tests = Test.test "float_nan" {
+    value = 0.0 / 0.0
+    Expect.equal True (value /= value)
+    Expect.equal "NaN" (show value)
+}
+
+main() = Test.run tests

@@ -1,0 +1,39 @@
+module ValueRepresentation exposing (tests)
+
+import Expect
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Test
+
+type Box a = Box a deriving (Eq, Show)
+type Tree = { label : Int, children : List Tree }
+type Chain = Chain (Maybe Chain)
+type Callback = Callback (() -> Callback)
+type Direction = North | South | East | West deriving (Eq, Ord, Show)
+
+sumTree : Tree -> Int
+sumTree tree = tree.label + List.foldl { child total -> sumTree child + total } 0 tree.children
+
+length (Chain tail) = case tail of
+    Nothing -> 0
+    Just rest -> 1 + length rest
+
+tests : Test.Test {}
+tests = Test.test "value_representation" {
+    value : Box (Maybe (Result String (Int, String)))
+    value = Box (Just (Ok (1, "one")))
+    Expect.equal value value
+    Expect.equal "Box (Just (Ok (1, \"one\")))" (show value)
+    Expect.equal North North
+    Expect.notEqual North South
+    Expect.equal True (North < South)
+    Expect.equal "East" (show East)
+    Expect.equal 3 (sumTree (Tree { label = 1, children = [Tree { label = 2, children = [] }] }))
+    Expect.equal 1 (length (Chain (Just (Chain Nothing))))
+    failed : Box (Result String Int)
+    failed = Box (Err "problem")
+    Box failure = failed
+    Expect.equal "problem" (Expect.err failure)
+}
+
+main() = Test.run tests

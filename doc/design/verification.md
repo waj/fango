@@ -9,6 +9,7 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 | Command | Purpose |
 | --- | --- |
 | make test | Correctness, including full interpreter/compiler differential tests |
+| make test-suite | Combined Test framework suite and library documentation examples under both backends, with one compiled executable |
 | make test-short | Short-mode tests without compiled differential legs |
 | make test-grammar | TextMate tokenization of every .fango file under stdlib, testdata, and examples |
 | make check-files | Reject executable or oversized files in the Git index |
@@ -33,12 +34,36 @@ shell, and `make ci` repeats it in case the hook was bypassed.
 
 ## Differential fixtures and examples
 
-Lexer, parser, inference, elaboration, and REPL use unit tests/goldens. Every runnable
-fixture evaluates Core and, outside short mode, compiles through the real compiler;
-compare outputs byte-for-byte against expectations and each other. Invalid fixtures
-pin diagnostic substrings. Focused checker/elaboration tests load the real bundled
-Prelude closure. Core lint runs in every batch compilation; malformed-Core tests
-exercise independent rejection.
+Lexer, parser, inference, elaboration, and REPL use unit tests/goldens. Compatible
+language and library checks are importable [Test suites](../../testdata/suite/Main.fango).
+The [combined harness](../../cmd/fango/suite_test.go) loads them as one Fango graph,
+executes Core once, and, outside short mode, builds and runs one executable through
+the real CLI. Both reports must match the complete passing summary byte-for-byte.
+The harness checks that every test module is imported and pins the case count so
+omitting a case cannot silently pass. Each module also has its own `main`, so
+`fango run testdata/suite/NAME.fango` runs just that module.
+
+Computation, collection, parsing, and memory-reader checks compare returned values
+with `Expect.equal`, `Expect.notEqual`, and the unwrapping expectations. Rendering
+checks assert `show` or `display` explicitly; class-evidence checks call the
+selected methods directly rather than adding output IO. Scoped readers and
+streaming JSON return typed observations, including the bytes they read or write.
+Effectful traversal and execution-trace checks compare ordered lists of typed
+observations alongside returned values. Each case creates its own `State` cell;
+async children inherit that cell with the runtime's synchronized handler storage.
+Tests that pin an IO permission perform an empty IO write rather than printing
+an observation. Async and scoped computations return their observations through
+helpers with closed effect budgets, keeping the runner's aborting `Expect` effect
+out of task rows. The existing Dict and String suites keep their expectations
+and groups.
+
+Standalone runnable fixtures retain exact stdout and exit-status comparisons under
+both backends. They cover entry-point contracts, report formatting, isolated
+stdin/argv/files, and sources used by generated-code, Core, race, or cache probes.
+Multi-module source-root checks and executable examples keep their isolated CLI
+runners. Invalid fixtures pin diagnostic substrings. Focused checker/elaboration
+tests load the real bundled Prelude closure. Core lint runs in every batch
+compilation; malformed-Core tests exercise independent rejection.
 
 | Fixture file | Input/expectation |
 | --- | --- |
@@ -51,9 +76,12 @@ exercise independent rejection.
 
 The bundled library is held to [`fango doc --strict`](../reference/commands.md#api-documentation):
 a new public declaration or module must arrive documented. The fenced `fango`
-examples in its documentation compile into one program that runs under both
-backends ([doc tests](../../cmd/fango/doc_test.go)); every top-level line that
-binds no name must evaluate to `True`.
+examples in its documentation become Test cases in the same combined executable
+([example extraction](../../cmd/fango/doc_test.go)); every top-level line that
+binds no name must evaluate to `True`. The harness copies the suite to a temporary
+source root and adds the generated example module there. Example computations
+retain a closed IO budget; assertions run around their results so generic async
+callbacks cannot acquire the runner's aborting `Expect` effect.
 
 Portable failure tests use missing paths or a directory opened as a file, not chmod.
 Stateful command examples run sequences in isolated directories with matched argv
@@ -71,8 +99,8 @@ Socket server tests allow 30 seconds for startup under parallel compilation
 load, stop waiting when the child exits, and include its captured output on
 startup failure. Later connections and request IO retain their shorter deadlines.
 
-Runnable fixtures share one generated Go project: each entry has its own package,
-shared dependencies are emitted once and asserted byte-identical across consumers,
+The remaining standalone runnable fixtures share one generated Go project: each
+entry has its own package, shared dependencies are emitted once and asserted byte-identical across consumers,
 and one Go build creates fixture binaries. The build overlaps interpreter legs;
 compiled cases then run in parallel. Examples/multi-module runners compile through
 the real CLI once per runner, preserving isolation when temporary sources change.

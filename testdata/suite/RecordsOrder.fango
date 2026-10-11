@@ -1,0 +1,30 @@
+module RecordsOrder exposing (tests)
+
+import Expect
+import State
+import Test
+
+type Pair = { first : Int, second : Int }
+
+mark : String -> Int ->{State.State (List String)} Int
+mark label value =
+    State.put [label | State.get()]
+    value
+
+make : () ->{State.State (List String)} Pair
+make() =
+    State.put ["r" | State.get()]
+    Pair { first = 0, second = 0 }
+
+tests : Test.Test {}
+tests = Test.test "records_order" {
+    observed = State.run [] {
+        literal = Pair { second = mark "b" 2, first = mark "a" 1 }
+        updated = { make() | second = mark "y" 4, first = mark "x" 3 }
+        literal.first + updated.second
+    }
+    Expect.equal 5 observed.value
+    Expect.equal ["b", "a", "r", "y", "x"] (List.reverse observed.state)
+}
+
+main() = Test.run tests

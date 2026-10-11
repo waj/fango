@@ -1,0 +1,58 @@
+module RowArgumentClosed exposing (tests)
+
+-- A row literal stands as a type argument wherever the parameter it fills is
+-- row-kinded, at the same spellings an arrow's row has: empty, a list of
+-- labels with their arguments, and a list with an open tail. Each source's
+-- annotation is the only thing fixing its row, and the pure one performs
+-- nothing at all.
+import Fail exposing (Fail)
+import Expect
+import Result exposing (Result(..))
+import State
+import Test
+
+type Source e = { pull : () ->{e} String }
+
+pure : Source {}
+pure = { pull = { _ -> "pure" } }
+
+noisy : Source {State.State (List String)}
+noisy = { pull = { _ ->
+    note "pulling"
+    "noisy" } }
+
+failing : Source {State.State (List String), Fail String}
+failing = { pull = { _ ->
+    note "failing"
+    Fail.fail "empty" } }
+
+open : Source {State.State (List String) | e}
+open = { pull = { _ ->
+    note "open"
+    "open" } }
+
+drain : Source e ->{e} String
+drain source = source.pull()
+
+note : String ->{State.State (List String)} ()
+note value = State.put [value | State.get()]
+
+fixtureBody : () ->{State.State (List String)} (String, (String, Result String String), String)
+fixtureBody() =
+    first = drain pure
+    second = drain noisy
+    third = Fail.attempt { drain failing }
+    fourth = drain open
+    (first, (second, third), fourth)
+
+observations : () -> ((String, (String, Result String String), String), List String)
+observations() =
+    observed = State.run [] fixtureBody
+    (observed.value, List.reverse observed.state)
+
+tests : Test.Test {}
+tests = Test.test "row_argument_closed" {
+    Expect.equal (("pure", ("noisy", Err "empty"), "open"), ["pulling", "failing", "open"]) observations()
+}
+
+main() = Test.run tests

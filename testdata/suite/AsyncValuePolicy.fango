@@ -1,0 +1,133 @@
+module AsyncValuePolicy exposing (tests)
+
+import Async exposing (Async, Outcome(..), Task)
+import Expect
+import Fail exposing (Fail)
+import IO
+import Result exposing (Result(..))
+import State
+import Test
+
+type DatabaseError = NotFound deriving (Eq, Show)
+type NetworkError = TimedOut deriving (Eq, Show)
+
+lookup : () ->{Fail DatabaseError} Int
+lookup() = Fail.fail NotFound
+fetch : () ->{Fail NetworkError} String
+fetch() = Fail.fail TimedOut
+
+-- No IO or error index is needed for an infallible business function.
+answer : () ->{Async} Int
+answer() = Async.await (Async.spawn { 42 })
+
+launch : (() ->{e} a) ->{Async | e} Task a
+launch action = Async.spawn action
+
+type Observation
+    = ValueOutcome (Async.Outcome Int)
+    | ErrorsOutcome (Async.Outcome (Result DatabaseError Int, Result NetworkError String))
+    | SiblingOutcome (Async.Outcome (Async.Outcome (Maybe Int)))
+    | DatabaseOutcome (Async.Outcome (Result DatabaseError Int))
+    | NetworkResult (Result NetworkError Int)
+    | StringsOutcome (Async.Outcome (String, String))
+    | FunctionResult (Result DatabaseError (Async.Outcome Int))
+    deriving (Eq, Show)
+
+record : Observation ->{IO, State.State (List Observation)} ()
+record value =
+    ignore (Fail.attempt { IO.write IO.stdout "" })
+    State.put [value | State.get()]
+
+recordValueOutcome : Async.Outcome Int ->{IO, State.State (List Observation)} ()
+recordValueOutcome value = record (ValueOutcome value)
+
+recordErrorsOutcome : Async.Outcome (Result DatabaseError Int, Result NetworkError String) ->{IO, State.State (List Observation)} ()
+recordErrorsOutcome value = record (ErrorsOutcome value)
+
+recordSiblingOutcome : Async.Outcome (Async.Outcome (Maybe Int)) ->{IO, State.State (List Observation)} ()
+recordSiblingOutcome value = record (SiblingOutcome value)
+
+recordDatabaseOutcome : Async.Outcome (Result DatabaseError Int) ->{IO, State.State (List Observation)} ()
+recordDatabaseOutcome value = record (DatabaseOutcome value)
+
+recordNetworkResult : Result NetworkError Int ->{IO, State.State (List Observation)} ()
+recordNetworkResult value = record (NetworkResult value)
+
+recordStringsOutcome : Async.Outcome (String, String) ->{IO, State.State (List Observation)} ()
+recordStringsOutcome value = record (StringsOutcome value)
+
+recordFunctionResult : Result DatabaseError (Async.Outcome Int) ->{IO, State.State (List Observation)} ()
+recordFunctionResult value = record (FunctionResult value)
+
+fixtureBody : () ->{IO, State.State (List Observation)} ()
+fixtureBody() =
+    recordValueOutcome pureValue()
+    recordErrorsOutcome distinctErrors()
+    recordSiblingOutcome (Async.runOutcome {
+            gate = Async.channel 0
+            sibling = launch { Async.receive gate }
+            ignored = Async.spawnAttempt lookup
+            recordDatabaseOutcome (Async.awaitOutcome ignored)
+            recordDatabaseOutcome (Async.awaitOutcome ignored)
+            failed : Result NetworkError Int
+            failed = Err TimedOut
+            recordNetworkResult (Async.await (Async.completed failed))
+            ignore (Async.send gate 7)
+            Async.awaitOutcome sibling
+    })
+    recordStringsOutcome sharedCompleted()
+    recordFunctionResult returnedFunctionFailure()
+    recordValueOutcome ignoredErrorValues()
+
+pureValue : () ->{IO} Async.Outcome Int
+pureValue() = Async.runOutcome answer
+
+distinctErrors : () ->{IO} Async.Outcome (Result DatabaseError Int, Result NetworkError String)
+distinctErrors() = Async.runOutcome {
+    database = Async.spawnAttempt lookup
+    network = Async.spawn { Fail.attempt fetch }
+    (Async.await database, Async.await network)
+}
+
+sharedCompleted : () ->{IO} Async.Outcome (String, String)
+sharedCompleted() = Async.runOutcome {
+    value = Async.completed "stable"
+    first = Async.spawn { Async.await value }
+    second = Async.spawn { Async.await value }
+    (Async.await first, Async.await second)
+}
+
+returnedFunctionFailure : () ->{IO} Result DatabaseError (Async.Outcome Int)
+returnedFunctionFailure() = Fail.attempt {
+    Async.runOutcome {
+        pending = Async.spawn { { n -> if n > 0 then n else Fail.fail NotFound } }
+        function = Async.await pending
+        function 0
+    }
+}
+
+ignoredErrorValues : () ->{IO} Async.Outcome Int
+ignoredErrorValues() = Async.runOutcome {
+    ignore (Async.spawn { Err NotFound })
+    ignore (Async.completed (Err TimedOut))
+    123
+}
+
+observations : () ->{IO} List Observation
+observations() = List.reverse (State.run [] fixtureBody).state
+
+tests : Test.Test IO.IO
+tests = Test.test "async_value_policy" {
+    Expect.equal [ ValueOutcome (Async.Completed 42)
+                 , ErrorsOutcome (Async.Completed (Err NotFound, Err TimedOut))
+                 , DatabaseOutcome (Async.Completed (Err NotFound))
+                 , DatabaseOutcome (Async.Completed (Err NotFound))
+                 , NetworkResult (Err TimedOut)
+                 , SiblingOutcome (Async.Completed (Async.Completed (Just 7)))
+                 , StringsOutcome (Async.Completed ("stable", "stable"))
+                 , FunctionResult (Err NotFound)
+                 , ValueOutcome (Async.Completed 123)
+                 ] observations()
+}
+
+main() = Test.run tests
