@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os/exec"
@@ -128,21 +127,16 @@ func TestStreamFailuresAndConsoleWrappers(t *testing.T) {
 				if worker {
 					ioctx.Natives = executor
 				}
-				func() {
-					defer func() {
-						p := recover()
-						if source.panics {
-							if p == nil || !strings.Contains(fmt.Sprint(p), endpoint+": permission denied") {
-								t.Fatalf("panic = %v", p)
-							}
-						} else if p != nil {
-							t.Fatalf("unexpected panic = %v", p)
-						}
-					}()
-					if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil {
-						t.Fatal(err)
+				// A Console failure panics in the program; the interpreter
+				// reports that panic as a traced runtime error.
+				_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+				if source.panics {
+					if err == nil || !strings.Contains(err.Error(), endpoint+": permission denied") || !strings.Contains(err.Error(), "Fango trace:") {
+						t.Fatalf("error = %v", err)
 					}
-				}()
+				} else if err != nil {
+					t.Fatal(err)
+				}
 				if !source.panics && errorOutput.String() != endpoint+": permission denied" {
 					t.Fatalf("diagnostic = %q", errorOutput.String())
 				}

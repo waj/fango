@@ -13,6 +13,29 @@ type File struct {
 	Name        string
 	Content     []byte
 	lineOffsets []int // byte offset of the start of each line, 0-based line index
+	// lineOnly marks a file known by its name and line numbers alone, as a
+	// runtime payload describes source positions: a span's offsets are
+	// zero-based lines and there is no text to excerpt.
+	lineOnly bool
+}
+
+// NewLineFile is a file whose spans carry line numbers rather than byte
+// offsets: `LineSpan` places a position in it, and `StartPos` reads it back.
+func NewLineFile(name string) *File {
+	return &File{Name: name, lineOnly: true}
+}
+
+// LineOnly reports whether f has no content and its spans are line numbers.
+func (f *File) LineOnly() bool { return f.lineOnly }
+
+// LineSpan is the position of sp's first line in a line-only file of the same
+// name; a span with no file stays empty.
+func LineSpan(sp Span) Span {
+	if sp.File == nil {
+		return Span{}
+	}
+	line := sp.StartPos().Line - 1
+	return Span{File: NewLineFile(sp.File.Name), Start: line, End: line}
 }
 
 func NewFile(name string, content []byte) *File {
@@ -66,6 +89,9 @@ func (s Span) Merge(o Span) Span {
 }
 
 func (f *File) pos(offset int) Pos {
+	if f.lineOnly {
+		return Pos{Line: offset + 1, Col: 1}
+	}
 	line := sort.Search(len(f.lineOffsets), func(i int) bool {
 		return f.lineOffsets[i] > offset
 	}) - 1

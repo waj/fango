@@ -168,15 +168,12 @@ reload, declaration generations, private-scope access, and history.
 
 ## Stack traces
 
-Compiled programs report Fango stacks on crashes and through
-[Trace](../stdlib/Trace.fango); the [design](design/backend.md#source-positions-and-stack-traces)
-and [reference](reference/commands.md#runtime-failures) own the implemented
+Compiled programs and the interpreter report Fango stacks on crashes and
+through [Trace](../stdlib/Trace.fango); the [backend](design/backend.md#source-positions-and-stack-traces)
+and [interpreter](design/repl.md#call-stack) designs and the
+[reference](reference/commands.md#runtime-failures) own the implemented
 contract. Remaining:
 
-- Interpreter parity: a per-call position stack in `internal/eval` pushed at
-  worker and closure calls from `App.Origin`, carried through the native
-  worker (whose execution payload drops spans today), so `Trace.capture`
-  agrees with compiled programs and the REPL prints traces for runtime errors.
 - `Expect` failure positions from the first captured frame outside the
   `Expect` module, printed as `file:line` above the message, once both
   backends agree on lines; see the [testing roadmap](roadmap-testing.md#failure-source-positions).

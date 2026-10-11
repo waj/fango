@@ -104,7 +104,9 @@ func Demangle(goFunction string) (Symbol, bool) {
 	}
 	base, rest, _ := strings.Cut(fn, ".")
 	lambda := rest != ""
-	if strings.HasPrefix(base, "callbackBody") {
+	// A shared callback body and a function literal inside a package-level
+	// value's initializer have no enclosing Fango function.
+	if strings.HasPrefix(base, "callbackBody") || (base == "init" && lambda) {
 		return Symbol{Module: module, Function: "<lambda>"}, true
 	}
 	link, ok := strings.CutPrefix(base, "V_")
@@ -118,6 +120,14 @@ func Demangle(goFunction string) (Symbol, bool) {
 		owner = module
 	}
 	return Symbol{Module: owner, Function: function, Lambda: lambda}, true
+}
+
+// SymbolName spells a canonical Fango definition name the way a trace does:
+// lifted locals and instance methods regain their source form and anything
+// else is unchanged. The interpreter names its frames with it, so both
+// backends print one spelling.
+func SymbolName(canonical string) string {
+	return unlinkSymbol(LinkName(canonical))
 }
 
 // stripInstantiation removes a generic instantiation suffix, which may nest

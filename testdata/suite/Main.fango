@@ -272,6 +272,7 @@ import TextReaderWindows
 import TextWriter
 import TimeCalendar
 import TimeZones
+import TraceCapture
 import Tuples
 import UnaryMinus
 import UnitCallbackHandler
@@ -554,6 +555,7 @@ main() =
             , TextEncoding.tests
             , TextReaderWindows.tests
             , TextWriter.tests
+            , TraceCapture.tests
             , TimeCalendar.tests
             , TimeZones.tests
             , Tuples.tests

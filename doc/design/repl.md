@@ -47,6 +47,38 @@ entry is a value prints it through Display evidence, as `print` would. Without
 evidence either one shows an opaque typed placeholder or `<function>`, and
 observation never adds a constraint to the observed expression.
 
+## Call stack
+
+The interpreter keeps the call stack generated Go reads from its line table
+([backend](backend.md#source-positions-and-stack-traces)), so both backends
+report one trace. Each evaluator holds frames outermost first: a worker call
+pushes the definition's name as a trace spells it (`fangort.SymbolName`
+recovers lifted locals and instance methods), a closure call pushes the label
+its lambda was created with, and a forced top-level value pushes a hidden
+frame, since generated Go runs those initializers in package `init`, which a
+trace never shows. Before every call, perform, and native call the executing
+frame records the node's `Origin`, so a frame reports the line it is at,
+tail loops included, and the innermost frame reports the crash site. A
+lambda created inside a worker is `worker (lambda)`, one created inside a
+hidden value frame is `Module.<lambda>` (Go names both `init.funcN` and
+shared callback bodies without an enclosing function), and a lambda nested in
+a lambda keeps its label, as Go's `.func1.2` keeps the enclosing name. A
+call site with no frame at all, a prompt input, opens an `<expression>` frame.
+Child evaluators for tasks, parallel maps, and prompt levels start from a
+copy of their parent's stack.
+
+A failure acquires its stack once, at the first frame boundary it crosses,
+as a `TraceError` whose message carries the rendered trace, so it survives
+the worker protocol as text; exits, cancellation, and the compile-time
+restrictions are not failures and keep their types, and compile-time
+evaluation never traces, since its errors are diagnostics. Go panics inside
+`EvalIO`, `ForceIO`, and prompt levels are recovered into the same error
+while the frames are still on the stack. `Trace.captureRaw` is answered from
+the stack rather than its sidecar, which in the worker would see only Go
+frames. The execution payload keeps exactly the origins the stack reads, as
+line-only spans ([object encoding](pipeline.md#pipeline)); every other span
+is dropped as before.
+
 ## Persistent stores and generations
 
 A session retains one checker, fresh-name supply, evaluator environment, module

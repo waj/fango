@@ -475,6 +475,11 @@ registry entries validate arity
 but refuse execution; actual file calls use the worker. Staging rejects user
 sidecars, residual effects, and process-observing natives.
 
+The execution payload the worker decodes keeps the call origins of `App`,
+`Perform`, `ControlExit`, `NativeCall`, and `Let` nodes as line-only spans
+(`source.NewLineFile`), which is what the interpreter's [call stack](repl.md#call-stack)
+reads; it still drops every other span.
+
 ## Regex literals
 
 [Regex](../../stdlib/Regex.fango) is an ordinary bundled nominal wrapper

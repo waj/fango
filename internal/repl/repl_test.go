@@ -482,3 +482,23 @@ func (r *moduleRetryReader) Read(p []byte) (int, error) {
 	r.offset += n
 	return n, nil
 }
+
+// A runtime failure at the prompt reports the Fango stack it unwound
+// through, with the prompt's own line as the outermost frame.
+func TestRuntimeErrorShowsTrace(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader(`import Basics
+divide : Int -> Int -> Int
+divide a b = Basics.quotientBy b a
+fraction n = divide 100 n + 1
+fraction 0
+:quit
+`), &out)
+	got := out.String()
+	if !strings.Contains(got, "runtime error: ") || !strings.Contains(got, "integer divide by zero") {
+		t.Fatalf("division by zero was not reported as a runtime error:\n%s", got)
+	}
+	if strings.Contains(got, "runtime error: runtime error") || !strings.Contains(got, "Fango trace:\n  at divide (<repl>:2)\n  at fraction (<repl>:1)\n  at <expression> (<repl>:1)") {
+		t.Fatalf("runtime error carries no Fango trace:\n%s", got)
+	}
+}

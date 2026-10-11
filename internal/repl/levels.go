@@ -284,7 +284,8 @@ func (s *Session) runtimeError(err error) {
 		fmt.Fprintln(s.out, "interrupted")
 		return
 	}
-	fmt.Fprintf(s.out, "runtime error: %v\n", err)
+	// A Go runtime error already says so; a Fango trace follows the message.
+	fmt.Fprintf(s.out, "runtime error: %s\n", strings.TrimPrefix(err.Error(), "runtime error: "))
 }
 
 // levelOutcome prints what a level's head finished with. Ending one level on

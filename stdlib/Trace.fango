@@ -8,8 +8,8 @@
 -- source text: a small pure function the compiler inlined has no frame of
 -- its own, a self tail call appears once however deep the recursion, and a
 -- Go closure a short lambda becomes shares its enclosing statement's line.
--- The interpreter and the REPL report no frames yet, so `capture` returns an
--- empty list there.
+-- The interpreter keeps the same stack, so the REPL and compile-time
+-- evaluation report the same frames.
 module Trace exposing (Frame(..), capture, render)
 
 import Basics exposing (..)

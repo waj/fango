@@ -43,6 +43,9 @@ const (
 	tagSpanNil
 	tagSpan
 	tagTyped
+	// tagSpanLine is a position known by file name and line only, as runtime
+	// payloads carry call origins.
+	tagSpanLine
 )
 
 type Context struct {
@@ -74,8 +77,22 @@ func Encode(input any) ([]byte, error) {
 	return EncodeSections(Section{Value: input})
 }
 
+// SpanPolicy decides what an encoder writes for a span field: the span as
+// it is, an empty span, or a line-only span (source.LineSpan). It receives
+// the struct type and field name holding the span.
+type SpanPolicy func(owner reflect.Type, field string, sp source.Span) source.Span
+
+// EncodeWith is Encode with a policy applied to every span.
+func EncodeWith(input any, policy SpanPolicy) ([]byte, error) {
+	return encodeSections(policy, []Section{{Value: input}})
+}
+
 func EncodeSections(sections ...Section) ([]byte, error) {
-	e := &encoder{index: map[string]int{}, seen: map[any]int{}}
+	return encodeSections(nil, sections)
+}
+
+func encodeSections(policy SpanPolicy, sections []Section) ([]byte, error) {
+	e := &encoder{index: map[string]int{}, seen: map[any]int{}, policy: policy}
 	named := map[string]bool{}
 	roots := make([]root, len(sections))
 	for i, section := range sections {
@@ -102,6 +119,10 @@ type encoder struct {
 	index   map[string]int
 	nodes   [][]byte
 	seen    map[any]int
+	policy  SpanPolicy
+	// owner and field name the struct field being encoded, for the policy.
+	owner reflect.Type
+	field string
 }
 
 func (e *encoder) str(s string) int {
@@ -162,7 +183,11 @@ func (e *encoder) value(dst []byte, v reflect.Value) ([]byte, bool, error) {
 		return dst, true, err
 	}
 	if v.Type() == spanType {
-		out, err := e.span(dst, v.Interface().(source.Span))
+		sp := v.Interface().(source.Span)
+		if e.policy != nil {
+			sp = e.policy(e.owner, e.field, sp)
+		}
+		out, err := e.span(dst, sp)
 		return out, false, err
 	}
 	switch v.Kind() {
@@ -189,6 +214,7 @@ func (e *encoder) value(dst []byte, v reflect.Value) ([]byte, bool, error) {
 				return nil, false, fmt.Errorf("unsupported private field %s.%s", v.Type(), f.Name)
 			}
 			dst = binary.AppendUvarint(dst, uint64(e.str(f.Name)))
+			e.owner, e.field = v.Type(), f.Name
 			next, _, err := e.value(dst, v.Field(i))
 			if err != nil {
 				return nil, false, fmt.Errorf("%s.%s: %w", v.Type(), f.Name, err)
@@ -284,6 +310,11 @@ func (e *encoder) span(dst []byte, sp source.Span) ([]byte, error) {
 	if sp.File == nil {
 		return append(dst, tagSpanNil), nil
 	}
+	if sp.File.LineOnly() {
+		dst = append(dst, tagSpanLine)
+		dst = binary.AppendUvarint(dst, uint64(e.str(sp.File.Name)))
+		return binary.AppendUvarint(dst, uint64(sp.Start)), nil
+	}
 	if sp.Start < 0 || sp.End < sp.Start || sp.End > len(sp.File.Content) {
 		return nil, fmt.Errorf("invalid span %s[%d:%d]", sp.File.Name, sp.Start, sp.End)
 	}
@@ -344,6 +375,7 @@ type decoder struct {
 	values          []reflect.Value
 	filling, filled []bool
 	context         Context
+	lineFiles       map[string]*source.File // line-only files, one per name
 }
 
 func newDecoder(data []byte, context Context) (*decoder, error) {
@@ -802,6 +834,29 @@ func (d *decoder) ref(c *cursor, target reflect.Type) (reflect.Value, error) {
 func (d *decoder) span(c *cursor, tag byte) (reflect.Value, error) {
 	if tag == tagSpanNil {
 		return reflect.Zero(spanType), nil
+	}
+	if tag == tagSpanLine {
+		index, err := c.uvarint()
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		name, err := d.str(index)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		line, err := c.uvarint()
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		f := d.lineFiles[name]
+		if f == nil {
+			f = source.NewLineFile(name)
+			if d.lineFiles == nil {
+				d.lineFiles = map[string]*source.File{}
+			}
+			d.lineFiles[name] = f
+		}
+		return reflect.ValueOf(source.Span{File: f, Start: int(line), End: int(line)}), nil
 	}
 	if tag != tagSpan {
 		return reflect.Value{}, fmt.Errorf("want span, got tag %d", tag)

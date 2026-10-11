@@ -66,6 +66,7 @@ func (in *interp) asyncLaunch(e *core.AsyncLaunch, fr *Frame) (Value, error) {
 	task := fangort.SpawnAsync(owner.(*CtorVal).Fields[0].(*fangort.AsyncScope), func(scope *fangort.AsyncScope) fangort.AsyncCompletion {
 		evidence := cloneEvidence(body.Evidence)
 		child := &interp{ctx: hostContext, hostContext: hostContext, env: in.env, ioctx: in.ioctx, out: in.out, evidence: evidence, forcing: map[*Cell]bool{}, pollOwned: 1}
+		child.inherit(in)
 		rows, rowErr := child.bindInvocationRow(body.rowParam, body.rowEffects, row, evidence, body.Env)
 		if rowErr != nil {
 			panic(rowErr)
@@ -106,6 +107,7 @@ func (in *interp) parallelMap(e *core.ParallelMap, fr *Frame) (Value, error) {
 	var firstFailure sync.Once
 	result := fangort.ParallelMap(func(value Value) Value {
 		child := &interp{ctx: in.ctx, hostContext: in.hostContext, env: in.env, ioctx: in.ioctx, out: in.out, evidence: cloneEvidence(body.Evidence), forcing: map[*Cell]bool{}, compileTime: in.compileTime, pollOwned: in.pollOwned}
+		child.inherit(in)
 		output, err := child.eval(body.Body, &Frame{parent: body.Env, vars: map[string]Value{body.Param: value}})
 		if err == nil {
 			if _, ok := asExit(output); ok {

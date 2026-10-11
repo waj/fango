@@ -77,7 +77,7 @@ func resolveEvidence(ev *evidence) *evidence {
 }
 
 func (in *interp) plainClosure(lam *core.Lambda, fr *Frame) *Closure {
-	return &Closure{Param: lam.Param, Body: lam.Body, Env: fr, Evidence: in.closureEvidence(lam), effectParams: lam.EffectParams,
+	return &Closure{Param: lam.Param, Body: lam.Body, Env: fr, Evidence: in.closureEvidence(lam), label: in.lambdaLabel(), effectParams: lam.EffectParams,
 		control: types.FunctionControl(lam.Ty.(*types.TFun)), rowParam: lam.RowParam, rowEffects: lam.RowEffects}
 }
 

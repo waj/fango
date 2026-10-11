@@ -557,8 +557,14 @@ it, a self tail call appears once however deep the recursion, and a short
 lambda the Go printer keeps on one line shares its enclosing statement's
 line. Package-level value initializers run before `main` and are reported by
 Go. Setting `FANGO_TRACEBACK=go` leaves Go's own goroutine dump in place, for
-debugging the compiler and runtime rather than the program. The interpreter
-and the REPL do not report positions yet.
+debugging the compiler and runtime rather than the program.
+
+The interpreter keeps the same stack, so a runtime error at the REPL prompt
+prints `runtime error: <message>` followed by the trace, whose outermost
+frame is the prompt input itself as `<expression>` at its `<repl>` line, and
+`Trace.capture` under either backend returns the same frames. The one
+difference is deliberate: a Go panic inside the interpreter becomes an
+ordinary runtime error instead of ending the process.
 
 Programs read the same stack through [Trace](../../stdlib/Trace.fango), whose
 `capture` returns the frames above its caller and `render` prints them in the

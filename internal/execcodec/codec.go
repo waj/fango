@@ -1,6 +1,7 @@
 // Package execcodec serializes checked runtime Core for the interpreter
-// worker. It deliberately drops source spans: checking and diagnostics stay in
-// the compiler process, while the worker needs only executable identities.
+// worker. It keeps only the source positions execution reports: the file and
+// line of each call origin, for stack traces. Every other span is dropped,
+// since checking and diagnostics stay in the compiler process.
 package execcodec
 
 import (
@@ -10,6 +11,7 @@ import (
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/objectcodec"
+	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -22,7 +24,24 @@ type Payload struct {
 	Effects []core.EffectInstance
 }
 
-func Encode(p *Payload) ([]byte, error) { return objectcodec.Encode(p) }
+func Encode(p *Payload) ([]byte, error) { return objectcodec.EncodeWith(p, originLines) }
+
+// originLines keeps the Origin of the nodes the interpreter's call stack
+// reads, as line-only spans, and nothing else.
+func originLines(owner reflect.Type, field string, sp source.Span) source.Span {
+	if field != "Origin" || !originOwners[owner] {
+		return source.Span{}
+	}
+	return source.LineSpan(sp)
+}
+
+var originOwners = map[reflect.Type]bool{
+	reflect.TypeOf(core.App{}):         true,
+	reflect.TypeOf(core.Perform{}):     true,
+	reflect.TypeOf(core.ControlExit{}): true,
+	reflect.TypeOf(core.NativeCall{}):  true,
+	reflect.TypeOf(core.Let{}):         true,
+}
 
 func Decode(data []byte) (*Payload, error) {
 	var p *Payload

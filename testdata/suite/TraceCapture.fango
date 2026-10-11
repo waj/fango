@@ -1,0 +1,27 @@
+module TraceCapture exposing (tests)
+
+import Expect
+import List
+import Test
+import Trace
+
+-- Recursion keeps this out of the inliner, so it has a frame of its own.
+capturing : Int -> List Trace.Frame
+capturing n =
+    if n == 0 then Trace.capture () else capturing (n - 1)
+
+firstTwo : List Trace.Frame -> List Trace.Frame
+firstTwo frames =
+    case frames of
+        [ a | [ b | _ ] ] -> [ a, b ]
+        _ -> frames
+
+tests : Test.Test {}
+tests = Test.test "trace_capture" {
+    frames = firstTwo (capturing 2)
+    Expect.equal [ "TraceCapture.capturing", "TraceCapture.<lambda>" ] (List.map { f -> f.function } frames)
+    Expect.equal [ "TraceCapture.fango", "TraceCapture.fango" ] (List.map { f -> f.file } frames)
+    Expect.equal [ 11, 21 ] (List.map { f -> f.line } frames)
+}
+
+main() = Test.run tests

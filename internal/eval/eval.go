@@ -115,6 +115,7 @@ type Closure struct {
 	Body         core.Expr
 	Env          *Frame
 	Evidence     map[types.EffectKey]*evidence
+	label        string // its frames' name, from the function that created it
 	effectParams []core.EffectInstance
 	control      types.Control
 	rowParam     types.CaptureVar
@@ -518,6 +519,7 @@ type interp struct {
 	evidence map[types.EffectKey]*evidence
 	forcing  map[*Cell]bool
 	stack    []*Cell
+	trace    []traceFrame // the Fango call stack, outermost first
 	steps    int
 	// Task CPU loops use explicit source cancellation. Ordinary and staged
 	// evaluation also support host interruption checkpoints.
@@ -574,11 +576,13 @@ func Eval(ctx context.Context, e core.Expr, env *Env, out io.Writer) (Value, err
 	return EvalIO(ctx, e, env, NewIOContext(strings.NewReader(""), out))
 }
 
-func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (Value, error) {
+func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (v Value, err error) {
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
 		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Expr: e})
 	}
-	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}}).eval(e, nil)
+	in := &interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}}
+	defer in.recoverPanic(&err)
+	return in.eval(e, nil)
 }
 
 // promptLevel serves the prompt's inputs inside the handlers in effect here,
@@ -613,16 +617,22 @@ func (in *interp) promptLevel(binders Value, fr *Frame) (Value, error) {
 }
 
 func (in *interp) levelInput(req LevelRequest, depth int, fr *Frame) (v Value, err error) {
+	var child *interp
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("%v", recovered)
+			if child != nil {
+				err = child.recovered(recovered)
+			} else {
+				err = fmt.Errorf("%v", recovered)
+			}
 		}
 	}()
 	evidence, err := in.levelEvidence(req.Effects, fr)
 	if err != nil {
 		return nil, err
 	}
-	child := &interp{ctx: req.Ctx, env: in.env, out: in.out, ioctx: in.ioctx, evidence: evidence, levelDepth: depth, levelBase: evidence}
+	child = &interp{ctx: req.Ctx, env: in.env, out: in.out, ioctx: in.ioctx, evidence: evidence, levelDepth: depth, levelBase: evidence}
+	child.inherit(in)
 	return child.eval(req.Expr, nil)
 }
 
@@ -695,11 +705,13 @@ func Force(ctx context.Context, name string, env *Env, out io.Writer) (Value, er
 	return ForceIO(ctx, name, env, NewIOContext(strings.NewReader(""), out))
 }
 
-func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (Value, error) {
+func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (v Value, err error) {
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
 		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Force: name})
 	}
-	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}}).force(name)
+	in := &interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}}
+	defer in.recoverPanic(&err)
+	return in.force(name)
 }
 
 // tick is shared by Core evaluation, tail loops, and producer machines. A
@@ -850,8 +862,16 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			args[i] = v
 		}
+		in.callSite(e.Origin)
 		if in.ioctx.Levels != nil && e.Name == types.PromptLevelName && !in.compileTime {
 			return in.promptLevel(args[0], fr)
+		}
+		if e.Name == traceCaptureName {
+			var batch Value = in.captureFrames()
+			if n := in.env.natives[e.Name]; n != nil && n.ResultWrapper != nil {
+				batch = &CtorVal{Ctor: n.ResultWrapper, Fields: []Value{batch}}
+			}
+			return batch, nil
 		}
 		if !in.compileTime && in.ioctx.Natives != nil {
 			executor := in.ioctx.Natives
@@ -906,6 +926,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			args[i] = v
 		}
+		in.callSite(e.Origin)
 		if ev := resolveEvidence(in.evidence[e.Effect.Key()]); ev != nil && ev.handler != nil {
 			if e.Op.Abort {
 				return nil, fmt.Errorf("eval: abort-only operation `%s` reached Perform", e.Op.Name)
@@ -1150,6 +1171,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			saved := in.evidence
 			in.evidence = callEvidence
+			in.callSite(e.Origin)
+			in.pushFrame(def.Name)
 			// Workers see no caller locals — matching compiled scoping.
 			var out Value
 			var err error
@@ -1162,6 +1185,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			} else {
 				out, err = in.eval(def.Body, &Frame{vars: vars, types: descriptors, rows: rows})
 			}
+			err = in.traced(err)
+			in.popFrame()
 			in.evidence = saved
 			return out, err
 		case core.Value:
@@ -1204,7 +1229,11 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, rowErr
 			}
 			in.evidence = callEvidence
+			in.callSite(e.Origin)
+			in.pushLambda(c.label)
 			out, err := in.eval(c.Body, &Frame{parent: c.Env, vars: map[string]Value{c.Param: v}, rows: rows})
+			err = in.traced(err)
+			in.popFrame()
 			in.evidence = saved
 			return out, err
 		case core.Ctor:
@@ -1483,7 +1512,11 @@ func (in *interp) force(name string) (Value, error) {
 	if !ok {
 		if d, isWorker := in.env.workers[name]; isWorker {
 			if name == in.env.entry && len(d.Params) == 1 {
-				return in.eval(d.Body, &Frame{vars: map[string]Value{d.Params[0]: struct{}{}}})
+				in.pushFrame(name)
+				v, err := in.eval(d.Body, &Frame{vars: map[string]Value{d.Params[0]: struct{}{}}})
+				err = in.traced(err)
+				in.popFrame()
+				return v, err
 			}
 			return nil, fmt.Errorf("eval: bare reference to worker `%s` — the linter should have caught this", name)
 		}
@@ -1556,7 +1589,10 @@ func (in *interp) force(name string) (Value, error) {
 		}
 	}()
 
+	in.pushCell(name)
 	v, err = in.eval(cell.Body, nil)
+	err = in.traced(err)
+	in.popFrame()
 
 	if err != nil {
 		return nil, err
