@@ -502,3 +502,22 @@ fraction 0
 		t.Fatalf("runtime error carries no Fango trace:\n%s", got)
 	}
 }
+
+// A prompt declaration is bound under its bare name, which is also the form an
+// imported module's parameters and pattern variables take; the module is
+// checked against its own scope, so the names may coincide. The cache is off
+// so the module is checked from source rather than served as a stored object.
+func TestImportAfterPromptDeclaration(t *testing.T) {
+	var out strings.Builder
+	script := "a = 1\nb = 2\nx1 = 3\nimport Geometry.Point exposing (origin, manhattan)\nmanhattan origin (Geometry.Point.Point 3 4)\na + b\nx1\n:quit\n"
+	RunWith(strings.NewReader(script), &out, Options{Root: filepath.Join("..", "..", "testdata", "repl", "import"), DisableCache: true})
+	got := out.String()
+	if strings.Contains(got, "SHADOWING") {
+		t.Fatalf("prompt names leaked into the imported module's shadowing check:\n%s", got)
+	}
+	for _, want := range []string{"loaded Geometry.Point", "7 : Int", "3 : Int"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q:\n%s", want, got)
+		}
+	}
+}

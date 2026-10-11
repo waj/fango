@@ -431,6 +431,14 @@ func (ck *Checker) valueVisible(name string) bool {
 	if i, ok := b.methodAt[name]; ok {
 		return i < b.current
 	}
+	// A bare name is a private module's or the prompt's (doc/design/repl.md,
+	// "Imports and resolution"), and a named module can refer to neither:
+	// its resolver never binds one. Keeping such names out of sight here
+	// also keeps the no-shadowing rule to the module's own scope, so a
+	// prompt declaration cannot collide with an imported module's binders.
+	if ck.moduleName != "" && symbolModule(name) == "" {
+		return false
+	}
 	return true
 }
 

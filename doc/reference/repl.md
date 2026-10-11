@@ -65,6 +65,9 @@ one an import or the prelude exposes: that is the `UNQUALIFIED COLLISION` it
 would be in a module. Qualified access to the exposed name stays available.
 Imports see only a module's public interface; a private name is a `PRIVATE
 OR UNKNOWN NAME` under any qualifier.
+A name declared at the prompt does not reach an imported module: a module
+checked after `a = 1` may still name a parameter or local `a` without a
+`SHADOWING` error.
 Prompt inputs remain sequential; module-wide function visibility applies to
 imported source modules. The prompt accepts a single exhaustive patterned function equation and
 top-level destructuring bindings. It does not collect multiple function

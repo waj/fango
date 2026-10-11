@@ -135,8 +135,12 @@ produces and publishes. Module values generalize there whatever the prompt's
 own monomorphism rule is: that rule is for its memo cells alone. Elaboration
 installs stable lifted names, specialization, intrinsics, native metadata, and
 solved capture summaries, then lints against everything already installed.
-Visibility merges per owner and expands the prompt's set. Sidecar imports
-rebuild the worker's module set. An increment records the operator table in
+Visibility merges per owner and expands the prompt's set, in one direction:
+the prompt's names are bare, as a private module's are, and the checker
+treats a bare name as invisible while a named module is checked, so an
+imported module's binders are measured against the module's own scope and a
+prompt declaration cannot shadow-collide with them. Sidecar imports rebuild
+the worker's module set. An increment records the operator table in
 effect when it was resolved; a later increment may widen it without changing
 how an accepted input was read.
 
