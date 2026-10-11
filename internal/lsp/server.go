@@ -148,7 +148,13 @@ func (s *server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error)
 		s.roots = initializeRoots(p)
 		s.workspaceReady = false
 		s.mu.Unlock()
-		return map[string]any{"capabilities": map[string]any{"textDocumentSync": 1, "definitionProvider": true, "hoverProvider": true, "referencesProvider": true}, "serverInfo": map[string]string{"name": "fango"}}, nil
+		capabilities := map[string]any{"textDocumentSync": 1, "definitionProvider": true, "hoverProvider": true, "referencesProvider": true}
+		// Clients must watch the library this process actually resolved, which
+		// may be outside the workspace or selected through FANGO_ROOT.
+		if root, err := libroot.Root(); err == nil {
+			capabilities["experimental"] = map[string]any{"fango": map[string]string{"stdlibPath": filepath.Join(root, "stdlib")}}
+		}
+		return map[string]any{"capabilities": capabilities, "serverInfo": map[string]string{"name": "fango"}}, nil
 	case "initialized":
 		return nil, nil
 	case "$/cancelRequest":

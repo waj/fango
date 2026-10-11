@@ -27,6 +27,13 @@
     "onLanguage:fango"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "fango.restartLanguageServer",
+        "title": "Restart Language Server",
+        "category": "Fango"
+      }
+    ],
     "languages": [
       {
         "id": "fango",

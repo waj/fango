@@ -134,6 +134,15 @@ func TestProtocolUnsavedNavigationAndDiagnostics(t *testing.T) {
 	if _, err := conn.Call(ctx, "initialize", map[string]any{}, &initialized); err != nil {
 		t.Fatal(err)
 	}
+	lib, err := libroot.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities := initialized["capabilities"].(map[string]any)
+	experimental := capabilities["experimental"].(map[string]any)["fango"].(map[string]any)
+	if got := experimental["stdlibPath"]; got != filepath.Join(lib, "stdlib") {
+		t.Fatalf("advertised stdlib path = %v, want %s", got, filepath.Join(lib, "stdlib"))
+	}
 	uri := pathURI(path)
 	if err := conn.Notify(ctx, "textDocument/didOpen", openParams{TextDocument: textItem{URI: uri, Version: 1, Text: good}}); err != nil {
 		t.Fatal(err)

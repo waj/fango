@@ -367,6 +367,14 @@ its own navigation index without an application importing it.
 The editor diagnostic path rolls back a failed owner and checks other modules
 whose dependencies succeeded; dependents of a failed owner are skipped.
 
+The server advertises its resolved standard-library directory through the
+experimental `fango.stdlibPath` capability. The VS Code client watches that
+directory even outside the workspace and debounces saved library changes into
+a process restart: another check in the same process would still read the
+[retained library bytes](#the-library-root). Startup and restart are serialized,
+and the old clients and watchers are stopped/disposed before replacements start.
+The restart command uses the same lifecycle and reopens the current buffers.
+
 The editor index records source spans from a successful resolved and checked
 graph. Hover documentation and signatures come from the shared
 [API documentation](#api-documentation) package. Canonical names identify module declarations; lexical binder spans

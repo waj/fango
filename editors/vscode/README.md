@@ -30,9 +30,17 @@ hover, and references use the last valid analysis during a broken edit when the
 symbol at the queried range still matches. It uses the existing `--` and `{- … -}`
 comments immediately above a declaration as hover documentation.
 
+Use **Fango: Restart Language Server** in the Command Palette to restart the
+servers and recheck open buffers, for example after rebuilding the compiler.
+Changing `fango.path` also restarts them. Saved standard-library source/sidecar
+changes automatically restart the servers after a short debounce, even if the
+resolved library is outside the workspace. A restart reloads the library snapshot
+held by each process; see the [editor reference](../../doc/reference/commands.md#language-server-and-editor-support)
+for the watched files and native sidecar rebuild requirement.
+
 The extension now needs its runtime dependency installed before using a local
 symlink: run `npm install` in this directory. It remains plain JavaScript and
-has no build step. Run `npm run test:extension` to check server startup wiring.
+has no build step. Run `npm run test:extension` to check server startup and restart wiring.
 
 ## Formatting
 

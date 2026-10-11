@@ -320,6 +320,18 @@ output. It accepts no paths or flags. The VS Code extension starts it for
 `.fango` files using the same `fango.path` setting as the formatter. Install
 the extension's npm dependencies before loading it from a local symlink.
 
+Run **Fango: Restart Language Server** from VS Code's Command Palette to
+restart all Fango servers and recheck the current open buffers. Use it after
+rebuilding the compiler or to recover stale editor state. Changing `fango.path`
+also restarts the servers.
+
+Saved changes, additions, and deletions of `.fango` sources, `.native.go`
+sidecars, or `native_support.go` in the server's resolved standard library
+automatically restart the servers after a short debounce, including when the
+library is outside the workspace. The restart reloads library files cached for
+the process lifetime; ordinary watched-file notifications alone cannot do so.
+The [native sidecar rebuild requirement](#the-library-root) still applies.
+
 Go to Definition follows values, functions, operators, types, constructors,
 effect operations, imported modules, local binders, and nominal record fields
 across local modules and the bundled library, including types in
