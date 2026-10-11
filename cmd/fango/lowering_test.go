@@ -158,7 +158,7 @@ func testLoweringAgreement(t *testing.T, stem string) {
 	}
 	var units []codegen.Unit
 	for _, unit := range result.Graph.Units {
-		units = append(units, codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry})
+		units = append(units, codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source})
 	}
 	native := emittedProject(t, source)
 	runtime, err := build.RuntimeFiles()

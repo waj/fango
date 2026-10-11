@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -405,4 +406,39 @@ func TestLoweringReportsAStaleContractItWasToldWasProven(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Generated Go carries `//line` directives, so an edit that only moves an
+// owner's lines changes its emitted bytes, while its importers, whose Go
+// names no line of the dependency, keep their emission.
+func TestOwnLineShiftReEmitsOwnerOnly(t *testing.T) {
+	// A recursive helper is a call the inliner leaves alone, so Lib's Go
+	// has a line to attribute.
+	const lib = "module Lib exposing (value, twice)\nimport Basics exposing (..)\nvalue = \"one\"\ntwice x = repeat 2 x\nrepeat n x = if n == 0 then x else repeat (n - 1) x\n"
+	p := libraryProject(t)
+	p.write(t, "Lib.fango", "{-# no-prelude #-}\n"+lib)
+	first := p.build(t)
+	p.write(t, "Lib.fango", "{-# no-prelude #-}\n-- shifted source positions\n"+lib)
+	second := p.build(t)
+	if p.events["emission"]["Lib"] != 1 {
+		t.Fatalf("line-shifted owner was not re-emitted: %#v", p.events)
+	}
+	if p.events["emission"]["Main"] != 0 || p.events["emitted-cache-hit"]["Main"] != 1 {
+		t.Fatalf("importer was re-emitted for a dependency's line shift: %#v", p.events)
+	}
+	before, after := fileData(t, first, "modules/Lib/module.go"), fileData(t, second, "modules/Lib/module.go")
+	if bytes.Equal(before, after) || !bytes.Contains(after, []byte("//line Lib.fango:")) {
+		t.Fatalf("re-emitted Go does not carry the moved directives:\n%s", after)
+	}
+}
+
+func fileData(t *testing.T, files []codegen.File, path string) []byte {
+	t.Helper()
+	for _, file := range files {
+		if file.Path == path {
+			return file.Data
+		}
+	}
+	t.Fatalf("no %s among %d files", path, len(files))
+	return nil
 }

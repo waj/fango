@@ -71,7 +71,9 @@ and `Net` modules use their declared `IO.Error` and `Net.Error` results.
 Effect rows on native value types
 are preserved for checking and may contain `IO` or user-declared effects; the
 sidecar call itself uses the same boundary ABI and does not receive a hidden
-evidence argument. Sidecars may import only Go standard-library packages.
+evidence argument. Sidecars may import only Go standard-library packages and
+the runtime package `github.com/waj/fango/runtime/fangort`, whose path the
+generated module rewrites to its own copy.
 Every call-form declaration needs its matching exported function, and every
 exported sidecar function needs a declaration.
 

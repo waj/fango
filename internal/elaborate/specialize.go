@@ -269,7 +269,7 @@ func (s *scalarSpecializer) simplify(e core.Expr) core.Expr {
 						return e.Args[0]
 					}
 					if name := method.instance.NativeMethods[method.index]; name != "" {
-						return s.folder.fold(&core.NativeCall{Name: name, Module: s.ck.Natives[name].Module, Storage: s.ck.Natives[name].Storage, Args: e.Args, Ty: e.Ty})
+						return s.folder.fold(&core.NativeCall{Name: name, Module: s.ck.Natives[name].Module, Storage: s.ck.Natives[name].Storage, Args: e.Args, Ty: e.Ty, Origin: e.Origin})
 					}
 				}
 			}

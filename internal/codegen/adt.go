@@ -7,15 +7,16 @@ import (
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 // ADT lowering uses value products, pointer products for recursive layouts,
 // tagged bundled sums, and marker interfaces for other unions. See
 // doc/design/backend.md, "Representations and ABI".
 
-func mangleType(name string) string   { return "T_" + linkName(name) }
-func mangleCtor(name string) string   { return "C_" + linkName(name) }
-func markerMethod(name string) string { return "isT_" + linkName(name) }
+func mangleType(name string) string   { return "T_" + fangort.LinkName(name) }
+func mangleCtor(name string) string   { return "C_" + fangort.LinkName(name) }
+func markerMethod(name string) string { return "isT_" + fangort.LinkName(name) }
 
 func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 

@@ -1,0 +1,89 @@
+{-# no-prelude #-}
+-- The call stack of the running program, for logging and diagnostics.
+--
+-- A compiled program knows which Fango functions are executing and the
+-- source line each one is at, the same information a crash report prints.
+-- `capture` returns it as ordinary values; `render` prints it the way a
+-- crash report does. Frames follow the generated code rather than the
+-- source text: a small pure function the compiler inlined has no frame of
+-- its own, a self tail call appears once however deep the recursion, and a
+-- Go closure a short lambda becomes shares its enclosing statement's line.
+-- The interpreter and the REPL report no frames yet, so `capture` returns an
+-- empty list there.
+module Trace exposing (Frame(..), capture, render)
+
+import Basics exposing (..)
+import List exposing (List)
+import Runtime.Native
+import String
+
+-- One entry of a captured call stack.
+type Frame =
+    {
+      -- The executing function, qualified by its module: `Main.divide`,
+      -- `Main.compute (lambda)` for a function literal inside `compute`,
+      -- `Main.outer.inner` for a local function, `Show (List a).show` for an
+      -- instance method, or `native Console.Write` for a Go sidecar.
+      function : String
+      -- The source file as diagnostics name it: the entry's root-relative
+      -- path, `Sub/Mod.fango`, or a bundled module's logical path.
+    , file : String
+      -- The line of the call expression being executed.
+    , line : Int
+    }
+    deriving (Eq, Show)
+
+type Batch = Batch Runtime.Native.Any
+
+captureRaw : () -> Batch
+captureRaw = native
+frameCount : Batch -> Int
+frameCount = native
+frameFunction : Batch -> Int -> String
+frameFunction = native
+frameFile : Batch -> Int -> String
+frameFile = native
+frameLine : Batch -> Int -> Int
+frameLine = native
+
+-- The calling function's stack, innermost first: the first frame is the
+-- function that called `capture`, at the line of that call. Capturing is
+-- not referentially transparent, since the result describes the caller, but
+-- it performs no effect and may be called anywhere.
+--
+-- ```fango
+-- import List
+-- import Trace
+--
+-- List.length (Trace.capture ()) >= 0
+-- ```
+capture : () -> List Frame
+capture () =
+    batch = captureRaw ()
+    framesFrom batch 0 (frameCount batch)
+
+framesFrom : Batch -> Int -> Int -> List Frame
+framesFrom batch index count =
+    if index >= count then
+        []
+    else
+        frame = { function = frameFunction batch index, file = frameFile batch index, line = frameLine batch index }
+        [ frame | framesFrom batch (index + 1) count ]
+
+-- Renders frames one per line, innermost first, as a crash report prints
+-- them: `  at Main.divide (Main.fango:12)`, with a trailing newline after
+-- each frame and nothing for an empty list.
+--
+-- ```fango
+-- import Trace
+--
+-- Trace.render [ { function = "Main.divide", file = "Main.fango", line = 12 } ] == "  at Main.divide (Main.fango:12)\n"
+-- Trace.render [] == ""
+-- ```
+render : List Frame -> String
+render frames =
+    String.concat (List.map renderFrame frames)
+
+renderFrame : Frame -> String
+renderFrame frame =
+    "  at " ++ frame.function ++ " (" ++ frame.file ++ ":" ++ show frame.line ++ ")\n"

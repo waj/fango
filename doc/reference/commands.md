@@ -522,3 +522,44 @@ function-style effectful `main` must have exactly the shown IO/Unit shape and
 one discarded Unit parameter; `main _ = ...` remains compatible. Non-Unit pure
 `main` values are primarily observable in the REPL and test harness; an
 ordinary built executable exits without printing them.
+
+## Runtime failures
+
+A compiled program that panics, for example on an integer division by zero,
+a `Console` write to a closed stream, or a crash inside a native sidecar,
+exits with status 2 and reports the Fango stack on standard error:
+
+```
+panic: runtime error: integer divide by zero
+
+Fango trace:
+  at Main.divide (Main.fango:12)
+  at Main.compute (lambda) (Main.fango:20)
+  at List.foldl (<stdlib>/List.fango:87)
+  at Main.compute (Main.fango:20)
+  at Main.main (Main.fango:30)
+```
+
+Frames are innermost first and name the function executing and the line of
+the call expression it was at. Files are named as diagnostics name them: the
+entry's root-relative path, `Sub/Mod.fango`, or `<stdlib>/List.fango`. A
+function literal appears as a lambda of its enclosing function, a local
+function as `Main.outer.inner`, an instance method as
+`Main.Show (Ratio).show`, and a Go sidecar as `native Hash.Crc32` at its
+place in the generated project. A panic inside a spawned task or a parallel
+map ends the program the same way and adds a `spawned from:` section with the
+stack of the spawning call. Standard output is unaffected, so the differential
+checks between backends never see a report.
+
+The trace follows the generated code: a small pure function the compiler
+inlined has no frame of its own and its body reports the line that called
+it, a self tail call appears once however deep the recursion, and a short
+lambda the Go printer keeps on one line shares its enclosing statement's
+line. Package-level value initializers run before `main` and are reported by
+Go. Setting `FANGO_TRACEBACK=go` leaves Go's own goroutine dump in place, for
+debugging the compiler and runtime rather than the program. The interpreter
+and the REPL do not report positions yet.
+
+Programs read the same stack through [Trace](../../stdlib/Trace.fango), whose
+`capture` returns the frames above its caller and `render` prints them in the
+report's format.

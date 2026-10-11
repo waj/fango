@@ -30,8 +30,8 @@ func digest(parts ...string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func ownFingerprints(object *ModuleObject) (semantic, abi, implementation string) {
-	return semanticFingerprint(object), abiFingerprint(object), implementationFingerprint(object)
+func ownFingerprints(object *ModuleObject, source string) (semantic, abi, implementation string) {
+	return semanticFingerprint(object), abiFingerprint(object), implementationFingerprint(object, source)
 }
 
 func semanticFingerprint(object *ModuleObject) string {
@@ -51,9 +51,12 @@ func abiFingerprint(object *ModuleObject) string {
 
 // implementationFingerprint covers the owner's own byte-affecting backend
 // input: runtime Core with bodies, unlike the header-only ABI summary
-// consumers link against.
-func implementationFingerprint(object *ModuleObject) string {
-	return canonicalDigest(object.Runtime, object)
+// consumers link against. The lines of the owner's own call origins are
+// part of it, because generated Go carries them as `//line` directives;
+// spans into other files are not, since only own-file origins are emitted
+// and a dependency's relocated spans must not re-emit its consumers.
+func implementationFingerprint(object *ModuleObject, source string) string {
+	return canonicalDigestPositions(object.Runtime, object, source)
 }
 
 // ownStageFingerprint takes the defs separately because an object carries its
@@ -72,10 +75,16 @@ func combinedFingerprint(kind, own string, dependencies []string) string {
 }
 
 func canonicalDigest(value any, object *ModuleObject) string {
+	return canonicalDigestPositions(value, object, "")
+}
+
+// canonicalDigestPositions is canonicalDigest that also writes the line of
+// every Origin span positioned in the named source file.
+func canonicalDigestPositions(value any, object *ModuleObject, positions string) string {
 	w := &canonicalWriter{
 		seen: map[visit]int{}, ids: map[reflect.Type]map[int64]int{},
 		nominals: object.Nominals, effects: object.EffectNames, scopes: object.ScopeNames,
-		templateBase: object.TemplateBase,
+		templateBase: object.TemplateBase, positions: positions,
 	}
 	w.write(reflect.ValueOf(value), "")
 	h := sha256.Sum256(w.buf.Bytes())
@@ -95,6 +104,7 @@ type canonicalWriter struct {
 	effects      map[int]string
 	scopes       map[types.ScopeID]string
 	templateBase int
+	positions    string // source file whose Origin lines are written; empty writes none
 }
 
 var (
@@ -144,6 +154,11 @@ func (w *canonicalWriter) write(v reflect.Value, field string) {
 	}
 	if v.Type() == spanReflectType {
 		w.token("span")
+		if w.positions != "" && field == "Origin" {
+			if sp := v.Interface().(source.Span); sp.File != nil && sp.File.Name == w.positions {
+				w.token(strconv.Itoa(sp.StartPos().Line))
+			}
+		}
 		return
 	}
 	if v.Type() == captureReflectType || v.Type() == scopeReflectType || v.Type() == resumeReflectType {

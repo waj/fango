@@ -75,6 +75,16 @@ runners. Invalid fixtures pin diagnostic substrings. Focused checker/elaboration
 tests load the real bundled Prelude closure. Core lint runs in every batch
 compilation; malformed-Core tests exercise independent rejection.
 
+Crash reports are compiled-only checks ([crash tests](../../cmd/fango/crash_test.go)):
+the interpreter leg runs in-process, where a panic would end the test binary,
+and the differential comparison never reads standard error. They build inline
+programs through the CLI, assert the exit status and the frames on standard
+error in order, and that `FANGO_TRACEBACK=go` restores Go's traceback. The
+determinism test additionally requires every entry's Go to carry a `//line`
+directive naming its source and none naming an absolute path; compiled test
+builds set `FANGO_INTERNAL_STRICT_DIRECTIVES` so a directive pass that would
+fall back to plain Go fails instead.
+
 | Fixture file | Input/expectation |
 | --- | --- |
 | .expected | Exact output |

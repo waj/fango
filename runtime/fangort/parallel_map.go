@@ -21,8 +21,10 @@ func ParallelMap[A, B any](fn func(A) B, source List[A]) List[B] {
 	output := make([]B, len(input))
 	var next atomic.Int64
 	var done sync.WaitGroup
+	spawned := Capture(0)
 	work := func() {
 		defer done.Done()
+		defer recoverTask(spawned)
 		for {
 			i := int(next.Add(1)) - 1
 			if i >= len(input) {

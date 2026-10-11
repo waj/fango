@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 // A bound operation callback sometimes passes its fixed evidence through an
@@ -289,6 +290,7 @@ func (g *gen) rewriteBoundOperation(root goast.Node, name string, members map[st
 				continue
 			}
 			direct := callExpr(&goast.SelectorExpr{X: call.Args[0], Sel: ident(forward.op)}, args...).(*goast.CallExpr)
+			g.copyOrigin(call, direct)
 			if forward.voidUnit {
 				block.List[i] = &goast.BlockStmt{List: []goast.Stmt{exprStmt(direct), returnStmt(&goast.SelectorExpr{X: ident("fangort"), Sel: ident("UnitValue")})}}
 			} else {
@@ -339,7 +341,7 @@ func (g *gen) recordDirectActivation(name string, e *core.Handle, label int) {
 		if c.Effect != label || len(c.LocalVars) > 0 || c.Op.Abort || c.Op.Native != nil {
 			continue
 		}
-		slot := "Op_" + linkName(c.Op.Name)
+		slot := "Op_" + fangort.LinkName(c.Op.Name)
 		operations[slot] = directOperation{void: g.isUnit(c.Op.ResultType), fixed: g.fixedOperations[activationLabel{e, label}][slot]}
 	}
 	if g.directActivations == nil {

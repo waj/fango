@@ -39,7 +39,7 @@ func (c *memoryCache) Store(key string, data []byte) {
 func unitsOf(result *check.Result) []codegen.Unit {
 	units := make([]codegen.Unit, len(result.Graph.Units))
 	for i, unit := range result.Graph.Units {
-		units[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry}
+		units[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source}
 	}
 	return units
 }

@@ -117,6 +117,7 @@ func buildCLIBinary(t *testing.T, source, absSource string, b *cliBuild) string 
 		cmd := exec.Command(cliBinary(t), "build", "-o", b.binary, absSource)
 		cmd.Env = append(os.Environ(),
 			"FANGO_INTERNAL_PRINT_MAIN=1",
+			"FANGO_INTERNAL_STRICT_DIRECTIVES=1",
 			"FANGO_BUILD_DIR="+filepath.Join(dir, "build"))
 		if out, err := cmd.CombinedOutput(); err != nil {
 			b.err = fmt.Errorf("building %s through fango: %w\n%s", source, err, out)
@@ -718,6 +719,14 @@ func TestEmitDeterministicAndFormatted(t *testing.T) {
 			}
 			if !bytes.Equal(formatted, a[i].Data) {
 				t.Errorf("%s: generated %s is not gofmt-idempotent:\n%s", name, a[i].Path, a[i].Data)
+			}
+			// Positions reach the Go line table as directives naming the
+			// owner's logical file, never a path on this machine.
+			if strings.HasPrefix(a[i].Path, "entries/") && !bytes.Contains(a[i].Data, []byte("\n//line "+name+":")) {
+				t.Errorf("%s: generated %s has no line directive back to its source", name, a[i].Path)
+			}
+			if bytes.Contains(a[i].Data, []byte("//line /")) {
+				t.Errorf("%s: generated %s has an absolute line directive", name, a[i].Path)
 			}
 		}
 	}

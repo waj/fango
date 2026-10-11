@@ -775,19 +775,34 @@ func handlerPatternParam(p ast.Pattern) string {
 }
 
 func (el *elab) expr(e ast.Expr) (out core.Expr) {
+	// The innermost expression that produced a node names its origin; an
+	// enclosing block or parenthesis that elaborates to the same node must
+	// not widen it, or a call would be attributed to the block's first line.
 	defer func() {
 		if e == nil {
 			return
 		}
 		switch x := out.(type) {
 		case *core.App:
-			x.Origin = e.Span()
+			if x.Origin.File == nil {
+				x.Origin = e.Span()
+			}
 		case *core.VarRef:
-			x.Origin = e.Span()
+			if x.Origin.File == nil {
+				x.Origin = e.Span()
+			}
 		case *core.Perform:
-			x.Origin = e.Span()
+			if x.Origin.File == nil {
+				x.Origin = e.Span()
+			}
 		case *core.ControlExit:
-			x.Origin = e.Span()
+			if x.Origin.File == nil {
+				x.Origin = e.Span()
+			}
+		case *core.NativeCall:
+			if x.Origin.File == nil {
+				x.Origin = e.Span()
+			}
 		}
 	}()
 	if desugared := el.ck.Desugared[e]; desugared != nil {

@@ -5,6 +5,7 @@ import (
 	gotoken "go/token"
 
 	"github.com/waj/fango/internal/types"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 // A polymorphic handler clause erases its operation-local type variables to
@@ -14,7 +15,7 @@ import (
 // instantiation in scope where they are constructed, and constructors expose
 // their fields independently of instantiation (runtime/fangort/rebuild.go).
 
-func rebuilderName(name string) string { return "R_" + linkName(name) }
+func rebuilderName(name string) string { return "R_" + fangort.LinkName(name) }
 
 // rebuildableADT reports whether a declaration's values may need a different
 // Go instantiation after a descriptor match.

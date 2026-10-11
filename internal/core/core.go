@@ -290,6 +290,10 @@ type Let struct {
 	Body Expr
 	Rec  bool
 	Ty   types.Type // == Body.Type(), linted
+	// Origin is the span of the call an inlined body's parameter bindings
+	// replaced, so generated code can still name the call's line; zero for
+	// an ordinary binding.
+	Origin source.Span
 }
 
 // Lambda is one currying step: exactly one parameter, mirroring the
@@ -349,6 +353,9 @@ type NativeCall struct {
 	Module string
 	Args   []Expr
 	Ty     types.Type
+	// Origin is the call this native body was inlined for, when it was;
+	// a native definition's own body has none.
+	Origin source.Span
 }
 
 // CalleeKind classifies application spines after saturation analysis

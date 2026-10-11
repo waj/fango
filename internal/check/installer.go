@@ -396,13 +396,17 @@ func (i *Installer) summarizeAll(jobs <-chan *summaryJob) {
 func (job *summaryJob) run(known map[string]moduleSummary) {
 	object, module := job.object, job.module
 	object.ScopeNames = foreignScopeNames(job.captures, job.own, object)
+	source := ""
+	if module.Source != nil {
+		source = module.Source.Name
+	}
 	// The fingerprints are independent reads of the finished object.
 	var ownSemantic, ownABI, ownImplementation, ownStage, ownUnfolding string
 	var fingerprinting sync.WaitGroup
 	for _, compute := range []func(){
 		func() { ownSemantic = semanticFingerprint(object) },
 		func() { ownABI = abiFingerprint(object) },
-		func() { ownImplementation = implementationFingerprint(object) },
+		func() { ownImplementation = implementationFingerprint(object, source) },
 		func() { ownStage = ownStageFingerprint(object, object.Stage) },
 		func() { ownUnfolding = canonicalDigest(job.unfoldable, object) },
 	} {

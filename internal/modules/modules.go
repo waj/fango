@@ -240,6 +240,11 @@ type Interface struct {
 	OpenTypes, OpenEffects                    map[string]bool
 }
 
+// RuntimeImportPath is the one non-standard package a native sidecar may
+// import: the Fango runtime, whose path the generated module rewrites to its
+// own copy.
+const RuntimeImportPath = "github.com/waj/fango/runtime/fangort"
+
 type NativeSource struct {
 	Module, Path string
 	Content      []byte
@@ -254,6 +259,9 @@ type Unit struct {
 	Program string
 	Imports []string
 	Entry   bool
+	// Source is the module's file name as diagnostics and spans report it:
+	// the entry's root-relative path, `Sub/Mod.fango`, or `<stdlib>/X.fango`.
+	Source string
 }
 
 type node struct {
@@ -433,7 +441,7 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		if n.private {
 			unitName = ""
 		}
-		unit := Unit{Name: unitName, Imports: explicitDependencyNames(n), Entry: name == entryName}
+		unit := Unit{Name: unitName, Imports: explicitDependencyNames(n), Entry: name == entryName, Source: n.path}
 		if unit.Entry {
 			unit.Program = wantEntry
 		}
@@ -797,8 +805,8 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl, opDecls map[strin
 	for _, im := range f.Imports {
 		path, _ := strconv.Unquote(im.Path.Value)
 		first := strings.Split(path, "/")[0]
-		if strings.Contains(first, ".") {
-			errs = append(errs, diag.Errorf(source.Span{}, "NATIVE IMPORT NOT ALLOWED", "Native sidecar %s may import only Go standard-library packages; `%s` is external.", n.nativePath, path))
+		if strings.Contains(first, ".") && path != RuntimeImportPath {
+			errs = append(errs, diag.Errorf(source.Span{}, "NATIVE IMPORT NOT ALLOWED", "Native sidecar %s may import only Go standard-library packages and `%s`; `%s` is external.", n.nativePath, RuntimeImportPath, path))
 		}
 	}
 	funcs := map[string]*goast.FuncDecl{}

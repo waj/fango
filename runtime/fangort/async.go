@@ -8,7 +8,8 @@ import (
 
 // AsyncCompletion contains an ordinary value or cooperative cancellation.
 // Payloads are sealed by the compiler boundary; the runtime never interprets them.
-// A Go panic is not an AsyncCompletion and is deliberately not recovered here.
+// A Go panic is not an AsyncCompletion: it crashes the program, reported with
+// the task's Fango trace and where it was spawned.
 type AsyncCompletion struct {
 	Value     any
 	Cancelled bool
@@ -82,7 +83,11 @@ func SpawnAsync(owner *AsyncScope, body func(*AsyncScope) AsyncCompletion) *Asyn
 	}
 	owner.children[task] = struct{}{}
 	owner.mu.Unlock()
-	go func() { task.publish(child.Finish(body(child))) }()
+	spawned := Capture(0)
+	go func() {
+		defer recoverTask(spawned)
+		task.publish(child.Finish(body(child)))
+	}()
 	return task
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/infer"
+	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -319,7 +320,7 @@ func (in *inliner) instantiate(d *core.Def, a *core.App) core.Expr {
 	for i, v := range d.TyParams {
 		subst[v.ID] = a.TyArgs[i]
 	}
-	c := &copier{in: in, typ: func(t types.Type) types.Type { return types.SubstRigid(t, subst) }}
+	c := &copier{in: in, typ: func(t types.Type) types.Type { return types.SubstRigid(t, subst) }, site: a.Origin}
 	scope := map[string]string{}
 	params := make([]string, len(d.Params))
 	for i, p := range d.Params {
@@ -327,7 +328,7 @@ func (in *inliner) instantiate(d *core.Def, a *core.App) core.Expr {
 	}
 	body := c.expr(d.Body, scope)
 	for i := len(params) - 1; i >= 0; i-- {
-		body = &core.Let{Name: params[i], Rhs: a.Args[i], Body: body, Ty: body.Type()}
+		body = &core.Let{Name: params[i], Rhs: a.Args[i], Body: body, Ty: body.Type(), Origin: a.Origin}
 	}
 	return body
 }
@@ -335,6 +336,10 @@ func (in *inliner) instantiate(d *core.Def, a *core.App) core.Expr {
 type copier struct {
 	in  *inliner
 	typ func(types.Type) types.Type
+	// site is the inlined call's origin. Copied nodes take it over their
+	// own, so a trace attributes the body to the line that called it — the
+	// line a frame for the callee would have been reported from.
+	site source.Span
 }
 
 // bind adds a fresh name for a binder to a copy of scope's entries visible
@@ -380,7 +385,7 @@ func (c *copier) expr(e core.Expr, scope map[string]string) core.Expr {
 		inner := within(scope)
 		name := c.bind(inner, e.Name)
 		body := c.expr(e.Body, inner)
-		return &core.Let{Name: name, Rhs: rhs, Body: body, Ty: body.Type()}
+		return &core.Let{Name: name, Rhs: rhs, Body: body, Ty: body.Type(), Origin: c.site}
 	case *core.Case:
 		scrut := c.expr(e.Scrut, scope)
 		inner := within(scope)
@@ -396,9 +401,11 @@ func (c *copier) expr(e core.Expr, scope map[string]string) core.Expr {
 		n := *e
 		n.Args = c.exprs(e.Args, scope)
 		n.Ty = c.typ(e.Ty)
+		n.Origin = c.site
 		return &n
 	case *core.App:
 		n := *e
+		n.Origin = c.site
 		if e.SourceType != nil {
 			n.SourceType = c.typ(e.SourceType)
 		}

@@ -1,0 +1,220 @@
+package codegen
+
+import (
+	"bytes"
+	"fmt"
+	goast "go/ast"
+	"go/format"
+	goparser "go/parser"
+	gotoken "go/token"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+
+	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/source"
+)
+
+// Source positions reach generated Go as `//line` directives, so a Go stack
+// walk reports Fango files and lines (runtime/fangort/trace.go). Emission
+// never positions the go/ast it builds; instead each emitted call, operator,
+// or exit node is attributed to the innermost own-file origin being emitted,
+// and after printing the directives are inserted textually.
+
+// exprOrigin is the source position a Core node carries, if any.
+func exprOrigin(e core.Expr) source.Span {
+	switch e := e.(type) {
+	case *core.App:
+		return e.Origin
+	case *core.Perform:
+		return e.Origin
+	case *core.ControlExit:
+		return e.Origin
+	case *core.Let:
+		return e.Origin
+	case *core.NativeCall:
+		return e.Origin
+	}
+	return source.Span{}
+}
+
+// ownSpan reports whether sp positions code in the owner's own file. Inlined
+// dependency bodies carry their module's spans, which a cached consumer may
+// see relocated, so only the owner's lines become directives.
+func (g *gen) ownSpan(sp source.Span) bool {
+	return g.source != "" && sp.File != nil && sp.File.Name == g.source
+}
+
+// enter installs sp as the current site while its node is emitted and
+// returns the restoring action for the caller to defer.
+func (g *gen) enter(sp source.Span) func() {
+	if !g.ownSpan(sp) {
+		return func() {}
+	}
+	saved := g.site
+	g.site = sp
+	return func() { g.site = saved }
+}
+
+// mark attributes an emitted node to the current site. Only the node kinds
+// the pairing in lineDirectives recognizes are recorded; parentheses are
+// unwrapped because the printer adds and the parser drops them freely.
+func (g *gen) mark(node goast.Node) goast.Node {
+	if g.site.File == nil {
+		return node
+	}
+	target := node
+	for {
+		paren, ok := target.(*goast.ParenExpr)
+		if !ok {
+			break
+		}
+		target = paren.X
+	}
+	if pairedNode(target) {
+		g.origins[target] = g.site
+	}
+	return node
+}
+
+// copyOrigin carries an attribution to a node a later pass builds from an
+// attributed one.
+func (g *gen) copyOrigin(from, to goast.Node) {
+	if sp, ok := g.origins[from]; ok {
+		g.origins[to] = sp
+	}
+}
+
+// pairedNode is the set of node kinds whose counts agree between the tree
+// the emitter built and the parse of its printed form, so that the n-th node
+// of a kind in one is the n-th in the other.
+func pairedNode(n goast.Node) bool {
+	switch n.(type) {
+	case *goast.CallExpr, *goast.BinaryExpr, *goast.UnaryExpr, *goast.AssignStmt, *goast.BranchStmt:
+		return true
+	}
+	return false
+}
+
+// anchor is the position Go attributes a node's execution to.
+func anchor(n goast.Node) gotoken.Pos {
+	switch n := n.(type) {
+	case *goast.CallExpr:
+		return n.Lparen
+	case *goast.BinaryExpr:
+		return n.OpPos
+	}
+	return n.Pos()
+}
+
+type nodeKey struct {
+	kind    reflect.Type
+	ordinal int
+}
+
+// strictDirectivesVariable makes a directive pass that would fall back to
+// plain Go fail instead, for the tests that pin directive output.
+const strictDirectivesVariable = "FANGO_INTERNAL_STRICT_DIRECTIVES"
+
+// lineDirectives inserts `//line <source>:<line>` above each Go line that
+// carries an attributed node, the first attributed node in preorder claiming
+// the line, and resets the position to the generated file after a claimed
+// run. The printed text is parsed back to learn the Go lines; the result is
+// formatted again so it stays a gofmt fixed point. Anything the pass cannot
+// account for keeps the plain text.
+func (g *gen) lineDirectives(file *goast.File, formatted []byte, unitPath string) ([]byte, error) {
+	if g.source == "" || len(g.origins) == 0 {
+		return formatted, nil
+	}
+	out, err := g.insertDirectives(file, formatted, unitPath)
+	if err != nil {
+		if os.Getenv(strictDirectivesVariable) != "" {
+			return nil, fmt.Errorf("codegen: line directives for %s: %w", unitPath, err)
+		}
+		return formatted, nil
+	}
+	return out, nil
+}
+
+func (g *gen) insertDirectives(file *goast.File, formatted []byte, unitPath string) ([]byte, error) {
+	var order []nodeKey
+	wanted := map[nodeKey]source.Span{}
+	counts := map[reflect.Type]int{}
+	goast.Inspect(file, func(n goast.Node) bool {
+		if n == nil || !pairedNode(n) {
+			return true
+		}
+		key := nodeKey{reflect.TypeOf(n), counts[reflect.TypeOf(n)]}
+		counts[key.kind]++
+		if sp, ok := g.origins[n]; ok {
+			wanted[key] = sp
+			order = append(order, key)
+		}
+		return true
+	})
+	fset := gotoken.NewFileSet()
+	parsed, err := goparser.ParseFile(fset, unitPath, formatted, goparser.SkipObjectResolution)
+	if err != nil {
+		return nil, err
+	}
+	lines := map[nodeKey]int{}
+	parsedCounts := map[reflect.Type]int{}
+	goast.Inspect(parsed, func(n goast.Node) bool {
+		if n == nil || !pairedNode(n) {
+			return true
+		}
+		key := nodeKey{reflect.TypeOf(n), parsedCounts[reflect.TypeOf(n)]}
+		parsedCounts[key.kind]++
+		if _, ok := wanted[key]; ok {
+			lines[key] = fset.Position(anchor(n)).Line
+		}
+		return true
+	})
+	for kind, count := range counts {
+		if parsedCounts[kind] != count {
+			return nil, fmt.Errorf("%d %s nodes emitted, %d printed", count, kind, parsedCounts[kind])
+		}
+	}
+	claims := map[int]source.Span{}
+	for _, key := range order {
+		line := lines[key]
+		if _, taken := claims[line]; !taken {
+			claims[line] = wanted[key]
+		}
+	}
+	text := strings.Split(strings.TrimSuffix(string(formatted), "\n"), "\n")
+	out := make([]string, 0, len(text)+2*len(claims))
+	redirected := false
+	for i, line := range text {
+		// A directive is a full line of its own. It cannot precede a line
+		// that must follow `}` directly, as `} else` must, and gofmt would
+		// separate it from a top-level declaration with a blank line, so
+		// directives go only before indented lines; a reset waits for one.
+		body := strings.TrimLeft(line, "\t")
+		eligible := body != line && !strings.HasPrefix(body, "}")
+		if sp, claimed := claims[i+1]; claimed && eligible {
+			out = append(out, "//line "+g.source+":"+strconv.Itoa(sp.StartPos().Line))
+			redirected = true
+		} else if redirected && eligible {
+			out = append(out, "//line "+unitPath+":"+strconv.Itoa(len(out)+2))
+			redirected = false
+		}
+		out = append(out, line)
+	}
+	joined := []byte(strings.Join(out, "\n") + "\n")
+	final, err := format.Source(joined)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Count(final, []byte("\n")) != len(out) {
+		return nil, fmt.Errorf("formatting moved lines around the directives")
+	}
+	return final, nil
+}
+
+// markExpr is mark for expression positions.
+func (g *gen) markExpr(e goast.Expr) goast.Expr {
+	g.mark(e)
+	return e
+}

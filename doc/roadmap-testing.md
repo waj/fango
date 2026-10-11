@@ -12,54 +12,33 @@ IO-free execution and pluggable reporters are
 ## Failure source positions
 
 A failing expectation should name its `file:line`; the test name locates the
-case but not which of several expectations failed. The recommended mechanism
-is a compiler-solved **call-site constraint**, after GHC's `HasCallStack`
-(*proposed syntax*):
+case but not which of several expectations failed. The mechanism is the
+[stack trace](roadmap.md#stack-traces) facility: `Expect.Error` gains
+`location : Maybe Trace.Frame`, the failing helpers take the first captured
+frame whose module is not `Expect`, and the report prints `file:line` above
+the message. The report is standard output compared under both backends, so
+this waits for interpreter parity: compiled frames report the line of the
+outermost call on a Go line, the interpreter each call's own origin, which
+agree when the expectation call is the statement, the tail expression, or a
+lambda body.
 
-```fango
-equal : (Eq a, Inspect a, Located) => a -> a ->{Expect} ()
-```
-
-`Located` is a nullary constraint. At a call site the compiler discharges it
-with that site's position; when the caller itself carries `Located =>`, the
-constraint propagates, so a user's helper reports *its* caller. The body reads
-it with `Meta.location : Located => Location`. It rides the existing
-evidence-passing ABI — the dictionary is a `Location` record — and both
-backends see the same Core, so the invariant that the backends agree is kept.
-`Expect.Error` gains `location : Maybe Location`, and the report prints it
-above the message.
-
-Nothing in the language supplies this yet. The parser requires exactly one
-class parameter (`CLASS PARAMETER`, [`internal/parser/classes.go`](../internal/parser/classes.go)),
-the checker's predicate always carries a type ([`internal/types/types.go`](../internal/types/types.go)),
-and the compile-time stage has no splice that reads its own position:
-`Meta.Site` is an attribute's attachment site, usable only by `Meta.failAt`.
-
-Rejected alternatives:
-
-- `//line` directives in generated Go read back through `runtime.Caller`:
-  compiled-only, so the interpreter would report something different.
-- An explicit `$(Meta.here)` argument at every expectation: correct, but the
-  ergonomics defeat the purpose.
-- Numbering expectations in the handler: a passing expectation performs no
-  operation, and a resumptive counter cannot share an effect with the abort
-  operation.
-
-Open questions: the surface syntax for a nullary constraint, whether
-`Located` and `Location` live in `Meta` or `Basics`, what a `Location`
-holds (module, line, column), and how the constraint reads in an inferred
-signature.
+A compiler-solved call-site constraint after GHC's `HasCallStack` was designed
+and rejected: it would leak into signatures and interfaces, and the stack
+facility serves crashes and logging as well as tests. Helper authors who want
+a failure attributed to their caller may later get an explicit opt-in, as
+Go's `t.Helper()` is.
 
 ## Milestones
 
 1. **M1 — library.** DONE: `stdlib/Expect.fango`, `stdlib/Test.fango`, the
-   runner, the report, and the `test_*` fixtures under `testdata/run/`.
+   runner, the report, and the `test_*` fixtures under `testdata/run/` and
+   `testdata/suite/`.
 2. **M2 — dogfooding.** DONE: the `Dict` fold and update fixtures and the
    `String` pad/split/trim fixture are `Test` suites. Call-order checks that
    printed from inside callbacks became `State` accumulators asserted with
    `Expect.equal`; no expectation beyond the first version was needed.
-3. **M3 — positions.** The `Located` constraint, `Meta.location`, the
-   `Error` location, and the report line, as above.
+3. **M3 — positions.** The trace-based location, the `Error` location, and
+   the report line, as above.
 
 ## Later
 

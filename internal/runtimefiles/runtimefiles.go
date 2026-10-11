@@ -108,6 +108,13 @@ func RepositoryNativeHost() ([]byte, error) {
 	return libroot.ReadStdlib("native_support.go")
 }
 
+// ForGeneratedModule rewrites a sidecar's repository runtime imports to
+// their paths in the private generated module, as the runtime's own sources
+// are rewritten; a sidecar may import `github.com/waj/fango/runtime/fangort`.
+func ForGeneratedModule(path string, source []byte) ([]byte, error) {
+	return forGeneratedModule(path, source)
+}
+
 func forGeneratedModule(path string, source []byte) ([]byte, error) {
 	fset := gotoken.NewFileSet()
 	file, err := goparser.ParseFile(fset, path, source, goparser.ParseComments)

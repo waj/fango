@@ -301,6 +301,51 @@ never selects the compilation cache. The low-level byte store has no dependency
 on modules, inference, or code generation; each layer above owns its own codec
 and validation.
 
+### Source positions and stack traces
+
+Generated Go carries `//line` directives back to Fango source, so a Go stack
+walk reports Fango files and lines, and the runtime's `Capture` and the crash
+report in `main` read them from the ordinary Go line table at no cost to
+running code ([reference](../reference/commands.md#runtime-failures)).
+
+Emission never positions the `go/ast` it builds. Instead every call,
+operator, perform, exit, and tail-jump node it emits is attributed to the
+innermost *own-file* origin being emitted: the `Origin` span Core keeps on
+`App`, `Perform`, `ControlExit`, `NativeCall`, and, for an inlined call, on
+the parameter `Let`s and copied body the inliner makes from it, which take
+the call's position so the body reports the line that called it. Only spans
+in the owner's own file count: an inlined dependency body carries its
+module's spans, which a cached consumer may see relocated, so a consumer's
+Go names no line of a dependency and a dependency's edit never re-emits it.
+After printing, the text is parsed back, the attributed nodes are paired with
+the parse by concrete kind and ordinal (the printer only adds parentheses),
+and a directive is inserted above each claimed Go line, the first attributed
+node in preorder claiming it; a reset to the generated file follows a claimed
+run. Directives go only before indented lines, since one cannot separate `}`
+from `else` and gofmt would pad one before a top-level declaration. The result
+is formatted once more so it stays a gofmt fixed point, and a pass that cannot
+account for its nodes falls back to plain Go (`FANGO_INTERNAL_STRICT_DIRECTIVES`
+turns that into a failure for the tests that pin directives). Directive
+file names are the compiler's logical names, so shared packages stay
+byte-identical across consumers.
+
+The implementation fingerprint of the emission cache writes the line of every
+own-file `Origin`, so an edit that only moves an owner's lines re-emits that
+owner and nothing else; the semantic, ABI, stage, and unfolding fingerprints
+remain position-free.
+
+Frames come from `runtime.CallersFrames`: the runtime keeps frames in
+generated Fango packages and native sidecars, reverses the injective `V_`
+link-name mangling it shares with the emitter (`fangort.LinkName`,
+`fangort.Demangle`), names Go closures as lambdas of their enclosing worker,
+decodes lifted locals and instance methods, and collapses consecutive frames
+with one function and line, which hides the closures a single expression
+lowers to. Consequences the reference documents: a Fango-inlined helper and a
+self tail-call iteration have no frame, and a one-line Go closure shares its
+enclosing statement's line. Every generated `main` defers `RecoverMain`, and
+task goroutines defer the same recovery with the stack captured at spawn;
+`FANGO_TRACEBACK=go` leaves Go's own traceback in place.
+
 ## Self tail-call loops
 
 Elaboration lifts named local functions, including monomorphic ones, into

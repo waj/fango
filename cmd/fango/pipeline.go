@@ -116,7 +116,7 @@ func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Wr
 	units := make([]codegen.Unit, len(loadedUnits))
 	program := ""
 	for i, unit := range loadedUnits {
-		units[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry}
+		units[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source}
 		if unit.Entry {
 			program = unit.Program
 		}
@@ -133,7 +133,11 @@ func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Wr
 		return nil, nil, "", false
 	}
 	for _, native := range nativeSources {
-		data := native.Content
+		data, err := runtimefiles.ForGeneratedModule(native.Path, native.Content)
+		if err != nil {
+			reportInternal(stderr, err)
+			return nil, nil, "", false
+		}
 		if formatted, err := format.Source(data); err == nil {
 			data = formatted
 		}

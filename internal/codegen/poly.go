@@ -8,6 +8,7 @@ import (
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 func (g *gen) polymorphicPerformExpr(e *core.Perform, evidence goast.Expr) goast.Expr {
@@ -37,7 +38,7 @@ func (g *gen) polymorphicPerformExpr(e *core.Perform, evidence goast.Expr) goast
 		&goast.KeyValueExpr{Key: ident("Types"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: g.descriptorType()}, Elts: localTypes}},
 		&goast.KeyValueExpr{Key: ident("Args"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: ident("any")}, Elts: values}},
 	}}
-	call := callExpr(&goast.SelectorExpr{X: evidence, Sel: ident("Op_" + linkName(e.Op.Name))}, request)
+	call := callExpr(&goast.SelectorExpr{X: evidence, Sel: ident("Op_" + fangort.LinkName(e.Op.Name))}, request)
 	if g.currentEvidenceMode(e.Effect.Key()) == types.Exit {
 		g.markOutcomeCall(call.(*goast.CallExpr), selector("fangort", "PolyReply"))
 	}
@@ -222,7 +223,7 @@ func (g *gen) polyConvertEvidence(value goast.Expr, from, to types.EffLabel, mod
 			fromSub[p.ID], toSub[p.ID] = from.Args[i], to.Args[i]
 		}
 		for _, op := range eff.Ops {
-			field := "Op_" + linkName(op.Name)
+			field := "Op_" + fangort.LinkName(op.Name)
 			if len(op.LocalVars) > 0 && op.Native == nil {
 				request := fmt.Sprintf("t_poly_request%d", g.tmp)
 				g.tmp++

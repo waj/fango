@@ -18,7 +18,9 @@ import (
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/lower"
+	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 // Unit describes one Fango source module for package emission. Units must be
@@ -33,6 +35,10 @@ type Unit struct {
 	Program string
 	Imports []string
 	Entry   bool
+	// Source is the owner's Fango file name as its spans report it. When
+	// set, the generated Go carries `//line` directives back to it; empty
+	// emits plain Go, which the structural tests compare textually.
+	Source string
 }
 
 // File is one path relative to the generated Go module root.
@@ -174,6 +180,8 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		evidenceModes:        map[types.EffectKey][]types.Transport{},
 		defs:                 map[string]*core.Def{},
 		unit:                 unit.Name,
+		source:               unit.Source,
+		origins:              map[goast.Node]source.Span{},
 		imports:              map[string]bool{},
 		nativeImports:        map[string]bool{},
 		direct:               map[string]bool{},
@@ -263,19 +271,25 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		}
 	}
 
+	// Every generated main recovers first, so a crash reports the Fango
+	// trace rather than Go's goroutine dump.
+	mainDecl := func(body ...goast.Stmt) goast.Decl {
+		g.usesFangort = true
+		recover := &goast.DeferStmt{Call: callExpr(selector("fangort", "RecoverMain")).(*goast.CallExpr)}
+		return funcDecl("main", append([]goast.Stmt{recover}, body...)...)
+	}
 	switch {
 
 	case mainIsUnit:
-		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
+		decls = append(decls, mainDecl(g.stmts(mainDef.Body)...))
 	case mainIsFn:
-		decls = append(decls, funcDecl("main", g.workerCallStmts(entry, nil)...))
+		decls = append(decls, mainDecl(g.workerCallStmts(entry, nil)...))
 	case printMain && unit.Entry:
-		g.usesFangort = true
-		decls = append(decls, funcDecl("main",
+		decls = append(decls, mainDecl(
 			exprStmt(callExpr(selector("fangort", "PrintString"), g.expr(p.EntryDisplay, 0)))))
 	default:
 		if mainDef != nil {
-			decls = append(decls, funcDecl("main", assignBlank(g.topValueRef(entry))))
+			decls = append(decls, mainDecl(assignBlank(g.topValueRef(entry))))
 		}
 	}
 
@@ -303,7 +317,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
 		return nil, fmt.Errorf("codegen: printing generated Go: %w", err)
 	}
-	return buf.Bytes(), nil
+	return g.lineDirectives(file, buf.Bytes(), UnitPath(unit))
 }
 
 func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
@@ -323,6 +337,9 @@ type gen struct {
 	adts            map[int]*types.ADTInfo
 	tmp             int // type-switch binding counter (ts0, ts1, …)
 	usesFangort     bool
+	source          string                     // the owner's Fango file name; empty disables line directives
+	site            source.Span                // the innermost own-file origin being emitted
+	origins         map[goast.Node]source.Span // emitted nodes attributed to a source line
 	usesMath        bool
 	descriptorNames map[string]string
 	descriptorDecls []goast.Decl
@@ -477,7 +494,7 @@ func (g *gen) qualified(owner, name string) goast.Expr {
 }
 
 func (g *gen) topValueName(name string) string {
-	return "V_" + linkName(name)
+	return "V_" + fangort.LinkName(name)
 }
 
 func (g *gen) topValueRef(name string) goast.Expr {
@@ -533,7 +550,7 @@ func (g *gen) controlledType(t types.Type, visiting map[int]bool) bool {
 }
 
 func (g *gen) evidenceName(name string) string {
-	return "ev_" + linkName(name)
+	return "ev_" + fangort.LinkName(name)
 }
 
 func (g *gen) ownedADTs(in []*types.ADTInfo) []*types.ADTInfo {
@@ -870,7 +887,7 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 		}
 		args = append(args, g.workerArgument(g.defs[ref.Name], i, a, mode))
 	}
-	return exprStmt(callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...))
+	return exprStmt(g.markExpr(callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...)))
 }
 
 // tyParamNames assigns positional Go names (A0, A1, …) to a definition's
@@ -932,6 +949,7 @@ func (g *gen) retStmts(e core.Expr) []goast.Stmt {
 }
 
 func (g *gen) retStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
+	defer g.enter(exprOrigin(e))()
 	if stmts, ok := g.immediateUnitApplication(e, func(body core.Expr) []goast.Stmt {
 		return g.retStmtsFor(body, unitResult)
 	}); ok {
@@ -1135,7 +1153,7 @@ func (g *gen) nativeSidecarCall(call *core.NativeCall, n *types.NativeInfo) ([]g
 		args = append(args, value)
 	}
 	fn := selector(nativeAlias(n.Module), exportNativeName(types.SurfaceName(n.Name)))
-	var result goast.Expr = callExpr(fn, args...)
+	result := g.markExpr(callExpr(fn, args...))
 	if n.Storage.Kind == "read" {
 		g.usesFangort = true
 		return prelude, callExpr(indexExpr(selector("fangort", "UnpackNativeValue"), []goast.Expr{g.goType(call.Ty)}), result)
@@ -1280,7 +1298,7 @@ func (g *gen) nativeTemplateExpr(call *core.NativeCall, template string, parentP
 			panic(fmt.Sprintf("codegen: unsupported native template node %T", x))
 		}
 	}
-	return splice(x, parentPrec)
+	return g.markExpr(splice(x, parentPrec))
 }
 
 func (g *gen) nativeExpr(call *core.NativeCall, parentPrec int) goast.Expr {
@@ -1334,6 +1352,7 @@ const unaryPrec = 6
 // expr emits e in expression context; parentPrec is the precedence of the
 // enclosing operator (0 = none) for minimal parenthesization.
 func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
+	defer g.enter(exprOrigin(e))()
 	switch e := e.(type) {
 	case *core.IntLit:
 		return intLit(e.Val)
@@ -1390,7 +1409,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			return g.workerCallExpr(e)
 		case core.Value:
 			if call, ok := g.flatCallbackCall(e); ok {
-				return call
+				return g.markExpr(call)
 			}
 			// One typed indirect call per application; chains render
 			// e(a)(b). Call is a Go primary expression — no parens needed,
@@ -1409,14 +1428,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			}
 			args = append(args, g.expr(e.Args[0], 0))
 			if lam, ok := e.Callee.(*core.Lambda); ok {
-				return callExpr(g.directLambdaMember(lam, mode), args...)
+				return g.markExpr(callExpr(g.directLambdaMember(lam, mode), args...))
 			}
 			if ref, ok := e.Callee.(*core.VarRef); ok && ref.Local {
 				if lam := g.forwarders[ref.Name]; lam != nil {
-					return callExpr(g.directLambdaMember(lam, mode), args...)
+					return g.markExpr(callExpr(g.directLambdaMember(lam, mode), args...))
 				}
 			}
-			call := callExpr(callbackMember(g.expr(e.Callee, 0), mode), args...)
+			call := g.markExpr(callExpr(callbackMember(g.expr(e.Callee, 0), mode), args...))
 			if mode == types.Exit {
 				g.markOutcomeCall(call.(*goast.CallExpr), g.goType(e.Ty))
 			}
@@ -1491,7 +1510,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			args = append(args, g.expr(a, 0))
 		}
 		callOp := func(as []goast.Expr) goast.Expr {
-			call := callExpr(g.operationCallee(stack[len(stack)-1], "Op_"+linkName(e.Op.Name)), as...)
+			call := g.markExpr(callExpr(g.operationCallee(stack[len(stack)-1], "Op_"+fangort.LinkName(e.Op.Name)), as...))
 			if g.currentEvidenceMode(e.Effect.Key()) == types.Exit {
 				g.markOutcomeCall(call.(*goast.CallExpr), g.goType(e.Ty))
 			}
@@ -1566,6 +1585,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			&goast.KeyValueExpr{Key: ident("Payload"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: ident("any")}, Elts: payload}},
 			&goast.KeyValueExpr{Key: ident("PayloadTypes"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: g.descriptorType()}, Elts: descriptors}},
 		}}}
+		g.mark(exit)
 		return g.propagateOutcome(e.Ty, exit)
 	case *core.ResumeTail:
 		panic("codegen: ResumeTail outside verified handler-clause emission")
@@ -1635,7 +1655,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			body = append(body, varDeclStmt(name, g.workerArgumentType(g.defs[ref.Name], i, a.Type(), mode), g.workerArgument(g.defs[ref.Name], i, a, mode)))
 			args = append(args, ident(name))
 		}
-		call := callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...)
+		call := g.markExpr(callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...))
 		if mode == types.Exit {
 			g.markWorkerOutcomeCall(call.(*goast.CallExpr), g.goType(e.Ty), g.defs[ref.Name])
 		}
@@ -1656,7 +1676,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		}
 		return wrapped
 	}
-	call := callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...)
+	call := g.markExpr(callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...))
 	if mode == types.Exit {
 		g.markWorkerOutcomeCall(call.(*goast.CallExpr), g.goType(e.Ty), g.defs[ref.Name])
 	}
@@ -2134,7 +2154,7 @@ func (g *gen) handlerEvidence(e *core.Handle, label int, mode types.Transport, s
 			continue
 		}
 		if len(c.LocalVars) > 0 && !c.Op.Abort && c.Op.Native == nil {
-			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(c.Op.Name)), Value: g.polymorphicHandlerClause(e, c, mode, state)})
+			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + fangort.LinkName(c.Op.Name)), Value: g.polymorphicHandlerClause(e, c, mode, state)})
 			continue
 		}
 		params := make([]paramSpec, 0, len(c.Params))
@@ -2171,7 +2191,7 @@ func (g *gen) handlerEvidence(e *core.Handle, label int, mode types.Transport, s
 		clauseBody := g.resumeStmtsFor(c.Body, c.ResumeID, g.isUnit(c.Op.ResultType), state, stateType)
 		g.control, g.resultType = oldControl, oldResult
 		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: append(clausePrefix, clauseBody...)}}
-		elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(c.Op.Name)), Value: fn})
+		elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + fangort.LinkName(c.Op.Name)), Value: fn})
 	}
 	st := g.effectTypeMode(e.Effects[label], mode)
 	return st, &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: st.(*goast.StarExpr).X, Elts: elts}}
@@ -2325,7 +2345,7 @@ func (g *gen) effectType(e core.EffectInstance) goast.Expr {
 }
 
 func (g *gen) effectTypeMode(e core.EffectInstance, mode types.Transport) goast.Expr {
-	name := "Eff_" + linkName(e.Name)
+	name := "Eff_" + fangort.LinkName(e.Name)
 	switch e.Control.Resolve(mode) {
 	case types.Exit:
 		name += "_exit"
@@ -2391,12 +2411,12 @@ func (g *gen) rawEvidenceAdapter(ev core.EffectInstance, value goast.Expr, actua
 	for _, op := range eff.Ops {
 		if len(op.LocalVars) > 0 && op.Native == nil {
 			request := ident("t_request")
-			call := callExpr(&goast.SelectorExpr{X: value, Sel: ident("Op_" + linkName(op.Name))}, request)
+			call := callExpr(&goast.SelectorExpr{X: value, Sel: ident("Op_" + fangort.LinkName(op.Name))}, request)
 			wrapped := callExpr(indexExpr(selector("fangort", "Normal"), []goast.Expr{selector("fangort", "PolyReply")}), call)
 			fn := funcLitParams([]paramSpec{{name: "t_request", typ: selector("fangort", "PolyRequest")}},
 				indexExpr(selector("fangort", "Outcome"), []goast.Expr{selector("fangort", "PolyReply")}),
 				[]goast.Stmt{returnStmt(wrapped)})
-			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: fn})
+			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + fangort.LinkName(op.Name)), Value: fn})
 			continue
 		}
 		var params []paramSpec
@@ -2411,7 +2431,7 @@ func (g *gen) rawEvidenceAdapter(ev core.EffectInstance, value goast.Expr, actua
 			args = append(args, ident(name))
 		}
 		resultTy := types.SubstRigid(op.ResultType, sub)
-		call := callExpr(&goast.SelectorExpr{X: value, Sel: ident("Op_" + linkName(op.Name))}, args...)
+		call := callExpr(&goast.SelectorExpr{X: value, Sel: ident("Op_" + fangort.LinkName(op.Name))}, args...)
 		var body []goast.Stmt
 		if g.isUnit(resultTy) {
 			body = []goast.Stmt{exprStmt(call), returnStmt(g.normalOutcome(resultTy, g.unitValue()))}
@@ -2419,7 +2439,7 @@ func (g *gen) rawEvidenceAdapter(ev core.EffectInstance, value goast.Expr, actua
 			body = []goast.Stmt{returnStmt(g.normalOutcome(resultTy, call))}
 		}
 		fn := funcLitParams(params, g.outcomeType(resultTy), body)
-		elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: fn})
+		elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + fangort.LinkName(op.Name)), Value: fn})
 	}
 	return &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: g.effectType(desired).(*goast.StarExpr).X, Elts: elts}}
 }
@@ -2438,7 +2458,7 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			g.usesFangort = true
 			fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Origin")}, Type: &goast.StarExpr{X: selector("fangort", "EvidenceOrigin")}},
 				&goast.Field{Names: []*goast.Ident{ident("Binding")}, Type: &goast.StarExpr{X: selector("fangort", "EvidenceBinding")}})
-			otherName := "Eff_" + linkName(eff.Name)
+			otherName := "Eff_" + fangort.LinkName(eff.Name)
 			otherMember := "Direct"
 			if mode == types.Direct {
 				otherName += "_exit"
@@ -2472,7 +2492,7 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 					if mode == types.Exit {
 						result = indexExpr(selector("fangort", "Outcome"), []goast.Expr{result})
 					}
-					fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(op.Name))}, Type: &goast.FuncType{
+					fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Op_" + fangort.LinkName(op.Name))}, Type: &goast.FuncType{
 						Params:  &goast.FieldList{List: []*goast.Field{{Type: selector("fangort", "PolyRequest")}}},
 						Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
 					}})
@@ -2492,9 +2512,9 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 				} else if !g.isUnit(op.ResultType) {
 					results = &goast.FieldList{List: []*goast.Field{{Type: g.goType(op.ResultType)}}}
 				}
-				fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(op.Name))}, Type: &goast.FuncType{Params: paramFields(ps), Results: results}})
+				fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Op_" + fangort.LinkName(op.Name))}, Type: &goast.FuncType{Params: paramFields(ps), Results: results}})
 			}
-			name := "Eff_" + linkName(eff.Name)
+			name := "Eff_" + fangort.LinkName(eff.Name)
 			if mode == types.Exit {
 				name += "_exit"
 			}
@@ -2592,6 +2612,7 @@ func (g *gen) letIIFE(e *core.Let) goast.Expr {
 // rest of the chain never mentions them (Go rejects unused locals; Fango
 // bindings still evaluate eagerly).
 func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
+	defer g.enter(let.Origin)()
 	if g.rememberForwarder(let) {
 		return nil
 	}
@@ -2657,6 +2678,7 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 // body. Prints become fangort calls; ifs become genuine Go if statements;
 // Let bindings become plain locals.
 func (g *gen) stmts(e core.Expr) []goast.Stmt {
+	defer g.enter(exprOrigin(e))()
 	if stmts, ok := g.immediateUnitApplication(e, g.stmts); ok {
 		return stmts
 	}
@@ -2691,7 +2713,7 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 				args = append(args, g.expr(a, 0))
 			}
 			if !needPrelude {
-				call := callExpr(g.operationCallee(stack[len(stack)-1], "Op_"+linkName(e.Op.Name)), args...)
+				call := g.markExpr(callExpr(g.operationCallee(stack[len(stack)-1], "Op_"+fangort.LinkName(e.Op.Name)), args...))
 				return []goast.Stmt{exprStmt(call)}
 			}
 		}
@@ -2741,51 +2763,7 @@ func mangleValue(name string) string {
 	if strings.HasPrefix(name, "_") {
 		return "t" + name
 	}
-	return "v_" + linkName(name)
-}
-
-// linkOps spells the operator characters Go cannot hold in an identifier.
-// Words rather than a hash because generated Go is meant to be readable:
-// `Basics.++` becomes `v_Basics_dot__plus__plus_`, which can be traced back
-// to its source by eye.
-var linkOps = map[byte]string{
-	'!': "_bang_", '#': "_hash_", '%': "_pct_", '&': "_amp_", '*': "_star_",
-	'+': "_plus_", '-': "_dash_", '/': "_slash_", ':': "_colon_", '<': "_lt_",
-	'=': "_eq_", '>': "_gt_", '?': "_qmark_", '@': "_at_", '^': "_hat_",
-	'|': "_bar_", '~': "_tilde_",
-}
-
-// linkName maps a canonical Fango symbol to a Go identifier. Module
-// separators and operator characters are the only characters a Fango symbol
-// can hold that Go cannot.
-//
-// The substitution is injective against ordinary names: identifier
-// characters and operator characters are disjoint sets, a Fango name may
-// not begin with `_`, and the character after a `_dot_` is always a letter —
-// so no identifier can spell one of these words in the position where an
-// operator's would appear. It is a pure function of the name, which is what
-// the byte-identical-Go requirement needs.
-func linkName(name string) string {
-	if !strings.ContainsFunc(name, func(r rune) bool {
-		_, isOp := linkOps[byte(r)]
-		return r == '.' || (r < 0x80 && isOp)
-	}) {
-		return name
-	}
-	var b strings.Builder
-	for i := 0; i < len(name); i++ {
-		switch c := name[i]; {
-		case c == '.':
-			b.WriteString("_dot_")
-		default:
-			if word, isOp := linkOps[c]; isOp {
-				b.WriteString(word)
-				continue
-			}
-			b.WriteByte(c)
-		}
-	}
-	return b.String()
+	return "v_" + fangort.LinkName(name)
 }
 
 func (g *gen) directLambdaMember(e *core.Lambda, mode types.Transport) goast.Expr {

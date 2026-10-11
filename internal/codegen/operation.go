@@ -31,6 +31,9 @@ func (g *gen) cloneOperation(v reflect.Value) reflect.Value {
 		}
 		out := reflect.New(v.Type().Elem())
 		out.Elem().Set(g.cloneOperation(v.Elem()))
+		if node, ok := v.Interface().(goast.Node); ok {
+			g.copyOrigin(node, out.Interface().(goast.Node))
+		}
 		if call, ok := v.Interface().(*goast.CallExpr); ok {
 			if typ, found := g.outcomeCalls[call]; found {
 				cloned := out.Interface().(*goast.CallExpr)

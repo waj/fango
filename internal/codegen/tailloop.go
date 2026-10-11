@@ -24,6 +24,7 @@ import (
 // into t_u%d temporaries (erased Unit args running as statements), then the
 // params assign, then continue.
 func (g *gen) tailJumpStmts(d *core.Def, e *core.App) []goast.Stmt {
+	defer g.enter(e.Origin)()
 	argTys, _ := core.PeelFun(d.Type, len(d.Params))
 	needPrelude := false
 	for i, a := range e.Args {
@@ -63,9 +64,13 @@ func (g *gen) tailJumpStmts(d *core.Def, e *core.App) []goast.Stmt {
 		lhs, rhs = append(lhs, ident(target)), append(rhs, g.workerArgument(d, i, a, g.control))
 	}
 	if len(lhs) > 0 {
-		stmts = append(stmts, &goast.AssignStmt{Lhs: lhs, Tok: gotoken.ASSIGN, Rhs: rhs})
+		assign := &goast.AssignStmt{Lhs: lhs, Tok: gotoken.ASSIGN, Rhs: rhs}
+		g.mark(assign)
+		stmts = append(stmts, assign)
 	}
-	return append(stmts, &goast.BranchStmt{Tok: gotoken.CONTINUE})
+	jump := &goast.BranchStmt{Tok: gotoken.CONTINUE}
+	g.mark(jump)
+	return append(stmts, jump)
 }
 
 // pureAtom reports whether evaluating e can have no observable effect —
