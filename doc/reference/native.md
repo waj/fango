@@ -171,6 +171,8 @@ A module imported at the REPL prompt brings its sidecar along: the session
 rebuilds its worker over the bundled sidecars and every user sidecar imported
 so far, and the worker builds and starts the first time one of its functions
 is called. Package globals persist across calls but not across such a rebuild.
+Sidecar functions are discovered automatically; third-party libraries need no
+registration in the compiler or REPL.
 
 The word `native` is reserved. Inline `native "Go expression"` templates are
 compiler-bundled syntax and are rejected in user modules. The standard library

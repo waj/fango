@@ -137,8 +137,8 @@ uses is copied into its generated project at build time.
 
 The library is versioned with the compiler and expected to match it. Editing a
 bundled `.fango` module is supported and invalidates exactly what depends on
-it. Two mismatches are reported rather than miscompiled: a bundled native
-declaration that disagrees with the compiler's registry (`INVALID BUNDLED
+it. Two mismatches are reported rather than miscompiled: a bundled inline native
+template declaration that disagrees with the compiler's registry (`INVALID BUNDLED
 NATIVE`) and a `List` that no longer has the shape code generation projects
 against (`INVALID BUNDLED LIST`). One is not: editing a bundled `.native.go`
 sidecar changes compiled programs and the interpreter's native worker, but not

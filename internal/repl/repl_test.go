@@ -437,6 +437,41 @@ func TestImportNativeSidecar(t *testing.T) {
 	}
 }
 
+// Native objects stay in the automatically generated worker, including across
+// prompt inputs. A third-party module needs no in-process registry adapters.
+func TestImportNativeSidecarOpaqueState(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, contents string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("Counter.fango", `module Counter exposing (Cell, newCell, add)
+import Runtime.Native
+type Cell = Cell Runtime.Native.Any
+newCell : Int ->{IO} Cell
+newCell = native
+add : Cell -> Int ->{IO} Int
+add = native
+`)
+	write("Counter.native.go", `package native
+func NewCell(value int64) any { return &value }
+func Add(cell any, increment int64) int64 {
+    value := cell.(*int64)
+    *value += increment
+    return *value
+}
+`)
+	var out strings.Builder
+	RunWith(strings.NewReader("import Counter\ncell = Counter.newCell 40\nCounter.add cell 2\nCounter.add cell 3\n:quit\n"), &out, Options{Root: root})
+	got := out.String()
+	for _, want := range []string{"loaded Counter\n", "42 : Int\n", "45 : Int\n"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestModuleFunctionImportRollback(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "Helpers.fango")

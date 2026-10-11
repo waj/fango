@@ -477,13 +477,19 @@ Globals persist across calls, but importing new sidecars rebuilds the worker.
 Panics are reported and reproduced; host exit becomes an interpreter exit error.
 This is lifecycle isolation, not a security sandbox.
 
-The in-process native registry is limited to templates, compiler representations,
-and explicitly stage-safe bundled behavior, plus host-only IO and Process calls
-for in-process and WASM evaluation. IO classified outcomes use the same boundary
-wrapping as sidecars; mutable operations remain excluded from staging. File
-registry entries validate arity
-but refuse execution; actual file calls use the worker. Staging rejects user
-sidecars, residual effects, and process-observing natives.
+The worker's function table is generated from the exported functions in its
+sidecar sources. Call-form validation and execution do not require an entry in
+the in-process native registry, for bundled or user modules. File and Net have
+no in-process entries and run only through the worker.
+
+The in-process registry supplies inline templates, compiler representations,
+and explicitly stage-safe bundled adapters. Host fallbacks preserve in-process
+and WASM execution, including IO, Process, entropy, clocks, and timezone lookup.
+Deterministic adapters are installed as stage-safe before host fallbacks and
+evaluator-owned prompt traps; there is no name-based exclusion list that makes
+new ambient operations stage-safe by default. IO classified outcomes use the
+same boundary wrapping as sidecars. Staging rejects user sidecars, residual
+effects, and process-observing natives.
 
 The execution payload the worker decodes keeps the call origins of `App`,
 `Perform`, `ControlExit`, `NativeCall`, and `Let` nodes as line-only spans
