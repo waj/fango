@@ -29,8 +29,8 @@ import (
 
 // The differential end-to-end suite (doc/design.md, "Testing and performance"): every
 // testdata/run/*.fango runs through BOTH backends — the Core interpreter
-// in-process and generated Go compiled and executed — and stdout is diffed
-// byte-exact against the .expected file AND between the backends. Programs
+// in-process and generated Go compiled and executed in differential mode.
+// stdout is diffed byte-exact against .expected and between the backends. Programs
 // with a .error file instead assert a compile-error substring.
 //
 // Pure value programs produce no output, so the compiled leg is emitted with
@@ -129,6 +129,11 @@ func buildCLIBinary(t *testing.T, source, absSource string, b *cliBuild) string 
 }
 
 func TestMain(m *testing.M) {
+	_, err := parseTestBackendMode(os.Getenv(testBackendsEnv))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	// The suite builds the CLI into a temporary directory and runs it with
 	// working directories of its own, so neither the executable-relative
 	// install layout nor the checkout walk reaches the library this
@@ -396,25 +401,28 @@ func TestTodoExample(t *testing.T) {
 		{"list"},
 	}
 
-	prog, executor := compileWithWorker(t, path)
-
-	interpDir := t.TempDir()
 	var interpreted bytes.Buffer
-	func() {
-		interpret.Lock()
-		defer interpret.Unlock()
-		for _, args := range commands {
-			env := eval.NewEnv()
-			env.DefineProg(prog)
-			ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
-			ioctx.Args, ioctx.Dir, ioctx.Natives = args, interpDir, executor
-			if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil {
-				t.Fatalf("interpreter %v: %v", args, err)
+	if interpreterTestsEnabled() {
+		prog, executor := compileWithWorker(t, path)
+
+		interpDir := t.TempDir()
+		func() {
+			interpret.Lock()
+			defer interpret.Unlock()
+			for _, args := range commands {
+				env := eval.NewEnv()
+				env.DefineProg(prog)
+				ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
+				ioctx.Args, ioctx.Dir, ioctx.Natives = args, interpDir, executor
+				if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil {
+					t.Fatalf("interpreter %v: %v", args, err)
+				}
 			}
+		}()
+		if interpreted.String() != string(want) {
+			t.Fatalf("interpreter output:\n%q\nwant:\n%q", interpreted.String(), want)
 		}
-	}()
-	if interpreted.String() != string(want) {
-		t.Fatalf("interpreter output:\n%q\nwant:\n%q", interpreted.String(), want)
+
 	}
 
 	if testing.Short() {
@@ -433,7 +441,7 @@ func TestTodoExample(t *testing.T) {
 	if compiled.String() != string(want) {
 		t.Fatalf("compiled output:\n%q\nwant:\n%q", compiled.String(), want)
 	}
-	if compiled.String() != interpreted.String() {
+	if interpreterTestsEnabled() && compiled.String() != interpreted.String() {
 		t.Fatalf("backends disagree: compiled %q vs interpreted %q", compiled.String(), interpreted.String())
 	}
 }
@@ -441,7 +449,7 @@ func TestTodoExample(t *testing.T) {
 func TestTodoExampleFailures(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "todo.fango")
-	prog, executor := compileWithWorker(t, path)
+	prog, executor := compileInterpreterProgram(t, path)
 
 	type failure struct {
 		name       string
@@ -457,30 +465,33 @@ func TestTodoExampleFailures(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.name+"/interpreter", func(t *testing.T) {
-			dir := t.TempDir()
-			if tc.store != "" {
-				if err := os.WriteFile(filepath.Join(dir, "todo.json"), []byte(tc.store), 0o644); err != nil {
-					t.Fatal(err)
+		if interpreterTestsEnabled() {
+			t.Run(tc.name+"/interpreter", func(t *testing.T) {
+				dir := t.TempDir()
+				if tc.store != "" {
+					if err := os.WriteFile(filepath.Join(dir, "todo.json"), []byte(tc.store), 0o644); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-			env := eval.NewEnv()
-			env.DefineProg(prog)
-			var output bytes.Buffer
-			ioctx := eval.NewIOContext(strings.NewReader(""), &output)
-			ioctx.Args, ioctx.Dir, ioctx.Natives = tc.args, dir, executor
-			err := withInterpreter(func() error {
-				_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
-				return err
+				env := eval.NewEnv()
+				env.DefineProg(prog)
+				var output bytes.Buffer
+				ioctx := eval.NewIOContext(strings.NewReader(""), &output)
+				ioctx.Args, ioctx.Dir, ioctx.Natives = tc.args, dir, executor
+				err := withInterpreter(func() error {
+					_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+					return err
+				})
+				var exitErr *natives.ExitError
+				if !errors.As(err, &exitErr) || exitErr.Code != tc.wantStatus {
+					t.Fatalf("exit = %v, want status %d", err, tc.wantStatus)
+				}
+				if output.String() != tc.wantOutput {
+					t.Fatalf("output = %q, want %q", output.String(), tc.wantOutput)
+				}
 			})
-			var exitErr *natives.ExitError
-			if !errors.As(err, &exitErr) || exitErr.Code != tc.wantStatus {
-				t.Fatalf("exit = %v, want status %d", err, tc.wantStatus)
-			}
-			if output.String() != tc.wantOutput {
-				t.Fatalf("output = %q, want %q", output.String(), tc.wantOutput)
-			}
-		})
+
+		}
 
 		if testing.Short() {
 			continue
@@ -534,11 +545,15 @@ func runDifferentialCase(t *testing.T, path string, compiled compiledRunner) {
 	runDifferentialCaseWith(t, path, compiled, readFixtureInputs(t, base), string(expData))
 }
 
-// runDifferentialCaseWith runs one program under both backends with explicit
-// inputs and expected output, so a test can drive the same source through
-// several argument sets.
+// runDifferentialCaseWith runs the selected integration backends with explicit
+// inputs and expected output, comparing the backends in differential mode.
+// A compiled-only run avoids the interpreter's graph compilation and worker.
 func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner, in fixtureInputs, expected string) {
 	t.Helper()
+	if !interpreterTestsEnabled() {
+		runCompiledCaseWith(t, compiled, in, expected)
+		return
+	}
 
 	// Backend 1: the Core interpreter. A Unit-typed main is observed through
 	// its print output; any other main through its value and shared formatter.
@@ -610,6 +625,14 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 	if testing.Short() {
 		t.Skip("compiled leg skipped in -short mode")
 	}
+	compiledOut := runCompiledCaseWith(t, compiled, in, expected)
+	if compiledOut != evalOut {
+		t.Errorf("backends disagree: compiled %q vs interpreted %q", compiledOut, evalOut)
+	}
+}
+
+func runCompiledCaseWith(t *testing.T, compiled compiledRunner, in fixtureInputs, expected string) string {
+	t.Helper()
 	compiledOut, status := compiled(t, in, seedDir(t, in))
 	if status != in.status {
 		t.Errorf("compiled exit status %d, want %d", status, in.status)
@@ -617,9 +640,7 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 	if compiledOut != expected {
 		t.Errorf("compiled output:\n%q\nwant:\n%q", compiledOut, expected)
 	}
-	if compiledOut != evalOut {
-		t.Errorf("backends disagree: compiled %q vs interpreted %q", compiledOut, evalOut)
-	}
+	return compiledOut
 }
 
 func runErrorCase(t *testing.T, path, wantSubstr string) {
@@ -1032,21 +1053,24 @@ func TestCsvExample(t *testing.T) {
 		return dir
 	}
 
-	prog, executor := compileWithWorker(t, path)
-	env := eval.NewEnv()
-	env.DefineProg(prog)
 	var interpreted bytes.Buffer
-	ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
-	ioctx.Args, ioctx.Dir, ioctx.Natives = []string{"expenses.csv"}, seed(t), executor
-	err = withInterpreter(func() error {
-		_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
-		return err
-	})
-	if err != nil {
-		t.Fatalf("interpreter: %v", err)
-	}
-	if interpreted.String() != string(want) {
-		t.Fatalf("interpreter output:\n%q\nwant:\n%q", interpreted.String(), want)
+	if interpreterTestsEnabled() {
+		prog, executor := compileWithWorker(t, path)
+		env := eval.NewEnv()
+		env.DefineProg(prog)
+		ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
+		ioctx.Args, ioctx.Dir, ioctx.Natives = []string{"expenses.csv"}, seed(t), executor
+		err = withInterpreter(func() error {
+			_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("interpreter: %v", err)
+		}
+		if interpreted.String() != string(want) {
+			t.Fatalf("interpreter output:\n%q\nwant:\n%q", interpreted.String(), want)
+		}
+
 	}
 
 	if testing.Short() {
@@ -1062,7 +1086,7 @@ func TestCsvExample(t *testing.T) {
 	if compiled.String() != string(want) {
 		t.Fatalf("compiled output:\n%q\nwant:\n%q", compiled.String(), want)
 	}
-	if compiled.String() != interpreted.String() {
+	if interpreterTestsEnabled() && compiled.String() != interpreted.String() {
 		t.Fatalf("backends disagree: compiled %q vs interpreted %q", compiled.String(), interpreted.String())
 	}
 }
@@ -1070,7 +1094,7 @@ func TestCsvExample(t *testing.T) {
 func TestCsvExampleFailures(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "csv.fango")
-	prog, executor := compileWithWorker(t, path)
+	prog, executor := compileInterpreterProgram(t, path)
 
 	cases := []struct {
 		name       string
@@ -1084,24 +1108,27 @@ func TestCsvExampleFailures(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.name+"/interpreter", func(t *testing.T) {
-			env := eval.NewEnv()
-			env.DefineProg(prog)
-			var output bytes.Buffer
-			ioctx := eval.NewIOContext(strings.NewReader(""), &output)
-			ioctx.Args, ioctx.Dir, ioctx.Natives = tc.args, t.TempDir(), executor
-			err := withInterpreter(func() error {
-				_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
-				return err
+		if interpreterTestsEnabled() {
+			t.Run(tc.name+"/interpreter", func(t *testing.T) {
+				env := eval.NewEnv()
+				env.DefineProg(prog)
+				var output bytes.Buffer
+				ioctx := eval.NewIOContext(strings.NewReader(""), &output)
+				ioctx.Args, ioctx.Dir, ioctx.Natives = tc.args, t.TempDir(), executor
+				err := withInterpreter(func() error {
+					_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+					return err
+				})
+				var exitErr *natives.ExitError
+				if !errors.As(err, &exitErr) || exitErr.Code != tc.wantStatus {
+					t.Fatalf("exit = %v, want status %d", err, tc.wantStatus)
+				}
+				if output.String() != tc.wantOutput {
+					t.Fatalf("output = %q, want %q", output.String(), tc.wantOutput)
+				}
 			})
-			var exitErr *natives.ExitError
-			if !errors.As(err, &exitErr) || exitErr.Code != tc.wantStatus {
-				t.Fatalf("exit = %v, want status %d", err, tc.wantStatus)
-			}
-			if output.String() != tc.wantOutput {
-				t.Fatalf("output = %q, want %q", output.String(), tc.wantOutput)
-			}
-		})
+
+		}
 
 		if testing.Short() {
 			continue

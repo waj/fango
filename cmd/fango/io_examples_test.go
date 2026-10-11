@@ -30,7 +30,6 @@ func TestFileExampleFailures(t *testing.T) {
 				t.Skip("symlink fixture needs Unix")
 			}
 			path := filepath.Join("..", "..", "examples", tc.example+".fango")
-			prog, executor := compileWithWorker(t, path)
 			seed := func() string {
 				dir := t.TempDir()
 				var err error
@@ -46,23 +45,27 @@ func TestFileExampleFailures(t *testing.T) {
 				}
 				return dir
 			}
-			env := eval.NewEnv()
-			env.DefineProg(prog)
-			var output bytes.Buffer
-			ioctx := eval.NewIOContext(strings.NewReader(""), &output)
-			ioctx.Dir, ioctx.Args, ioctx.Natives = seed(), tc.args, executor
-			_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
-			var exit *natives.ExitError
-			if !errors.As(err, &exit) || exit.Code != 1 || output.String() != tc.want {
-				t.Fatalf("interpreter = %v, %q", err, output.String())
+			if interpreterTestsEnabled() {
+				prog, executor := compileWithWorker(t, path)
+				env := eval.NewEnv()
+				env.DefineProg(prog)
+				var output bytes.Buffer
+				ioctx := eval.NewIOContext(strings.NewReader(""), &output)
+				ioctx.Dir, ioctx.Args, ioctx.Natives = seed(), tc.args, executor
+				_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+				var exit *natives.ExitError
+				if !errors.As(err, &exit) || exit.Code != 1 || output.String() != tc.want {
+					t.Fatalf("interpreter = %v, %q", err, output.String())
+				}
 			}
+
 			if testing.Short() {
 				return
 			}
 			cmd := exec.Command(cliCompiledBinary(t, path), tc.args...)
 			var compiled, errorOutput bytes.Buffer
 			cmd.Dir, cmd.Stdout, cmd.Stderr = seed(), &compiled, &errorOutput
-			err = cmd.Run()
+			err := cmd.Run()
 			var compiledExit *exec.ExitError
 			if !errors.As(err, &compiledExit) || compiledExit.ExitCode() != 1 || compiled.String() != tc.want || errorOutput.Len() != 0 {
 				t.Fatalf("compiled = %v, %q, stderr %q", err, compiled.String(), errorOutput.String())

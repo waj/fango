@@ -23,48 +23,50 @@ import (
 // always uses the race detector, even when the parent test did not.
 func TestConcurrentSharedListBackends(t *testing.T) {
 	path := filepath.Join("..", "..", "testdata", "run", "c6d_shared_list.fango")
-	var diagnostics bytes.Buffer
-	program, _, ok := compileFile(path, &diagnostics)
-	if !ok {
-		t.Fatalf("compile: %s", diagnostics.String())
-	}
-	var extend *core.Def
-	for i := range program.Defs {
-		if program.Defs[i].Name == "extend" {
-			extend = &program.Defs[i]
-			break
+	if interpreterTestsEnabled() {
+		var diagnostics bytes.Buffer
+		program, _, ok := compileFile(path, &diagnostics)
+		if !ok {
+			t.Fatalf("compile: %s", diagnostics.String())
 		}
-	}
-	if extend == nil {
-		t.Fatal("missing extend worker")
-	}
-	fn := extend.Type.(*types.TFun)
-	env := eval.NewEnv()
-	env.DefineProg(program)
-	const children = 64
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	for i := range children {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-start
-			call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: extend.Name, Ty: extend.Type},
-				Args: []core.Expr{&core.IntLit{Val: int64(i), Ty: fn.Arg}}, Ty: fn.Ret,
-				Control: core.ArrowControl(extend.Type, 1)}
-			value, err := eval.Eval(context.Background(), call, env, io.Discard)
-			if err != nil {
-				t.Errorf("interpreter child %d: %v", i, err)
-				return
+		var extend *core.Def
+		for i := range program.Defs {
+			if program.Defs[i].Name == "extend" {
+				extend = &program.Defs[i]
+				break
 			}
-			list, ok := value.(fangort.List[any])
-			if !ok || list.IsEmpty() || list.Head() != int64(i) || list.Tail().Head() != int64(1) {
-				t.Errorf("interpreter child %d: %v", i, value)
-			}
-		}(i)
+		}
+		if extend == nil {
+			t.Fatal("missing extend worker")
+		}
+		fn := extend.Type.(*types.TFun)
+		env := eval.NewEnv()
+		env.DefineProg(program)
+		const children = 64
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i := range children {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: extend.Name, Ty: extend.Type},
+					Args: []core.Expr{&core.IntLit{Val: int64(i), Ty: fn.Arg}}, Ty: fn.Ret,
+					Control: core.ArrowControl(extend.Type, 1)}
+				value, err := eval.Eval(context.Background(), call, env, io.Discard)
+				if err != nil {
+					t.Errorf("interpreter child %d: %v", i, err)
+					return
+				}
+				list, ok := value.(fangort.List[any])
+				if !ok || list.IsEmpty() || list.Head() != int64(i) || list.Tail().Head() != int64(1) {
+					t.Errorf("interpreter child %d: %v", i, value)
+				}
+			}(i)
+		}
+		close(start)
+		wg.Wait()
 	}
-	close(start)
-	wg.Wait()
 	if testing.Short() {
 		return
 	}
@@ -131,31 +133,34 @@ func TestConcurrentSharedHandlerStateBackends(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var diagnostics bytes.Buffer
-			program, _, _, _, sources, ok := compileFileGraph(path, &diagnostics)
-			if !ok {
-				t.Fatalf("compile: %s", diagnostics.String())
+			if interpreterTestsEnabled() {
+				var diagnostics bytes.Buffer
+				program, _, _, _, sources, ok := compileFileGraph(path, &diagnostics)
+				if !ok {
+					t.Fatalf("compile: %s", diagnostics.String())
+				}
+				env := eval.NewEnv()
+				env.DefineProg(program)
+				workerSources := make([]nativehost.Source, len(sources))
+				for i, source := range sources {
+					workerSources[i] = nativehost.Source{Module: source.Module, Content: source.Content}
+				}
+				executor, err := nativehost.New(workerSources)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer executor.Close()
+				var out bytes.Buffer
+				ioctx := eval.NewIOContext(strings.NewReader(""), &out)
+				ioctx.Natives = executor
+				if _, err := eval.ForceIO(context.Background(), program.Entry, env, ioctx); err != nil {
+					t.Fatalf("interpreter: %v", err)
+				}
+				if out.String() != string(expected) {
+					t.Fatalf("interpreter output %q, want %q", out.String(), expected)
+				}
 			}
-			env := eval.NewEnv()
-			env.DefineProg(program)
-			workerSources := make([]nativehost.Source, len(sources))
-			for i, source := range sources {
-				workerSources[i] = nativehost.Source{Module: source.Module, Content: source.Content}
-			}
-			executor, err := nativehost.New(workerSources)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer executor.Close()
-			var out bytes.Buffer
-			ioctx := eval.NewIOContext(strings.NewReader(""), &out)
-			ioctx.Natives = executor
-			if _, err := eval.ForceIO(context.Background(), program.Entry, env, ioctx); err != nil {
-				t.Fatalf("interpreter: %v", err)
-			}
-			if out.String() != string(expected) {
-				t.Fatalf("interpreter output %q, want %q", out.String(), expected)
-			}
+
 			if testing.Short() {
 				return
 			}

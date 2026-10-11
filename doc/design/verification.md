@@ -8,12 +8,12 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 
 | Command | Purpose |
 | --- | --- |
-| make test | Correctness, including full interpreter/compiler differential tests |
-| make test-suite | Combined Test framework suite and library documentation examples under both backends, with one compiled executable |
-| make test-short | Short-mode tests without compiled differential legs |
+| make test | Go unit tests and compiled Fango integration tests |
+| make test-suite | Combined Test framework suite and library documentation examples in one compiled executable |
+| make test-short | Short-mode Go tests and interpreter integration legs without compiled legs |
 | make test-grammar | TextMate tokenization of every .fango file under stdlib, testdata, and examples |
 | make check-files | Reject executable or oversized files in the Git index |
-| make ci | Indexed-file check, Go/Fango formatting, go vet, and correctness |
+| make ci | Indexed-file check, Go/Fango formatting, go vet, Go unit tests, and full interpreter/compiler differential checks |
 | make update-goldens | Intentional lexer/parser/infer/elaborate/REPL/formatter golden updates |
 | go vet ./benchmarks | Build-check benchmarks without timing them |
 | go test -race ./runtime/fangort ./runtime/nativeworker ./internal/eval ./internal/nativehost ./stdlib/... | Race checks for shared storage, callback drain, native hosts, and bundled adapters |
@@ -24,6 +24,15 @@ Timing gates are excluded from correctness and CI. Do not run them during ordina
 development. Syntax changes also require `make test-grammar`, whose Node and grammar
 packages come from the Nix development shell; see
 [repository instructions](../../AGENTS.md). No documentation change weakens these gates.
+
+The command package's integration harness reads `FANGO_TEST_BACKENDS`:
+`compiled` runs generated executables; `both` also executes Core and compares
+the results. An unset value defaults to `both`, and invalid values fail the run.
+`make test` and `make test-suite` explicitly select `compiled`; `make ci`
+explicitly selects `both`, including when the caller's environment selects
+compiled execution. Short mode retains interpreter integration checks and skips
+compiled legs. Go unit tests for the interpreter, REPL, and native host still
+run in ordinary correctness commands; the selection controls integration legs.
 
 `make check-files` keeps build outputs out of history: no indexed file outside
 `.githooks/` may be executable or exceed 512 KiB. `fango build` writes its
@@ -36,9 +45,10 @@ shell, and `make ci` repeats it in case the hook was bypassed.
 
 Lexer, parser, inference, elaboration, and REPL use unit tests/goldens. Compatible
 language and library checks are importable [Test suites](../../testdata/suite/Main.fango).
-The [combined harness](../../cmd/fango/suite_test.go) loads them as one Fango graph,
-executes Core once, and, outside short mode, builds and runs one executable through
-the real CLI. Both reports must match the complete passing summary byte-for-byte.
+The [combined harness](../../cmd/fango/suite_test.go) builds and runs one executable
+through the real CLI. Differential mode also loads the Fango graph and executes
+Core once; short mode executes only Core. Each selected backend's report must
+match the complete passing summary byte-for-byte.
 The harness checks that every test module is imported and pins the case count so
 omitting a case cannot silently pass. Each module also has its own `main`, so
 `fango run testdata/suite/NAME.fango` runs just that module.
@@ -57,8 +67,8 @@ helpers with closed effect budgets, keeping the runner's aborting `Expect` effec
 out of task rows. The existing Dict and String suites keep their expectations
 and groups.
 
-Standalone runnable fixtures retain exact stdout and exit-status comparisons under
-both backends. They cover entry-point contracts, report formatting, isolated
+Standalone runnable fixtures retain exact stdout and exit-status checks under
+the selected backends. They cover entry-point contracts, report formatting, isolated
 stdin/argv/files, and sources used by generated-code, Core, race, or cache probes.
 Multi-module source-root checks and executable examples keep their isolated CLI
 runners. Invalid fixtures pin diagnostic substrings. Focused checker/elaboration
@@ -101,9 +111,10 @@ startup failure. Later connections and request IO retain their shorter deadlines
 
 The remaining standalone runnable fixtures share one generated Go project: each
 entry has its own package, shared dependencies are emitted once and asserted byte-identical across consumers,
-and one Go build creates fixture binaries. The build overlaps interpreter legs;
-compiled cases then run in parallel. Examples/multi-module runners compile through
-the real CLI once per runner, preserving isolation when temporary sources change.
+and one Go build creates fixture binaries. In differential mode the build overlaps
+interpreter legs; compiled cases then run in parallel. Examples/multi-module
+runners compile through the real CLI once per runner, preserving isolation when
+temporary sources change.
 Dedicated command tests cover the run wrapper.
 
 Interpreter legs are serialized because native workers/host contexts are process-level

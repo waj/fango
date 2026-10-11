@@ -43,7 +43,7 @@ main() = Test.run suite
 	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prog, executor := compileWithWorker(t, path)
+	prog, executor := compileInterpreterProgram(t, path)
 	const usage = "Usage: tests [--format console|progress|documentation|silent] [--json PATH] [--help]\n"
 	const failures = "FAIL  suite > nested > fails \"é\"\n\n    line one\n    line \"two\"\n\nFAIL  suite > empty\n\n    The group has no tests.\n\n"
 	const summary = "TEST RUN FAILED\n\nPassed:  1\nFailed:  2\nSkipped: 1\nTodo:    1\n"
@@ -76,7 +76,7 @@ main() = Test.run suite
 		{"write failure", []string{"--format", "silent", "--json", "missing/report.json"}, "Test.run: JSON report: missing/report.json: no such file or directory\n", 2, true, false},
 	}
 	for _, tc := range cases {
-		for _, backend := range []string{"interpreter", "compiled"} {
+		for _, backend := range executionTestBackends() {
 			t.Run(tc.name+"/"+backend, func(t *testing.T) {
 				if backend == "compiled" && testing.Short() {
 					t.Skip("compiled leg")
@@ -180,8 +180,8 @@ func TestReporterJSONVerdicts(t *testing.T) {
 			if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			prog, executor := compileWithWorker(t, path)
-			for _, backend := range []string{"interpreter", "compiled"} {
+			prog, executor := compileInterpreterProgram(t, path)
+			for _, backend := range executionTestBackends() {
 				t.Run(backend, func(t *testing.T) {
 					if backend == "compiled" && testing.Short() {
 						t.Skip("compiled leg")

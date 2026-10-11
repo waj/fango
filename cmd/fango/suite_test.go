@@ -9,9 +9,9 @@ import (
 )
 
 // The language/library checks and documentation examples share one Fango
-// graph, one interpreter run, and one compiled executable. The remaining run
-// fixtures exercise diagnostics, entry contracts, isolated process inputs, or
-// source shapes consumed by the structural tests.
+// graph and one compiled executable. Differential mode also executes Core.
+// The remaining run fixtures exercise diagnostics, entry contracts, isolated
+// process inputs, or source shapes consumed by the structural tests.
 func TestSuite(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join("..", "..", "testdata", "suite")
@@ -75,5 +75,6 @@ func TestSuite(t *testing.T) {
 	// must not leave the gate green. Documentation cases are generated above.
 	expected := fmt.Sprintf("TEST RUN PASSED\n\nPassed:  %d\nFailed:  0\nSkipped: 0\nTodo:    0\n", 309+cases)
 	t.Logf("309 regression cases and %d documentation cases (%d assertions) in one executable", cases, assertions)
+	t.Logf("execution backends: %s", strings.Join(executionTestBackends(), ", "))
 	runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{}, expected)
 }

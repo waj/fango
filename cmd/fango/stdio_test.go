@@ -37,26 +37,39 @@ func compileWithWorker(t *testing.T, path string) (*core.Prog, *nativehost.Execu
 	return prog, executor
 }
 
+// Avoid graph compilation and worker setup for compiled-only integration runs.
+// Interpreter-specific unit tests continue to call compileWithWorker directly.
+func compileInterpreterProgram(t *testing.T, path string) (*core.Prog, *nativehost.Executor) {
+	t.Helper()
+	if !interpreterTestsEnabled() {
+		return nil, nil
+	}
+	return compileWithWorker(t, path)
+}
+
 func TestStandardStreams(t *testing.T) {
 	path := filepath.Join("testdata", "stdio.fango")
-	prog, executor := compileWithWorker(t, path)
 	input := "ab\r\n\xfftail\nlast"
 	wantOutput := "[97]\nb:\"\\r\\n\"\n[255]\ntail:\"\\n\"\nTrue\nlast:\"\"\nTrue\nout\nstdout:Other\nstdin:Other\n[\"one\", \"two\"]\n"
 	wantError := "err\n\xff\x00A"
-	// Retain memoized standard handles in the same environment across sessions.
-	env := eval.NewEnv()
-	env.DefineProg(prog)
-	for range 2 {
-		var output, errorOutput bytes.Buffer
-		ioctx := eval.NewIOContext(strings.NewReader(input), &output)
-		ioctx.ErrorWriter, ioctx.Args, ioctx.Natives = &errorOutput, []string{"one", "two"}, executor
-		_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
-		var exit *natives.ExitError
-		if !errors.As(err, &exit) || exit.Code != 0 {
-			t.Fatalf("interpreter exit = %v", err)
-		}
-		if output.String() != wantOutput || errorOutput.String() != wantError {
-			t.Fatalf("streams = %q / %q", output.String(), errorOutput.String())
+
+	if interpreterTestsEnabled() {
+		prog, executor := compileWithWorker(t, path)
+		// Retain memoized standard handles in the same environment across sessions.
+		env := eval.NewEnv()
+		env.DefineProg(prog)
+		for range 2 {
+			var output, errorOutput bytes.Buffer
+			ioctx := eval.NewIOContext(strings.NewReader(input), &output)
+			ioctx.ErrorWriter, ioctx.Args, ioctx.Natives = &errorOutput, []string{"one", "two"}, executor
+			_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+			var exit *natives.ExitError
+			if !errors.As(err, &exit) || exit.Code != 0 {
+				t.Fatalf("interpreter exit = %v", err)
+			}
+			if output.String() != wantOutput || errorOutput.String() != wantError {
+				t.Fatalf("streams = %q / %q", output.String(), errorOutput.String())
+			}
 		}
 	}
 	if testing.Short() {

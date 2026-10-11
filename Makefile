@@ -43,15 +43,15 @@ install-lib:
 		done; \
 	done
 
-# The correctness suite: deterministic, asserting nothing about elapsed time.
-# This includes the full compiler/interpreter differential suite.
+# Go unit tests and compiled Fango integration tests. Interpreter/compiler
+# comparisons are added by ci; interpreter-specific Go unit tests still run.
 test:
-	go test -parallel 16 $$(go list ./... | grep -v benchmarks)
+	FANGO_TEST_BACKENDS=compiled go test -parallel 16 $$(go list ./... | grep -v benchmarks)
 
 # The compatible language/library cases and documentation examples share one
-# compiled executable and one interpreter run. Included in test and ci.
+# compiled executable. CI also executes it through the interpreter.
 test-suite:
-	go test ./cmd/fango -run '^TestSuite$$' -count=1 -v
+	FANGO_TEST_BACKENDS=compiled go test ./cmd/fango -run '^TestSuite$$' -count=1 -v
 
 # The TextMate grammar in editors/vscode/ encodes exact lexer rules, so a
 # change to the surface syntax must be re-checked against it: this tokenizes
@@ -100,7 +100,7 @@ ci: check-files
 	test -z "$$(gofmt -l .)"
 	go run ./cmd/fango fmt -l $(FANGO_SOURCES)
 	go vet ./...
-	go test -parallel 16 $$(go list ./... | grep -v benchmarks)
+	FANGO_TEST_BACKENDS=both go test -parallel 16 $$(go list ./... | grep -v benchmarks)
 
 clean:
 	rm -f fango

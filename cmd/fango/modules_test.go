@@ -53,28 +53,31 @@ func testMultiModule(t *testing.T, fixture string) {
 
 func testMultiModuleEntry(t *testing.T, entry, want string) {
 	t.Helper()
-	var stderr bytes.Buffer
-	prog, ck, ok := compileFile(entry, &stderr)
-	if !ok {
-		t.Fatalf("compile: %s", stderr.String())
-	}
-	env := eval.NewEnv()
-	env.DefineProg(prog)
-	_ = ck
-	var shown any
-	err := withInterpreter(func() error {
-		if _, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{})); err != nil {
-			return err
+	if interpreterTestsEnabled() {
+		var stderr bytes.Buffer
+		prog, ck, ok := compileFile(entry, &stderr)
+		if !ok {
+			t.Fatalf("compile: %s", stderr.String())
 		}
-		var err error
-		shown, err = eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.TrimSpace(shown.(string)); got != strings.TrimSpace(string(want)) {
-		t.Fatalf("interpreter got %q, want %q", got, want)
+		env := eval.NewEnv()
+		env.DefineProg(prog)
+		_ = ck
+		var shown any
+		err := withInterpreter(func() error {
+			if _, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{})); err != nil {
+				return err
+			}
+			var err error
+			shown, err = eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSpace(shown.(string)); got != strings.TrimSpace(string(want)) {
+			t.Fatalf("interpreter got %q, want %q", got, want)
+		}
+
 	}
 
 	if testing.Short() {
@@ -453,32 +456,35 @@ import Hash
 main() = print (Hash.twice (Hash.constant (print "before")))
 `)
 	var stderr bytes.Buffer
-	prog, ck, _, _, sources, ok := compileFileGraph(entry, &stderr)
-	if !ok {
-		t.Fatalf("compile: %s", stderr.String())
-	}
-	env := eval.NewEnv()
-	env.DefineProg(prog)
-	workerSources := make([]nativehost.Source, len(sources))
-	for i, source := range sources {
-		workerSources[i] = nativehost.Source{Module: source.Module, Content: source.Content}
-	}
-	executor, err := nativehost.New(workerSources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer executor.Close()
-	var interpreted bytes.Buffer
-	ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
-	ioctx.Natives = executor
-	if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil || interpreted.String() != "before\n84\n" {
-		t.Fatalf("interpreter output %q, err %v", interpreted.String(), err)
-	}
-	probe := &core.App{CalleeKind: core.Worker,
-		Callee: &core.VarRef{Name: "Hash.probe", Ty: ck.Natives["Hash.tick"].Scheme.Body},
-		Args:   []core.Expr{&core.UnitLit{Ty: ck.B.Unit}}, Ty: ck.B.Int}
-	if got, err := eval.EvalIO(context.Background(), probe, env, ioctx); err != nil || got != int64(42) {
-		t.Fatalf("native effect = %v, %v", got, err)
+	if interpreterTestsEnabled() {
+		prog, ck, _, _, sources, ok := compileFileGraph(entry, &stderr)
+		if !ok {
+			t.Fatalf("compile: %s", stderr.String())
+		}
+		env := eval.NewEnv()
+		env.DefineProg(prog)
+		workerSources := make([]nativehost.Source, len(sources))
+		for i, source := range sources {
+			workerSources[i] = nativehost.Source{Module: source.Module, Content: source.Content}
+		}
+		executor, err := nativehost.New(workerSources)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer executor.Close()
+		var interpreted bytes.Buffer
+		ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
+		ioctx.Natives = executor
+		if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil || interpreted.String() != "before\n84\n" {
+			t.Fatalf("interpreter output %q, err %v", interpreted.String(), err)
+		}
+		probe := &core.App{CalleeKind: core.Worker,
+			Callee: &core.VarRef{Name: "Hash.probe", Ty: ck.Natives["Hash.tick"].Scheme.Body},
+			Args:   []core.Expr{&core.UnitLit{Ty: ck.B.Unit}}, Ty: ck.B.Int}
+		if got, err := eval.EvalIO(context.Background(), probe, env, ioctx); err != nil || got != int64(42) {
+			t.Fatalf("native effect = %v, %v", got, err)
+		}
+
 	}
 
 	buildDir := filepath.Join(root, "build")

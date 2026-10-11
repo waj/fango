@@ -61,34 +61,37 @@ main() =
 		}
 		return []byte(strings.Replace(text, before, after, 1))
 	}
-	var diagnostics bytes.Buffer
-	p, _, _, _, sources, ok := compileFileGraph(path, &diagnostics)
-	if !ok {
-		t.Fatal(diagnostics.String())
-	}
-	var workerSources []nativehost.Source
-	for _, source := range sources {
-		content := source.Content
-		content = inject(source.Module, content)
-		workerSources = append(workerSources, nativehost.Source{Module: source.Module, Content: content})
-	}
-	executor, err := nativehost.New(workerSources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer executor.Close()
-	env := eval.NewEnv()
-	env.DefineProg(p)
-	var interpreted bytes.Buffer
-	ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
-	ioctx.Dir, ioctx.Natives = t.TempDir(), executor
-	if _, err := eval.ForceIO(context.Background(), "main", env, ioctx); err != nil {
-		t.Fatal(err)
-	}
 	want := "output.txt: injected write failure\noutput.txt: injected close failure\n"
-	if interpreted.String() != want {
-		t.Fatalf("interpreter: %q, want %q", interpreted.String(), want)
+	if interpreterTestsEnabled() {
+		var diagnostics bytes.Buffer
+		p, _, _, _, sources, ok := compileFileGraph(path, &diagnostics)
+		if !ok {
+			t.Fatal(diagnostics.String())
+		}
+		var workerSources []nativehost.Source
+		for _, source := range sources {
+			content := source.Content
+			content = inject(source.Module, content)
+			workerSources = append(workerSources, nativehost.Source{Module: source.Module, Content: content})
+		}
+		executor, err := nativehost.New(workerSources)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer executor.Close()
+		env := eval.NewEnv()
+		env.DefineProg(p)
+		var interpreted bytes.Buffer
+		ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
+		ioctx.Dir, ioctx.Natives = t.TempDir(), executor
+		if _, err := eval.ForceIO(context.Background(), "main", env, ioctx); err != nil {
+			t.Fatal(err)
+		}
+		if interpreted.String() != want {
+			t.Fatalf("interpreter: %q, want %q", interpreted.String(), want)
+		}
 	}
+
 	if testing.Short() {
 		return
 	}

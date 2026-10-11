@@ -45,7 +45,7 @@ func TestAsyncUnsupportedInheritedAbort(t *testing.T) {
 func testAsyncRejectedBeforeUserCode(t *testing.T, source string) {
 	t.Helper()
 	path := writeModuleFile(t, t.TempDir(), "Main.fango", source)
-	for _, backend := range []string{"interpreter", "compiled"} {
+	for _, backend := range executionTestBackends() {
 		t.Run(backend, func(t *testing.T) {
 			var cmd *exec.Cmd
 			if backend == "compiled" {
