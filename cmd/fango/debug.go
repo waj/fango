@@ -48,7 +48,7 @@ func prepareDebug(args []string, stderr io.Writer) (string, []string, int) {
 		binary = build.BinaryPath(dir, program)
 		data, err := os.ReadFile(binary)
 		if err == nil {
-			err = nativedebug.WriteManifest(binary, data, session.debugSources, session.debugScopes, session.debugTypes)
+			err = nativedebug.WriteManifest(binary, session.debugEntryModule, data, session.debugSources, session.debugScopes, session.debugTypes)
 		}
 		if err != nil {
 			fmt.Fprintf(stderr, "fango debug: %v\n", err)

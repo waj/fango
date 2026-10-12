@@ -37,11 +37,11 @@ func (r *scopedRPC) Call(method string, in, out any) error {
 }
 
 func TestFrameInspectionAndHandleLifetime(t *testing.T) {
-	c, rpc := controller(stop{frames: []Frame{frame("parent", 1, 2)}})
-	rpc.frames = []Frame{frame("child", 2, 1), frame("parent", 1, 2)}
+	c, rpc := controller(stop{frames: []Frame{frame("main.V_parent", 1, 2)}})
+	rpc.frames = []Frame{frame("main.V_child", 2, 1), {Location: Location{File: "<fango-generated>", Function: &Function{Name: "main.wrapper"}}}, frame("main.V_parent", 1, 2)}
 	r := &scopedRPC{fakeRPC: rpc, values: map[int]map[string]variable{
 		0: {"v_x": {Type: "main.Box"}, "(v_x).F0": scalar("", "int64", "10")},
-		1: {"v_x": scalar("", "int64", "20")},
+		2: {"v_x": scalar("", "int64", "20")},
 	}}
 	c.RPC = r
 	c.Manifest.Types = map[string]debugger.NativeType{"main.Box": {Kind: "constructor", Constructors: []debugger.NativeConstructor{{Name: "Box", Fields: []debugger.NativeField{{Runtime: "F0"}}}}}}
@@ -83,7 +83,7 @@ func TestFrameInspectionAndHandleLifetime(t *testing.T) {
 		}
 	}
 	execute(debugsession.Request{Kind: "raw", RawCommand: "print", Arg: "v_x"})
-	if r.scopes[len(r.scopes)-1] != 1 {
+	if r.scopes[len(r.scopes)-1] != 2 {
 		t.Fatal("raw did not use selected frame")
 	}
 	page := execute(debugsession.Request{Kind: "expand", Handle: value.Handle})

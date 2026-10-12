@@ -124,11 +124,26 @@ reject stale frame operations; deferred responses carry their originating
 epoch. Public handles map to backend handles only for the current pause and
 are never reused within a session. Resume, cancellation, completion, and
 termination discard them before further execution. Frame selection is local
-to the session; inspection and next/finish receive the selected backend frame
-index. Native stop snapshots include the bounded Delve stack, so frame
-selection works without a preceding `stack` request. Frame indexes preserve
-Delve's native stack, including generated frames; raw inspection can access
-frames without source scope metadata.
+to the session; inspection and next/finish receive the selected visible frame
+index. Native stop snapshots include source frames from the bounded Delve
+stack, so selection works without a preceding `stack` request. The native
+adapter maps visible indexes back to Delve indexes for inspection and caller
+stepping. It replaces this mapping only after a successful stack read and
+clears it on resume, a new stop, or termination. Expansion handles retain
+their original native activation independently of this mapping.
+
+Native source frames are those whose locations belong to the manifest's
+source snapshots. Names use `fangort.DemangleWithEntryModule`, sharing the
+runtime trace decoder and the interpreter's source symbol spelling. The
+manifest records the entry module for decoding callbacks in package `main`
+without changing the debugger process's runtime module. Missing symbols use
+an explicit unknown-function label; source activations are never merged just
+because their names and locations match. Frames outside Fango snapshots are
+hidden, except the actual top frame at a native/generated stop, which remains
+an explicit native boundary. This preserves the true execution point. Closure
+names follow runtime traces and do not distinguish source lambdas from every
+lowering callback. `raw stack` returns a separate native-stack event without
+changing the source frame list, selection, or inspection handles.
 
 Resume failures must provide an authoritative state event or leave the session
 in an unknown state, where inspection and execution are rejected. The native
@@ -192,8 +207,8 @@ passes; no target-side stepping hooks or debugger dependency are emitted.
 
 `internal/nativedebug` reads linked DWARF statement entries and writes the
 binary-adjacent manifest with source snapshots, executable lines, binding
-scopes with expression spans, representation layouts, a format version, and
-the binary digest. The frontend validates that identity before
+scopes with expression spans, representation layouts, the entry module, a
+format version, and the binary digest. The frontend validates that identity before
 launching Delve over a private Unix socket. Source excerpts come from the
 snapshots. Delve resolves file/line locations to relocated addresses, including
 multiple generic instantiations.

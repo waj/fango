@@ -7,11 +7,16 @@ import (
 
 	"github.com/waj/fango/internal/debugger"
 	"github.com/waj/fango/internal/debugsession"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 // SessionBackend adapts Delve without owning terminal IO or its child process.
 // The launcher remains responsible for terminating the child on session exit.
-type SessionBackend struct{ Controller *Controller }
+type SessionBackend struct {
+	Controller *Controller
+	// Visible frame indexes map to actual Delve activations for this pause.
+	nativeFrames []int
+}
 
 func (b *SessionBackend) Capabilities() debugsession.Capabilities {
 	return debugsession.Capabilities{Name: "native", Frame: true, Expand: true, Args: true, Raw: true, Interrupt: true}
@@ -37,6 +42,7 @@ func (b *SessionBackend) location(file string, line int) debugsession.Location {
 func (b *SessionBackend) Snapshot() debugsession.Event {
 	c := b.Controller
 	c.handles = nil
+	b.nativeFrames = nil
 	if c.State.Exited {
 		return debugsession.Event{Kind: "terminated", Reason: "exited", ExitStatus: c.State.ExitStatus}
 	}
@@ -63,14 +69,44 @@ func (b *SessionBackend) frames() ([]debugsession.Frame, error) {
 		return nil, err
 	}
 	var result []debugsession.Frame
-	for _, f := range frames {
-		name := "?"
-		if f.Function != nil {
-			name = f.Function.Name
+	var indexes []int
+	for i, f := range frames {
+		_, source := b.Controller.Manifest.Sources[f.File]
+		// Keep a native stop visible instead of attributing its PC to a caller.
+		if !source && i != 0 {
+			continue
+		}
+		name := "<unknown Fango function>"
+		if !source {
+			name = "<native> " + nativeFrameName(f)
+		} else if symbol, ok := fangort.DemangleWithEntryModule(nativeFrameName(f), b.Controller.Manifest.EntryModule); ok {
+			name = symbol.String()
 		}
 		result = append(result, debugsession.Frame{Name: name, Location: b.location(f.File, f.Line)})
+		indexes = append(indexes, i)
 	}
+	// Publish only a complete stack; failed refreshes retain the old mapping.
+	b.nativeFrames = indexes
 	return result, nil
+}
+
+func nativeFrameName(f Frame) string {
+	if f.Function == nil {
+		return "?"
+	}
+	return f.Function.Name
+}
+
+func (b *SessionBackend) nativeFrame(index int) (int, error) {
+	if b.nativeFrames == nil {
+		if _, err := b.frames(); err != nil {
+			return 0, err
+		}
+	}
+	if index < 0 || index >= len(b.nativeFrames) {
+		return 0, fmt.Errorf("source frame %d is unavailable", index)
+	}
+	return b.nativeFrames[index], nil
 }
 
 func (b *SessionBackend) breakpoint(bp Breakpoint) debugsession.Breakpoint {
@@ -80,7 +116,18 @@ func (b *SessionBackend) breakpoint(bp Breakpoint) debugsession.Breakpoint {
 func (b *SessionBackend) Execute(req debugsession.Request) (debugsession.Event, error) {
 	c := b.Controller
 	switch req.Kind {
+	case "next", "finish", "locals", "args", "print", "raw":
+		if req.Kind != "raw" || req.RawCommand != "stack" {
+			frame, err := b.nativeFrame(req.Frame)
+			if err != nil {
+				return debugsession.Event{}, err
+			}
+			req.Frame = frame
+		}
+	}
+	switch req.Kind {
 	case "continue", "step", "next", "finish":
+		b.nativeFrames = nil
 		err := c.moveFrame(req.Kind, req.Frame)
 		if err != nil {
 			var out struct{ State State }
@@ -95,6 +142,7 @@ func (b *SessionBackend) Execute(req debugsession.Request) (debugsession.Event, 
 		return b.Snapshot(), err
 	case "quit":
 		c.handles = nil
+		b.nativeFrames = nil
 		return debugsession.Event{Kind: "terminated", Reason: "quit"}, nil
 	case "break":
 		bp, err := c.Break(fmt.Sprintf("%s:%d", req.File, req.Line))
@@ -131,6 +179,17 @@ func (b *SessionBackend) Execute(req debugsession.Request) (debugsession.Event, 
 		values, more, err := c.expand(req.Handle, req.Offset)
 		return debugsession.Event{Kind: "inspection", Variables: values, More: more}, err
 	case "raw":
+		if req.RawCommand == "stack" {
+			frames, err := c.Frames()
+			if err != nil {
+				return debugsession.Event{}, err
+			}
+			event := debugsession.Event{Kind: "raw-frames"}
+			for _, f := range frames {
+				event.Frames = append(event.Frames, debugsession.Frame{Name: nativeFrameName(f), Location: b.location(f.File, f.Line)})
+			}
+			return event, nil
+		}
 		values, err := c.rawVariables(req.RawCommand, req.Arg, req.Frame)
 		return debugsession.Event{Kind: "raw", Raw: values}, err
 	case "sources":

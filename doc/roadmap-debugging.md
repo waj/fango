@@ -48,8 +48,8 @@ Native frame selection, caller stepping, and paged value expansion follow the
 
 Remaining steps:
 
-- Close capability gaps, including source stack names, source type labels
-  on native expansion children, and consistent argument/local views. Advertise
+- Close capability gaps, including source type labels on native expansion
+  children and consistent argument/local views. Advertise
   supported operations explicitly instead of silently approximating unsupported ones.
 - Reuse this session API for the editor adapter described under
   [delivery](#delivery-and-verification).
@@ -94,9 +94,11 @@ to interpreter sessions rather than an invalid native fixture.
 
 Evaluate Delve [path substitution](https://github.com/go-delve/delve/blob/master/Documentation/cli/substitutepath.md)
 and actual stop paths. Keep [native variable presentation](#native-variable-presentation),
-synthetic-frame filtering and Fango watch expressions separate from
-source-stepping support. A native launch limitation does not block interpreter
-debugging.
+finer source-lambda attribution for lowering callbacks, and Fango watch
+expressions separate from source-stepping support. Source stack naming and
+generated-frame filtering follow the
+[native inspection contract](reference/native-debugging.md#inspection-and-limits).
+A native launch limitation does not block interpreter debugging.
 
 ## Native variable presentation
 

@@ -89,6 +89,12 @@ func SetEntryModule(name string) { entryModule = name }
 // `main.V_main.func1`. Functions outside generated Fango packages, and the
 // package-level plumbing inside them, are not symbols.
 func Demangle(goFunction string) (Symbol, bool) {
+	return DemangleWithEntryModule(goFunction, entryModule)
+}
+
+// DemangleWithEntryModule decodes a symbol for an external program without
+// changing the runtime entry module of this process.
+func DemangleWithEntryModule(goFunction, entryModule string) (Symbol, bool) {
 	name := stripInstantiation(goFunction)
 	pkgPath, local := name, ""
 	if i := strings.LastIndexByte(name, '/'); i >= 0 {

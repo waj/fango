@@ -38,9 +38,9 @@ Backend capabilities and execution semantics still differ:
 | --- | --- | --- |
 | `args` | Parameters are included in locals | Separate argument view |
 | `locals` | Parameters, lexical locals, and captures | Locals and captures, excluding values classified as arguments |
-| `raw args`, `raw locals`, `raw print EXPR` | Not yet supported | Go-level inspection |
+| `raw stack`, `raw args`, `raw locals`, `raw print EXPR` | Not yet supported | Go-level inspection |
 | `stop` | Cancel the current input and return to the REPL | Not supported |
-| `stack` | Fango source frames | Native frames, including generated frames |
+| `stack` | Fango source frames | Fango source frames; explicit native boundary when stopped outside Fango |
 | Ctrl-C | Cancel the current input | Interrupt execution |
 | `quit` | Cancel the input, end handler levels, and leave the REPL | Terminate the launched process |
 

@@ -142,7 +142,7 @@ func (s *Session) Accept(event Event) Event {
 	if event.Kind != "stopped" && event.Kind != "running" && event.Kind != "completed" && event.Kind != "terminated" && event.Epoch != 0 && event.Epoch != s.epoch {
 		return Event{Kind: "error", Error: "stale debug response", Epoch: s.epoch}
 	}
-	if (event.Kind == "inspection" || event.Kind == "frames" || event.Kind == "raw") && s.state != "stopped" {
+	if (event.Kind == "inspection" || event.Kind == "frames" || event.Kind == "raw" || event.Kind == "raw-frames") && s.state != "stopped" {
 		return Event{Kind: "error", Error: "debugger is not stopped", Epoch: s.epoch}
 	}
 	switch event.Kind {
@@ -284,7 +284,7 @@ func (s *Session) validate(r Request) error {
 			if r.Arg == "" {
 				return fmt.Errorf("missing raw expression")
 			}
-		case "args", "locals":
+		case "args", "locals", "stack":
 			if r.Arg != "" {
 				return fmt.Errorf("raw %s takes no arguments", r.RawCommand)
 			}

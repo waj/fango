@@ -253,7 +253,7 @@ func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	if session.debugEnabled() {
-		if err := nativedebug.WriteManifest(dest, data, session.debugSources, session.debugScopes, session.debugTypes); err != nil {
+		if err := nativedebug.WriteManifest(dest, session.debugEntryModule, data, session.debugSources, session.debugScopes, session.debugTypes); err != nil {
 			fmt.Fprintf(stderr, "fango: %v\n", err)
 			return 1
 		}

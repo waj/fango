@@ -86,3 +86,16 @@ func TestNativeFile(t *testing.T) {
 		t.Fatalf("nativeFile = %q", got)
 	}
 }
+
+func TestDemangleExternalEntryModule(t *testing.T) {
+	for _, module := range []string{"First", "Second", ""} {
+		symbol, ok := DemangleWithEntryModule("main.init.func1", module)
+		if !ok || symbol.Module != module || symbol.Function != "<lambda>" {
+			t.Fatal(symbol, ok)
+		}
+	}
+	symbol, ok := Demangle("main.init.func1")
+	if !ok || symbol.Module != entryModule {
+		t.Fatal("external decoding changed runtime entry module", symbol)
+	}
+}

@@ -27,7 +27,7 @@ func Interpreter() Features {
 }
 func Native() Features {
 	return Features{Capabilities: debugsession.Capabilities{Name: "native", Frame: true, Expand: true, Args: true, Raw: true, Interrupt: true},
-		Quit: "terminate the launched process", Stack: "list native frames, including generated frames",
+		Quit: "terminate the launched process", Stack: "list source frames",
 		Locals: "inspect locals and captures", Interrupt: "interrupt execution"}
 }
 
@@ -49,7 +49,7 @@ var commands = []commandSpec{
 	{"locals", "", "locals", ""},
 	{"print", "", "print NAME", "inspect one binding (expressions are not evaluated)"},
 	{"expand", "", "expand HANDLE [OFFSET]", "inspect up to 50 children"},
-	{"raw", "", "raw args | locals | print EXPR", "inspect Go names and read-only Go expressions"},
+	{"raw", "", "raw stack | args | locals | print EXPR", "inspect native frames, Go names and read-only Go expressions"},
 	{"stop", "", "stop", "cancel this input and return to the REPL"},
 	{"quit", "q", "quit", ""},
 	{"help", "h", "help", "list debugger commands"},
@@ -140,7 +140,7 @@ func Parse(text string, features Features) (Command, error) {
 		cmd.RawCommand = args[0]
 		cmd.Arg = strings.TrimSpace(cmd.Arg[len(args[0]):])
 		switch cmd.RawCommand {
-		case "args", "locals":
+		case "args", "locals", "stack":
 			if len(args) != 1 {
 				return usage()
 			}

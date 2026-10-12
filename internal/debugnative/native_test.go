@@ -376,6 +376,15 @@ func probeNativeInspection(t *testing.T, c *nativedebug.Controller, line string)
 		}
 		return e
 	}
+	rawStack := execute(debugsession.Request{Kind: "raw", RawCommand: "stack"})
+	if len(rawStack.Frames) <= len(stop.Frames) {
+		t.Fatalf("generated frames not filtered: %+v", stop.Frames)
+	}
+	for _, f := range stop.Frames {
+		if _, ok := c.Manifest.Sources[f.Location.File]; !ok || strings.Contains(f.Name, "V_") || strings.Contains(f.Name, "<unknown") {
+			t.Fatalf("not a source frame: %+v", f)
+		}
+	}
 	binding := "value"
 	if line == "Values.fango:53" {
 		binding = "items"
@@ -389,7 +398,7 @@ func probeNativeInspection(t *testing.T, c *nativedebug.Controller, line string)
 	if line == "Values.fango:28" {
 		caller := -1
 		for i, f := range stop.Frames {
-			if i > 0 && strings.Contains(f.Name, "V_Values_dot_run") && f.Location.File == "Values.fango" {
+			if i > 0 && f.Name == "Values.run" && f.Location.File == "Values.fango" {
 				caller = i
 				break
 			}
@@ -467,7 +476,7 @@ func probeCallerStep(t *testing.T, client *rpc.Client, binary, mode string) {
 	event := s.Accept(b.Snapshot())
 	caller := -1
 	for i, frame := range event.Frames {
-		if i > 0 && strings.Contains(frame.Name, "V_Values_dot_run") && frame.Location.File == "Values.fango" {
+		if i > 0 && frame.Name == "Values.run" && frame.Location.File == "Values.fango" {
 			caller = i
 			break
 		}

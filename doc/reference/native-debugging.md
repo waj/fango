@@ -103,10 +103,21 @@ source line or use the raw view to investigate.
 
 `raw args`, `raw locals`, and `raw print EXPR` retain Go names, types, and
 read-only Go expressions. Inspection does not inject target function calls.
-`stack` lists native frames, including generated frames, with zero-based
-indexes for `frame INDEX`. All source and raw inspection commands use the
-selected frame. A generated/native frame without Fango scope metadata reports
-that explicitly; its raw view remains available.
+`stack` lists Fango source frames with zero-based indexes for `frame INDEX`.
+Function names use Fango spelling, including modules, operators, local functions,
+and instance methods. Closures use their enclosing function's `(lambda)` label,
+or `<lambda>` for shared callbacks; native lowering can still produce multiple
+such activations. Recursive activations remain separate even at the same line.
+Generated and runtime frames are hidden. If execution stops outside Fango,
+frame zero remains explicitly `<native>` with its actual native location,
+followed by the available Fango callers.
+
+`raw stack` displays the complete native stack with Go function names and
+`native #N` indexes for investigation. Those indexes are diagnostic only;
+`frame INDEX` always uses the source stack's indexes. Viewing the raw stack
+leaves the selection unchanged. All source and raw variable inspection commands
+use the selected frame. A native boundary without Fango scope metadata reports
+that explicitly; its raw variable view remains available.
 
 Source inspection uses the [shared structural preview rules](debugger-commands.md#structural-value-previews),
 including for generic source types. Native decoding reads memory without

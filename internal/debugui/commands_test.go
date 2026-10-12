@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/debugsession"
 )
 
 func TestCommonCommandGrammar(t *testing.T) {
@@ -44,7 +45,7 @@ func TestCapabilitiesAndHelp(t *testing.T) {
 		yes, no []string
 	}{
 		{Interpreter(), []string{"frame 0", "expand 1 50", "stop"}, []string{"args", "raw print x"}},
-		{Native(), []string{"args", "raw print x + 1", "raw locals", "frame 0", "expand 1"}, []string{"stop"}},
+		{Native(), []string{"args", "raw print x + 1", "raw locals", "raw stack", "frame 0", "expand 1"}, []string{"stop"}},
 	} {
 		var out bytes.Buffer
 		Help(&out, tc.f)
@@ -63,7 +64,7 @@ func TestCapabilitiesAndHelp(t *testing.T) {
 			}
 		}
 	}
-	for _, text := range []string{"raw locals extra", "raw print", "raw next", "frame -1", "expand 0", "expand 1 -1", "expand 1 2 extra"} {
+	for _, text := range []string{"raw locals extra", "raw stack extra", "raw print", "raw next", "frame -1", "expand 0", "expand 1 -1", "expand 1 2 extra"} {
 		f := Interpreter()
 		if strings.HasPrefix(text, "raw") {
 			f = Native()
@@ -106,5 +107,13 @@ func TestPresentation(t *testing.T) {
 	want := "items : List Int = [1, 2] [handle 7]\nbreakpoint 3: Main.fango:4 (verified)\n#0 main at Main.fango:4:2\n"
 	if out.String() != want {
 		t.Fatalf("%s", &out)
+	}
+}
+
+func TestRawStackPresentation(t *testing.T) {
+	var out bytes.Buffer
+	(&Terminal{Out: &out}).Present(debugsession.Event{Kind: "raw-frames", Frames: []debugsession.Frame{{Name: "main.V_main", Location: Location{File: "Main.fango", Line: 3}}}})
+	if want := "native #0 main.V_main at Main.fango:3\n"; out.String() != want {
+		t.Fatalf("got %q, want %q", out.String(), want)
 	}
 }

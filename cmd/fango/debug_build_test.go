@@ -14,7 +14,7 @@ import (
 )
 
 func TestDebugBuildFlagsAndCacheSwitching(t *testing.T) {
-	entry := writeEntry(t, "main() = print 42\n")
+	entry := writeEntry(t, "module Main exposing (main)\nmain() = print 42\n")
 	binary := filepath.Join(filepath.Dir(entry), "out")
 	for _, tc := range []struct {
 		name        string
@@ -47,6 +47,10 @@ func TestDebugBuildFlagsAndCacheSwitching(t *testing.T) {
 			}
 			want := ""
 			if tc.debug {
+				metadata, err := nativedebug.ReadManifest(binary)
+				if err != nil || metadata.EntryModule != "Main" {
+					t.Fatalf("entry module metadata: %+v, %v", metadata, err)
+				}
 				want = "all=-N -l"
 			}
 			if flags != want {
@@ -90,7 +94,7 @@ func TestNativeDebugProfileIsolationAndSourceSnapshots(t *testing.T) {
 			t.Fatalf("missing debug statement %d: %v", line, m.Lines["Main.fango"])
 		}
 	}
-	if m.Sources["Main.fango"] != source {
+	if m.Sources["Main.fango"] != source || m.EntryModule != "" {
 		t.Fatal("incorrect source snapshot")
 	}
 	debugSource, err := os.ReadFile(filepath.Join(root, ".fango", "build", "debug", "entries", "Main", "main.go"))
@@ -130,7 +134,7 @@ func TestNativeDebugProfileIsolationAndSourceSnapshots(t *testing.T) {
 }
 
 func TestDebugSourceLaunchPreparation(t *testing.T) {
-	entry := writeEntry(t, "main() = print 42\n")
+	entry := writeEntry(t, "module Main exposing (main)\nmain() = print 42\n")
 	var stderr bytes.Buffer
 	binary, args, code := prepareDebug([]string{"-v", entry, "--", "--program-option", "value"}, &stderr)
 	if code != 0 {

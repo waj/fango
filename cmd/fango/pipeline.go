@@ -28,13 +28,14 @@ type stageEvent = compileevent.Event
 // observer, Go build flags, and whether to bypass the persistent cache. A
 // session with no observer costs the pipeline nothing.
 type compilationSession struct {
-	observe      compileevent.Observer
-	noCache      bool
-	goBuildFlags []string
-	debug        bool
-	debugSources map[string]string
-	debugScopes  []debugger.NativeScope
-	debugTypes   map[string]debugger.NativeType
+	observe          compileevent.Observer
+	noCache          bool
+	goBuildFlags     []string
+	debug            bool
+	debugEntryModule string
+	debugSources     map[string]string
+	debugScopes      []debugger.NativeScope
+	debugTypes       map[string]debugger.NativeType
 }
 
 func (s *compilationSession) debugEnabled() bool { return s != nil && s.debug }
@@ -133,6 +134,9 @@ func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Wr
 	for i, unit := range loadedUnits {
 		units[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source, Debug: session.debugEnabled()}
 		if unit.Entry {
+			if session.debugEnabled() {
+				session.debugEntryModule = unit.Name
+			}
 			program = unit.Program
 		}
 	}

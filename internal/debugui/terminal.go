@@ -60,6 +60,10 @@ func (t *Terminal) Present(event debugsession.Event) {
 		for i, frame := range event.Frames {
 			t.frame(i, frame, false)
 		}
+	case "raw-frames":
+		for i, frame := range event.Frames {
+			fmt.Fprintf(t.Out, "native #%d %s at %s\n", i, frame.Name, frame.Location)
+		}
 	case "frame":
 		if len(event.Frames) > 0 {
 			t.frame(event.Index, event.Frames[0], true)
