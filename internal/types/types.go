@@ -387,6 +387,10 @@ const (
 // CtorInfo is one constructor's row in the constructor table (doc/design.md, "Type inference"), shared
 // by pattern checking, exhaustiveness checking, and codegen.
 type CtorInfo struct {
+	// Hidden are constructor-local existential binders. They may occur in
+	// Fields but never in Result. Construction supplies witnesses; a pattern
+	// opens them with fresh abstract types shared by all of its fields.
+	Hidden          []*TVar
 	Attributes      []AttributeInfo
 	FieldAttributes [][]AttributeInfo
 	Name            string
@@ -413,6 +417,10 @@ func (c *CtorInfo) ValueType() Type {
 // vars (empty for monomorphic types); constructor Fields and Result are
 // expressed over them.
 type ADTInfo struct {
+	// RepresentationOf identifies a compiler-only typed storage mirror. Its
+	// additional parameters describe storage; observable type identity is the
+	// original nominal type with only its public arguments.
+	RepresentationOf  *ADTInfo
 	Attributes        []AttributeInfo
 	AttributesPending bool
 	NativeIndexed     bool // phantom native handle; its representation cannot be opened by Fango
@@ -447,6 +455,15 @@ type RecordFieldInfo struct {
 }
 
 func (a *ADTInfo) IsRecord() bool { return a.RecordFields != nil }
+
+func (a *ADTInfo) HasHidden() bool {
+	for _, ctor := range a.Ctors {
+		if len(ctor.Hidden) > 0 {
+			return true
+		}
+	}
+	return false
+}
 
 func (a *ADTInfo) RecordField(name string) (int, *RecordFieldInfo) {
 	for i := range a.RecordFields {
@@ -533,6 +550,22 @@ func (a *ADTInfo) InstFields(c *CtorInfo, args []Type) []Type {
 		fields[i] = SubstRigid(f, m)
 	}
 	return fields
+}
+
+func (a *ADTInfo) InstHiddenFields(c *CtorInfo, args, witnesses []Type) []Type {
+	fields := a.InstFields(c, args)
+	if len(c.Hidden) == 0 {
+		return fields
+	}
+	m := make(map[int]Type, len(c.Hidden))
+	for i, hidden := range c.Hidden {
+		m[hidden.ID] = witnesses[i]
+	}
+	out := make([]Type, len(fields))
+	for i, field := range fields {
+		out[i] = SubstRigid(field, m)
+	}
+	return out
 }
 
 // CtorNamed returns the constructor with the given name, or nil.

@@ -95,6 +95,23 @@ async function main() {
   assert(rowScopeAt(rowArgument.indexOf("|")).includes("keyword.operator.pipe.fango"));
   assert(rowScopeAt(rowArgument.indexOf("}")).includes("punctuation.definition.effect-row.end.fango"));
 
+  for (const sample of [
+    'withBytes : Bytes -> (Reader {s | e} ->{s | e} a) ->{e} a',
+    'closed : (Reader {s | {}} ->{s | {}} a) ->{} a',
+    'guarded : (Reader {s | e} ->{Fail String, s | e} a) ->{e} Result String a',
+  ]) {
+    const tokens = grammar.tokenizeLine(sample).tokens;
+    for (const match of sample.matchAll(/s \| (e|\{\})/g)) {
+      const at = index => tokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+      assert(at(match.index).includes('variable.other.generic-type.scope.fango'));
+      assert(at(match.index + 2).includes('keyword.operator.pipe.fango'));
+      if (match[1] === 'e') assert(at(match.index + 4).includes('variable.other.generic-type.fango'));
+      else assert(at(match.index + 4).some(s => s.includes('effect-row.begin')));
+    }
+  }
+  assert(grammar.tokenizeLine('read : () ->{State state | e} Int').tokens.every(
+    t => !t.scopes.includes('variable.other.generic-type.scope.fango')));
+
   const pragma = grammar.tokenizeLine('{-# resource #-}').tokens;
   assert(pragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   const scopedPragma = grammar.tokenizeLine('{-# scoped s #-}').tokens;
@@ -244,6 +261,15 @@ async function main() {
     const result = grammar.tokenizeLine(line, incompleteBlockStack);
     assert(!result.stoppedEarly);
     incompleteBlockStack = result.ruleStack;
+  }
+
+  // Constructor-local types use ordinary variable spelling inside fields.
+  const hiddenDeclaration = "type Source a = { initial : state, step : state -> Maybe (a, state) }";
+  const hiddenTokens = grammar.tokenizeLine(hiddenDeclaration).tokens;
+  assert(hiddenTokens.find(t => t.startIndex === 0).scopes.includes("keyword.other.type.fango"));
+  for (const match of hiddenDeclaration.matchAll(/state/g)) {
+    const token = hiddenTokens.find(t => t.startIndex <= match.index && t.endIndex > match.index);
+    assert(token.scopes.includes("variable.other.generic-type.fango"));
   }
 
   const root = path.resolve(__dirname, "../../..");

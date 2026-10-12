@@ -30,6 +30,10 @@ func (in *interp) typeDescriptor(t types.Type, fr *Frame) (*fangort.TypeDescript
 		}
 		return fangort.NominalType(name, false, args...), nil
 	case *types.TCon:
+		if adt := in.env.adts[t.Unique]; adt != nil && adt.RepresentationOf != nil {
+			original := adt.RepresentationOf
+			return in.typeDescriptor(&types.TCon{Unique: original.Con.Unique, Name: original.Con.Name, Args: t.Args[:len(original.Params)]}, fr)
+		}
 		args := make([]*fangort.TypeDescriptor, len(t.Args))
 		for i, arg := range t.Args {
 			descriptor, err := in.typeDescriptor(arg, fr)

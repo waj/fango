@@ -33,3 +33,13 @@ func TestInspectionChecksEveryConstructorAndNestedTypeArgument(t *testing.T) {
 		t.Fatal("unused resource-bearing constructor ignored")
 	}
 }
+
+func TestInspectionRejectsExistentialStorage(t *testing.T) {
+	sup := &Supply{}
+	hidden := sup.FreshRigid(General)
+	con := &TCon{Name: "Box", Unique: sup.NextUnique()}
+	adt := &ADTInfo{Con: con, Ctors: []*CtorInfo{{Name: "Box", Result: con, Fields: []Type{hidden}, Hidden: []*TVar{hidden}}}}
+	if InspectionShapeSafe(con, map[int]*ADTInfo{con.Unique: adt}) {
+		t.Fatal("hidden storage may contain resources or callbacks")
+	}
+}

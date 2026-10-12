@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/waj/fango/internal/core"
@@ -75,5 +76,33 @@ func TestFailureDescriptorsDistinguishNominalGenerations(t *testing.T) {
 	}
 	if _, ok := fangort.FailureArgument[Value](0, snapshot, after); ok {
 		t.Fatal("new generation matched an old payload")
+	}
+}
+
+func TestStorageDescriptorPreservesPublicIdentity(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	a, h := sup.FreshRigid(types.General), sup.FreshRigid(types.General)
+	original := &types.ADTInfo{Con: &types.TCon{Unique: sup.NextUnique(), Name: "Module.Box"}, Params: []*types.TVar{a}}
+	original.Ctors = []*types.CtorInfo{{Name: "Module.Box", Result: original.Con, Fields: []types.Type{h}, Hidden: []*types.TVar{h}}}
+	mirror := &types.ADTInfo{Con: &types.TCon{Unique: sup.NextUnique(), Name: "Module._storage_Box"}, Params: []*types.TVar{a, h}, RepresentationOf: original}
+	adts := map[int]*types.ADTInfo{original.Con.Unique: original, mirror.Con.Unique: mirror}
+	public := &types.TCon{Unique: original.Con.Unique, Name: original.Con.Name, Args: []types.Type{b.Int}}
+	// Deliberately leave the storage witness unbound. Its descriptor must
+	// neither be consulted nor appear in the source nominal identity.
+	storage := &types.TCon{Unique: mirror.Con.Unique, Name: mirror.Con.Name, Args: []types.Type{b.Int, h}}
+	env := NewEnv()
+	env.adts = adts
+	in := &interp{env: env}
+	want, err := in.typeDescriptor(public, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := in.typeDescriptor(storage, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("storage descriptor changed public identity: %#v versus %#v", got, want)
 	}
 }

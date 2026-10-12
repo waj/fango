@@ -42,6 +42,22 @@ func (ck *Checker) checkScopedDeclaration(d *ast.ValueDecl, ty types.Type, tv *T
 	if len(args) != arity {
 		return fail("The annotation must match the runner's parameter count.")
 	}
+	if d.ScopedBase != "" {
+		outer := ty
+		var final *types.TFun
+		for range arity {
+			final = outer.(*types.TFun)
+			outer = final.Ret
+		}
+		base := tv.vars[d.ScopedBase]
+		if d.ScopedBase == "{}" {
+			if final.Eff.Tail != nil {
+				return fail("The closed scoped base `{}` requires a closed final arrow effect row.")
+			}
+		} else if base == nil || base.Kind != types.RowVar || !types.Equal(final.Eff.Tail, base) {
+			return fail("The ambient row after `|` must be the tail of the runner's final arrow effects.")
+		}
+	}
 	index := types.ScopedParameterIndex(ty, arity, v)
 	if index < 0 {
 		return fail("Exactly one callback must perform the scoped row as its tail.")
@@ -194,7 +210,7 @@ func (g *generator) scopedCall(e *ast.App, name string, sch types.Scheme) types.
 }
 
 func (g *generator) checkScopeBoundaries() []diag.Error {
-	var errs []diag.Error
+	errs := g.checkHiddenBoundaries()
 	for _, c := range g.scopeObligations {
 		if c.Scope != nil {
 			errs = append(errs, c.Scope.check(g.ck.Sub, c.Span)...)

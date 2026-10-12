@@ -342,8 +342,7 @@ stub respond action =
 --
 -- greeting == Ok "hello"
 -- ```
-{-# scoped s #-}
-mock : (Server.Request {Protocol | s} ->{Protocol | s} Server.Response {Protocol | s}) -> (() ->{Http | e} a) ->{e} a
+mock : (Server.Request {Protocol, s | e} ->{Protocol, s | e} Server.Response {Protocol, s | e}) -> (() ->{Http | e} a) ->{e} a
 mock handler action =
     config = Server.defaultConfig 0
     answer bytes =
@@ -494,8 +493,7 @@ drainQuietly body =
 
 -- Scopes the body of a response whose head was read to `action`, and reports
 -- whether the connection can serve another request.
-{-# scoped s #-}
-responseBody : Url -> Bool -> Bool -> Int -> Head -> Reader {Fail Error | e} -> (Response s ->{s} a) ->{Protocol, Fail Error | e} (a, Bool)
+responseBody : Url -> Bool -> Bool -> Int -> Head -> Reader {Fail Error | e} -> (Response {s | e} ->{s | e} a) ->{Protocol, Fail Error | e} (a, Bool)
 responseBody target headRequest decode headerLimit head input action =
     bodyFraming =
         if headRequest || head.status == 204 || head.status == 304 then NoBody
@@ -516,8 +514,7 @@ responseBody target headRequest decode headerLimit head input action =
 -- HEAD, and a 204 or 304, has no body; any other is framed by Content-Length,
 -- chunked encoding, or the connection closing. With `decode`, a gzip body is
 -- decompressed and loses the headers that described its encoded form.
-{-# scoped s #-}
-withResponse : Url -> Bool -> Bool -> Int -> Reader {Fail Error | e} -> (Response s ->{s} a) ->{Protocol, Fail Error | e} a
+withResponse : Url -> Bool -> Bool -> Int -> Reader {Fail Error | e} -> (Response {s | e} ->{s | e} a) ->{Protocol, Fail Error | e} a
 withResponse target headRequest decode headerLimit input action =
     head = readHead input headerLimit
     (value, _) = responseBody target headRequest decode headerLimit head input action
@@ -578,8 +575,7 @@ reused connection =
         Memory _ -> False
 
 -- Sends one request to `target`. `hops` redirects were followed before it.
-{-# scoped s #-}
-exchange : Config -> Request {Http, Fail Error | e} -> Url -> Bool -> Int -> Bool -> (Response s ->{s} a) ->{Http, Fail Error | e} Step a
+exchange : Config -> Request {Http, Fail Error | e} -> Url -> Bool -> Int -> Bool -> (Response {s | e} ->{s | e} a) ->{Http, Fail Error | e} Step a
 exchange config outgoing target crossOrigin hops fresh action =
     endpoint = endpointOf config target fresh
     defaults = [Header { name = "User-Agent", value = config.userAgent } | if config.decompress then [Header { name = "Accept-Encoding", value = "gzip" }] else []]
@@ -651,8 +647,7 @@ exchange config outgoing target crossOrigin hops fresh action =
 -- accepted, and a body that ends early fails with `Malformed` when read. A
 -- request body that fails partway closes the connection, and its failure
 -- reaches the caller unchanged. Any status is a normal response.
-{-# scoped s #-}
-send : Request {Http, Fail Error | e} -> (Response s ->{s} a) ->{Http, Fail Error | e} a
+send : Request {Http, Fail Error | e} -> (Response {s | e} ->{s | e} a) ->{Http, Fail Error | e} a
 send outgoing action =
     config = currentConfig()
     checkHeaders config.headers

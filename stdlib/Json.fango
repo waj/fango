@@ -274,7 +274,7 @@ emitObject entries first =
 --
 -- Tuple.second written == Bytes.fromString "[\"a\",\"b\"]"
 -- ```
-array : Encode a => Stream state a {Emit, Fail Error | e} ->{Emit, Fail Error | e} ()
+array : Encode a => Stream a {Emit, Fail Error | e} ->{Emit, Fail Error | e} ()
 array items =
     emit "["
     ignore (Stream.fold { item first ->

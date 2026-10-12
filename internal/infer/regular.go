@@ -66,6 +66,7 @@ func (ck *Checker) checkRegularity(batch map[*ast.TypeDecl]*types.ADTInfo) []dia
 					sp = td.Ctors[i].Args[j].Span()
 				}
 				errs = append(errs, ck.checkRegularOccurrences(f, adt, members, reaches, sp)...)
+				errs = append(errs, ck.checkHiddenFieldKinds(f, c, sp)...)
 			}
 		}
 	}

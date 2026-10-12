@@ -133,6 +133,9 @@ func (ck *Checker) DeriveDecl(td *ast.TypeDecl) ([]DeclInfo, []diag.Error) {
 		return nil, errs
 	}
 	adt := ck.ADTs[con.Unique]
+	if len(td.Deriving) > 0 && adt.HasHidden() {
+		return nil, []diag.Error{diag.Errorf(td.NameSpan, "CANNOT DERIVE", "Type `%s` contains constructor-local hidden types. Automatic deriving cannot assume class instances for those types.", types.SurfaceName(td.Name))}
+	}
 	for _, derive := range td.Deriving {
 		cl := ck.Classes[derive.Name]
 		if cl == nil {

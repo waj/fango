@@ -50,8 +50,11 @@ type RowArgument struct {
 }
 
 type Def struct {
-	Scoped      bool // SourceType binds the selected callback row universally
-	ScopedParam int  // zero-based callback parameter position
+	// RepresentationWorker names an internal variant whose extra type parameters
+	// retain hidden storage types. It is an ABI contract, not a source binding.
+	RepresentationWorker string
+	Scoped               bool // SourceType binds the selected callback row universally
+	ScopedParam          int  // zero-based callback parameter position
 
 	Name  string
 	Owner string     // defining source module; empty for headerless files and REPL inputs
@@ -428,12 +431,15 @@ const (
 type App struct {
 	DebugInfo
 
-	SourceType   types.Type
-	Origin       source.Span
-	CalleeKind   CalleeKind
-	Callee       Expr
-	Args         []Expr
-	TyArgs       []types.Type
+	SourceType types.Type
+	Origin     source.Span
+	CalleeKind CalleeKind
+	Callee     Expr
+	Args       []Expr
+	TyArgs     []types.Type
+	// Witnesses instantiate the constructor's hidden binders at a pack.
+	// They do not become arguments of the public result type.
+	Witnesses    []types.Type
 	Ty           types.Type
 	EvidenceArgs []EffectInstance
 	Row          *RowArgument
@@ -486,9 +492,12 @@ type SwitchCtor struct {
 }
 
 type CtorCase struct {
-	Ctor  *types.CtorInfo
-	Binds []string // one per field; "" = unused in the subtree
-	Tree  Tree
+	// Hidden are fresh abstract binders scoped over this case's fields and
+	// subtree. A branch's result must not mention them.
+	Hidden []*types.TVar
+	Ctor   *types.CtorInfo
+	Binds  []string // one per field; "" = unused in the subtree
+	Tree   Tree
 }
 
 // SwitchLit discriminates on literal equality (Int, Float, String, or Char

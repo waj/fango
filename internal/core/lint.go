@@ -43,6 +43,9 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
+	for _, adt := range p.ADTs {
+		l.hiddenDeclaration(adt)
+	}
 	for _, eff := range p.Effects {
 		if old := l.effects[eff.Unique]; old != nil {
 			l.errorf("effect unique %d is shared by `%s` and `%s`", eff.Unique, old.Name, eff.Name)
@@ -1053,6 +1056,9 @@ func (l *linter) expr(e Expr, where string) {
 			}
 		}
 	case *App:
+		if e.CalleeKind != Ctor && len(e.Witnesses) != 0 {
+			l.errorf("%s: hidden witnesses on a non-constructor call", where)
+		}
 		if con, ok := e.Ty.(*types.TCon); ok && (con.Name == types.FailureTypeName) && e.CalleeKind == Ctor {
 			l.errorf("%s: opaque failure snapshot constructed as an ordinary ADT", where)
 		}
@@ -1214,7 +1220,14 @@ func (l *linter) expr(e Expr, where string) {
 					l.errorf("%s: App{Ctor} `%s` type arg %d disagrees with its result type", where, e.Ctor.Name, i+1)
 				}
 			}
-			fields := l.runtimeInstFields(adt, e.Ctor, result.Args)
+			if len(e.Witnesses) != len(e.Ctor.Hidden) {
+				l.errorf("%s: constructor hidden witness count mismatch", where)
+				return
+			}
+			for _, w := range e.Witnesses {
+				l.typ(w, where)
+			}
+			fields := l.runtimeInstHiddenFields(adt, e.Ctor, result.Args, e.Witnesses)
 			for i, a := range e.Args {
 				if !EqualValueRepresentation(a.Type(), fields[i]) {
 					l.errorf("%s: App{Ctor} `%s` arg %d typed %s, want %s",
@@ -1456,10 +1469,33 @@ func (l *linter) tree(t Tree, want types.Type, where string) {
 					where, c.Ctor.Name, len(c.Binds), len(c.Ctor.Fields))
 				continue
 			}
+			if len(c.Hidden) != len(c.Ctor.Hidden) {
+				l.errorf("%s: constructor hidden binder count mismatch", where)
+				continue
+			}
+			var hiddenIDs []int
+			validHidden := true
+			witnesses := make([]types.Type, len(c.Hidden))
+			for i, v := range c.Hidden {
+				if v == nil || !v.Rigid || v.Kind != types.General || l.tyParams[v.ID] {
+					l.errorf("%s: constructor opening needs fresh ordinary rigid binders", where)
+					validHidden = false
+					continue
+				}
+				l.tyParams[v.ID] = true
+				hiddenIDs = append(hiddenIDs, v.ID)
+				witnesses[i] = v
+			}
+			if !validHidden {
+				for _, id := range hiddenIDs {
+					delete(l.tyParams, id)
+				}
+				continue
+			}
 			var bound []string
 			var fields []types.Type
 			if scrut, ok := l.localTypes[t.Scrut].(*types.TCon); ok && scrut.Unique == t.ADT.Con.Unique && len(scrut.Args) == len(t.ADT.Params) {
-				fields = l.runtimeInstFields(t.ADT, c.Ctor, scrut.Args)
+				fields = l.runtimeInstHiddenFields(t.ADT, c.Ctor, scrut.Args, witnesses)
 			}
 			for i, bind := range c.Binds {
 				if bind == "" {
@@ -1475,6 +1511,9 @@ func (l *linter) tree(t Tree, want types.Type, where string) {
 				bound = append(bound, bind)
 			}
 			l.tree(c.Tree, want, where)
+			for _, id := range hiddenIDs {
+				delete(l.tyParams, id)
+			}
 			for _, bind := range bound {
 				delete(l.scope, bind)
 				delete(l.localTypes, bind)
@@ -1854,16 +1893,6 @@ func (l *linter) runtimeType(t types.Type) types.Type {
 	}
 }
 
-func (l *linter) runtimeInstFields(adt *types.ADTInfo, c *types.CtorInfo, args []types.Type) []types.Type {
-	// InstFields returns the constructor's own field list for a type with no
-	// parameters, which the declaration shares with every reader.
-	fields := append([]types.Type(nil), adt.InstFields(c, args)...)
-	for i := range fields {
-		fields[i] = l.runtimeType(fields[i])
-	}
-	return fields
-}
-
 func rowEvidence(r types.Row) []EffectInstance {
 	var out []EffectInstance
 	for _, l := range types.SortedRow(r).Labels {
@@ -1872,4 +1901,46 @@ func rowEvidence(r types.Row) []EffectInstance {
 		}
 	}
 	return out
+}
+
+func (l *linter) runtimeInstHiddenFields(adt *types.ADTInfo, c *types.CtorInfo, args, witnesses []types.Type) []types.Type {
+	fields := append([]types.Type(nil), adt.InstHiddenFields(c, args, witnesses)...)
+	for i := range fields {
+		fields[i] = l.runtimeType(fields[i])
+	}
+	return fields
+}
+
+// The declaration is proof data too: hidden binders belong only to their
+// constructor fields and cannot masquerade as public result parameters.
+func (l *linter) hiddenDeclaration(adt *types.ADTInfo) {
+	if !adt.HasHidden() {
+		return
+	}
+	public := map[int]bool{}
+	for _, p := range adt.Params {
+		public[p.ID] = true
+	}
+	for _, c := range adt.Ctors {
+		local := map[int]bool{}
+		for _, v := range c.Hidden {
+			if v == nil || !v.Rigid || v.Kind != types.General || public[v.ID] || local[v.ID] {
+				l.errorf("type %s: invalid hidden constructor binder", adt.Con.Name)
+				continue
+			}
+			local[v.ID] = true
+		}
+		for _, v := range types.RigidVarsIn(c.Result) {
+			if !public[v.ID] {
+				l.errorf("type %s: hidden type in constructor result", adt.Con.Name)
+			}
+		}
+		for _, f := range c.Fields {
+			for _, v := range types.RigidVarsIn(f) {
+				if !public[v.ID] && !local[v.ID] {
+					l.errorf("type %s: unbound constructor field type", adt.Con.Name)
+				}
+			}
+		}
+	}
 }

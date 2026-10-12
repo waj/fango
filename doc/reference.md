@@ -67,7 +67,9 @@ defines the default scope.
 
 ## Algebraic data types and matching
 
-[Algebraic data types and matching](reference/types.md) — Records, unions, lists, tuples, deriving, and patterns.
+[Algebraic data types and matching](reference/types.md) — Records, unions,
+[hidden state](reference/types.md#hidden-state-types), lists, tuples, deriving,
+and patterns.
 
 ## Effectful function types
 

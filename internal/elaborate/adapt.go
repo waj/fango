@@ -74,6 +74,11 @@ func (el *elab) adaptNominalValue(e core.Expr, want, sourceActual, sourceWant ty
 	sourceFromSub, sourceToSub := adt.ParamSubst(sourceFrom.Args), adt.ParamSubst(sourceTo.Args)
 	tree := &core.SwitchCtor{Scrut: matched, ADT: adt}
 	for _, ctor := range adt.Ctors {
+		hidden := el.freshHidden(ctor)
+		for i, v := range ctor.Hidden {
+			fromSub[v.ID], toSub[v.ID] = hidden[i], hidden[i]
+			sourceFromSub[v.ID], sourceToSub[v.ID] = hidden[i], hidden[i]
+		}
 		binds := make([]string, len(ctor.Fields))
 		args := make([]core.Expr, len(ctor.Fields))
 		var ctorTy types.Type = to
@@ -89,7 +94,7 @@ func (el *elab) adaptNominalValue(e core.Expr, want, sourceActual, sourceWant ty
 			ctorTy = &types.TFun{Arg: fields[i], Ret: ctorTy}
 		}
 		body := el.ctorCallee(ctor, ctorTy).saturatedApp(args)
-		tree.Cases = append(tree.Cases, core.CtorCase{Ctor: ctor, Binds: binds, Tree: &core.Leaf{Body: body}})
+		tree.Cases = append(tree.Cases, core.CtorCase{Ctor: ctor, Hidden: hidden, Binds: binds, Tree: &core.Leaf{Body: body}})
 	}
 	body := &core.Case{Scrut: &core.VarRef{Name: param, Local: true, Ty: from}, Bind: matched, Tree: tree, Ty: to}
 	lambda := &core.Lambda{Param: param, Body: body, Ty: fn, ParamCapture: el.ck.Sup.FreshCapture()}

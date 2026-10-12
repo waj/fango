@@ -130,6 +130,40 @@ func TestAllocationSlope(t *testing.T) {
 	}
 }
 
+func TestStreamFoldAllocatesNoObjectsPerElement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiled allocation check")
+	}
+	source := filepath.Join("..", "..", "benchmarks", "existentialcompare", "workload.fango")
+	project := filepath.Join(t.TempDir(), "generated")
+	cmd := exec.Command(cliBinary(t), "build", "--emit-go", "-o", project, source)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("emit: %v\n%s", err, out)
+	}
+	test := `package main
+import "testing"
+var streamAllocationSink int64
+func TestStreamFoldAllocationSlope(t *testing.T) {
+ for _, n := range []int64{0, 1, 10000} {
+  source := V__storage_scalar(false, n)
+  allocations := testing.AllocsPerRun(20, func(){streamAllocationSink=V__storage_sum[int64](nil, source)})
+  want := n*(n+1)/2
+  if streamAllocationSink != want || allocations != 0 {
+   t.Fatalf("n=%d: checksum %d want %d; allocations %.0f want 0",n,streamAllocationSink,want,allocations)
+  }
+ }
+}
+`
+	if err := os.WriteFile(filepath.Join(project, "entries", "workload", "allocation_test.go"), []byte(test), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("go", "test", "-count=1", "./entries/workload")
+	cmd.Dir = project
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("allocation check: %v\n%s", err, out)
+	}
+}
+
 func TestOptimizedAndGeneralLoweringAgree(t *testing.T) {
 	testLoweringAgreement(t, "backend_lowering")
 }
@@ -193,5 +227,29 @@ func testLoweringAgreement(t *testing.T, stem string) {
 		if err != nil || !bytes.Equal(out, want) {
 			t.Fatalf("disabled=%t: %v\n%s\nwant %s", disabled, err, out, want)
 		}
+	}
+}
+
+func TestHiddenPackageAllocations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiled allocation check")
+	}
+	source := filepath.Join("..", "..", "benchmarks", "existentialcompare", "compiler.fango")
+	project := filepath.Join(t.TempDir(), "generated")
+	cmd := exec.Command(cliBinary(t), "build", "--emit-go", "-o", project, source)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("emit: %v\n%s", err, out)
+	}
+	test, err := os.ReadFile(filepath.Join("..", "..", "benchmarks", "existentialcompare", "compiler_test.go.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "entries", "compiler", "allocation_test.go"), test, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("go", "test", "-count=1", "./entries/compiler")
+	cmd.Dir = project
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("allocation check: %v\n%s", err, out)
 	}
 }

@@ -13,9 +13,13 @@ local modules, and an experimental library
 shipped beside it. Generated representations and calls aim to stay close to ordinary Go.
 Laziness, self-hosting, and a package manager are not implemented. The Fango
 compiler's own optimization is limited to scalar specialization and
-[inlining](design/core.md#inlining) of small first-order pure workers.
+[inlining](design/core.md#inlining) of small pure workers and bounded unfolding
+of hidden-package factories and consumers, plus internal typed storage workers.
 
 ## Language semantics
+
+[Hidden constructor types](design/hidden-types.md) — abstract state, Core proofs,
+package cancellation, and runtime storage.
 
 [Pipeline and resolution](design/pipeline.md) — strict sequencing, source scope,
 nominal identity, parser lowering, and the inference/elaboration boundary.

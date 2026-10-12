@@ -180,6 +180,18 @@ func (ck *Checker) CheckModule(m *ast.Module, options ModuleOptions) (*CheckedMo
 // summaries installed by owner-scoped elaboration.
 func (ck *Checker) CompleteModuleState(state *ModuleState) *ModuleState {
 	copyState := *state
+	copyState.ADTs = append([]*types.ADTInfo(nil), state.ADTs...)
+	for _, adt := range ck.ADTOrder {
+		if adt.RepresentationOf != nil && symbolModule(adt.Con.Name) == state.Name {
+			found := false
+			for _, existing := range copyState.ADTs {
+				found = found || existing.Con.Unique == adt.Con.Unique
+			}
+			if !found {
+				copyState.ADTs = append(copyState.ADTs, adt)
+			}
+		}
+	}
 	copyState.Captures = make(map[string]types.CaptureSummary, len(state.Captures))
 	for name, summary := range state.Captures {
 		copyState.Captures[name] = summary

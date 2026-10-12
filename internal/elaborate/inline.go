@@ -11,28 +11,34 @@ import (
 )
 
 // Inlining (doc/design/core.md, "Inlining") replaces saturated calls to small
-// first-order pure workers with their bodies, then normalizes and simplifies
+// pure workers and hidden-package factories/consumers, then normalizes and simplifies
 // the result. It runs during elaboration, so the interpreter executes the
 // same Core as both backends.
 //
-// A candidate has Direct control, no evidence, effect, or row parameters, and
+// An ordinary candidate has Direct control, no evidence, effect, or row parameters, and
 // no function in its type; its body contains only literals, variables,
 // negation, natives, conditionals, sequencing, non-recursive bindings,
 // constructor and worker applications, and matches. Such a body has no
 // capture variables, scopes, or resumptions to refresh, so an inlined copy
 // needs only fresh binder names and type-argument substitution.
+// Hidden-package workers additionally permit callbacks and residual-row
+// forwarding, with fresh callback/opening binders and explicit row substitution.
 
 // inlineLimit bounds a candidate body's node count after its own inlining.
 const inlineLimit = 40
+const hiddenInlineLimit = 128
 
 // Inlining enables the pass. This package's tests turn it off so their dumps
 // show elaboration itself; inline_test.go covers the pass.
 var Inlining = true
 
 type inliner struct {
-	candidates map[string]*core.Def
-	adts       map[int]*types.ADTInfo
-	fresh      int
+	candidates   map[string]*core.Def
+	adts         map[int]*types.ADTInfo
+	fresh        int
+	sup          *types.Supply
+	hasHidden    bool
+	branchGrowth int
 }
 
 // inlineDefs inlines into the owned definitions, reading candidate bodies
@@ -45,12 +51,13 @@ func inlineDefs(defs []core.Def, context []core.Def, ck *infer.Checker) {
 	if !Inlining {
 		return
 	}
-	in := &inliner{candidates: map[string]*core.Def{}, adts: map[int]*types.ADTInfo{}}
+	in := &inliner{sup: ck.Sup, candidates: map[string]*core.Def{}, adts: map[int]*types.ADTInfo{}}
 	for _, a := range ck.ADTOrder {
 		in.adts[a.Con.Unique] = a
+		in.hasHidden = in.hasHidden || a.HasHidden()
 	}
 	for i := range context {
-		if d := &context[i]; in.eligible(d) && in.size(d.Body) <= inlineLimit {
+		if d := &context[i]; in.eligible(d) && in.size(d.Body) <= in.limit(d) {
 			in.candidates[d.Name] = d
 		}
 	}
@@ -80,7 +87,7 @@ func inlineDefs(defs []core.Def, context []core.Def, ck *infer.Checker) {
 		if d.Body != nil {
 			d.Body = in.optimize(d.Body)
 		}
-		if !recursive[d.Name] && in.eligible(d) && in.size(d.Body) <= inlineLimit && !mentionsWorker(d.Body, d.Name) {
+		if !recursive[d.Name] && in.eligible(d) && in.size(d.Body) <= in.limit(d) && !mentionsWorker(d.Body, d.Name) {
 			in.candidates[d.Name] = d
 		}
 		state[d.Name] = 2
@@ -99,6 +106,7 @@ func Unfoldable(defs []core.Def, ck *infer.Checker) []core.Def {
 	in := &inliner{adts: map[int]*types.ADTInfo{}}
 	for _, a := range ck.ADTOrder {
 		in.adts[a.Con.Unique] = a
+		in.hasHidden = in.hasHidden || a.HasHidden()
 	}
 	var out []core.Def
 	for i := range defs {
@@ -126,8 +134,19 @@ func mentionsWorker(e core.Expr, name string) bool {
 }
 
 func (in *inliner) eligible(d *core.Def) bool {
-	if len(d.Params) == 0 || d.Body == nil || len(d.EffectParams) != 0 || d.RowParam != 0 || len(d.RowEffects) != 0 ||
-		d.Control.Transport != types.Direct || d.Control.Polymorphic || d.Scoped || !firstOrder(d.Type) {
+	hidden := in.hiddenSignature(d.Type)
+	if len(d.Params) == 0 || d.Body == nil || len(d.EffectParams) != 0 || len(d.RowEffects) != 0 ||
+		d.Control.Transport != types.Direct || d.Scoped || (!firstOrder(d.Type) && !hidden) {
+		return false
+	}
+	if hidden {
+		row := d.RowParam
+		if row == 0 && core.ArrowOpenRow(d.Type, len(d.Params)) {
+			row = pendingRow
+		}
+		return hiddenInlineBody(d.Body, row)
+	}
+	if d.RowParam != 0 || d.Control.Polymorphic {
 		return false
 	}
 	params, _ := core.PeelFun(d.Type, len(d.Params))
@@ -200,7 +219,9 @@ func firstOrderValue(t types.Type) bool {
 	return true
 }
 
-func simpleBody(e core.Expr) bool {
+func simpleBody(e core.Expr) bool { return simpleBodyWithClosures(e, false) }
+
+func simpleBodyWithClosures(e core.Expr, closures bool) bool {
 	ok := true
 	core.Inspect(e, func(e core.Expr) {
 		switch e := e.(type) {
@@ -208,9 +229,11 @@ func simpleBody(e core.Expr) bool {
 			*core.VarRef, *core.Neg, *core.NativeCall, *core.If, *core.Seq, *core.Case:
 		case *core.Let:
 			ok = ok && !e.Rec
+		case *core.Lambda:
+			ok = ok && closures && len(e.EffectParams) == 0 && e.RowParam == 0 && len(e.RowEffects) == 0
 		case *core.App:
-			ok = ok && (e.CalleeKind == core.Worker || e.CalleeKind == core.Ctor) &&
-				len(e.EvidenceArgs) == 0 && e.Row == nil && e.Control.Transport == types.Direct && !e.Control.Polymorphic
+			ok = ok && (e.CalleeKind == core.Worker || e.CalleeKind == core.Ctor || closures && e.CalleeKind == core.Value) &&
+				len(e.EvidenceArgs) == 0 && (e.Row == nil || closures && e.Row.From == 0 && len(e.Row.Effects) == 0) && e.Control.Transport == types.Direct && !e.Control.Polymorphic
 		default:
 			ok = false
 		}
@@ -226,10 +249,11 @@ func (in *inliner) size(e core.Expr) int {
 
 // optimize inlines eligible calls in a body, then normalizes and simplifies.
 func (in *inliner) optimize(body core.Expr) core.Expr {
+	in.branchGrowth = 0
 	changed := false
 	out := core.Rewrite(body, sameType, func(e core.Expr) core.Expr {
 		a, ok := e.(*core.App)
-		if !ok || a.CalleeKind != core.Worker || len(a.EvidenceArgs) != 0 || a.Row != nil {
+		if !ok || a.CalleeKind != core.Worker || len(a.EvidenceArgs) != 0 {
 			return e
 		}
 		v, ok := a.Callee.(*core.VarRef)
@@ -240,12 +264,47 @@ func (in *inliner) optimize(body core.Expr) core.Expr {
 		if d == nil || len(a.Args) != len(d.Params) || len(a.TyArgs) != len(d.TyParams) {
 			return e
 		}
+		if a.Row != nil && !in.hiddenSignature(d.Type) {
+			return e
+		}
 		changed = true
 		return in.instantiate(d, a)
 	})
 	if !changed {
-		return body
+		if !in.hasHidden {
+			return body
+		}
+		core.Inspect(body, func(e core.Expr) {
+			if a, ok := e.(*core.App); ok && len(a.Witnesses) != 0 {
+				changed = true
+			}
+		})
+		if !changed {
+			return body
+		}
 	}
+	// Evaluate each non-atomic packed field once before attempting cancellation.
+	out = core.Rewrite(out, sameType, func(e core.Expr) core.Expr {
+		a, ok := e.(*core.App)
+		if !ok || len(a.Witnesses) == 0 {
+			return e
+		}
+		n := *a
+		n.Args = append([]core.Expr(nil), a.Args...)
+		var bindings []binding
+		for i, arg := range a.Args {
+			if !atom(arg) {
+				name := in.temp()
+				bindings = append(bindings, binding{name, arg})
+				n.Args[i] = &core.VarRef{Name: name, Local: true, Ty: arg.Type()}
+			}
+		}
+		var body core.Expr = &n
+		for i := len(bindings) - 1; i >= 0; i-- {
+			body = &core.Let{Name: bindings[i].name, Rhs: bindings[i].rhs, Body: body, Ty: body.Type()}
+		}
+		return body
+	})
 	out = in.normalize(out)
 	return pruneBinders(in.simplify(out, map[string]*core.App{}))
 }
@@ -324,6 +383,20 @@ func (in *inliner) instantiate(d *core.Def, a *core.App) core.Expr {
 		subst[v.ID] = a.TyArgs[i]
 	}
 	c := &copier{in: in, typ: func(t types.Type) types.Type { return types.SubstRigid(t, subst) }, site: a.Origin}
+	if core.ArrowOpenRow(d.Type, len(d.Params)) {
+		row := d.RowParam
+		if row == 0 {
+			row = pendingRow
+		}
+		actual := a.Row
+		if actual == nil {
+			actual = &core.RowArgument{}
+		}
+		c.rows = map[types.CaptureVar]*core.RowArgument{row: actual}
+	}
+	if d.Control.Polymorphic {
+		c.mode = &a.Control
+	}
 	scope := map[string]string{}
 	params := make([]string, len(d.Params))
 	for i, p := range d.Params {
@@ -337,8 +410,10 @@ func (in *inliner) instantiate(d *core.Def, a *core.App) core.Expr {
 }
 
 type copier struct {
-	in  *inliner
-	typ func(types.Type) types.Type
+	in   *inliner
+	typ  func(types.Type) types.Type
+	rows map[types.CaptureVar]*core.RowArgument
+	mode *types.Control
 	// site is the inlined call's origin. Copied nodes take it over their
 	// own, so a trace attributes the body to the line that called it — the
 	// line a frame for the callee would have been reported from.
@@ -375,6 +450,33 @@ func (c *copier) exprs(es []core.Expr, scope map[string]string) []core.Expr {
 
 func (c *copier) expr(e core.Expr, scope map[string]string) core.Expr {
 	switch e := e.(type) {
+	case *core.Lambda:
+		n := *e
+		inner := within(scope)
+		n.Param = c.bind(inner, e.Param)
+		n.ParamCapture = c.in.sup.FreshCapture()
+		n.Ty = c.typ(e.Ty)
+		if e.SourceType != nil {
+			n.SourceType = c.typ(e.SourceType)
+		}
+		priorRows, priorMode := c.rows, c.mode
+		if core.ArrowOpenRow(e.Ty, 1) {
+			old := e.RowParam
+			if old == 0 {
+				old = pendingRow
+			}
+			n.RowParam = c.in.sup.FreshCapture()
+			c.rows = make(map[types.CaptureVar]*core.RowArgument, len(priorRows)+1)
+			for k, v := range priorRows {
+				c.rows[k] = v
+			}
+			c.rows[old] = &core.RowArgument{From: n.RowParam}
+			c.mode = nil
+		}
+		n.Body = c.expr(e.Body, inner)
+		c.rows, c.mode = priorRows, priorMode
+		return &n
+
 	case *core.VarRef:
 		n := *e
 		if to, ok := scope[e.Name]; ok {
@@ -415,6 +517,14 @@ func (c *copier) expr(e core.Expr, scope map[string]string) core.Expr {
 		n.Callee = c.expr(e.Callee, scope)
 		n.Args = c.exprs(e.Args, scope)
 		n.TyArgs = c.types(e.TyArgs)
+		n.Witnesses = c.types(e.Witnesses)
+		n.Row = c.row(e.Row)
+		if e.Control.Polymorphic && c.mode != nil {
+			n.Control.Polymorphic = c.mode.Polymorphic
+			if c.mode.Transport > n.Control.Transport {
+				n.Control.Transport = c.mode.Transport
+			}
+		}
 		n.Ty = c.typ(e.Ty)
 		return &n
 	}
@@ -460,7 +570,16 @@ func (c *copier) tree(t core.Tree, scope map[string]string) core.Tree {
 			for j, b := range cc.Binds {
 				binds[j] = c.bind(inner, b)
 			}
-			n.Cases[i] = core.CtorCase{Ctor: cc.Ctor, Binds: binds, Tree: c.tree(cc.Tree, inner)}
+			hidden := make([]*types.TVar, len(cc.Hidden))
+			subst := map[int]types.Type{}
+			for j, v := range cc.Hidden {
+				hidden[j] = c.in.sup.FreshRigid(v.Kind)
+				subst[v.ID] = hidden[j]
+			}
+			prior := c.typ
+			c.typ = func(t types.Type) types.Type { return types.SubstRigid(prior(t), subst) }
+			n.Cases[i] = core.CtorCase{Ctor: cc.Ctor, Hidden: hidden, Binds: binds, Tree: c.tree(cc.Tree, inner)}
+			c.typ = prior
 		}
 		n.Default = c.tree(t.Default, scope)
 		return &n
@@ -699,6 +818,18 @@ func (in *inliner) simplify(e core.Expr, known map[string]*core.App) core.Expr {
 	switch e := e.(type) {
 	case *core.Let:
 		if !e.Rec {
+
+			if choice, ok := e.Rhs.(*core.If); ok && in.hiddenSignature(choice.Ty) && hiddenBranchBody(e.Body) && in.size(e.Body) <= hiddenInlineLimit && in.branchGrowth+in.size(e.Body) <= 4*hiddenInlineLimit {
+				in.branchGrowth += in.size(e.Body)
+				// The continuation executes in exactly one branch, after the choice's
+				// effects and selected constructor. Separate openings retain typed state.
+				branch := func(value core.Expr) core.Expr {
+					copy := &copier{in: in, typ: sameType, site: e.Origin}
+					body := copy.expr(e.Body, map[string]string{})
+					return &core.Let{Name: e.Name, Rhs: value, Body: body, Ty: e.Ty}
+				}
+				return in.simplify(&core.If{Cond: choice.Cond, Then: branch(choice.Then), Else: branch(choice.Else), Ty: e.Ty}, known)
+			}
 			if v, ok := e.Rhs.(*core.VarRef); ok && v.Local {
 				return in.simplify(substitute(e.Body, e.Name, v.Name), known)
 			}
@@ -723,6 +854,11 @@ func (in *inliner) simplify(e core.Expr, known map[string]*core.App) core.Expr {
 		}
 		return &core.Let{Name: e.Name, Rhs: rhs, Body: body, Rec: e.Rec, Ty: body.Type()}
 	case *core.Case:
+		if a, ok := e.Scrut.(*core.App); ok && a.CalleeKind == core.Ctor && allAtoms(a.Args) {
+			if body := resolve(e, a); body != nil {
+				return in.simplify(body, known)
+			}
+		}
 		if v, ok := e.Scrut.(*core.VarRef); ok && v.Local {
 			if a := known[v.Name]; a != nil {
 				if body := resolve(e, a); body != nil {
@@ -809,7 +945,7 @@ func floatProduct(c *core.Case, l *core.Let) core.Expr {
 	}
 	inner := &core.Let{Name: l.Name, Rhs: leaf.Body, Body: l.Body, Ty: l.Body.Type()}
 	n := *sw
-	n.Cases = []core.CtorCase{{Ctor: sw.Cases[0].Ctor, Binds: sw.Cases[0].Binds, Tree: &core.Leaf{Body: inner}}}
+	n.Cases = []core.CtorCase{{Ctor: sw.Cases[0].Ctor, Hidden: sw.Cases[0].Hidden, Binds: sw.Cases[0].Binds, Tree: &core.Leaf{Body: inner}}}
 	return &core.Case{Scrut: c.Scrut, Bind: c.Bind, Tree: &n, Ty: inner.Ty}
 }
 
@@ -821,10 +957,11 @@ func resolve(c *core.Case, a *core.App) core.Expr {
 		return nil
 	}
 	var tree core.Tree
+	var hidden []*types.TVar
 	var binds []string
 	for _, cc := range sw.Cases {
 		if cc.Ctor == a.Ctor {
-			tree, binds = cc.Tree, cc.Binds
+			tree, binds, hidden = cc.Tree, cc.Binds, cc.Hidden
 		}
 	}
 	if tree == nil {
@@ -835,6 +972,16 @@ func resolve(c *core.Case, a *core.App) core.Expr {
 		return nil
 	}
 	body := leaf.Body
+	if len(hidden) != 0 {
+		if len(hidden) != len(a.Witnesses) {
+			return nil
+		}
+		subst := map[int]types.Type{}
+		for i, v := range hidden {
+			subst[v.ID] = a.Witnesses[i]
+		}
+		body = core.Rewrite(body, func(t types.Type) types.Type { return types.SubstRigid(t, subst) }, func(e core.Expr) core.Expr { return e })
+	}
 	for i := len(binds) - 1; i >= 0; i-- {
 		if binds[i] != "" {
 			body = &core.Let{Name: binds[i], Rhs: a.Args[i], Body: body, Ty: body.Type()}
@@ -885,4 +1032,30 @@ func renameScrutinees(t core.Tree, names map[string]string) {
 		}
 		renameScrutinees(t.Default, names)
 	}
+}
+
+func (in *inliner) hiddenSignature(t types.Type) bool {
+	switch t := t.(type) {
+	case *types.TCon:
+		if adt := in.adts[t.Unique]; adt != nil && adt.HasHidden() {
+			return true
+		}
+		for _, arg := range t.Args {
+			if in.hiddenSignature(arg) {
+				return true
+			}
+		}
+	case *types.TFun:
+		return in.hiddenSignature(t.Arg) || in.hiddenSignature(t.Ret)
+	}
+	return false
+}
+
+// Hidden factories commonly include step lambdas. Their bounded unfolding
+// exposes the concrete witness; ordinary worker budgets stay unchanged.
+func (in *inliner) limit(d *core.Def) int {
+	if in.hiddenSignature(d.Type) {
+		return hiddenInlineLimit
+	}
+	return inlineLimit
 }

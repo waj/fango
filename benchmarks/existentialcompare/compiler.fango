@@ -1,0 +1,46 @@
+-- Compiler-generated controls: a known package and a surviving dynamic package.
+type Source a = { initial : state, step : state -> Maybe (a, state) }
+
+down : Int -> Maybe (Int, Int)
+down n = if n <= 0 then Nothing else Just (n, n - 1)
+
+foldStep : (state -> Maybe (Int, state)) -> state -> Int -> Int
+foldStep step state total = case step state of
+    Nothing -> total
+    Just (value, next) -> foldStep step next (total + value)
+
+explicit : Int -> Int
+explicit n = foldStep down n 0
+
+hidden : Int -> Int
+hidden n = case Source { initial = n, step = down } of
+    Source { initial = state, step = step } -> foldStep step state 0
+
+make : Int -> Source Int
+make n = Source { initial = n, step = down }
+
+repack : Source a -> Source a
+repack (Source { initial = state, step = step }) = Source { initial = state, step = step }
+
+consume : Source Int -> Int
+consume (Source { initial = state, step = step }) = foldStep step state 0
+
+pairDown : (Int, Int) -> Maybe (Int, (Int, Int))
+pairDown (n, offset) = if n <= 0 then Nothing else Just (n + offset, (n - 1, offset))
+
+choose : Bool -> Int -> Source Int
+choose alternate n = if alternate then make n else Source { initial = (n, 0), step = pairDown }
+
+knownCall : Int -> Int
+knownCall n = consume (make n)
+
+dynamic : Bool -> Int -> Int
+dynamic alternate n = consume (choose alternate n)
+
+explicitPair : Int -> Int
+explicitPair n = foldStep pairDown (n, 0) 0
+
+explicitChoice : Bool -> Int -> Int
+explicitChoice alternate n = if alternate then explicit n else explicitPair n
+
+main() = ()

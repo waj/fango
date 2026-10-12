@@ -252,7 +252,11 @@ type EffRow struct {
 	Labels []EffLabelExpr
 	Tail   string      // "" when closed; a lowercase row variable otherwise
 	TailSp source.Span // zero when Tail is ""
-	Sp     source.Span // the `{` through the `}`
+	// ScopeBase makes Tail a callback-local extension: {Tail | ScopeBase}.
+	// "{}" denotes a closed outer row; otherwise it is the ambient tail name.
+	// It is normalized to the existing scoped row contract during inference.
+	ScopeBase string
+	Sp        source.Span // the `{` through the `}`
 }
 
 // EffLabelExpr is one label in a surface row: an effect name plus type
@@ -610,7 +614,8 @@ func (e *MetaValue) Span() source.Span { return e.Sp }
 type Decl interface{ isDecl() }
 
 type ValueDecl struct {
-	ScopedRow string // declaration-local scoped callback row binder
+	ScopedRow  string // declaration-local scoped callback row binder
+	ScopedBase string // nonempty when the binder comes from {s | e} syntax
 
 	Name      string
 	NameSpan  source.Span

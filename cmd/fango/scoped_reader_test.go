@@ -47,6 +47,75 @@ main() = ()
 	}
 }
 
+func TestScopedExtensionPreservesGeneratedABI(t *testing.T) {
+	dir := t.TempDir()
+	var previous []byte
+	for _, signature := range []string{
+		"{-# scoped s #-}\nwithText : String -> (Reader.Reader s ->{s} a) ->{e} a",
+		"\nwithText : String -> (Reader.Reader {s | e} ->{s | e} a) ->{e} a",
+	} {
+		writeModuleFile(t, dir, "Cursor.fango", `module Cursor exposing (withText)
+import Bytes
+import Reader
+`+signature+`
+withText text action = Reader.withBytes (Bytes.fromString text) action
+`)
+		path := writeModuleFile(t, dir, "Main.fango", `import Cursor
+import Reader
+import Bytes
+main() = print (Cursor.withText "abc" { reader -> Bytes.length (Reader.readUpTo reader 2) })
+`)
+		got := generatedFile(t, emittedProject(t, path), "modules/Cursor/module.go")
+		if previous != nil && !bytes.Equal(previous, got) {
+			t.Fatalf("row-extension syntax changed generated code:\nold:\n%s\nnew:\n%s", previous, got)
+		}
+		previous = got
+		writeModuleFile(t, dir, "Main.expected", "2\n")
+		runDifferentialCase(t, path, cliRunner(path))
+	}
+}
+
+func TestScopedExtensionExportAndEscape(t *testing.T) {
+	dir := t.TempDir()
+	writeModuleFile(t, dir, "Cursor.fango", `module Cursor exposing (withTextFirst, guarded)
+import Bytes
+import Reader
+import Fail
+import Result
+withTextFirst : (Reader.Reader {s | e} ->{s | e} a) -> String ->{e} a
+withTextFirst action text = Reader.withBytes (Bytes.fromString text) action
+guarded : String -> (Reader.Reader {s | e} ->{Fail.Fail String, s | e} a) ->{e} Result.Result String a
+guarded text action = Reader.withBytes (Bytes.fromString text) { reader -> Fail.attempt { action reader } }
+`)
+	path := writeModuleFile(t, dir, "Main.fango", `import Cursor
+import Reader
+import Bytes
+import Fail
+main() =
+    first = Cursor.withTextFirst { reader -> Bytes.length (Reader.readUpTo reader 1) } "abc"
+    second = Cursor.guarded "abc" { reader ->
+        bytes = Reader.readUpTo reader 1
+        if Bytes.length bytes == 1 then Fail.fail "stop" else 0
+    }
+    print (first, second)
+`)
+	writeModuleFile(t, dir, "Main.expected", "(1, Err \"stop\")\n")
+	runDifferentialCase(t, path, cliRunner(path))
+	buildVerbose(t, path, "-v")
+	_, warm := buildVerbose(t, path, "-v")
+	if !strings.Contains(warm, "Checking  Cursor (from cache)") {
+		t.Fatalf("extension contract not cached: %s", warm)
+	}
+	for _, body := range []string{
+		`bad = Cursor.withTextFirst { reader -> reader } "abc"`,
+		`bad = Cursor.withTextFirst { reader -> { Reader.readUpTo reader 1 } } "abc"`,
+		`bad = Runtime.Local.run Nothing { slot -> Cursor.withTextFirst { reader -> slot.write (Just reader) } "abc" }`,
+	} {
+		path = writeModuleFile(t, dir, "Main.fango", "import Cursor\nimport Reader\nimport Runtime.Local\n"+body+"\nmain() = ()\n")
+		runErrorCase(t, path, "SCOPE ESCAPE")
+	}
+}
+
 func TestScopedExportSurvivesCache(t *testing.T) {
 	dir := t.TempDir()
 	writeModuleFile(t, dir, "Cursor.fango", `module Cursor exposing (withText, withNumber, withTextFirst, withTextAndAction)

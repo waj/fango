@@ -176,7 +176,14 @@ func (el *elab) bindPatternCore(pattern ast.Pattern, rhs core.Expr, subject stri
 			"This destructuring binding is refutable. For example, it does not handle:\n\n    %s", w[0]))
 		return &core.Let{Name: subject, Rhs: rhs, Body: body, Ty: body.Type()}
 	}
-	tree := m.compile([]occurrence{{name: subject, ty: subjectTy}}, []row{{pats: []ast.Pattern{p}, idx: 0, names: names}})
+	occs := []occurrence{{name: subject, ty: subjectTy}}
+	m.rows = []row{{pats: []ast.Pattern{p}, idx: 0, names: names}}
+	var tree core.Tree
+	if el.overloadedPattern(p) {
+		tree = m.ordered([][]ast.Pattern{{p}}, occs, 0)
+	} else {
+		tree = m.compile(occs, m.rows)
+	}
 	if leaf, ok := tree.(*core.Leaf); ok {
 		return &core.Let{Name: subject, Rhs: rhs, Body: leaf.Body, Ty: body.Type()}
 	}
@@ -190,7 +197,11 @@ func (el *elab) lowerRecordPattern(p ast.Pattern) ast.Pattern {
 		for i, a := range p.Args {
 			args[i] = el.lowerRecordPattern(a)
 		}
-		return &ast.PCtor{Name: p.Name, NameSpan: p.NameSpan, Args: args}
+		out := &ast.PCtor{Name: p.Name, NameSpan: p.NameSpan, Args: args}
+		if hidden := el.ck.PatternHidden[p]; len(hidden) != 0 {
+			el.ck.PatternHidden[out] = hidden
+		}
+		return out
 	case *ast.PRecord:
 		adt := el.ck.RecordPatternUses[p]
 		if adt == nil {
@@ -207,7 +218,11 @@ func (el *elab) lowerRecordPattern(p ast.Pattern) ast.Pattern {
 				args[i] = &ast.PWildcard{Sp: p.Sp}
 			}
 		}
-		return &ast.PCtor{Name: adt.Ctors[0].Name, NameSpan: p.NameSpan, Args: args}
+		out := &ast.PCtor{Name: adt.Ctors[0].Name, NameSpan: p.NameSpan, Args: args}
+		if hidden := el.ck.PatternHidden[p]; len(hidden) != 0 {
+			el.ck.PatternHidden[out] = hidden
+		}
+		return out
 	default:
 		return p
 	}
@@ -297,7 +312,7 @@ func (el *elab) pushPatternVars(p ast.Pattern, ty types.Type) int {
 			if ctor == nil {
 				return
 			}
-			fields := instFields(el.ck.ADTs[ctor.Result.Unique], ctor, ty)
+			fields := el.patternFields(p, ctor, ty)
 			for i, a := range p.Args {
 				walk(a, fields[i])
 			}
@@ -668,4 +683,31 @@ func spliceOccs(occs []occurrence, col int, sub []occurrence) []occurrence {
 
 func removeOcc(occs []occurrence, col int) []occurrence {
 	return spliceOccs(occs, col, nil)
+}
+
+// patternFields opens the constructor at this pattern's fresh abstract types.
+func (el *elab) patternFields(p ast.Pattern, c *types.CtorInfo, ty types.Type) []types.Type {
+	adt := el.ck.ADTs[c.Result.Unique]
+	fields := adt.InstHiddenFields(c, ty.(*types.TCon).Args, hiddenTypes(el.ck.PatternHidden[p]))
+	out := make([]types.Type, len(fields))
+	for i, f := range fields {
+		out[i] = el.eraseRuntimeKinds(eraseRows(f))
+	}
+	return out
+}
+
+func hiddenTypes(vars []*types.TVar) []types.Type {
+	out := make([]types.Type, len(vars))
+	for i, v := range vars {
+		out[i] = v
+	}
+	return out
+}
+
+func (el *elab) freshHidden(c *types.CtorInfo) []*types.TVar {
+	out := make([]*types.TVar, len(c.Hidden))
+	for i := range out {
+		out[i] = el.ck.Sup.FreshRigid(types.General)
+	}
+	return out
 }

@@ -9,6 +9,9 @@ import (
 )
 
 func (el *elab) overloadedPattern(p ast.Pattern) bool {
+	if len(el.ck.PatternHidden[p]) != 0 {
+		return true
+	}
 	switch p := p.(type) {
 	case *ast.PInt:
 		t := el.apply(el.ck.PatTypes[p])
@@ -81,7 +84,7 @@ func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, names map[string
 	case *ast.PCtor:
 		ctor := el.ck.Ctors[p.Name]
 		adt := el.ck.ADTs[ctor.Result.Unique]
-		fts := instFields(adt, ctor, occ.ty)
+		fts := el.patternFields(p, ctor, occ.ty)
 		binds := make([]string, len(p.Args))
 		for i := range binds {
 			binds[i] = fmt.Sprintf("_pattern%d", el.tmp)
@@ -99,7 +102,7 @@ func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, names map[string
 		if len(adt.Ctors) == 1 {
 			fallback = nil
 		}
-		return &core.SwitchCtor{Scrut: occ.name, ADT: adt, Cases: []core.CtorCase{{Ctor: ctor, Binds: binds, Tree: success}}, Default: fallback}
+		return &core.SwitchCtor{Scrut: occ.name, ADT: adt, Cases: []core.CtorCase{{Ctor: ctor, Hidden: el.ck.PatternHidden[p], Binds: binds, Tree: success}}, Default: fallback}
 	case *ast.PInt:
 		fromTy := &types.TFun{Arg: el.ck.B.Int, Ret: occ.ty}
 		lit := el.valueApp(el.methodValue(el.ck.Methods["Basics.fromInt"], fromTy), &core.IntLit{Val: p.Value, Ty: el.ck.B.Int})

@@ -107,6 +107,7 @@ type sealKey struct {
 type CtorVal struct {
 	Ctor   *types.CtorInfo
 	Fields []Value
+	Hidden []*fangort.TypeDescriptor
 }
 
 // Closure is the interpreter's only function value: one currying step,
@@ -1301,7 +1302,15 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				}
 				return fangort.ListCons(fields[0], fields[1].(fangort.List[Value])), nil
 			}
-			return &CtorVal{Ctor: e.Ctor, Fields: fields}, nil
+			hidden := make([]*fangort.TypeDescriptor, len(e.Witnesses))
+			for i, w := range e.Witnesses {
+				var err error
+				hidden[i], err = in.typeDescriptor(w, fr)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return &CtorVal{Ctor: e.Ctor, Fields: fields, Hidden: hidden}, nil
 		default:
 			return nil, fmt.Errorf("eval: App with unknown CalleeKind")
 		}
@@ -1513,7 +1522,11 @@ func (in *interp) tree(t core.Tree, fr *Frame, leaf func(core.Expr, *Frame) (Val
 					vars[bind] = cv.Fields[i]
 				}
 			}
-			return in.tree(c.Tree, &Frame{parent: fr, vars: vars}, leaf)
+			descriptors := descriptorEnv{}
+			for i, v := range c.Hidden {
+				descriptors[v.ID] = cv.Hidden[i]
+			}
+			return in.tree(c.Tree, &Frame{parent: fr, vars: vars, types: descriptors}, leaf)
 		}
 		if t.Default == nil {
 			return nil, fmt.Errorf("eval: no case for constructor `%s` and no default — exhaustiveness is broken", cv.Ctor.Name)

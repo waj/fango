@@ -73,3 +73,21 @@ func TestCallbackContractsSolveRecursiveForwardingWithoutDependencyBodies(t *tes
 		t.Fatalf("imported forwarding = %+v, want %+v", got, dependency.ABI.Callbacks[0])
 	}
 }
+
+func TestCallbackAliasesRetainAllUses(t *testing.T) {
+	b := types.NewBuiltins(&types.Supply{})
+	fn := &types.TFun{Arg: b.Int, Ret: b.Int}
+	ref := func(name string) Expr { return &VarRef{Name: name, Local: true, Ty: fn} }
+	invoke := &App{CalleeKind: Value, Callee: ref("alias"), Args: []Expr{&IntLit{Val: 1, Ty: b.Int}}, Ty: b.Int}
+	for _, escape := range []bool{false, true} {
+		var body Expr = invoke
+		if escape {
+			body = &Seq{First: invoke, Then: ref("callback"), Ty: fn}
+		}
+		binding := &Let{Name: "alias", Rhs: ref("callback"), Body: body, Ty: body.Type()}
+		contract := LocalCallbackABI(binding, "callback", fn, nil)
+		if (contract.Arity == 0) != escape {
+			t.Fatalf("escape=%t: %+v", escape, contract)
+		}
+	}
+}

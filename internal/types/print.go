@@ -21,6 +21,7 @@ type Printer struct {
 	general int
 	row     int
 	rows    map[int]int
+	scoped  map[int]*TVar // a scoped row's ambient tail, only while printing its scheme
 	// bound holds the variables given a name by Bind, and the names they
 	// took, which generated names then avoid.
 	bound map[int]bool
@@ -82,6 +83,9 @@ func (p *Printer) Type(t Type) string {
 func (p *Printer) render(t Type) string {
 	switch t := t.(type) {
 	case *TVar:
+		if p.scoped[t.ID] != nil {
+			return p.rowText(Row{Tail: t})
+		}
 		return p.varName(t)
 	case *TCon:
 		if len(t.Args) == 0 {
@@ -106,18 +110,11 @@ func (p *Printer) render(t Type) string {
 			showEff = true
 		}
 		if showEff {
-			parts := make([]string, len(t.Eff.Labels))
-			for i, l := range t.Eff.Labels {
-				parts[i] = p.label(l)
+			row := t.Eff
+			if v, ok := row.Tail.(*TVar); ok && !p.shownRow(v) {
+				row.Tail = nil
 			}
-			inside := strings.Join(parts, ", ")
-			if v, ok := t.Eff.Tail.(*TVar); ok && p.shownRow(v) {
-				if inside != "" {
-					inside += " | "
-				}
-				inside += p.varName(v)
-			}
-			arrow = "->{" + inside + "}"
+			arrow = "->" + p.rowText(row)
 		}
 		return fmt.Sprintf("%s %s %s", p.funArg(t.Arg), arrow, p.render(t.Ret))
 	case Row:
@@ -133,6 +130,16 @@ func (p *Printer) rowText(r Row) string {
 		parts[i] = p.label(l)
 	}
 	inside := strings.Join(parts, ", ")
+	if v, ok := r.Tail.(*TVar); ok {
+		if base, scoped := p.scoped[v.ID]; scoped {
+			ambient := "{}"
+			if base != nil {
+				ambient = p.varName(base)
+			}
+			parts = append(parts, p.varName(v))
+			return "{" + strings.Join(parts, ", ") + " | " + ambient + "}"
+		}
+	}
 	if r.Tail != nil {
 		if inside != "" {
 			inside += " | "
@@ -237,6 +244,18 @@ func (p *Printer) Pred(class string, t Type) string {
 func ShowPred(class string, t Type) string { return NewPrinter().Pred(class, t) }
 
 func (p *Printer) Scheme(s Scheme) string {
+	if _, ambient, _, ok := ScopedCallback(s.Body, s.ScopedArity, s.ScopedParam); s.ScopedRow != nil && ok {
+		base, _ := ambient.Tail.(*TVar)
+		{
+			old := p.scoped
+			p.scoped = map[int]*TVar{s.ScopedRow.ID: base}
+			defer func() { p.scoped = old }()
+			p.Bind(s.ScopedRow, "s")
+			if base != nil {
+				p.Bind(base, "e")
+			}
+		}
+	}
 	body := p.Type(s.Body)
 	if len(s.Preds) == 0 {
 		return body

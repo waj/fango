@@ -15,8 +15,9 @@ import Iterator exposing (Iterator)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
 
--- A sequence of `a` produced from a `state`, whose steps perform `e`.
-type Stream state a e =
+-- A sequence of `a`, whose steps perform `e`. The state type is hidden;
+-- open both fields with one record pattern when implementing a consumer.
+type Stream a e =
     {
       -- Where every traversal starts.
       initial : state
@@ -33,7 +34,7 @@ type Stream state a e =
 --
 -- Stream.toList (Stream.take 3 naturals) == [0, 1, 2]
 -- ```
-unfold : state -> (state ->{e} Maybe (a, state)) -> Stream state a e
+unfold : state -> (state ->{e} Maybe (a, state)) -> Stream a e
 unfold initial step = { initial = initial, step = step }
 
 -- Passes `consumer` an iterator at the stream's start, for code that needs
@@ -43,7 +44,7 @@ unfold initial step = { initial = initial, step = step }
 -- import Iterator exposing (Iterator)
 -- import Stream
 --
--- peek : Iterator (List Int) Int {} -> Maybe Int
+-- peek : Iterator Int {} -> Maybe Int
 -- peek cursor =
 --     case Iterator.next cursor of
 --         Just (value, _) -> Just value
@@ -51,8 +52,8 @@ unfold initial step = { initial = initial, step = step }
 --
 -- Stream.withCursor (Stream.fromList [7, 8]) peek == Just 7
 -- ```
-withCursor : Stream state a e -> (Iterator state a e ->{e} result) ->{e} result
-withCursor source consumer = consumer (Iterator.start source.initial source.step)
+withCursor : Stream a e -> (Iterator a e ->{e} result) ->{e} result
+withCursor (Stream { initial = initial, step = step }) consumer = consumer (Iterator.start initial step)
 
 listStep values = case values of
     [] -> Nothing
@@ -65,7 +66,7 @@ listStep values = case values of
 --
 -- Stream.toList (Stream.fromList [1, 2, 3]) == [1, 2, 3]
 -- ```
-fromList : List a -> Stream (List a) a e
+fromList : List a -> Stream a e
 fromList values = unfold values listStep
 
 mapStep action step state = case step state of
@@ -80,8 +81,8 @@ mapStep action step state = case step state of
 --
 -- Stream.toList (Stream.map { n -> n * 2 } (Stream.fromList [1, 2, 3])) == [2, 4, 6]
 -- ```
-map : (a ->{e} b) -> Stream state a e -> Stream state b e
-map action source = unfold source.initial (mapStep action source.step)
+map : (a ->{e} b) -> Stream a e -> Stream b e
+map action (Stream { initial = initial, step = step }) = unfold initial (mapStep action step)
 
 filterStep predicate step state = case step state of
     Nothing -> Nothing
@@ -97,8 +98,8 @@ filterStep predicate step state = case step state of
 --
 -- Stream.toList (Stream.filter { n -> n > 1 } (Stream.fromList [3, 1, 2])) == [3, 2]
 -- ```
-filter : (a ->{e} Bool) -> Stream state a e -> Stream state a e
-filter predicate source = unfold source.initial (filterStep predicate source.step)
+filter : (a ->{e} Bool) -> Stream a e -> Stream a e
+filter predicate (Stream { initial = initial, step = step }) = unfold initial (filterStep predicate step)
 
 takeStep step (remaining, state) =
     if remaining <= 0 then Nothing
@@ -115,9 +116,10 @@ takeStep step (remaining, state) =
 -- Stream.toList (Stream.take 2 (Stream.fromList [1, 2, 3])) == [1, 2]
 -- Stream.toList (Stream.take 5 (Stream.fromList [1])) == [1]
 -- ```
-take : Int -> Stream state a e -> Stream (Int, state) a e
-take count source = unfold (count, source.initial) (takeStep source.step)
+take : Int -> Stream a e -> Stream a e
+take count (Stream { initial = initial, step = step }) = unfold (count, initial) (takeStep step)
 
+foldStep : (a -> b ->{e} b) -> (state ->{e} Maybe (a, state)) -> b -> state ->{e} b
 foldStep combine step accumulator state = case step state of
     Nothing -> accumulator
     Just (value, next) -> foldStep combine step (combine value accumulator) next
@@ -130,8 +132,8 @@ foldStep combine step accumulator state = case step state of
 --
 -- Stream.fold { n total -> total + n } 0 (Stream.fromList [1, 2, 3]) == 6
 -- ```
-fold : (a -> b ->{e} b) -> b -> Stream state a e ->{e} b
-fold combine initial source = foldStep combine source.step initial source.initial
+fold : (a -> b ->{e} b) -> b -> Stream a e ->{e} b
+fold combine accumulator (Stream { initial = initial, step = step }) = foldStep combine step accumulator initial
 
 -- Traverses the stream from its start, calling `action` on each element for
 -- its effects.
@@ -144,7 +146,7 @@ fold combine initial source = foldStep combine source.step initial source.initia
 --
 -- total.state == 6
 -- ```
-forEach : (a ->{e} ()) -> Stream state a e ->{e} ()
+forEach : (a ->{e} ()) -> Stream a e ->{e} ()
 forEach action source = fold { value _ -> action value } () source
 
 -- Traverses the stream from its start and collects its elements in order.
@@ -154,7 +156,7 @@ forEach action source = fold { value _ -> action value } () source
 --
 -- Stream.toList (Stream.fromList ["a", "b"]) == ["a", "b"]
 -- ```
-toList : Stream state a e ->{e} List a
+toList : Stream a e ->{e} List a
 toList source = List.reverse (fold { value values -> [value | values] } [] source)
 
 zipStep left right (leftState, rightState) = case left leftState of
@@ -172,5 +174,6 @@ zipStep left right (leftState, rightState) = case left leftState of
 --
 -- Stream.toList (Stream.zip (Stream.fromList [1, 2, 3]) (Stream.fromList ["a", "b"])) == [(1, "a"), (2, "b")]
 -- ```
-zip : Stream left a e -> Stream right b e -> Stream (left, right) (a, b) e
-zip left right = unfold (left.initial, right.initial) (zipStep left.step right.step)
+zip : Stream a e -> Stream b e -> Stream (a, b) e
+zip (Stream { initial = left, step = leftStep }) (Stream { initial = right, step = rightStep }) =
+    unfold (left, right) (zipStep leftStep rightStep)

@@ -57,15 +57,17 @@ func freeGeneral(t types.Type) *types.TVar {
 
 // TypeVars scopes the type variables of one type expression. Annotations use
 // an open scope: the first use of a name mints a fresh rigid skolem (doc/design.md, "Type inference").
-// Constructor fields use a closed scope holding exactly the declaration's
-// parameters — an unknown variable there is an error, not a fresh skolem.
+// Constructor fields extend their declaration parameters with ordinary
+// constructor-local hidden binders.
 type TypeVars struct {
-	open   bool
-	sup    *types.Supply
-	vars   map[string]*types.TVar
-	minted []*types.TVar // open scopes: skolems in first-use order
-	preds  []types.Pred
-	native bool
+	hidden                bool
+	scopedRow, scopedBase string
+	open                  bool
+	sup                   *types.Supply
+	vars                  map[string]*types.TVar
+	minted                []*types.TVar // open scopes: skolems in first-use order
+	preds                 []types.Pred
+	native                bool
 	// kinds records the first required kind for each binder in this scope.
 	// ADT parameters start as ordinary variables and are promoted to RowVar
 	// when used as an effect-row tail; a second, incompatible use is a
@@ -86,6 +88,12 @@ func (tv *TypeVars) Preds() []types.Pred { return append([]types.Pred(nil), tv.p
 // name within the annotation share one skolem.
 func (ck *Checker) NewAnnScope() *TypeVars {
 	return &TypeVars{open: true, sup: ck.Sup, vars: map[string]*types.TVar{}, kinds: map[int]types.VarKind{}}
+}
+
+func (ck *Checker) newDeclAnnScope(d *ast.ValueDecl) *TypeVars {
+	tv := ck.NewAnnScope()
+	tv.scopedRow, tv.scopedBase = d.ScopedRow, d.ScopedBase
+	return tv
 }
 
 // newCtorScope is the closed scope of a type declaration's parameters.
@@ -148,7 +156,13 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 		}
 		return t, nil
 	case *ast.TVarName:
+		if tv.scopedBase != "" && te.Name == tv.scopedRow {
+			return nil, []diag.Error{diag.Errorf(te.Sp, "SCOPED CALLBACK", "Write the scoped row as `{%s | %s}` wherever it occurs.", tv.scopedRow, tv.scopedBase)}
+		}
 		if v, ok := tv.vars[te.Name]; ok {
+			if tv.hidden && want == types.RowVar && tv.isMinted(v) {
+				return nil, []diag.Error{diag.Errorf(te.Sp, "HIDDEN EFFECT ROW", "The effect row `%s` must be declared in the type parameters.", te.Name)}
+			}
 			if want == kindAny {
 				return v, nil
 			}
@@ -162,6 +176,9 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 		if !tv.open {
 			return nil, []diag.Error{diag.Errorf(te.Sp, "NAMING ERROR",
 				"The type variable `%s` is not declared by this type's parameters.", te.Name)}
+		}
+		if tv.hidden && want == types.RowVar {
+			return nil, []diag.Error{diag.Errorf(te.Sp, "HIDDEN EFFECT ROW", "The effect row `%s` must be declared in the type's parameters. Only ordinary types can be hidden in a constructor.", te.Name)}
 		}
 		v := tv.sup.FreshRigid(types.General)
 		tv.vars[te.Name] = v
@@ -245,6 +262,12 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 	if row == nil {
 		return types.Row{}, nil
 	}
+	if row.ScopeBase != "" && (row.Tail != tv.scopedRow || row.ScopeBase != tv.scopedBase) {
+		return types.Row{}, []diag.Error{diag.Errorf(row.Span(), "SCOPED CALLBACK", "A scoped row extension belongs to one callback in an annotated runner; it is not a general union of effect rows.")}
+	}
+	if tv.scopedBase != "" && row.Tail == tv.scopedRow && row.ScopeBase == "" {
+		return types.Row{}, []diag.Error{diag.Errorf(row.Span(), "SCOPED CALLBACK", "Write the scoped row as `{%s | %s}` wherever it occurs.", tv.scopedRow, tv.scopedBase)}
+	}
 	var result types.Row
 	var errs []diag.Error
 	seen := map[types.EffectKey]bool{}
@@ -280,6 +303,9 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 	}
 	if row.Tail != "" {
 		if old, ok := tv.vars[row.Tail]; ok {
+			if tv.hidden && tv.isMinted(old) {
+				return result, []diag.Error{diag.Errorf(row.TailSp, "HIDDEN EFFECT ROW", "The effect row `%s` must be declared in the type parameters.", row.Tail)}
+			}
 			if prior, used := tv.kinds[old.ID]; used && prior != types.RowVar {
 				errs = append(errs, diag.Errorf(row.TailSp, "KIND MISMATCH", "`%s` is already used as an ordinary type variable, not an effect row.", row.Tail))
 			} else {
@@ -287,6 +313,8 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 				old.Kind = types.RowVar
 				result.Tail = old
 			}
+		} else if tv.hidden {
+			errs = append(errs, diag.Errorf(row.TailSp, "HIDDEN EFFECT ROW", "The effect row `%s` must be declared in the type's parameters. Only ordinary types can be hidden in a constructor.", row.Tail))
 		} else if !tv.open {
 			errs = append(errs, diag.Errorf(row.TailSp, "NAMING ERROR", "The row variable `%s` is not declared here.", row.Tail))
 		} else {
@@ -343,4 +371,13 @@ func (ck *Checker) containsFunction(t types.Type, visiting map[int]bool) bool {
 	default:
 		return false
 	}
+}
+
+func (tv *TypeVars) isMinted(v *types.TVar) bool {
+	for _, own := range tv.minted {
+		if own.ID == v.ID {
+			return true
+		}
+	}
+	return false
 }

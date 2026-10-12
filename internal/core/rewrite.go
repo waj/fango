@@ -219,6 +219,7 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Callee = r.expr(e.Callee)
 		n.Args = r.exprs(e.Args)
 		n.TyArgs = r.types(e.TyArgs)
+		n.Witnesses = r.types(e.Witnesses)
 		n.EvidenceArgs = make([]EffectInstance, len(e.EvidenceArgs))
 		for i, ev := range e.EvidenceArgs {
 			n.EvidenceArgs[i] = r.effect(ev)

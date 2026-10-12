@@ -1,0 +1,269 @@
+package main
+
+// A model of specializing an existential elimination at its concrete package
+// type. Dispatch happens once per consumer, never inside the generated fold.
+// This interface is a finite table of the opening sites in this experiment,
+// not an OO Stream API and not an implementation of the compiler analysis
+// needed to discover and instantiate those sites in arbitrary programs.
+import (
+	"runtime"
+	"sync"
+	"testing"
+
+	"fangobuild/fangort"
+	m_Maybe "fangobuild/modules/Maybe"
+	m_Stream "fangobuild/modules/Stream"
+	m_Tuple "fangobuild/modules/Tuple"
+)
+
+type openedStream interface {
+	sum() int64
+	cursorSum() int64
+	fold(fangort.EvidenceValue, int64, func(fangort.EvidenceValue, int64, int64) int64) int64
+	foldExit(fangort.EvidenceValue, int64, func(fangort.EvidenceValue, int64, int64) (int64, *fangort.ExitRequest)) (int64, *fangort.ExitRequest)
+	first() (int64, bool)
+	advance() (int64, openedStream, bool)
+}
+
+type typedStream[S any] struct {
+	source m_Stream.T_Stream_dot_Stream[S, int64]
+}
+
+func (p typedStream[S]) sum() int64       { return V_sum[S](nil, p.source) }
+func (p typedStream[S]) cursorSum() int64 { return V_cursorSum[S](nil, p.source) }
+
+func (p typedStream[S]) fold(row fangort.EvidenceValue, seed int64, combine func(fangort.EvidenceValue, int64, int64) int64) int64 {
+	return m_Stream.V_Stream_dot_fold[int64, int64, S](nil, nil, nil, row, combine, seed, p.source)
+}
+
+func (p typedStream[S]) foldExit(row fangort.EvidenceValue, seed int64, combine func(fangort.EvidenceValue, int64, int64) (int64, *fangort.ExitRequest)) (int64, *fangort.ExitRequest) {
+	return m_Stream.V_Stream_dot_fold_exit[int64, int64, S](nil, nil, nil, row, combine, seed, p.source)
+}
+
+func (p typedStream[S]) first() (int64, bool) {
+	next := p.source.F1.Direct(fangort.EvidenceValue{}, p.source.F0)
+	return next.F1_0.F0, next.Tag != 0
+}
+
+func (p typedStream[S]) advance() (int64, openedStream, bool) {
+	next := p.source.F1.Direct(fangort.EvidenceValue{}, p.source.F0)
+	if next.Tag == 0 {
+		return 0, nil, false
+	}
+	// Publishing another position must not mutate any retained alias.
+	source := p.source
+	source.F0 = next.F1_0.F1
+	return next.F1_0.F0, pack(source), true
+}
+
+// Match the opaque packaging boundary of explicit/checked/unchecked. The
+// underlying record retains its original typed state and original step.
+//
+//go:noinline
+func pack[S any](source m_Stream.T_Stream_dot_Stream[S, int64]) openedStream {
+	return typedStream[S]{source}
+}
+
+//go:noinline
+func explicitCursor[S any](source m_Stream.T_Stream_dot_Stream[S, int64]) func() int64 {
+	return func() int64 { return V_cursorSum[S](nil, source) }
+}
+
+func openedFactory(which string, n int64, alternate bool) openedStream {
+	switch which {
+	case "scalar":
+		return pack(V_scalar(alternate, n))
+	case "pair":
+		return pack(V_pair(n))
+	case "list":
+		return pack(V_linked(n))
+	case "mapped":
+		return pack(V_mapped(alternate, n))
+	case "rejected":
+		return pack(V_rejected(alternate, n))
+	case "taken":
+		return pack(V_taken(alternate, n))
+	case "zipped":
+		return pack(V_zipped(alternate, n))
+	case "choice", "cursor":
+		if alternate {
+			return pack(V_pair(n))
+		}
+		return pack(V_scalar(alternate, n))
+	default:
+		panic("unknown case: " + which)
+	}
+}
+
+// Choose the measurement path outside the timer. Both paths make one opaque
+// consumer call per traversal. Neither wraps its individual step. The same
+// outer run(i) boundary and checksum checks apply to every representation.
+func measurementRunner(which, variant string, n int64, mode string) func(int) int64 {
+	if variant == "opened" {
+		first, second := openedFactory(which, n, false), openedFactory(which, n, true)
+		if which == "cursor" {
+			return func(i int) int64 {
+				alternate := i%2 != 0
+				if mode == "construct" {
+					return openedFactory(which, n, alternate).cursorSum()
+				}
+				if alternate {
+					return second.cursorSum()
+				}
+				return first.cursorSum()
+			}
+		}
+		return func(i int) int64 {
+			alternate := i%2 != 0
+			if mode == "construct" {
+				return openedFactory(which, n, alternate).sum()
+			}
+			if alternate {
+				return second.sum()
+			}
+			return first.sum()
+		}
+	}
+	first, second := factory(which, variant, n, false), factory(which, variant, n, true)
+	return func(i int) int64 {
+		alternate := i%2 != 0
+		if mode == "construct" {
+			return factory(which, variant, n, alternate)()
+		}
+		if alternate {
+			return second()
+		}
+		return first()
+	}
+}
+
+func TestOpeningConsumersAndAliases(t *testing.T) {
+	for _, which := range []string{"scalar", "pair", "list", "mapped", "rejected", "choice", "taken", "zipped", "cursor"} {
+		for _, n := range []int64{0, 1, 2, 17, 1000} {
+			for _, alternate := range []bool{false, true} {
+				source := openedFactory(which, n, alternate)
+				want := expected(which, n)
+				for range 3 {
+					runtime.GC()
+					if got := source.sum(); got != want {
+						t.Fatalf("%s/%d sum: %d want %d", which, n, got, want)
+					}
+					if got := source.cursorSum(); got != want {
+						t.Fatalf("%s/%d cursor consumer: %d want %d", which, n, got, want)
+					}
+					if got := source.fold(fangort.EvidenceValue{}, 7, func(_ fangort.EvidenceValue, x, acc int64) int64 { return acc + 2*x }); got != 7+2*want {
+						t.Fatalf("%s/%d independent consumer: %d", which, n, got)
+					}
+				}
+				// All cursors are retained across a GC and re-read. This
+				// covers publication semantics, not cursor throughput parity.
+				positions := []openedStream{}
+				values := []int64{}
+				cursor := source
+				for {
+					value, next, ok := cursor.advance()
+					if !ok {
+						break
+					}
+					positions = append(positions, cursor)
+					values = append(values, value)
+					cursor = next
+				}
+				runtime.GC()
+				var sum int64
+				for i, position := range positions {
+					value, ok := position.first()
+					if !ok || value != values[i] {
+						t.Fatalf("%s/%d alias changed at %d", which, n, i)
+					}
+					sum += value
+				}
+				if sum != want {
+					t.Fatalf("%s/%d cursor sum: %d want %d", which, n, sum, want)
+				}
+			}
+		}
+	}
+}
+
+func TestOpeningConcurrentTraversals(t *testing.T) {
+	source := openedFactory("list", 1000, false)
+	var workers sync.WaitGroup
+	for range 8 {
+		workers.Go(func() {
+			for range 10 {
+				if got := source.sum(); got != 500500 {
+					t.Errorf("sum: %d", got)
+				}
+			}
+		})
+	}
+	workers.Wait()
+}
+
+func TestOpeningAllocations(t *testing.T) {
+	for _, which := range []string{"scalar", "pair", "list", "mapped", "rejected", "choice", "taken", "zipped", "cursor"} {
+		for _, n := range []int64{0, 1, 10, 10000} {
+			run := measurementRunner(which, "opened", n, "consume")
+			baseline := measurementRunner(which, "explicit", n, "consume")
+			want := testing.AllocsPerRun(10, func() { sink = baseline(0) })
+			if allocs := testing.AllocsPerRun(10, func() { sink = run(0) }); allocs != want {
+				t.Errorf("%s/%d: %.0f traversal allocations, explicit has %.0f", which, n, allocs, want)
+			}
+		}
+	}
+}
+
+func TestOpeningInvocationEvidenceAndExit(t *testing.T) {
+	calls := []int64{}
+	source := V_scalar(false, 4)
+	step := source.F1
+	source.F1.Direct = func(row fangort.EvidenceValue, state int64) m_Maybe.T_Maybe_dot_Maybe[m_Tuple.T_Tuple_dot_Pair[int64, int64]] {
+		calls = append(calls, state)
+		next := step.Direct(row, state)
+		if next.Tag != 0 {
+			next.F1_0.F0 += fangort.ValueEvidence[int64](row, "Offset", fangort.DirectEvidence)
+		}
+		return next
+	}
+	exit := &fangort.ExitRequest{Target: &fangort.ExitTarget{}, Effect: "Stop"}
+	source.F1.Exit = func(row fangort.EvidenceValue, state int64) (m_Maybe.T_Maybe_dot_Maybe[m_Tuple.T_Tuple_dot_Pair[int64, int64]], *fangort.ExitRequest) {
+		calls = append(calls, state)
+		if state == fangort.ValueEvidence[int64](row, "StopAt", fangort.ExitEvidence) {
+			return m_Maybe.T_Maybe_dot_Maybe[m_Tuple.T_Tuple_dot_Pair[int64, int64]]{}, exit
+		}
+		return step.Exit(row, state)
+	}
+	hidden := pack(source)
+	if len(calls) != 0 {
+		t.Fatal("packing executed a step")
+	}
+	for _, offset := range []int64{10, 20} {
+		row := fangort.ExtendEvidenceValue(fangort.EvidenceValue{}, &fangort.EvidenceBinding{Name: "Offset", Family: fangort.EvidenceFamily{Direct: offset}})
+		calls = nil
+		got := hidden.fold(row, 0, func(row fangort.EvidenceValue, x, acc int64) int64 {
+			return acc + x + fangort.ValueEvidence[int64](row, "Offset", fangort.DirectEvidence)
+		})
+		if got != 10+8*offset || len(calls) != 5 {
+			t.Fatalf("invocation evidence/restart: %d, calls %v", got, calls)
+		}
+	}
+	for _, stopAt := range []int64{2, -1} {
+		row := fangort.ExtendEvidenceValue(fangort.EvidenceValue{}, &fangort.EvidenceBinding{Name: "StopAt", Family: fangort.EvidenceFamily{Exit: stopAt}})
+		calls = nil
+		_, gotExit := hidden.foldExit(row, 0, func(_ fangort.EvidenceValue, x, acc int64) (int64, *fangort.ExitRequest) {
+			// With no step abort, stop in the consumer on the first element.
+			if stopAt < 0 {
+				return 0, exit
+			}
+			return acc + x, nil
+		})
+		wantCalls := 3
+		if stopAt < 0 {
+			wantCalls = 1
+		}
+		if gotExit != exit || len(calls) != wantCalls {
+			t.Fatalf("lost exit or continued after abort: %p, calls %v", gotExit, calls)
+		}
+	}
+}

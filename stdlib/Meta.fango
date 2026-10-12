@@ -267,10 +267,12 @@ type TypeInfo =
 
 -- info answers Opaque unless the type's schema is visible where `typeOf` was
 -- written: `exposing (T)` reflects opaque and `exposing (T(..))` reflects in
--- full, exactly as those forms already govern patterns and field access.
+-- full, exactly as those forms already govern patterns and field access. Types
+-- with constructor-local hidden state also answer Opaque; their public type
+-- arguments and nominal identity remain available.
 type Reflected
     -- No schema is readable: the type is imported opaquely, or it is a
-    -- scalar or a type variable.
+    -- scalar, a type variable, or a type with constructor-local hidden state.
     = Opaque
     -- The type's schema.
     | Visible TypeInfo
@@ -335,7 +337,8 @@ infoOf repr =
     , shape = shapeOf repr
     }
 
--- The type's schema, when it is visible where `typeOf` was written.
+-- The type's schema, when visible where `typeOf` was written and without
+-- constructor-local hidden types.
 info : TypeRepr -> Reflected
 info repr = if schemaVisible repr then Visible (infoOf repr) else Opaque
 

@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"go/ast"
+	"reflect"
 	"testing"
 
 	"github.com/waj/fango/internal/types"
@@ -28,5 +29,25 @@ func TestDescriptorsShareClosedShapesOnly(t *testing.T) {
 	two := g.typeDescriptor(closed).(*ast.Ident)
 	if one.Name != two.Name || len(g.descriptorDecls) != 2 {
 		t.Fatal("nested closed descriptor was rebuilt")
+	}
+}
+
+func TestStorageDescriptorPreservesPublicIdentity(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	a, h := sup.FreshRigid(types.General), sup.FreshRigid(types.General)
+	original := &types.ADTInfo{Con: &types.TCon{Unique: sup.NextUnique(), Name: "Module.Box"}, Params: []*types.TVar{a}}
+	original.Ctors = []*types.CtorInfo{{Name: "Module.Box", Result: original.Con, Fields: []types.Type{h}, Hidden: []*types.TVar{h}}}
+	mirror := &types.ADTInfo{Con: &types.TCon{Unique: sup.NextUnique(), Name: "Module._storage_Box"}, Params: []*types.TVar{a, h}, RepresentationOf: original}
+	adts := map[int]*types.ADTInfo{original.Con.Unique: original, mirror.Con.Unique: mirror}
+	public := &types.TCon{Unique: original.Con.Unique, Name: original.Con.Name, Args: []types.Type{b.Int}}
+	// Deliberately leave the storage witness unbound. Its descriptor must
+	// neither be consulted nor appear in the source nominal identity.
+	storage := &types.TCon{Unique: mirror.Con.Unique, Name: mirror.Con.Name, Args: []types.Type{b.Int, h}}
+	g := &gen{adts: adts}
+	want := g.typeDescriptorExpr(public)
+	got := g.typeDescriptorExpr(storage)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("storage descriptor changed public identity: %#v versus %#v", got, want)
 	}
 }

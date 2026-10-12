@@ -118,6 +118,13 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 	visit = func(e Expr) {
 		InspectPruned(e, func(e Expr) bool {
 			switch e := e.(type) {
+			case *Let:
+				if ref, ok := e.Rhs.(*VarRef); ok && ref.Local && ref.Name == name && !e.Rec {
+					c := callbackUses(e.Body, e.Name, arity, defs)
+					add(c)
+					visit(e.Body)
+					return false
+				}
 			case *Handle:
 				// Clauses become operation functions, potentially invoked in
 				// another transport context or task. They are escaping uses.

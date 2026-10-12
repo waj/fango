@@ -337,16 +337,17 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 // constructor, or a lifted local. All get the same saturation analysis; only
 // the emitted App's kind and leading arguments differ.
 type callee struct {
-	kind     core.CalleeKind
-	name     string
-	ty       types.Type      // full curried type AT THIS OCCURRENCE (instantiated)
-	arity    int             // total parameters, including pre
-	ctor     *types.CtorInfo // when kind == core.Ctor
-	tyArgs   []types.Type    // explicit instantiation (doc/design.md, "Go backend and runtime"); nil when monomorphic
-	pre      []core.Expr     // lifted locals: the captured frees, already-atomic leading args
-	evidence []core.EffectInstance
-	row      *core.RowArgument
-	raw      types.Type
+	witnesses []types.Type
+	kind      core.CalleeKind
+	name      string
+	ty        types.Type      // full curried type AT THIS OCCURRENCE (instantiated)
+	arity     int             // total parameters, including pre
+	ctor      *types.CtorInfo // when kind == core.Ctor
+	tyArgs    []types.Type    // explicit instantiation (doc/design.md, "Go backend and runtime"); nil when monomorphic
+	pre       []core.Expr     // lifted locals: the captured frees, already-atomic leading args
+	evidence  []core.EffectInstance
+	row       *core.RowArgument
+	raw       types.Type
 }
 
 func (el *elab) workerCallee(name string, workerTy, rawTy types.Type, arity int) callee {
@@ -382,6 +383,9 @@ func (el *elab) ctorCallee(info *types.CtorInfo, occTy types.Type) callee {
 		arity: len(info.Fields), ctor: info}
 	if adt := el.ck.ADTs[info.Result.Unique]; adt != nil && len(adt.Params) > 0 {
 		c.tyArgs = matchTyArgs(info.ValueType(), adt.Params, occTy)
+	}
+	if len(info.Hidden) > 0 {
+		c.witnesses = matchTyArgs(info.ValueType(), info.Hidden, occTy)
 	}
 	return c
 }
@@ -563,6 +567,7 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 		Callee:       &core.VarRef{Name: c.name, Ty: c.ty},
 		Args:         append(append([]core.Expr{}, c.pre...), args...),
 		TyArgs:       c.tyArgs,
+		Witnesses:    c.witnesses,
 		Ty:           ret,
 		EvidenceArgs: c.evidence,
 		Ctor:         c.ctor,

@@ -109,8 +109,7 @@ readyAt encoding bytes offset =
 
 -- Runs `action` with a text reader over `parent` in `encoding`. It does not
 -- close the parent.
-{-# scoped s #-}
-overWith : Encoding -> ByteReader.Reader e -> (Reader s ->{s} a) ->{e} a
+overWith : Encoding -> ByteReader.Reader e -> (Reader {s | e} ->{s | e} a) ->{e} a
 overWith encoding parent action =
     Runtime.Local.run 0 { consumed ->
         action (Reader (Input
@@ -130,8 +129,7 @@ overWith encoding parent action =
     }
 
 -- Runs `action` with a UTF-8 text reader over `parent`.
-{-# scoped s #-}
-over : ByteReader.Reader e -> (Reader s ->{s} a) ->{e} a
+over : ByteReader.Reader e -> (Reader {s | e} ->{s | e} a) ->{e} a
 over parent action = overWith Encoding.utf8 parent action
 
 -- Runs `action` with a text reader over `text` in memory. The input cannot
@@ -145,8 +143,7 @@ over parent action = overWith Encoding.utf8 parent action
 --
 -- Fail.attempt { Text.Reader.withString "héllo" { r -> Text.Reader.readUpTo r 2 } } == Ok "hé"
 -- ```
-{-# scoped s #-}
-withString : String -> (Reader s ->{s} a) ->{e} a
+withString : String -> (Reader {s | e} ->{s | e} a) ->{e} a
 withString text action =
     bytes = Bytes.fromString text
     Runtime.Local.run 0 { consumed ->
@@ -521,5 +518,5 @@ chunkStep reader _ =
 -- The rest of the input as a stream of nonempty strings of whole
 -- characters. Its boundaries may differ from the source's chunks.
 -- Traversing it advances the reader.
-chunks : Reader e -> Stream () String {Fail Encoding.Error | e}
+chunks : Reader e -> Stream String {Fail Encoding.Error | e}
 chunks reader = Stream.unfold () (chunkStep reader)

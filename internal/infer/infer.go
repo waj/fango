@@ -132,6 +132,8 @@ type Checker struct {
 	LambdaEffects     map[*ast.Lambda][]types.Type
 	RecordUses        map[ast.Expr]*types.ADTInfo
 	RecordPatternUses map[*ast.PRecord]*types.ADTInfo
+	CtorWitnesses     map[ast.Expr][]types.Type
+	PatternHidden     map[ast.Pattern][]*types.TVar
 	PinExprs          map[*ast.PPin]*ast.Var
 
 	// Ctors is the constructor table (doc/design.md, "Type inference"), keyed by constructor name —
@@ -338,6 +340,8 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		LambdaEffects:     map[*ast.Lambda][]types.Type{},
 		RecordUses:        map[ast.Expr]*types.ADTInfo{},
 		RecordPatternUses: map[*ast.PRecord]*types.ADTInfo{},
+		CtorWitnesses:     map[ast.Expr][]types.Type{},
+		PatternHidden:     map[ast.Pattern][]*types.TVar{},
 		PinExprs:          map[*ast.PPin]*ast.Var{},
 		Ctors:             map[string]*types.CtorInfo{},
 		ADTs:              map[int]*types.ADTInfo{},
@@ -598,6 +602,12 @@ func (ck *Checker) patternDecl(d *ast.PatternDecl, mode DeclEffects) ([]DeclInfo
 		// subject, so only the first copy of a pattern diagnostic is news.
 		if i == 0 {
 			errs = append(errs, es...)
+		} else {
+			for _, err := range es {
+				if err.Title == "HIDDEN TYPE ESCAPES" {
+					errs = append(errs, err)
+				}
+			}
 		}
 		projected = append(projected, info)
 	}
@@ -670,7 +680,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 	if len(d.Ann.Preds) > 0 {
 		return []diag.Error{diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "Native declarations cannot require class constraints; use an ordinary constrained wrapper.")}
 	}
-	scope := ck.NewAnnScope()
+	scope := ck.newDeclAnnScope(d)
 	ty, errs := ck.ResolveTypeExpr(d.Ann.Type, scope)
 	if ty == nil {
 		return errs
@@ -1002,14 +1012,19 @@ func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.E
 // REPL path rebinds them (generational, like values).
 func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch bool) []diag.Error {
 	var errs []diag.Error
-	// Field types resolve in the closed scope of the declaration's
-	// parameters; the constructors' result type is the type applied to its
-	// own parameters (`Just : a -> Maybe a`).
+	// Each constructor extends the public parameters with its own hidden
+	// field binders. The result contains only the public parameters.
 	paramNames := make([]string, len(td.Params))
 	for i, p := range td.Params {
 		paramNames[i] = p.Name
 	}
-	scope := newCtorScope(paramNames, adt.Params)
+	kinds := map[int]types.VarKind{}
+	newScope := func() *TypeVars {
+		scope := newCtorScope(paramNames, adt.Params)
+		scope.open, scope.hidden, scope.sup = true, true, ck.Sup
+		scope.kinds = kinds
+		return scope
+	}
 	result := adt.Con
 	if len(adt.Params) > 0 {
 		args := make([]types.Type, len(adt.Params))
@@ -1019,6 +1034,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		result = &types.TCon{Unique: adt.Con.Unique, Name: adt.Con.Name, Args: args}
 	}
 	if td.RecordFields != nil {
+		scope := newScope()
 
 		seenFields := map[string]bool{}
 		fields := make([]types.Type, len(td.RecordFields))
@@ -1035,7 +1051,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 			fields[i] = ty
 			adt.RecordFields = append(adt.RecordFields, types.RecordFieldInfo{Name: f.Name, Type: ty})
 		}
-		ctor := &types.CtorInfo{Name: td.Name + ".__record", Index: 0, Fields: fields, Result: result}
+		ctor := &types.CtorInfo{Name: td.Name + ".__record", Index: 0, Fields: fields, Result: result, Hidden: scope.Minted()}
 		adt.Ctors = append(adt.Ctors, ctor)
 		ck.Ctors[ctor.Name] = ctor
 		for i := range adt.Params {
@@ -1044,6 +1060,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		return errs
 	}
 	for _, c := range td.Ctors {
+		scope := newScope()
 		if prev, dup := ck.Ctors[c.Name]; dup && batch {
 			errs = append(errs, diag.Errorf(c.NameSpan, "MULTIPLE DEFINITIONS",
 				"The constructor `%s` is already defined by type `%s` —\nconstructor names must be unique across a module.",
@@ -1064,7 +1081,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 			}
 			fields[j] = t
 		}
-		info := &types.CtorInfo{Name: c.Name, Index: len(adt.Ctors), Fields: fields, Result: result}
+		info := &types.CtorInfo{Name: c.Name, Index: len(adt.Ctors), Fields: fields, Result: result, Hidden: scope.Minted()}
 		adt.Ctors = append(adt.Ctors, info)
 		ck.Ctors[c.Name] = info
 	}
@@ -1170,7 +1187,7 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, mode DeclEffects) *declInferenc
 	var annTy types.Type
 	var annScope *TypeVars
 	if d.Ann != nil {
-		annScope = ck.NewAnnScope()
+		annScope = ck.newDeclAnnScope(d)
 		var annErrs []diag.Error
 		annTy, annErrs = ck.ResolveTypeExpr(d.Ann.Type, annScope)
 		errs = append(errs, annErrs...)
@@ -1495,6 +1512,8 @@ type recordUpdateObligation struct {
 }
 
 type generator struct {
+	hiddenBoundaries  []hiddenBoundary
+	patternDepth      int
 	ck                *Checker
 	locals            *blockScope
 	cs                []Constraint
@@ -1575,6 +1594,7 @@ func (s *blockScope) lookup(name string) (types.Scheme, bool) {
 func (g *generator) expr(e ast.Expr) types.Type { return g.exprWant(e, nil) }
 
 func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
+	hiddenStart := len(g.hiddenBoundaries)
 	var ty types.Type
 	switch e := e.(type) {
 	case *ast.IntLit:
@@ -1652,7 +1672,10 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			ty = g.ck.Sup.FreshVar(types.General)
 			break
 		}
-		fields, result := g.instantiateCtor(info)
+		fields, result, witnesses := g.instantiateHiddenCtor(info, false)
+		if len(witnesses) != 0 {
+			g.ck.CtorWitnesses[e] = witnesses
+		}
 		if e.Witness != nil {
 			if e.Name != "Basics.Type" || len(fields) != 0 {
 				g.errs = append(g.errs, diag.Errorf(e.Sp, "TYPE WITNESS", "A type witness must use the bundled `Type` constructor."))
@@ -1690,7 +1713,10 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			}
 			break
 		}
-		fieldTys, result := g.instantiateCtor(adt.Ctors[0])
+		fieldTys, result, witnesses := g.instantiateHiddenCtor(adt.Ctors[0], false)
+		if len(witnesses) != 0 {
+			g.ck.CtorWitnesses[e] = witnesses
+		}
 		seen := map[string]bool{}
 		provided := map[string]ast.RecordExprField{}
 		for _, f := range e.Fields {
@@ -1728,6 +1754,11 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 					visible = visible || name == adt.Con.Name
 				}
 				if idx >= 0 && visible {
+					if hiddenField(adt.Ctors[0], idx) {
+						g.errs = append(g.errs, hiddenProjection(e.FieldSpan, e.Field))
+						ty = g.ck.Sup.FreshVar(types.General)
+						break
+					}
 					g.ck.RecordUses[e] = adt
 					ty = adt.InstFields(adt.Ctors[0], con.Args)[idx]
 					break
@@ -1956,6 +1987,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		panic("infer: unhandled expression node")
 	}
 	g.ck.ExprTypes[e] = ty
+	g.closeHiddenBoundaries(hiddenStart, ty, g.ambient)
 	return ty
 }
 
@@ -2632,6 +2664,7 @@ func declEquations(d *ast.ValueDecl) []ast.Equation {
 // an independent pattern scope. All bodies contribute to the final arrow's
 // effect row and must agree on one result type.
 func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []ast.Equation, ann types.Type) types.Type {
+	hiddenStart := len(g.hiddenBoundaries)
 	outer := g.locals
 	paramTys := make([]types.Type, len(eqs[0].Params))
 	if ann != nil {
@@ -2700,6 +2733,7 @@ func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []a
 		g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: eq.NameSpan, Why: Why{Kind: WhyRecursion, Name: name}})
 	}
 	g.locals = outer
+	g.closeHiddenBoundaries(hiddenStart, funTy, bodyAmbient)
 	return funTy
 }
 
@@ -3040,6 +3074,26 @@ func (g *generator) recordPass(final bool, from int) int {
 			return false
 		}
 		fieldTypes := adt.InstFields(adt.Ctors[0], con.Args)
+		if (ob.kind == recordBuild || ob.kind == recordMatch) && len(adt.Ctors[0].Hidden) > 0 {
+			mapping := map[int]types.Type{}
+			witnesses := make([]types.Type, len(adt.Ctors[0].Hidden))
+			for i, hidden := range adt.Ctors[0].Hidden {
+				v := g.ck.Sup.FreshVar(types.General)
+				if ob.kind == recordMatch {
+					v = g.ck.Sup.FreshRigid(types.General)
+				}
+				mapping[hidden.ID], witnesses[i] = v, v
+			}
+			fieldTypes = append([]types.Type(nil), fieldTypes...)
+			for i, field := range fieldTypes {
+				fieldTypes[i] = types.SubstRigid(field, mapping)
+			}
+			if ob.kind == recordMatch {
+				g.ck.PatternHidden[ob.pat] = rigidHidden(witnesses)
+			} else {
+				g.ck.CtorWitnesses[ob.node] = witnesses
+			}
+		}
 		if ob.field != "" {
 			idx, _ := adt.RecordField(ob.field)
 			switch {
@@ -3050,6 +3104,8 @@ func (g *generator) recordPass(final bool, from int) int {
 				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), ob.field))
 			case !visible(ob.candidates):
 				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
+			case hiddenField(adt.Ctors[0], idx):
+				g.errs = append(g.errs, hiddenProjection(ob.fieldSpan, ob.field))
 			default:
 				// The stored field is what the projection has, and the use
 				// site is what it must fit, so this is subsumption in that
@@ -3069,6 +3125,8 @@ func (g *generator) recordPass(final bool, from int) int {
 				g.errs = append(g.errs, diag.Errorf(u.span, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), u.name))
 			case !visible(u.candidates):
 				g.errs = append(g.errs, diag.Errorf(u.span, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
+			case ob.kind == recordAccess && hiddenField(adt.Ctors[0], idx):
+				g.errs = append(g.errs, hiddenProjection(u.span, u.name))
 			default:
 				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}, Subsume: ob.kind != recordMatch, ADTs: g.ck.ADTs, Bind: u.bind})
 			}
@@ -3145,7 +3203,12 @@ func (g *generator) caseExpr(e *ast.Case) types.Type {
 // pattern types one pattern, binding its variables into scope with the
 // no-shadowing rule (which also catches `Pair x x`).
 func (g *generator) pattern(p ast.Pattern, scope *blockScope) types.Type {
+	if g.patternDepth == 0 && g.patternMayHideTypes(p) {
+		g.hiddenBoundaries = append(g.hiddenBoundaries, hiddenBoundary{pattern: p, outer: g.scopeOuterTypes()})
+	}
+	g.patternDepth++
 	ty := g.patternInner(p, scope)
+	g.patternDepth--
 	g.ck.PatTypes[p] = ty
 	return ty
 }
@@ -3213,7 +3276,10 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 			}
 			return g.ck.Sup.FreshVar(types.General)
 		}
-		fieldTys, result := g.instantiateCtor(adt.Ctors[0])
+		fieldTys, result, hidden := g.instantiateHiddenCtor(adt.Ctors[0], true)
+		if len(hidden) != 0 {
+			g.ck.PatternHidden[p] = rigidHidden(hidden)
+		}
 		seen := map[string]bool{}
 		for _, f := range p.Fields {
 			if seen[f.Name] {
@@ -3240,7 +3306,10 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 			}
 			return g.ck.Sup.FreshVar(types.General)
 		}
-		fields, result := g.instantiateCtor(info)
+		fields, result, hidden := g.instantiateHiddenCtor(info, true)
+		if len(hidden) != 0 {
+			g.ck.PatternHidden[p] = rigidHidden(hidden)
+		}
 		if len(p.Args) != len(fields) {
 			g.errs = append(g.errs, diag.Errorf(p.Span(), "PATTERN ARITY",
 				"The `%s` constructor takes %d argument(s), but this pattern\ngives it %d.", p.Name, len(fields), len(p.Args)))
@@ -3358,9 +3427,14 @@ func (g *generator) instantiateAt(s types.Scheme, sp source.Span, op string) typ
 // owning type's parameters replaced by fresh metas — `Just : ∀a. a -> Maybe a`
 // used at a fresh `a` per occurrence, in expressions and patterns alike.
 func (g *generator) instantiateCtor(info *types.CtorInfo) ([]types.Type, types.Type) {
+	fields, result, _ := g.instantiateHiddenCtor(info, false)
+	return fields, result
+}
+
+func (g *generator) instantiateHiddenCtor(info *types.CtorInfo, opening bool) ([]types.Type, types.Type, []types.Type) {
 	adt := g.ck.ADTs[info.Result.Unique]
-	if adt == nil || len(adt.Params) == 0 {
-		return info.Fields, info.Result
+	if adt == nil || len(adt.Params) == 0 && len(info.Hidden) == 0 {
+		return info.Fields, info.Result, nil
 	}
 	m := make(map[int]types.Type, len(adt.Params))
 	args := make([]types.Type, len(adt.Params))
@@ -3369,10 +3443,18 @@ func (g *generator) instantiateCtor(info *types.CtorInfo) ([]types.Type, types.T
 		m[p.ID] = f
 		args[i] = f
 	}
+	hidden := make([]types.Type, len(info.Hidden))
+	for i, v := range info.Hidden {
+		fresh := g.ck.Sup.FreshVar(v.Kind)
+		if opening {
+			fresh = g.ck.Sup.FreshRigid(v.Kind)
+		}
+		hidden[i], m[v.ID] = fresh, fresh
+	}
 	fields := make([]types.Type, len(info.Fields))
 	for i, f := range info.Fields {
 		fields[i] = types.SubstRigid(f, m)
 	}
 	result := &types.TCon{Unique: info.Result.Unique, Name: info.Result.Name, Args: args}
-	return fields, result
+	return fields, result, hidden
 }

@@ -1,7 +1,7 @@
 module Pull exposing (Pull, read, withValues)
 import Iterator
 
-type Pull state a e = Pull (Iterator.Iterator state a e)
+type Pull a e = Pull (Iterator.Iterator a e)
 
 withValues values consumer = consumer (Pull (Iterator.start values ({ pending ->
     case pending of

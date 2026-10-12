@@ -143,32 +143,35 @@ available to inference and reflection.
 
 ## Scoped callbacks
 
-A declaration pragma binds a row universally within one selected callback:
+A scoped row extension binds a row universally within one selected callback:
 
 ```fango
-{-# scoped s #-}
-withText : String -> (Reader s ->{s} a) ->{e} a
+withText : String -> (Reader {s | e} ->{s | e} a) ->{e} a
 withText text action = Reader.withBytes (Bytes.fromString text) action
 ```
 
-At each call, `s` contains a fresh local permission plus the runner's residual
-row `e`. The callback may use both. The runner discharges its fresh permission;
-all other effects remain in `e`. Nested calls have distinct permissions and can
+Here `s` is the callback-local fragment and `e` is the ambient row variable.
+The ambient name must be the tail of the runner's final arrow. For a closed
+final row, write `{s | {}}`; fixed effects still come from the final arrow. At each call,
+the extension contains a fresh local permission plus the runner's complete
+effect row, including any fixed labels before its tail. The callback may use
+both. The runner discharges its fresh permission; ambient effects remain on
+the runner's final arrow. Nested calls have distinct permissions and can
 use multiple readers together through ordinary row inclusion, as the
 [two-reader fixture](../../testdata/suite/ReaderScopedMemory.fango) does.
 
 The annotated declaration must bind its scoped callback to a name. The callback
 may be in any parameter position; exactly one callback must have the annotated
-scoped row as its arrow's tail. The binder may occur in that callback's
-argument and result, but not in any other runner parameter, the runner result,
-or the runner's own arrow effects.
+scoped extension on its arrow. Every occurrence must use the same fragment and
+ambient name, including row arguments such as `Reader {s | e}`. The binder may
+occur in that callback's argument and result, but not in any other runner
+parameter, the runner result, or the runner's own arrow effects.
 
-Effects listed before the tail are granted to the callback by the runner, which
+Effects listed before the fragment are granted to the callback by the runner, which
 must handle them:
 
 ```fango
-{-# scoped s #-}
-guarded : String -> (Reader s ->{Fail String | s} a) ->{e} Result String a
+guarded : String -> (Reader {s | e} ->{Fail String, s | e} a) ->{e} Result String a
 guarded text action = Reader.withBytes (Bytes.fromString text) { reader -> Fail.attempt { action reader } }
 ```
 
@@ -179,6 +182,18 @@ may therefore return a value that uses a scoped reader or writer later in the
 same runner. The runner must consume that value before its scope ends. Within
 the implementation the callback can be instantiated at different rows
 extending the runner's residual row.
+
+This form is available on annotated named runners, not local annotations,
+record fields, class methods, or arbitrary nested function types. It is not a
+general union of row variables. Different fragments or ambient names, a binder
+outside the selected callback, or an ambient name that does not match the
+runner's final arrow reports `SCOPED CALLBACK`. Ordinary callback signatures
+and their implicit type variables keep their existing meaning.
+
+The legacy spelling `{-# scoped s #-}` followed by
+`withText : String -> (Reader s ->{s} a) ->{e} a` remains accepted with the same
+contract. The standard library uses row extensions, including `{s | {}}` for
+closed outer rows. Do not combine a pragma with the row-extension spelling.
 
 A [`use` item](syntax.md#use-items) calls a runner this way, binding the
 callback's parameter for the rest of the block:

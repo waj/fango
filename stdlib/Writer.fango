@@ -30,8 +30,7 @@ windowOf size = if size < 1 then 1 else size
 -- window is one write, and a window below one byte writes every emit
 -- straight through. A failed `action` writes nothing further, so no reader
 -- sees a truncated message it would have to guess at.
-{-# scoped s #-}
-over : Sink e -> Int -> (Writer s ->{s} a) ->{e} a
+over : Sink e -> Int -> (Writer {s | e} ->{s | e} a) ->{e} a
 over sink size action =
     Runtime.Local.run Bytes.empty { pending ->
         writer =
@@ -66,8 +65,7 @@ over sink size action =
 --
 -- written == ((), Bytes.fromString "hi")
 -- ```
-{-# scoped s #-}
-collecting : (Writer s ->{s} a) ->{e} (a, Bytes)
+collecting : (Writer {s | e} ->{s | e} a) ->{e} (a, Bytes)
 collecting action =
     Runtime.Local.run [] { parts ->
         result = action

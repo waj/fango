@@ -36,7 +36,7 @@ once action = Stream.unfold False { done ->
     if done then Nothing else Just (action(), True)
 }
 
-emit : Invoke a => a -> Stream.Stream Bool Int {State.State (List Observation)}
+emit : Invoke a => a -> Stream.Stream Int {State.State (List Observation)}
 emit stored = once { _ -> invoke stored 4 }
 
 type Observation = Trace String | Value Int deriving (Eq, Show)

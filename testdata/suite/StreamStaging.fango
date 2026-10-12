@@ -7,7 +7,7 @@ import Meta exposing (Code)
 import Stream
 import Test
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator state a e ->{e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just (value, next) -> foldCursor combine (combine value initial) next

@@ -7,18 +7,18 @@ import Maybe exposing (Maybe(..))
 import Stream
 import Test
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator state a e ->{e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just (value, next) -> foldCursor combine (combine value initial) next
 
-type Held state a e = Held (Iterator.Iterator state a e)
-type Consumer state e = Consumer (Iterator.Iterator state Int e ->{e} Int)
+type Held a e = Held (Iterator.Iterator a e)
+type Consumer e = Consumer (Iterator.Iterator Int e ->{e} Int)
 
-produce : Stream.Stream (List Int) Int e
+produce : Stream.Stream Int e
 produce = Stream.fromList [1, 2, 3]
 
-sumCursor : Iterator.Iterator state Int e ->{e} Int
+sumCursor : Iterator.Iterator Int e ->{e} Int
 sumCursor cursor = foldCursor { element acc -> element + acc } 0 cursor
 
 sumHeld (Held cursor) = sumCursor cursor
@@ -37,12 +37,12 @@ runStored source =
         Consumer consume -> Stream.withCursor source consume
 
 class Consume a
-    consume : Iterator.Iterator (List a) a IO ->{IO} Int
+    consume : Iterator.Iterator a IO ->{IO} Int
 
 instance Consume Int
     consume cursor = sumCursor cursor
 
-independent : Iterator.Iterator state Int e -> () -> Int
+independent : Iterator.Iterator Int e -> () -> Int
 independent cursor = { _ -> 42 }
 
 tests : Test.Test IO.IO

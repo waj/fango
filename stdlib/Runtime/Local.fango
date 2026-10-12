@@ -40,8 +40,7 @@ effect LocalState a
 --
 -- doubled == 42
 -- ```
-{-# scoped s #-}
-run : a -> (Cell s a ->{s} b) ->{e} b
+run : a -> (Cell {s | e} a ->{s | e} b) ->{e} b
 run initial action =
     handle action { read = { readState() }, write = { value -> writeState value } } with state = initial on
         readState () -> resume state with state

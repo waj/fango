@@ -12,7 +12,9 @@ permission, preserving source, sink, and consumer effects. Scoped local state
 must be installed inside the task.
 
 Stream and Iterator are Fango records and ordinary recursive functions. State
-is explicit in each step's return value. No compiler node recognizes streams,
+is explicit in each step's return value, and its type is hidden from callers.
+[Representation inference](hidden-types.md#typed-storage-workers) retains that
+type internally through generic workers. No compiler node recognizes streams,
 iterators, map, filter, take, zip, or fold. Resource ownership belongs to the
 scope performing the traversal, so there is no suspended-stack cleanup protocol.
 

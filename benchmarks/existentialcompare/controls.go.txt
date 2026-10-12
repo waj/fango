@@ -1,0 +1,243 @@
+package main
+
+// These are experimental Go adapters around the actual generated Fango
+// Stream and fold. They are not a Fango existential implementation.
+// A traversal owns one typed scratch slot: the source is never mutated, and
+// the consumer receives only Int values, so no alias of that slot can escape.
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"runtime"
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+	"unsafe"
+
+	"fangobuild/fangort"
+	m_Maybe "fangobuild/modules/Maybe"
+	m_Stream "fangobuild/modules/Stream"
+	m_Tuple "fangobuild/modules/Tuple"
+)
+
+type observation struct {
+	NS, Bytes, Allocs uint64
+	Reps              int
+	Checksum          int64
+}
+
+var sink int64
+
+// Keep the packaging boundary opaque in every representation. Only the
+// explicit control knows S in its consumer. Go remains free to optimize
+// the generated Fango workers and the body of each adapter.
+//
+//go:noinline
+func explicit[S any](source m_Stream.T_Stream_dot_Stream[S, int64]) func() int64 {
+	return func() int64 { return V_sum[S](nil, source) }
+}
+
+//go:noinline
+func checked[S any](source m_Stream.T_Stream_dot_Stream[S, int64]) func() int64 {
+	return func() int64 {
+		state := source.F0
+		erased := m_Stream.T_Stream_dot_Stream[any, int64]{F0: &state}
+		erased.F1.Direct = func(row fangort.EvidenceValue, raw any) m_Maybe.T_Maybe_dot_Maybe[m_Tuple.T_Tuple_dot_Pair[int64, any]] {
+			slot := raw.(*S)
+			next := source.F1.Direct(row, *slot)
+			if next.Tag == 0 {
+				return m_Maybe.T_Maybe_dot_Maybe[m_Tuple.T_Tuple_dot_Pair[int64, any]]{}
+			}
+			*slot = next.F1_0.F1
+			return m_Maybe.T_Maybe_dot_Maybe[m_Tuple.T_Tuple_dot_Pair[int64, any]]{
+				Tag: 1, F1_0: m_Tuple.T_Tuple_dot_Pair[int64, any]{F0: next.F1_0.F0, F1: raw},
+			}
+		}
+		return V_sum[any](nil, erased)
+	}
+}
+
+//go:noinline
+func unchecked[S any](source m_Stream.T_Stream_dot_Stream[S, int64]) func() int64 {
+	return func() int64 {
+		state := source.F0
+		erased := m_Stream.T_Stream_dot_Stream[unsafe.Pointer, int64]{F0: unsafe.Pointer(&state)}
+		erased.F1.Direct = func(row fangort.EvidenceValue, raw unsafe.Pointer) m_Maybe.T_Maybe_dot_Maybe[m_Tuple.T_Tuple_dot_Pair[int64, unsafe.Pointer]] {
+			// raw was obtained from *S in this invocation, and never from
+			// uintptr or a differently typed allocation.
+			slot := (*S)(raw)
+			next := source.F1.Direct(row, *slot)
+			if next.Tag == 0 {
+				return m_Maybe.T_Maybe_dot_Maybe[m_Tuple.T_Tuple_dot_Pair[int64, unsafe.Pointer]]{}
+			}
+			*slot = next.F1_0.F1
+			return m_Maybe.T_Maybe_dot_Maybe[m_Tuple.T_Tuple_dot_Pair[int64, unsafe.Pointer]]{
+				Tag: 1, F1_0: m_Tuple.T_Tuple_dot_Pair[int64, unsafe.Pointer]{F0: next.F1_0.F0, F1: raw},
+			}
+		}
+		return V_sum[unsafe.Pointer](nil, erased)
+	}
+}
+
+func adapt[S any](variant string, source m_Stream.T_Stream_dot_Stream[S, int64]) func() int64 {
+	switch variant {
+	case "explicit":
+		return explicit(source)
+	case "checked":
+		return checked(source)
+	case "unsafe":
+		return unchecked(source)
+	default:
+		panic("unknown variant: " + variant)
+	}
+}
+
+// The choice is made while the measurement runs, on every traversal. List
+// input allocation is included only in the construction measurement.
+func factory(which, variant string, n int64, alternate bool) func() int64 {
+	switch which {
+	case "scalar":
+		return adapt(variant, V_scalar(alternate, n))
+	case "pair":
+		return adapt(variant, V_pair(n))
+	case "list":
+		return adapt(variant, V_linked(n))
+	case "mapped":
+		return adapt(variant, V_mapped(alternate, n))
+	case "rejected":
+		return adapt(variant, V_rejected(alternate, n))
+	case "taken":
+		return adapt(variant, V_taken(alternate, n))
+	case "zipped":
+		return adapt(variant, V_zipped(alternate, n))
+	case "cursor":
+		if variant != "explicit" {
+			panic("cursor comparison requires explicit or opened")
+		}
+		if alternate {
+			return explicitCursor(V_pair(n))
+		}
+		return explicitCursor(V_scalar(alternate, n))
+	case "choice":
+		if alternate {
+			return adapt(variant, V_pair(n))
+		}
+		return adapt(variant, V_scalar(alternate, n))
+	default:
+		panic("unknown case: " + which)
+	}
+}
+
+func expected(which string, n int64) int64 {
+	if which == "rejected" {
+		return 0
+	}
+	result := n * (n + 1) / 2
+	if which == "mapped" {
+		result += 4 * n
+	}
+	if which == "taken" {
+		k := n / 2
+		result = k * (2*n - k + 1) / 2
+	}
+	if which == "zipped" {
+		result *= 2
+	}
+	return result
+}
+
+func TestRepresentations(t *testing.T) {
+	for _, which := range []string{"scalar", "pair", "list", "mapped", "rejected", "choice", "taken", "zipped"} {
+		for _, variant := range []string{"explicit", "checked", "unsafe"} {
+			for _, n := range []int64{0, 1, 2, 17, 1000} {
+				for _, alternate := range []bool{false, true} {
+					run := factory(which, variant, n, alternate)
+					want := expected(which, n)
+					for range 3 {
+						runtime.GC()
+						if got := run(); got != want {
+							t.Fatalf("%s/%s/%d/%v: %d want %d", which, variant, n, alternate, got, want)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestIndependentTraversals(t *testing.T) {
+	for _, variant := range []string{"explicit", "checked", "unsafe"} {
+		run := factory("list", variant, 1000, false)
+		var workers sync.WaitGroup
+		for range 8 {
+			workers.Go(func() {
+				for range 10 {
+					if got := run(); got != 500500 {
+						t.Errorf("%s: %d", variant, got)
+					}
+				}
+			})
+		}
+		workers.Wait()
+	}
+}
+
+func TestAllocationSlope(t *testing.T) {
+	for _, which := range []string{"scalar", "pair", "list", "mapped", "rejected", "choice", "taken", "zipped"} {
+		for _, variant := range []string{"explicit", "checked", "unsafe"} {
+			small, large := factory(which, variant, 10, true), factory(which, variant, 10000, false)
+			smallBase, largeBase := factory(which, "explicit", 10, true), factory(which, "explicit", 10000, false)
+			a := testing.AllocsPerRun(10, func() { sink = small() })
+			b := testing.AllocsPerRun(10, func() { sink = large() })
+			baseA := testing.AllocsPerRun(10, func() { sink = smallBase() })
+			baseB := testing.AllocsPerRun(10, func() { sink = largeBase() })
+			if b-a > baseB-baseA {
+				t.Errorf("%s/%s: allocation growth %.0f exceeds explicit %.0f", which, variant, b-a, baseB-baseA)
+			}
+		}
+	}
+}
+
+func TestMeasure(t *testing.T) {
+	if os.Getenv("PROBE_VARIANT") == "" {
+		t.Skip("measurement only")
+	}
+	number := func(key string) int {
+		value, err := strconv.Atoi(os.Getenv(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	variant, which, mode := os.Getenv("PROBE_VARIANT"), os.Getenv("PROBE_CASE"), os.Getenv("PROBE_MODE")
+	n, reps := int64(number("PROBE_N")), number("PROBE_REPS")
+	if n < 0 || reps <= 0 {
+		t.Fatal("invalid measurement dimensions")
+	}
+	run := measurementRunner(which, variant, n, mode)
+	want := expected(which, n)
+	for i := range 5 {
+		if run(i) != want {
+			t.Fatal("warmup checksum")
+		}
+	}
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	for i := range reps {
+		sink = run(i)
+		if sink != want {
+			t.Fatal("checksum")
+		}
+	}
+	elapsed := time.Since(start)
+	runtime.ReadMemStats(&after)
+	out := observation{uint64(elapsed), after.TotalAlloc - before.TotalAlloc, after.Mallocs - before.Mallocs, reps, sink}
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("MEASURE", string(data))
+}

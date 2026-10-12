@@ -134,8 +134,8 @@ func TestPolyNegative(t *testing.T) {
 		{"type Opt a = None | Some a\nx : Opt\nx = None", "TYPE ARITY", 2},
 		{"type Opt a = None | Some a\nx : Opt Int Int\nx = None", "TYPE ARITY", 2},
 		{"x : Int Int\nx = 1", "TYPE ARITY", 1},
-		// Constructor fields resolve in the closed parameter scope.
-		{"type T a = MkT b", "NAMING ERROR", 1},
+		// Ordinary constructor-local variables are hidden; rows stay explicit.
+		{"type T a = MkT (() ->{eff} a)", "HIDDEN EFFECT ROW", 1},
 		{"type T a a = MkT a", "SHADOWING", 1},
 		{"type Inner eff = Inner (() ->{IO | eff} ())\ntype Bad a = Bad (Inner a) a", "KIND MISMATCH", 2},
 		// A row literal fills a row-kinded parameter and nothing else.

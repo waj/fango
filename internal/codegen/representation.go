@@ -104,9 +104,11 @@ func (g *gen) productSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stm
 		return g.treeStmts(t.Default, leaf)
 	}
 	c := t.Cases[0]
+	restore := g.eraseHidden(c.Hidden)
+	defer restore()
 	con := g.caseVarTys[t.Scrut].(*types.TCon)
-	fields := t.ADT.InstFields(c.Ctor, con.Args)
-	var body []goast.Stmt
+	fields := t.ADT.InstHiddenFields(c.Ctor, con.Args, hiddenTypeArgs(c.Hidden))
+	body := g.openHidden(c.Hidden, mangleValue(t.Scrut))
 	if !anyBind(c.Binds) {
 		body = append(body, assignBlank(ident(mangleValue(t.Scrut))))
 	}
@@ -188,10 +190,15 @@ func (g *gen) convertProduct(value goast.Expr, from, to *types.TCon, adt *types.
 	name := fmt.Sprintf("t_product%d", g.tmp)
 	g.tmp++
 	ctor := adt.Ctors[0]
+	restore := g.eraseHidden(ctor.Hidden)
+	defer restore()
 	a, b := adt.InstFields(ctor, from.Args), adt.InstFields(ctor, to.Args)
 	fields := make([]goast.Expr, len(a))
 	for i := range fields {
 		fields[i] = g.polyConvert(selector(name, fieldName(i)), a[i], b[i])
+	}
+	for i := range ctor.Hidden {
+		fields = append(fields, selector(name, hiddenDescriptorField(i)))
 	}
 	result := g.ctorValue(ctor, runtimeADTArgs(adt, to.Args), fields...)
 	return callExpr(funcLitParams([]paramSpec{{name: name, typ: g.goType(from)}}, g.goType(to), []goast.Stmt{returnStmt(result)}), value)

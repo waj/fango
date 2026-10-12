@@ -1,0 +1,64 @@
+import Iterator
+import List exposing (List)
+import Stream exposing (Stream)
+
+down : Int -> Maybe (Int, Int)
+down n = if n <= 0 then Nothing else Just (n, n - 1)
+
+downOther : Int -> Maybe (Int, Int)
+downOther n = if n > 0 then Just (n, n - 1) else Nothing
+
+scalar : Bool -> Int -> Stream Int {}
+scalar alternate n = Stream.unfold n (if alternate then downOther else down)
+
+pairStep : (Int, Int) -> Maybe (Int, (Int, Int))
+pairStep (n, offset) = if n <= 0 then Nothing else Just (n + offset, (n - 1, offset))
+
+pair : Int -> Stream Int {}
+pair n = Stream.unfold (n, 0) pairStep
+
+linked : Int -> Stream Int {}
+linked n = Stream.fromList (List.range 1 n)
+
+mapped : Bool -> Int -> Stream Int {}
+mapped alternate n =
+    scalar alternate n
+        |> Stream.map { value -> value + 1 }
+        |> Stream.map { value -> value + 1 }
+        |> Stream.map { value -> value + 1 }
+        |> Stream.map { value -> value + 1 }
+
+rejected : Bool -> Int -> Stream Int {}
+rejected alternate n = Stream.filter { _ -> False } (scalar alternate n)
+
+taken alternate n = Stream.take (Basics.quotientBy 2 n) (scalar alternate n)
+
+zipped alternate n = Stream.map { (left, right) -> left + right } (Stream.zip (scalar alternate n) (pair n))
+
+sumCursor : Iterator.Iterator Int {} -> Int -> Int
+sumCursor cursor total = case Iterator.next cursor of
+    Nothing -> total
+    Just (value, next) -> sumCursor next (total + value)
+
+cursorSum : Stream Int {} -> Int
+cursorSum source = Stream.withCursor source { cursor -> sumCursor cursor 0 }
+
+sum : Stream Int {} -> Int
+sum source = Stream.fold { value total -> value + total } 0 source
+
+run : Int -> Int
+run n = sum (scalar False n)
+
+choice alternate n = if alternate then pair n else scalar alternate n
+runChoice alternate n = sum (choice alternate n)
+prepareChoice alternate n =
+    source = choice alternate n
+    { _ -> sum source }
+
+retained n = Stream.withCursor (scalar False n) { start ->
+    case Iterator.next start of
+        Nothing -> 0
+        Just (value, next) -> value + sumCursor next 0 + sumCursor start 0 + sumCursor next 0
+}
+
+main() = ()

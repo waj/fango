@@ -1,0 +1,78 @@
+package main
+
+import (
+ "fmt"
+ "testing"
+ "fangobuild/fangort"
+ m_Stream "fangobuild/modules/Stream"
+)
+
+var migrationSink int64
+
+// Both sides call actual generated factories and generic consumers. The
+// compiler-only worker names expose the representation chosen at typed calls.
+func prepare[S any](source STREAMTYPE) func() int64 {
+ return func() int64 { return SUM[S](nil, source) }
+}
+func cursor[S any](source STREAMTYPE) func() int64 {
+ return func() int64 { return CURSOR[S](nil, source) }
+}
+func prepareCase(which string, n int64, alternate bool) func() int64 {
+ switch which {
+ case "scalar": return prepare(SCALAR(alternate,n))
+ case "pair": return prepare(PAIR(n))
+ case "list": return prepare(LINKED(n))
+ case "mapped": return prepare(MAPPED(alternate,n))
+ case "rejected": return prepare(REJECTED(alternate,n))
+ case "taken": return prepare(TAKEN(alternate,n))
+ case "zipped": return prepare(ZIPPED(alternate,n))
+ case "cursor": return cursor(SCALAR(alternate,n))
+ case "choice":
+  action := V_prepareChoice[fangort.Unit](nil,alternate,n)
+  return func() int64 { return action.Direct(fangort.UnitValue) }
+ case "retained": return func() int64 { return V_retained(n) }
+ }
+ panic(which)
+}
+func expected(which string,n int64) int64 {
+ sum := n*(n+1)/2
+ switch which {
+ case "rejected": return 0
+ case "mapped": return sum+4*n
+ case "taken": k:=n/2; return k*(2*n-k+1)/2
+ case "zipped": return sum*2
+ case "retained": if n==0 {return 0}; return 3*sum-n
+ }
+ return sum
+}
+var cases = []string{"scalar","pair","list","mapped","rejected","taken","zipped","cursor","choice","retained"}
+func TestMigration(t *testing.T) {
+ for _,which := range cases {
+  for _,n := range []int64{0,1,16,10000} {
+   for _,alternate := range []bool{false,true} {
+    run := prepareCase(which,n,alternate)
+    for range 3 { if got:=run(); got!=expected(which,n) { t.Fatalf("%s/%d: %d",which,n,got) } }
+    allocs := testing.AllocsPerRun(10,func(){ migrationSink=run() })
+    t.Logf("ALLOC %s %d %t %.0f",which,n,alternate,allocs)
+    built := testing.AllocsPerRun(10,func(){ migrationSink=prepareCase(which,n,alternate)() })
+    t.Logf("ALLOC %s_construct %d %t %.0f",which,n,alternate,built)
+   }
+  }
+ }
+}
+func BenchmarkMigration(b *testing.B) {
+ for _,which := range cases {
+  for _,n := range []int64{16,10000,100000} {
+   for _,mode := range []string{"consume","construct"} {
+    b.Run(fmt.Sprintf("%s/%d/%s",which,n,mode),func(b *testing.B){
+     run:=prepareCase(which,n,false)
+     b.ReportAllocs(); b.ResetTimer()
+     for i:=0;i<b.N;i++ {
+      if mode=="construct" {run=prepareCase(which,n,i%2==1)}
+      migrationSink=run()
+     }
+    })
+   }
+  }
+ }
+}

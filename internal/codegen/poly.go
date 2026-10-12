@@ -69,7 +69,7 @@ func (g *gen) polymorphicPerformExpr(e *core.Perform, evidence goast.Expr) goast
 // polymorphism boundary. Its source and target Fango types are checked by
 // Core; a local variable is represented as Go any inside the clause.
 func (g *gen) polyConvert(value goast.Expr, from, to types.Type) goast.Expr {
-	if types.Equal(from, to) {
+	if types.Equal(from, to) || g.sameErasedRepresentation(from, to) {
 		return value
 	}
 	if target, variable := to.(*types.TVar); variable && g.tyParamNames[target.ID] == "any" {
@@ -300,6 +300,7 @@ func (g *gen) polyConvertADT(value goast.Expr, from, to *types.TCon, adt *types.
 	g.tmp++
 	var cases []goast.Stmt
 	for _, ctor := range adt.Ctors {
+		restore := g.eraseHidden(ctor.Hidden)
 		fromArgs := g.goTypes(runtimeADTArgs(adt, from.Args))
 		toArgs := g.goTypes(runtimeADTArgs(adt, to.Args))
 		fromCtor := &goast.StarExpr{X: indexExpr(g.ctorRef(ctor), fromArgs)}
@@ -311,7 +312,11 @@ func (g *gen) polyConvertADT(value goast.Expr, from, to *types.TCon, adt *types.
 			field := &goast.SelectorExpr{X: ident(variant), Sel: ident(fieldName(i))}
 			fields[i] = g.polyConvert(field, fromFields[i], toFields[i])
 		}
+		for i := range ctor.Hidden {
+			fields = append(fields, selector(variant, hiddenDescriptorField(i)))
+		}
 		converted := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: toCtor, Elts: fields}}
+		restore()
 		cases = append(cases, &goast.CaseClause{List: []goast.Expr{fromCtor}, Body: []goast.Stmt{returnStmt(converted)}})
 	}
 	zero := fmt.Sprintf("t_poly_zero%d", g.tmp)

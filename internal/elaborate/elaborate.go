@@ -103,6 +103,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 	if len(errs) == 0 {
 		specializeScalars(p, infos, ck)
 		inlineDefs(p.Defs, nil, ck)
+		hiddenRepresentations(p, nil, ck)
 		bindRows(p.Defs, ck)
 		errs = append(errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, source.Span{})...)
 		installCaptureSummaries(p.Defs, ck)
@@ -133,7 +134,7 @@ func intrinsicIdentities(ck *infer.Checker) map[string]bool {
 // them for a program, so a module that calls `Runtime.Scope.bracket` lints and runs.
 // context holds the session's already-installed definitions, which the
 // capture analysis reads for the call-site rules (core.InferCapturesIn).
-func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsics []string, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {
+func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsics []string, context []core.Def, ck *infer.Checker, owner string) ([]core.Def, []diag.Error) {
 	var defs []core.Def
 	var errs []diag.Error
 	defs = append(defs, intrinsicDefsNamed(intrinsics, ck)...)
@@ -166,6 +167,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 	specializeScalars(p, kept, ck)
 	inlineDefs(p.Defs, context, ck)
+	hiddenRepresentations(p, context, ck, owner)
 	bindRows(p.Defs, ck)
 	errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, ck.B, context), ck, source.Span{})...)
 	installCaptureSummaries(p.Defs, ck)
@@ -1011,15 +1013,15 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 	}
 }
 
-func (el *elab) recordCtorApp(adt *types.ADTInfo, args []core.Expr, result types.Type) core.Expr {
+func (el *elab) recordCtorApp(adt *types.ADTInfo, args []core.Expr, result types.Type, witnesses ...types.Type) core.Expr {
 	ctor := adt.Ctors[0]
 	con := result.(*types.TCon)
-	fieldTypes := adt.InstFields(ctor, con.Args)
+	fieldTypes := adt.InstHiddenFields(ctor, con.Args, witnesses)
 	var calleeTy types.Type = result
 	for i := len(fieldTypes) - 1; i >= 0; i-- {
 		calleeTy = &types.TFun{Arg: fieldTypes[i], Ret: calleeTy}
 	}
-	return &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: ctor.Name, Ty: calleeTy}, Args: args, TyArgs: append([]types.Type(nil), con.Args...), Ty: result, Ctor: ctor}
+	return &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: ctor.Name, Ty: calleeTy}, Args: args, TyArgs: append([]types.Type(nil), con.Args...), Ty: result, Ctor: ctor, Witnesses: witnesses}
 }
 
 func (el *elab) recordLiteral(e *ast.RecordLit, ty types.Type) core.Expr {
@@ -1042,12 +1044,18 @@ func (el *elab) recordLiteral(e *ast.RecordLit, ty types.Type) core.Expr {
 		}{name, value})
 	}
 	args := make([]core.Expr, len(adt.RecordFields))
-	fieldTypes := adt.InstFields(adt.Ctors[0], ty.(*types.TCon).Args)
-	rawFields := adt.InstFields(adt.Ctors[0], el.apply(el.ck.ExprTypes[e]).(*types.TCon).Args)
+	witnesses := make([]types.Type, len(el.ck.CtorWitnesses[e]))
+	rawWitnesses := make([]types.Type, len(witnesses))
+	for i, w := range el.ck.CtorWitnesses[e] {
+		witnesses[i] = el.zonkDefault(w)
+		rawWitnesses[i] = el.apply(w)
+	}
+	fieldTypes := adt.InstHiddenFields(adt.Ctors[0], ty.(*types.TCon).Args, witnesses)
+	rawFields := adt.InstHiddenFields(adt.Ctors[0], el.apply(el.ck.ExprTypes[e]).(*types.TCon).Args, rawWitnesses)
 	for i, f := range adt.RecordFields {
 		args[i] = el.adaptFunctionValue(values[f.Name], el.eraseRuntimeKinds(eraseRows(fieldTypes[i])), rawValues[f.Name], rawFields[i])
 	}
-	body := el.recordCtorApp(adt, args, ty)
+	body := el.recordCtorApp(adt, args, ty, witnesses...)
 	for i := len(binds) - 1; i >= 0; i-- {
 		body = &core.Let{Name: binds[i].name, Rhs: binds[i].value, Body: body, Ty: ty}
 	}
@@ -1056,6 +1064,7 @@ func (el *elab) recordLiteral(e *ast.RecordLit, ty types.Type) core.Expr {
 
 func (el *elab) recordGet(e *ast.RecordGet, ty types.Type) core.Expr {
 	adt := el.ck.RecordUses[e]
+	hidden := el.freshHidden(adt.Ctors[0])
 	bind := fmt.Sprintf("_record%d", el.tmp)
 	el.tmp++
 	binds := make([]string, len(adt.RecordFields))
@@ -1072,7 +1081,7 @@ func (el *elab) recordGet(e *ast.RecordGet, ty types.Type) core.Expr {
 		bound = el.eraseRuntimeKinds(eraseRows(adt.InstFields(adt.Ctors[0], con.Args)[idx]))
 	}
 	leaf := el.adaptFunctionValue(&core.VarRef{Name: field, Ty: bound, Local: true}, ty)
-	return &core.Case{Scrut: record, Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: adt, Cases: []core.CtorCase{{Ctor: adt.Ctors[0], Binds: binds, Tree: &core.Leaf{Body: leaf}}}}}
+	return &core.Case{Scrut: record, Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: adt, Cases: []core.CtorCase{{Ctor: adt.Ctors[0], Hidden: hidden, Binds: binds, Tree: &core.Leaf{Body: leaf}}}}}
 }
 
 func (el *elab) recordUpdate(e *ast.RecordUpdate, ty types.Type) core.Expr {
@@ -1082,7 +1091,11 @@ func (el *elab) recordUpdate(e *ast.RecordUpdate, ty types.Type) core.Expr {
 	old := make([]string, len(adt.RecordFields))
 	args := make([]core.Expr, len(adt.RecordFields))
 	con := ty.(*types.TCon)
-	fieldTypes := adt.InstFields(adt.Ctors[0], con.Args)
+	hidden := el.freshHidden(adt.Ctors[0])
+	fieldTypes := adt.InstHiddenFields(adt.Ctors[0], con.Args, hiddenTypes(hidden))
+	for i, field := range fieldTypes {
+		fieldTypes[i] = el.eraseRuntimeKinds(eraseRows(field))
+	}
 	for i := range old {
 		old[i] = fmt.Sprintf("_field%d", el.tmp)
 		el.tmp++
@@ -1105,11 +1118,11 @@ func (el *elab) recordUpdate(e *ast.RecordUpdate, ty types.Type) core.Expr {
 			value core.Expr
 		}{name, value})
 	}
-	leaf := el.recordCtorApp(adt, args, ty)
+	leaf := el.recordCtorApp(adt, args, ty, hiddenTypes(hidden)...)
 	for i := len(lets) - 1; i >= 0; i-- {
 		leaf = &core.Let{Name: lets[i].name, Rhs: lets[i].value, Body: leaf, Ty: ty}
 	}
-	return &core.Case{Scrut: el.expr(e.Record), Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: adt, Cases: []core.CtorCase{{Ctor: adt.Ctors[0], Binds: old, Tree: &core.Leaf{Body: leaf}}}}}
+	return &core.Case{Scrut: el.expr(e.Record), Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: adt, Cases: []core.CtorCase{{Ctor: adt.Ctors[0], Hidden: hidden, Binds: old, Tree: &core.Leaf{Body: leaf}}}}}
 }
 
 func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {

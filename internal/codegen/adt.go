@@ -66,9 +66,15 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 				}
 				decls = append(decls, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{Name: ident(name), TypeParams: g.typeParamFields(runtimeParams), Assign: alias, Type: nominal}}})
 				for _, ctor := range adt.Ctors {
+					for _, v := range ctor.Hidden {
+						g.tyParamNames[v.ID] = "any"
+					}
 					var fields []*goast.Field
 					for i, f := range ctor.Fields {
 						fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(fieldName(i))}, Type: g.goType(f)})
+					}
+					for i := range ctor.Hidden {
+						fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(hiddenDescriptorField(i))}, Type: g.descriptorType()})
 					}
 					ctorName := mangleCtor(ctor.Name)
 					decls = append(decls, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{Name: ident(ctorName), TypeParams: g.typeParamFields(runtimeParams), Type: &goast.StructType{Fields: &goast.FieldList{List: fields}}}}})
@@ -118,6 +124,18 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 		}
 		return callExpr(indexExpr(selector("fangort", fn), g.goTypes(typeArgs)), args...)
 	}
+	if len(e.Witnesses) != 0 {
+		restore := g.eraseHidden(e.Ctor.Hidden)
+		defer restore()
+		fields := adt.InstFields(e.Ctor, e.TyArgs)
+		for i, a := range e.Args {
+			// Give literals their checked Go type before boxing them as any.
+			args[i] = g.polyConvert(callExpr(g.goType(a.Type()), args[i]), a.Type(), fields[i])
+		}
+		for _, w := range e.Witnesses {
+			args = append(args, g.typeDescriptor(w))
+		}
+	}
 	return g.ctorValue(e.Ctor, typeArgs, args...)
 }
 
@@ -165,6 +183,11 @@ func (g *gen) caseStmts(e *core.Case, leaf func(core.Expr) []goast.Stmt) []goast
 	switch {
 	case core.TreeMentions(e.Tree, e.Bind):
 		stmts = append(stmts, varDeclStmt(bind, g.goType(e.Scrut.Type()), g.expr(e.Scrut, 0)))
+		if g.isUnit(e.Scrut.Type()) {
+			// Cancelling a hidden opening can reveal a Unit scrutinee. Value
+			// references to its binder materialize the singleton directly.
+			stmts = append(stmts, assignBlank(ident(bind)))
+		}
 	case !isLocalVarRef(e.Scrut):
 		stmts = append(stmts, assignStmt("_", g.expr(e.Scrut, 0)))
 	}
@@ -316,6 +339,8 @@ func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 
 	var clauses []goast.Stmt
 	clause := func(c core.CtorCase, isDefault bool) {
+		restore := g.eraseHidden(c.Hidden)
+		defer restore()
 		var body []goast.Stmt
 		src := tsVar
 		if isDefault {
@@ -323,17 +348,18 @@ func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 			// assert to the (only possible) constructor.
 			src = fmt.Sprintf("ts%d", g.tmp)
 			g.tmp++
-			if anyBind(c.Binds) {
+			if anyBind(c.Binds) || len(c.Hidden) != 0 {
 				body = append(body, &goast.AssignStmt{
 					Lhs: []goast.Expr{ident(src)},
 					Tok: gotoken.DEFINE,
 					Rhs: []goast.Expr{&goast.TypeAssertExpr{X: scrut, Type: ctorTag(c.Ctor.Name)}},
 				})
 			}
-		} else if anyBind(c.Binds) {
+		} else if anyBind(c.Binds) || len(c.Hidden) != 0 {
 			tsUsed = true
 		}
-		fields := t.ADT.InstFields(c.Ctor, scrutTy.Args)
+		body = append(body, g.openHidden(c.Hidden, src)...)
+		fields := t.ADT.InstHiddenFields(c.Ctor, scrutTy.Args, hiddenTypeArgs(c.Hidden))
 		for i, b := range c.Binds {
 			if b == "" {
 				continue

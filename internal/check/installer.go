@@ -265,7 +265,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	}
 	sort.Strings(intrinsics)
 	elaborateStart := i.begin("elaborate", owner)
-	owned, elabErrs := elaborate.Increment(checked.Infos, checked.State.Instances, intrinsics, i.installed, i.ck)
+	owned, elabErrs := elaborate.Increment(checked.Infos, checked.State.Instances, intrinsics, i.installed, i.ck, checked.State.Name)
 	i.timed("elaborate", owner, elaborateStart)
 	if len(elabErrs) != 0 {
 		return nil, elabErrs, nil

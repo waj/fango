@@ -81,7 +81,7 @@ func (g *gen) splitOutcomeABI(file *goast.File) {
 	l := &outcomeLowering{g: g, results: map[*goast.FuncType]goast.Expr{}, done: map[*goast.FuncType]bool{}, bridges: map[*goast.FuncType]bool{}, singleFunctions: map[*goast.FuncType]bool{}}
 	goast.Inspect(file, func(n goast.Node) bool {
 		if fn, ok := n.(*goast.FuncDecl); ok && fn.Type.Results != nil && len(fn.Type.Results.List) == 1 {
-			if value := outcomeArgument(fn.Type.Results.List[0].Type); value != nil && unitGoType(value) {
+			if value := outcomeArgument(fn.Type.Results.List[0].Type); value != nil && unitGoType(value) && !g.callbackFuncTypes[fn.Type] {
 				l.singleFunctions[fn.Type] = true
 			}
 		}

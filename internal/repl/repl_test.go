@@ -119,7 +119,7 @@ func TestStreamResidualRowsInREPLAndStaging(t *testing.T) {
 import Iterator
 import Fail
 import Meta
-source : Stream.Stream Int Int (Fail.Fail String)
+source : Stream.Stream Int (Fail.Fail String)
 source = Stream.unfold 0 { state ->
     if state == 0 then Just (7, 1) else Fail.fail "finished" }
 readAll() = Fail.attempt { _ -> Stream.toList source }

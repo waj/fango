@@ -233,8 +233,7 @@ chunkPull input state maxBody headersLimit =
             Ended _ -> invalid (Malformed "incomplete chunk size")
             Overflowed -> invalid (Malformed "chunk size line exceeds limit")
 
-{-# scoped s #-}
-withChunked : Reader e -> Int -> Int -> (Reader s ->{s} a) ->{Protocol | e} (a, Bool)
+withChunked : Reader e -> Int -> Int -> (Reader {s | e} ->{s | e} a) ->{Protocol | e} (a, Bool)
 withChunked input maxBody headersLimit action =
     Runtime.Local.run (ChunkState { remaining = 0, done = False, total = 0 }) { state ->
         cell = ChunkCell { read = state.read, write = state.write }
@@ -255,8 +254,7 @@ emptyBody = Reader
 
 -- Scopes a framed body reader to `action`. The Bool reports whether the consumer
 -- reached the end of the framed body.
-{-# scoped s #-}
-withBody : Framing -> Reader e -> Int -> Int -> (Reader s ->{s} a) ->{Protocol | e} (a, Bool)
+withBody : Framing -> Reader e -> Int -> Int -> (Reader {s | e} ->{s | e} a) ->{Protocol | e} (a, Bool)
 withBody bodyFraming input bodyLimit headersLimit action =
     case bodyFraming of
         NoBody -> (action emptyBody, True)

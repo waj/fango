@@ -440,7 +440,7 @@ main = $(Base.make)
 	if len(checked.State.Instances) == 0 {
 		t.Fatal("cached deriver did not produce the consumer instance")
 	}
-	defs, elabErrs := elaborate.Increment(checked.Infos, checked.State.Instances, nil, context, ck)
+	defs, elabErrs := elaborate.Increment(checked.Infos, checked.State.Instances, nil, context, ck, checked.State.Name)
 	if len(elabErrs) != 0 {
 		t.Fatal(elabErrs)
 	}
@@ -511,7 +511,7 @@ func TestInstalledObjectSupportsSubsequentInference(t *testing.T) {
 	if len(inferErrs) != 0 {
 		t.Fatal(inferErrs)
 	}
-	defs, elabErrs := elaborate.Increment(checked.Infos, checked.State.Instances, nil, decoded.Runtime, ck)
+	defs, elabErrs := elaborate.Increment(checked.Infos, checked.State.Instances, nil, decoded.Runtime, ck, checked.State.Name)
 	if len(elabErrs) != 0 {
 		t.Fatal(elabErrs)
 	}

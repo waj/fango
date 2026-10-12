@@ -32,7 +32,7 @@ func inspectionShapeSafe(t Type, adts map[int]*ADTInfo, visiting map[int]bool) b
 				return false
 			}
 		}
-		if adt.Resource {
+		if adt.Resource || adt.HasHidden() || adt.RepresentationOf != nil {
 			return false
 		}
 		if visiting[t.Unique] {

@@ -113,6 +113,47 @@ Constructor arguments are type atoms. Parenthesize applied or function types,
 as in `Cons a (List a)` or `Fn (a -> b)`. Constructors are ordinary curried
 values and can be partially applied.
 
+## Hidden state types
+
+An ordinary type variable used in a constructor's fields but absent from the
+`type` parameters is local to that constructor. The constructor chooses its
+type; callers see only the declared public parameters:
+
+```fango
+type Source a = { initial : state, read : state -> a }
+
+readSource : Source a -> a
+readSource (Source { initial = value, read = observe }) = observe value
+
+answer = Source { initial = 42, read = { n -> n } }
+message = Source { initial = (), read = { _ -> "hello" } }
+```
+
+`initial` and `read` share one `state` within each value. Every pattern that
+opens a value introduces a fresh abstract type for that state. Its fields may
+be used together or repackaged in another constructor, but the abstract type
+cannot escape the pattern's enclosing expression, function, or binding. For
+example, returning `value` from `readSource` reports `HIDDEN TYPE ESCAPES`;
+using the state from one opening with the callback from another is a type
+mismatch, even if both openings inspect the same value.
+
+Unpack related fields with one pattern. Projecting or updating a field that
+mentions hidden types reports `HIDDEN RECORD FIELD`. Independent fields can
+still be projected or updated; an update retains the original hidden state.
+These rules also apply to inferred record literals and patterns. In a union,
+each constructor has its own hidden variables, even when their names match.
+
+Only ordinary types can be hidden. Effect-row variables must appear in the
+public parameters; otherwise the declaration reports `HIDDEN EFFECT ROW`.
+Deriving is rejected for a type with hidden fields: the hidden types do not
+implicitly carry class instances. Its structural metaprogramming schema is
+opaque, and runtime structural inspection cannot treat its hidden storage as
+inspectable data. Its nominal identity and public parameters remain visible.
+
+Ordinary function annotations still implicitly quantify their variables
+universally. This constructor-local rule does not change the meaning of
+`identity : a -> a` or introduce scoped callback permissions.
+
 ## Lists
 
 Lists have construction syntax backed by the bundled `List` type:

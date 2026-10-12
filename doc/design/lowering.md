@@ -48,6 +48,11 @@ application can compute or diverge, so flattening must preserve evaluation order
 Evidence and the residual row belong to the final stage and precede the source
 arguments in the flat Go function signature.
 
+The explicit annotation on `Stream.foldStep` fixes the combining callback's
+first arrow to be pure. Its flat callback can therefore run without constructing
+an intermediate callable for each element; a compiled allocation test covers
+empty, singleton, and long scalar streams.
+
 Workers with a qualifying parameter receive a plain Go function for the selected
 mode. A known sequence of lambda bodies becomes one literal with all saturated
 arguments; the loop invokes it once without intermediate callable records.
@@ -56,18 +61,33 @@ and wrapped in one adapter. That adapter executes its original intermediate
 applications on every invocation, preserving their behavior and possible costs.
 Forwarding an already selected callback passes the same Go function.
 
-Nonrecursive unary local lambdas used only by invocation or compatible forwarding
-can be expanded at their call sites. Lambdas capturing evidence or residual rows
+Nonrecursive local lambdas used only by saturated invocation or compatible
+forwarding can be expanded at their call sites. Multiple arguments flatten only
+when intervening bodies are pure lambda creation. Alias bindings preserve the
+same contract, including every use of the original binding. Lambdas capturing evidence or residual rows
 keep their definition-site closure. Escaping values and partial application retain
 the structural Direct/Exit callable record described by the [backend](backend.md).
 
-Closed callbacks with a fixed Direct body share one module-local Go function
-across copies in enclosing transport families. Their Direct member names that
-function, and their Exit member calls it and supplies a nil exit. This applies
-to concrete callbacks with no invocation evidence parameters, captured evidence,
-rows, or local values; the argument and invocation row remain ordinary parameters.
-Callbacks with generic environments or additional local references retain their
-literal bodies. Effect-polymorphic bodies retain separate transport paths.
+Closed callbacks with a fixed Direct body share a module-local Go function and
+an Exit wrapper that supplies a nil exit. Both callable members name these
+functions, including inside generic workers and enclosing transport families.
+A lexical check permits internal bindings and patterns but rejects outer term
+captures; every runtime type and call instantiation must be monomorphic, so
+no enclosing type descriptor is captured. The argument and unused invocation
+row remain ordinary parameters. Captured evidence, residual rows, runtime
+effect parameters, or generic descriptors retain the literal closure path.
+Effect-polymorphic bodies retain separate transport paths. Keeping closed
+callbacks outside generic workers avoids Go dictionary closure allocations
+introduced by factory inlining.
+
+A local callable bundle initialized with function literals can split into
+individual function locals when all uses select members for direct calls or
+function arguments. The bundle must have one declaration, no reassignment,
+no address taken, and no whole-value or other member use. Closure creation stays
+at the declaration, preserving capture cells and evaluation order. This exposes
+the selected function to Go's devirtualizer after a known hidden package has
+been eliminated; retaining a struct-field projection can otherwise obstruct
+inlining even with zero allocations.
 
 ## Exit results
 

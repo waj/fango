@@ -43,7 +43,7 @@ func (r *TypeRepr) Con() *types.TCon {
 
 // ADT returns the reflected type's declaration, or nil when the type is not
 // nominal, has no declaration, hides its schema from the reflection site, or
-// is not fully applied. A partial application has no readable schema because
+// contains hidden constructor types, or is not fully applied. A partial application has no readable schema because
 // its constructor fields cannot be instantiated: `Meta.head` produces one,
 // and it is for comparing identities rather than for reading a shape.
 func (r *TypeRepr) ADT() *types.ADTInfo {
@@ -55,7 +55,7 @@ func (r *TypeRepr) ADT() *types.ADTInfo {
 		return nil
 	}
 	adt := r.Schema.ADT(con.Unique)
-	if adt == nil || len(con.Args) != len(adt.Params) {
+	if adt == nil || adt.HasHidden() || len(con.Args) != len(adt.Params) {
 		return nil
 	}
 	return adt

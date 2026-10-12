@@ -82,6 +82,16 @@ effects' type arguments.
 Recursive scoped runners and first-class runner values are rejected; ordinary
 rank-one schemes cannot preserve this callback contract on those paths.
 
+The source row form `{s | e}` selects this same contract without a pragma.
+The parser records `s` and its ambient name separately from ordinary row tails;
+annotation resolution accepts it only in a named runner's scoped annotation.
+Every occurrence normalizes to the existing aggregate scoped row variable.
+The ambient name must identify the final runner arrow's residual tail; the
+existing lower-bound constraint includes that arrow's fixed effects as well.
+This is a restricted binder, not row-union inference or a rule about arbitrary
+callback-local variables. No additional runtime representation is introduced.
+Legacy pragma declarations remain supported, including closed-row runners.
+
 Each saturated source call allocates a rigid permission label from the session
 supply and extends the runner's residual row with it. Distinct allocations
 coexist in ordinary effect rows. Expected scoped callback types are available

@@ -236,6 +236,9 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		if e.Control != (types.Control{}) {
 			head += "/" + ControlName(e.Control)
 		}
+		if len(e.Witnesses) > 0 {
+			head += fmt.Sprintf(" pack@[%s]", dumpTypes(e.Witnesses, pr))
+		}
 		if len(e.TyArgs) > 0 {
 			head += fmt.Sprintf(" @[%s]", dumpTypes(e.TyArgs, pr))
 		}
@@ -294,6 +297,13 @@ func dumpTree(t Tree, pr *types.Printer) string {
 		fmt.Fprintf(&b, "(switchctor %s", t.Scrut)
 		for _, c := range t.Cases {
 			fmt.Fprintf(&b, " (%s", c.Ctor.Name)
+			if len(c.Hidden) > 0 {
+				names := make([]string, len(c.Hidden))
+				for i, v := range c.Hidden {
+					names[i] = pr.Type(v)
+				}
+				fmt.Fprintf(&b, " open@[%s]", strings.Join(names, " "))
+			}
 			for _, bind := range c.Binds {
 				if bind == "" {
 					bind = "_"

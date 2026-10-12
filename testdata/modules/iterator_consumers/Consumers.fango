@@ -3,14 +3,14 @@ module Consumers exposing (Consumer, escape, make, prefix, run)
 import Iterator exposing (Iterator)
 import Maybe exposing (Maybe(..))
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator state a e ->{e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just (value, next) -> foldCursor combine (combine value initial) next
 
-type Consumer state e = Consumer (Iterator state Int e ->{e} Int)
+type Consumer e = Consumer (Iterator Int e ->{e} Int)
 
-sum : Iterator state Int e ->{e} Int
+sum : Iterator Int e ->{e} Int
 sum cursor = foldCursor ({ element acc -> element + acc }) 0 cursor
 
 twice cursor =
@@ -19,16 +19,16 @@ twice cursor =
     second = sum cursor
     first + second
 
-make : () -> Consumer state e
+make : () -> Consumer e
 make() = Consumer twice
 
-run : Consumer state e -> Iterator state Int e ->{e} Int
+run : Consumer e -> Iterator Int e ->{e} Int
 run (Consumer action) cursor = action cursor
 
-prefix : Int ->{IO} (Iterator state Int e ->{e} Int)
+prefix : Int ->{IO} (Iterator Int e ->{e} Int)
 prefix extra =
     print "prefix"
     { cursor -> sum cursor + extra }
 
-escape : Iterator state Int e -> (() -> Iterator state Int e)
+escape : Iterator Int e -> (() -> Iterator Int e)
 escape cursor = { _ -> cursor }

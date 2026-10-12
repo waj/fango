@@ -321,6 +321,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		g.inlineReturnCalls(file)
 		g.inlineBoundOperations(file)
 		g.elideCopies(file)
+		g.splitCallbackLocals(file)
 	}
 	var buf bytes.Buffer
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
@@ -361,6 +362,7 @@ type gen struct {
 
 	sharedCallbacks     map[sharedCallbackKey]string
 	sharedCallbackDecls []goast.Decl
+	callbackFuncTypes   map[*goast.FuncType]bool
 
 	// tyParamNames maps the rigid vars of the definition (or derived
 	// function) currently being emitted to their Go type-parameter names
@@ -2639,6 +2641,12 @@ func (g *gen) letBindingStmts(let *core.Let) (out []goast.Stmt) {
 		defer g.enterExpr(let.Rhs)()
 	} else {
 		defer g.enter(let.Origin)()
+	}
+	if ref, ok := let.Rhs.(*core.VarRef); ok && ref.Local && !let.Rec {
+		if flat, ok := g.flatCallbacks[ref.Name]; ok {
+			g.flatCallbacks[let.Name] = flat
+			return []goast.Stmt{varDeclStmt(mangleValue(let.Name), g.flatCallbackType(let.Rhs.Type(), flat.arity, flat.mode), ident(mangleValue(ref.Name)))}
+		}
 	}
 	if g.rememberForwarder(let) {
 		return nil

@@ -475,7 +475,7 @@ func (p *parser) parseDecl() ast.Decl {
 		if len(params) > 0 {
 			p.errorAt(nameSpan, "NATIVE DECLARATION", "A native declaration cannot have source parameters; put its complete function type in the annotation.")
 		}
-		return &ast.ValueDecl{Name: declName, NameSpan: nameSpan, Params: params, Ann: ann, Native: n}
+		return p.scopedRowDecl(&ast.ValueDecl{Name: declName, NameSpan: nameSpan, Params: params, Ann: ann, Native: n})
 	}
 	body := p.parseBindBody(eqTok)
 	if body == nil {
@@ -487,7 +487,7 @@ func (p *parser) parseDecl() ast.Decl {
 			"The expression seemed complete, but then I ran into this.")
 		p.recoverToTopLevel(false)
 	}
-	return &ast.ValueDecl{Name: declName, NameSpan: nameSpan, Params: params, Ann: ann, Body: body}
+	return p.scopedRowDecl(&ast.ValueDecl{Name: declName, NameSpan: nameSpan, Params: params, Ann: ann, Body: body})
 }
 
 // startsPatternDecl reports whether a token at column 1 can begin a top-level
@@ -1713,6 +1713,24 @@ func (p *parser) parseEffRow() *ast.EffRow {
 		if t.Kind == token.LIDENT {
 			p.next()
 			r.Tail, r.TailSp = t.Text, t.Span
+			if p.peekInExpr().Kind == token.PIPE {
+				p.next()
+				base := p.peekInExpr()
+				if base.Kind == token.LBRACE {
+					p.next()
+					if !p.expect(token.RBRACE, "A closed scoped base is written `{}`.") {
+						return nil
+					}
+					r.ScopeBase = "{}"
+				} else {
+					if base.Kind != token.LIDENT {
+						p.errorAt(base.Span, "SCOPED CALLBACK", "After a scoped row fragment's `|`, write the ambient row variable or `{}` for a closed outer row.")
+						return nil
+					}
+					p.next()
+					r.ScopeBase = base.Text
+				}
+			}
 			break
 		}
 		if t.Kind != token.UIDENT {

@@ -97,6 +97,12 @@ func effRowText(r *ast.EffRow) string {
 		labels[i] = strings.Join(parts, " ")
 	}
 	body := strings.Join(labels, ", ")
+	if r.ScopeBase != "" {
+		if body != "" {
+			body += ", "
+		}
+		return "{" + body + r.Tail + " | " + r.ScopeBase + "}"
+	}
 	if r.Tail != "" {
 		if body == "" {
 			return "{" + r.Tail + "}"

@@ -22,15 +22,9 @@ func Typed(name string, t types.Type, p *types.Printer) string {
 	return ast.Spelling(types.SurfaceName(name)) + " : " + p.Type(t)
 }
 
-// ScopedSignature is Signature for a scoped runner, preceded by the pragma
-// that binds its callback row. The row is shown wherever it occurs, as it is
-// in the runner's annotation.
+// ScopedSignature renders the checked callback extension, including a closed base.
 func ScopedSignature(name string, sch types.Scheme, p *types.Printer) string {
-	if sch.ScopedRow == nil {
-		return Signature(name, sch, p)
-	}
-	p.Bind(sch.ScopedRow, "s")
-	return "{-# scoped s #-}\n" + Signature(name, sch, p)
+	return Signature(name, sch, p)
 }
 
 // Head renders a declaration head such as `type Result error value`.

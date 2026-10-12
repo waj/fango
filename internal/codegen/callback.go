@@ -72,13 +72,11 @@ type sharedCallbackKey struct {
 }
 
 // A closed, fixed-Direct body can serve both callable members, including
-// copies of this lambda inside an enclosing transport family. Keep lexical
-// captures and generic environments at their construction sites. The local
-// reference check is conservative: internal binders other than the argument
-// also keep the ordinary closure path.
+// copies inside a generic worker or transport family. A lexical scope and
+// runtime-type check keeps captured values and descriptors at construction.
 func (g *gen) shareableDirectCallback(lam *core.Lambda) bool {
 	control := core.ExprControl(lam.Body)
-	if control.Polymorphic || control.Transport != types.Direct || len(lam.RowEffects) != 0 || len(g.tyParamNames) != 0 ||
+	if control.Polymorphic || control.Transport != types.Direct || len(lam.RowEffects) != 0 ||
 		len(core.FreeEvidence(lam)) != 0 || len(core.FreeRows(lam)) != 0 {
 		return false
 	}
@@ -87,15 +85,7 @@ func (g *gen) shareableDirectCallback(lam *core.Lambda) bool {
 			return false
 		}
 	}
-	closed := true
-	core.Inspect(lam.Body, func(e core.Expr) {
-		// Lifted local-worker adapters also carry lexical references without
-		// Local set. As in expr, only a known definition denotes a global.
-		if ref, ok := e.(*core.VarRef); ok && (ref.Local || g.defs[ref.Name] == nil) && ref.Name != lam.Param {
-			closed = false
-		}
-	})
-	return closed
+	return g.closedMonomorphicCallback(lam)
 }
 
 func (g *gen) sharedDirectCallback(lam *core.Lambda) goast.Expr {
@@ -104,7 +94,8 @@ func (g *gen) sharedDirectCallback(lam *core.Lambda) goast.Expr {
 		g.sharedCallbacks = map[sharedCallbackKey]string{}
 	}
 	name := g.sharedCallbacks[key]
-	if name == "" {
+	fresh := name == ""
+	if fresh {
 		name = fmt.Sprintf("callbackBody%d", len(g.sharedCallbacks))
 		g.sharedCallbacks[key] = name
 		body := g.directLambdaMember(lam, types.Direct).(*goast.FuncLit)
@@ -121,10 +112,17 @@ func (g *gen) sharedDirectCallback(lam *core.Lambda) goast.Expr {
 	args = append(args, ident("value"))
 	exit := funcLitParams(params, g.outcomeType(fn.Ret), []goast.Stmt{
 		returnStmt(g.normalOutcome(fn.Ret, callExpr(ident(name), args...))),
-	})
+	}).(*goast.FuncLit)
+	if fresh {
+		if g.callbackFuncTypes == nil {
+			g.callbackFuncTypes = map[*goast.FuncType]bool{}
+		}
+		g.callbackFuncTypes[exit.Type] = true
+		g.sharedCallbackDecls = append(g.sharedCallbackDecls, &goast.FuncDecl{Name: ident(name + "_exit"), Type: exit.Type, Body: exit.Body})
+	}
 	return &goast.CompositeLit{Type: g.callbackType(fn), Elts: []goast.Expr{
 		&goast.KeyValueExpr{Key: ident("Direct"), Value: ident(name)},
-		&goast.KeyValueExpr{Key: ident("Exit"), Value: exit},
+		&goast.KeyValueExpr{Key: ident("Exit"), Value: ident(name + "_exit")},
 	}}
 }
 

@@ -29,8 +29,8 @@ numberStep (pending, cursor) =
                 Just (value, (lookahead, rest))
             else numberStep (Nothing, next)
 
-numbers : Stream.Stream state Char e -> Stream.Stream (Maybe Char, Iterator.Iterator state Char e) Int e
-numbers source = Stream.unfold (Nothing, Iterator.start source.initial source.step) numberStep
+numbers : Stream.Stream Char e -> Stream.Stream Int e
+numbers (Stream.Stream { initial = initial, step = step }) = Stream.unfold (Nothing, Iterator.start initial step) numberStep
 
 expandStep (pending, cursor) = case pending of
     Just value -> Just (value, (Nothing, cursor))
@@ -38,8 +38,8 @@ expandStep (pending, cursor) = case pending of
         Nothing -> Nothing
         Just (value, next) -> Just (value, (Just (value * 10), next))
 
-expand : Stream.Stream state Int e -> Stream.Stream (Maybe Int, Iterator.Iterator state Int e) Int e
-expand source = Stream.unfold (Nothing, Iterator.start source.initial source.step) expandStep
+expand : Stream.Stream Int e -> Stream.Stream Int e
+expand (Stream.Stream { initial = initial, step = step }) = Stream.unfold (Nothing, Iterator.start initial step) expandStep
 
 tests : Test.Test {}
 tests = Test.test "stream_parser" {

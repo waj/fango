@@ -146,6 +146,14 @@ scopes, or resumptions, so a copy needs only fresh binder names, following
 lexical scope, and the call's type arguments. Workers in a call cycle are not
 candidates, and an owner's candidates are optimized callees first.
 
+Workers whose signatures contain hidden packages have a separate, bounded
+unfolding allowance (128 nodes). They may carry functions and forward an
+invocation row, but cannot install handlers, introduce evidence, or contain
+scoped operations. A copy refreshes term, callback-row, capture, and hidden
+opening binders, substitutes the caller's residual row, and preserves the
+callback's own invocation row. This exposes small factories and consumers
+without changing when a stored callback selects its effects.
+
 A copy binds each parameter to its argument with a strict Let. Normalization
 then floats bindings and matches out of expression slots, first binding any
 earlier non-atomic sibling so evaluation order is unchanged. Simplification
@@ -153,6 +161,14 @@ substitutes local aliases, floats a single-constructor match out of a
 binding's right-hand side, resolves a match on a variable bound to a
 constructor with atomic fields, drops unused bindings that cannot fail, and
 clears field binders their subtree no longer mentions.
+
+For a hidden package selected by an `if`, a bounded row-forwarding continuation can be
+copied into the two branches. Only the selected continuation executes, after
+the condition and selected construction. Each branch can then cancel its
+package independently and call a consumer with concrete state. Continuations
+are limited to 128 nodes and total branch duplication to 512 nodes per optimized
+definition; this is bounded partial evaluation, not general specialization
+of opaque dynamic packages.
 
 Candidates come from the owner and from installed dependencies, so an owner's
 checked object can contain a dependency's code. Each module therefore records

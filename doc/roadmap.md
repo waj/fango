@@ -70,6 +70,13 @@ in Fango. Tagged value layouts for `Json.Pull.Token` copied more than the alloca
 they removed on the recorded fixture; further sum-layout changes remain gated
 on measurements of the values flowing through hot operations.
 
+## Hidden state types and scoped callbacks
+
+[Hidden state types](roadmap-hidden-types.md) tracks further specialization of
+surviving dynamic packages. [Typed storage workers](design/hidden-types.md#typed-storage-workers),
+the Stream/Iterator migration, and the library's [callback row extensions](reference/functions.md#scoped-callbacks)
+are implemented. Legacy scoped pragmas remain accepted.
+
 ## Builder blocks and generators
 
 [Builder blocks and generators](roadmap-builders.md) propose a module-directed

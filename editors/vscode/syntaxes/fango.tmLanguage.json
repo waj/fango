@@ -290,6 +290,7 @@
       ]
     },
     "effect_row": {
+      "comment": "A lowercase name immediately before | is a scoped callback fragment; the name or empty row after | is its ambient base.",
       "begin": "\\{",
       "end": "\\}",
       "beginCaptures": {
@@ -300,6 +301,13 @@
       },
       "patterns": [
         { "include": "#qualified_module" },
+        { "include": "#effect_row" },
+        {
+          "match": "(?<=[{,])[\\t ]*([a-z][A-Za-z0-9_]*)(?=[\\t ]*\\|)",
+          "captures": {
+            "1": { "name": "variable.other.generic-type.scope.fango" }
+          }
+        },
         {
           "name": "entity.name.type.effect.fango",
           "match": "\\b[A-Z][A-Za-z0-9_]*\\b"

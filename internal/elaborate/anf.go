@@ -231,7 +231,7 @@ func (el *elab) anfExprChildren(e core.Expr) (result core.Expr, hs []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.App{SourceType: e.SourceType, Origin: e.Origin, CalleeKind: e.CalleeKind, Callee: callee, Args: args,
-			TyArgs: e.TyArgs, Ty: e.Ty, Ctor: e.Ctor, EvidenceArgs: e.EvidenceArgs, Control: e.Control, Row: e.Row}, hoists
+			TyArgs: e.TyArgs, Witnesses: e.Witnesses, Ty: e.Ty, Ctor: e.Ctor, EvidenceArgs: e.EvidenceArgs, Control: e.Control, Row: e.Row}, hoists
 	default:
 		panic(fmt.Sprintf("elaborate: anf unhandled node %T", e))
 	}
@@ -249,7 +249,7 @@ func (el *elab) anfTree(t core.Tree) core.Tree {
 	case *core.SwitchCtor:
 		cases := make([]core.CtorCase, len(t.Cases))
 		for i, c := range t.Cases {
-			cases[i] = core.CtorCase{Ctor: c.Ctor, Binds: c.Binds, Tree: el.anfTree(c.Tree)}
+			cases[i] = core.CtorCase{Ctor: c.Ctor, Hidden: c.Hidden, Binds: c.Binds, Tree: el.anfTree(c.Tree)}
 		}
 		var def core.Tree
 		if t.Default != nil {

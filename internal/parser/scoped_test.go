@@ -42,3 +42,30 @@ func TestScopedPragma(t *testing.T) {
 		}
 	}
 }
+
+func TestScopedRowExtension(t *testing.T) {
+	src := "run : (Reader {s | e} ->{Fail String, s | e} a) ->{e} a\nrun action = action value\n"
+	f := source.NewFile("scoped.fango", []byte(src))
+	toks, _ := lexer.Lex(f)
+	m, errs := Parse(toks, f)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	d := m.Decls[0].(*ast.ValueDecl)
+	if d.ScopedRow != "s" || d.ScopedBase != "e" || !strings.Contains(ast.Dump(m), "(scope-base e)") {
+		t.Fatalf("lost extension: %s", ast.Dump(m))
+	}
+	for _, bad := range []string{
+		"run : (Int ->{s | s} a) ->{s} a\nrun f = f 1\n",
+		"run : (Int ->{s | e} a) -> (Int ->{t | e} a) ->{e} a\nrun f g = f 1\n",
+		"run : (Reader {s | f} ->{s | e} a) ->{e} a\nrun f = f 1\n",
+		"run : (Int ->{s | IO} a) ->{e} a\nrun f = f 1\n",
+		"{-# scoped s #-}\nrun : (Int ->{s | e} a) ->{e} a\nrun f = f 1\n",
+	} {
+		f := source.NewFile("bad.fango", []byte(bad))
+		toks, _ := lexer.Lex(f)
+		if _, errs := Parse(toks, f); len(errs) == 0 {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

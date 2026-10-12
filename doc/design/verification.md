@@ -267,6 +267,15 @@ runtime, and a specialized Go pull state machine. These diagnostic controls do n
 Stream gate. Instrumented binaries count dispatcher steps, frame factories and
 nonempty evidence extensions separately; their timings never enter comparisons.
 
+### Existential storage feasibility
+
+[Hidden-state lowering experiments](hidden-state-performance.md) owns the
+reproducible generated-Go comparisons, correctness and allocation checks,
+manual performance contract, and measured results for per-step erasure,
+specialized-consumer prototypes, and actual hidden-type compiler controls.
+The prototype results and bounded package-elimination controls do not replace
+the full library migration gate.
+
 ### HTTP response comparison
 
 ```sh

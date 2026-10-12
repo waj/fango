@@ -107,8 +107,7 @@ readHead reader lineLimit headersLimit bodyLimit =
 -- count against the header limit, and a fixed-length body that ends early
 -- fails with `Malformed` when the consumer reads past what arrived. A response whose
 -- body reads the request must be written inside `action`.
-{-# scoped s #-}
-withRequest : Int -> Int -> Int -> Reader e -> (Request s ->{s} a) ->{Protocol | e} Maybe (a, Bool)
+withRequest : Int -> Int -> Int -> Reader e -> (Request {s | e} ->{s | e} a) ->{Protocol | e} Maybe (a, Bool)
 withRequest lineLimit headersLimit bodyLimit input action =
     case readHead input lineLimit headersLimit bodyLimit of
         Nothing -> Nothing
@@ -246,8 +245,7 @@ respond method output response =
 -- Handles `Protocol` like `serve`: failures before a response get their
 -- error status, invalid response declarations get 500, and a body failure
 -- after the head leaves the response incomplete. Other effects propagate.
-{-# scoped s #-}
-serveRequest : Int -> Int -> Int -> Reader e -> Writer e -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{e} Maybe Bool
+serveRequest : Int -> Int -> Int -> Reader e -> Writer e -> (Request {Protocol, s | e} ->{Protocol, s | e} Response {Protocol, s | e}) ->{e} Maybe Bool
 serveRequest lineLimit headersLimit bodyLimit input output handler =
     handle
         exchanged = withRequest lineLimit headersLimit bodyLimit input { request ->
@@ -264,8 +262,7 @@ serveRequest lineLimit headersLimit bodyLimit input output handler =
             sendError output (errorStatus error)
             Just False
 
-{-# scoped s #-}
-serveConnection : Config -> Net.Connection -> (Request s ->{s} Response s) ->{Async, IO, Fail Net.Error, Protocol | e} ()
+serveConnection : Config -> Net.Connection -> (Request {s | e} ->{s | e} Response {s | e}) ->{Async, IO, Fail Net.Error, Protocol | e} ()
 serveConnection config connection handler =
     source = Net.sourceAsync connection
     sink = Net.sinkAsync connection
@@ -289,8 +286,7 @@ serveConnection config connection handler =
 -- Each worker installs its own connection, buffer, protocol, and Fail
 -- handlers. Only a fatal accept error leaves this runner; its task captures
 -- that error and reports it through the server's shutdown channel.
-{-# scoped s #-}
-worker : Config -> Net.Listener -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{Async, IO, Fail Net.Error} ()
+worker : Config -> Net.Listener -> (Request {Protocol, s | {}} ->{Protocol, s | {}} Response {Protocol, s | {}}) ->{Async, IO, Fail Net.Error} ()
 worker config listener handler =
     loop() =
         outcome = attempt {
@@ -367,8 +363,7 @@ runListener config stop listener startWorkers =
 -- inside workers and do not stop unrelated connections. Fatal accept errors
 -- trigger coordinated shutdown through the server's event channel; `serve`
 -- raises the selected Net error in the caller after its workers are joined.
-{-# scoped s #-}
-serve : Config -> Channel () -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{Async, IO, Fail Net.Error} ()
+serve : Config -> Channel () -> (Request {Protocol, s | {}} ->{Protocol, s | {}} Response {Protocol, s | {}}) ->{Async, IO, Fail Net.Error} ()
 serve config stop handler =
     Net.withListener config.port { listener ->
         startWorkers : Channel (Maybe Net.Error) ->{Async, IO} List (Task ())
