@@ -1,14 +1,23 @@
 # Native source debugging
 
-`fango debug BINARY [--] [args...]` launches a binary built with
-[`fango build --debug`](commands.md#native-debug-builds), using Delve on macOS
-or Linux. It stops at the first executable Fango location reached from main
-and presents a `debug>` prompt. For the repository example:
+`fango debug [verbosity] SOURCE.fango|BINARY [--] [args...]` launches a native
+program using Delve on macOS or Linux. A `.fango` path is built automatically
+with the [debug profile](commands.md#native-debug-builds), then launched. For
+the repository example:
 
 ```sh
-./fango build --debug examples/mandelbrot.fango
-./fango debug ./mandelbrot
+./fango debug examples/mandelbrot.fango
 ```
+
+Source launches reuse the isolated debug build cache and leave executables
+in the working directory untouched. Build verbosity flags such as `-v` go
+before the source path; arguments after the path (and an optional `--`) go
+to the program. A failed build does not launch an older executable. Existing
+binaries built with `fango build --debug` are also accepted, with their
+matching companion metadata: `fango debug ./mandelbrot`.
+
+The debugger stops at the first executable Fango location reached from main
+and presents a `debug>` prompt.
 
 The companion source snapshots supply excerpts, so source files do not need
 to be present in the current working directory. The displayed text belongs
@@ -52,6 +61,12 @@ activation: `next` can stop on another iteration, while `finish` runs until
 the loop returns. Explicit breakpoints take precedence over `next` and
 `finish`, including a breakpoint in a callee.
 
+`next` executes called functions without stopping at their internal Fango
+statements. At `main()` in Mandelbrot, stepping over the call therefore runs
+the entire render; use `step` to enter it. Skipped calls can produce output or
+wait for IO before the next stop. Ctrl-C cancels the pending step, so a later
+`continue` runs with only the user breakpoints.
+
 Stepping follows the goroutine at the current stop; other goroutines may run.
 User breakpoints in other goroutines still stop execution. This is not an
 all-task stepping model. Ctrl-C interrupts execution; an interruption can
@@ -62,12 +77,29 @@ to the debugger.
 
 ## Inspection and limits
 
-`args` and `locals` inspect the current frame. `print EXPR` evaluates a
-read-only Go expression there; it does not inject target function calls.
-`stack` lists native frames, including generated frames. Names, types, and
-values currently retain their Go representation, for example `v_real`.
-Fango name translation, value rendering, and stack-frame filtering remain
-[roadmap work](../roadmap-debugging.md#native-variable-presentation).
+`args` and `locals` display source-visible bindings with their Fango names and
+source types. Compiler temporaries and evidence dictionaries are hidden.
+`print NAME` looks up one Fango binding in the current frame; it accepts a
+name, not a Fango expression. For example, at Mandelbrot line 36, `print real`
+shows `real : Float = -2.3` on the first iteration.
+
+The compiler records these mappings, including pattern bindings and closure
+captures. Names are not reconstructed from Go prefixes. The argument/local
+split follows the native frame, so captured values passed as generated
+parameters can appear in `args`. Generic source types retain their type
+variables, such as `a`, rather than displaying a Go instantiation.
+
+A source binding absent from the native frame is explicitly unavailable. If
+several lexical scopes share a source line and disagree about a binding, it
+is also unavailable: the Go line table cannot identify the active expression
+on that line. Inspection does not guess between scopes. Move to a distinct
+source line or use the raw view to investigate.
+
+`raw args`, `raw locals`, and `raw print EXPR` retain Go names, types, and
+read-only Go expressions. Inspection does not inject target function calls.
+Values and their children still use Go representations; Fango rendering for
+ADTs, records, and Lists remains [roadmap work](../roadmap-debugging.md#native-variable-presentation).
+`stack` also continues to list native frames, including generated frames.
 
 Inspection bounds string previews to 256 characters, collection children to
 50, and nested values to two levels. Source stepping supports stacks up to

@@ -97,7 +97,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 func usage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fango build [-o out] [--debug | --emit-go] [verbosity] main.fango
-  fango debug BINARY [--] [args...]
+  fango debug [verbosity] SOURCE.fango|BINARY [--] [args...]
   fango run [verbosity] main.fango [--] [args...]
   fango check [verbosity] main.fango
   fango fmt [-w] [-l] [file...]
@@ -253,7 +253,7 @@ func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	if session.debugEnabled() {
-		if err := nativedebug.WriteManifest(dest, data, session.debugSources); err != nil {
+		if err := nativedebug.WriteManifest(dest, data, session.debugSources, session.debugScopes); err != nil {
 			fmt.Fprintf(stderr, "fango: %v\n", err)
 			return 1
 		}

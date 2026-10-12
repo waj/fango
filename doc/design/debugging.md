@@ -77,7 +77,7 @@ or is cancelled.
 
 ## Native source stepping
 
-`build --debug` selects the debug checker for every imported module, reusing
+`build --debug` and source-file `debug` launches select the debug checker for every imported module, reusing
 its source snapshots and disabled Fango inlining/specialization. The Go
 emitter receives an explicit debug flag and suppresses optional callback,
 copy-elision, and call-inlining rewrites. Semantic lowering and self tail-call
@@ -95,30 +95,64 @@ profile. Ordinary emission keeps its existing annotations and optimization
 passes; no target-side stepping hooks or debugger dependency are emitted.
 
 `internal/nativedebug` reads linked DWARF statement entries and writes the
-binary-adjacent manifest with source snapshots, executable lines, a format
-version, and the binary digest. The frontend validates that identity before
+binary-adjacent manifest with source snapshots, executable lines, binding
+scopes, a format version, and the binary digest. The frontend validates that identity before
 launching Delve over a private Unix socket. Source excerpts come from the
 snapshots. Delve resolves file/line locations to relocated addresses, including
 multiple generic instantiations.
 
-Source stepping installs temporary breakpoints at Fango statement addresses
-and continues the real process. No replay or target function injection is
-involved. The selected goroutine restricts temporary stops; explicit user
-breakpoints retain precedence across goroutines. Step accepts the next source
-stop; next accepts the current activation or its caller; finish waits until
-the activation disappears. Activation identity combines function identity
-with Delve's stack-relative frame offset, so recursion and goroutine stack
-movement do not reduce to a depth comparison. Tail-loop iterations reuse the
-same activation. Calls through Go helpers can still stop in Fango callbacks.
+`step` installs temporary breakpoints at Fango statement addresses and
+continues the real process, including calls through Go helpers into Fango
+callbacks. `next` and `finish` use Delve's native next and step-out operations;
+they do not install statement breakpoints throughout skipped callees. Generated
+stops are filtered until a Fango location is reached. Once the original
+activation returns into generated code, a source step seeks the next Fango
+location. No replay or target function injection is involved.
+
+The selected goroutine restricts temporary stops; explicit user breakpoints
+retain precedence across goroutines. Next accepts the current activation or
+its caller; finish waits until the activation disappears. Activation identity
+combines function identity with Delve's stack-relative frame offset, so
+recursion and goroutine stack movement do not reduce to a depth comparison.
+Next also keeps the starting PC armed for that goroutine and frame offset:
+this preserves same-line tail-loop iteration stops, which native line-based
+next would otherwise skip. An existing user breakpoint at that address is
+preserved instead of replaced.
 
 Temporary breakpoints are cleared on success, failure, and interruption;
-existing user breakpoints are never owned by the stepping command. Cleanup
+Delve native stepping is canceled before returning to the prompt, including
+a breakpoint or interruption leaving its operation pending. Existing user
+breakpoints are never owned by the stepping command. Cleanup
 failure prevents subsequent execution. Interrupts halt an outstanding
-Continue RPC and also cancel a step during breakpoint installation. The
+execution RPC and also cancel a step during breakpoint installation. The
 frontend owns and terminates its Delve child and debuggee. It bounds stack
-inspection and displays raw native variables; source-name and representation
-translation remains separate work. [Native commands](../reference/native-debugging.md)
+inspection. [Native commands](../reference/native-debugging.md)
 own the user-visible behavior and limitations.
+
+## Native binding inspection
+
+Debug emission associates Core lexical scopes with the same Go AST nodes
+that claim source lines. Each recorded binding includes its original name,
+source type, and the exact generated identifier from the emitter's mangler.
+The generated Go carries deterministic JSON comments containing those scopes;
+reading both fresh and cached output supplies the companion manifest. This
+avoids a second cache artifact and emits no target-side metadata tables.
+Ordinary emission does not collect scopes or add these comments.
+
+The frontend resolves bindings only from the scopes recorded for the current
+Fango file and line. Go's line table does not distinguish expression columns;
+when scopes on one line disagree about a name, lookup reports it unavailable.
+It never selects a binding by stripping a prefix or guessing between scopes.
+The native argument list classifies source arguments without loading synthetic
+values. Inspection evaluates only compiler-recorded identifiers, including
+captures, and applies bounded loading to the requested source values. Missing
+bindings remain visible as unavailable. A raw view retains Go inspection;
+structural Fango value rendering is not yet implemented.
+
+Source-file launches call the same build pipeline as `build --debug`, write
+metadata beside the cached executable, and launch only after a successful
+build. They do not copy a binary to the working directory. Existing-binary
+launches continue to validate the companion version and binary digest.
 
 ## Native experiment harness
 

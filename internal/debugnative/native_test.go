@@ -4,6 +4,7 @@
 package debugnative
 
 import (
+	"bytes"
 	"context"
 	"debug/dwarf"
 	"debug/elf"
@@ -82,7 +83,10 @@ func TestNativeDebugging(t *testing.T) {
 	defer func() {
 		if t.Failed() {
 			out, _ := os.ReadFile(log.Name())
-			t.Logf("Delve log:\n%s", out)
+			if len(out) > 16000 {
+				out = out[len(out)-16000:]
+			}
+			t.Logf("Delve log (last 16 KB):\n%s", out)
 		}
 	}()
 	cmd = exec.CommandContext(ctx, dlv, "exec", binary, "--headless", "--api-version=2", "--log", "--log-output=debugger,rpc,lldbout", "--listen=unix:"+socket)
@@ -230,6 +234,19 @@ func probeSourceStepping(t *testing.T, client *rpc.Client, binary string) {
 	if c.State.CurrentThread.File != "Probe.fango" || c.State.CurrentThread.Line != 25 {
 		t.Fatalf("next did not advance over binding: %+v", c.State.CurrentThread)
 	}
+	inspect := func(commands string, expected ...string) {
+		t.Helper()
+		var out bytes.Buffer
+		if err := c.Prompt(strings.NewReader(commands), &out); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range expected {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("inspection missing %q:\n%s", want, out.String())
+			}
+		}
+	}
+	inspect("args\nlocals\nprint offset\nraw locals\n", "seed : Int = 10", "offset : Int = 11", "v_offset")
 	// Enter the stdlib traversal rather than skipping through its callback.
 	sawList := false
 	for i := 0; i < 12 && !sawList; i++ {
@@ -251,6 +268,7 @@ func probeSourceStepping(t *testing.T, client *rpc.Client, binary string) {
 	if err := c.Delete(callback.ID); err != nil {
 		t.Fatal(err)
 	}
+	inspect("locals\nprint number\n", "number : Int = 12")
 	// The Go sidecar boundary returns to Fango without stopping inside Go.
 	move("next")
 	loop, err := c.Break("Probe.fango:13")
@@ -274,6 +292,24 @@ func probeSourceStepping(t *testing.T, client *rpc.Client, binary string) {
 		t.Fatal("tail loop lost its activation")
 	}
 	move("finish")
+	capture, err := c.Break("Probe.fango:36")
+	if err != nil {
+		t.Fatal(err)
+	}
+	move("continue")
+	inspect("print outer\nprint value\nprint seed\n", "outer : a = 20", "value : a = 2", "seed : a = <unavailable in this native frame>")
+	if err := c.Delete(capture.ID); err != nil {
+		t.Fatal(err)
+	}
+	pattern, err := c.Break("Probe.fango:42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	move("continue")
+	inspect("print number\nprint seed\n", "number : a = 22", "seed : a = 10")
+	if err := c.Delete(pattern.ID); err != nil {
+		t.Fatal(err)
+	}
 	if !c.State.Exited {
 		move("continue")
 	}

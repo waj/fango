@@ -12,6 +12,7 @@ import (
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/debugger"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/libroot"
@@ -32,6 +33,7 @@ type compilationSession struct {
 	goBuildFlags []string
 	debug        bool
 	debugSources map[string]string
+	debugScopes  []debugger.NativeScope
 }
 
 func (s *compilationSession) debugEnabled() bool { return s != nil && s.debug }
@@ -146,6 +148,17 @@ func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Wr
 	if err != nil {
 		reportInternal(stderr, err)
 		return nil, nil, "", false
+	}
+	if session.debugEnabled() {
+		session.debugScopes = nil
+		for _, file := range files {
+			scopes, err := codegen.DebugScopes(file.Data)
+			if err != nil {
+				reportInternal(stderr, err)
+				return nil, nil, "", false
+			}
+			session.debugScopes = append(session.debugScopes, scopes...)
+		}
 	}
 	hostSource, err := runtimefiles.NativeHost()
 	if err != nil {

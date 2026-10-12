@@ -70,3 +70,12 @@ type Command struct {
 type Host interface {
 	DebugExchange(context.Context, Event) Command
 }
+
+// NativeScope describes the source bindings before a generated statement.
+// Runtime names are Go identifiers supplied by the emitter, not reconstructed
+// by the debugger. Multiple scopes can share a source line.
+type NativeScope struct {
+	File     string
+	Line     int
+	Bindings []Binding
+}

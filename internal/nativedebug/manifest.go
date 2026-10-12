@@ -12,24 +12,27 @@ import (
 	"io"
 	"os"
 	"sort"
+
+	"github.com/waj/fango/internal/debugger"
 )
 
 const Suffix = ".fango-debug.json"
-const version = 1
+const version = 2
 
 type Manifest struct {
 	Version    int
 	BinaryHash string
 	Sources    map[string]string
 	Lines      map[string][]int
+	Scopes     []debugger.NativeScope
 }
 
-func WriteManifest(binary string, data []byte, sources map[string]string) error {
+func WriteManifest(binary string, data []byte, sources map[string]string, scopes []debugger.NativeScope) error {
 	lines, err := StatementLines(binary, sources)
 	if err != nil {
 		return err
 	}
-	m := Manifest{version, fmt.Sprintf("%x", sha256.Sum256(data)), sources, lines}
+	m := Manifest{version, fmt.Sprintf("%x", sha256.Sum256(data)), sources, lines, scopes}
 	encoded, err := json.Marshal(m)
 	if err != nil {
 		return err

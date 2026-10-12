@@ -24,9 +24,10 @@ Interpreter source snapshots, lexical binding sites, profile-aware checked
 objects, and exact-line breakpoint matching are
 [implemented](design/debugging.md#metadata-and-profile). Remaining work:
 
-- A raw inspection view for evidence parameters and generated temporaries.
-- Disk path mappings for raw Delve source lookup, plus the binding and scope
-  mapping described under [native variable presentation](#native-variable-presentation).
+- A raw interpreter inspection view for evidence parameters and generated temporaries.
+  The native frontend already has [raw inspection](reference/native-debugging.md#inspection-and-limits).
+- Disk path mappings for raw Delve source lookup, plus finer scope
+  attribution described under [native variable presentation](#native-variable-presentation).
   The native frontend already uses binary-matched source snapshots;
   [debug emission and cache isolation](design/debugging.md#native-source-stepping)
   preserve ordinary outputs and the self tail-call guarantee.
@@ -48,7 +49,8 @@ Evidence on macOS ARM64 with Go 1.26.7 and pinned Delve 1.27.1:
   List. These are logical paths, not an exported copy of the Fango sources.
 - Generated bindings include `v_n`, `v_acc`, `v_offset`, `v_seed`, and closure
   parameters. Synthetic evidence, adapter, and result variables also
-  appear. This establishes raw tables, not faithful Fango variable presentation.
+  appear in the raw view. The frontend uses compiler mappings for Fango names
+  and source types, including captures and pattern bindings.
 - Live tests cover entering stdlib, next, finish, callback breakpoint
   precedence, a native sidecar, a tail loop, and process completion. Mandelbrot
   steps through coordinate calculations at lines 35–37 and returns to Range.
@@ -71,24 +73,20 @@ debugging.
 
 ## Native variable presentation
 
-Present native arguments and locals using their Fango names, types, and
-scopes. This requires compiler metadata and a presentation layer; the current
-source-stepping frontend retains raw Go variable names and representations.
-Proposed implementation order:
+[Source-name lookup and raw inspection](reference/native-debugging.md#inspection-and-limits)
+are implemented in `fango debug`. The binary-matched manifest carries emitted
+binding names, source types, and lexical scopes. Unavailable bindings are
+explicit, and compiler temporaries are hidden by default. Remaining work:
 
-1. Extend the versioned, binary-matched source manifest with a mapping from
-   generated bindings to original Fango names, types, and lexical scopes.
-   Account for captures and inlined bindings; stripping `v_` alone
-   cannot recover those relationships. Mark unavailable or optimized-away
-   bindings explicitly, and reject a mapping from a different build.
-2. Prototype Delve terminal helpers using its
-   [Starlark commands](https://github.com/go-delve/delve/blob/master/Documentation/cli/starlark.md),
-   which can inspect arguments and locals. Proposed `flocals` and `fprint NAME`
-   commands would display source names, resolve a name in the selected frame,
-   and hide compiler temporaries by default, with access to a raw view.
-   These are custom commands: ordinary Delve commands would continue to use
-   Go names and expressions. Start with binding lookup, not arbitrary Fango
-   expression evaluation.
+1. Disambiguate expression scopes sharing a source line with finer linked
+   location metadata. Current lookup conservatively reports a name unavailable
+   when those scopes disagree. Preserve capture and pattern-binding mappings
+   and validate against any future debug-profile inlining.
+2. Optional Delve terminal helpers using its
+   [Starlark commands](https://github.com/go-delve/delve/blob/master/Documentation/cli/starlark.md)
+   could reuse the manifest outside `fango debug`. Ordinary Delve commands
+   continue to use Go names and expressions; the Fango frontend already
+   provides name lookup, filtered locals, and a raw view.
 3. Add bounded structural rendering for ADTs, records, and Lists, such as
    `Just 42` and `[1, 2, 3]`, using type and representation metadata. Inspect
    memory without invoking `Show` or other target functions. Preserve raw
@@ -98,9 +96,10 @@ Proposed implementation order:
    editor variables, hover inspection, and source-level stack names. Keep
    general watch expressions as distinct work.
 
-Verify original-name lookup in the selected frame, closure captures, pattern
-bindings, inlined and unavailable bindings, synthetic-variable filtering,
-representation decoding, and mismatched-build rejection. Confirm that
+Retain coverage for original-name lookup, closure captures, pattern bindings,
+unavailable bindings, synthetic-variable filtering, and mismatched-build
+rejection. Extend it with exact same-line scopes, any future inlined bindings,
+and representation decoding. Confirm that
 inspection does not execute target code and that raw inspection remains
 available. Native fixtures must establish these behaviors independently of
 the interpreter debugger.

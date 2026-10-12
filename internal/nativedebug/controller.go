@@ -44,10 +44,11 @@ type State struct {
 	SelectedGoroutine *struct {
 		ID int64 `json:"id"`
 	} `json:"currentGoroutine"`
-	Threads    []*Thread
-	Exited     bool   `json:"exited"`
-	ExitStatus int    `json:"exitStatus"`
-	StopReason string `json:"stopReason"`
+	NextInProgress bool
+	Threads        []*Thread
+	Exited         bool   `json:"exited"`
+	ExitStatus     int    `json:"exitStatus"`
+	StopReason     string `json:"stopReason"`
 }
 
 type Controller struct {
@@ -190,9 +191,8 @@ func shouldStop(mode string, start Frame, frames []Frame) bool {
 	return true // the starting activation returned (or unwound)
 }
 
-// Move uses temporary source breakpoints instead of Go single-stepping. This
-// preserves calls through runtime helpers and callbacks while hiding their
-// instructions. Next/finish compare activation identities, not stack depth.
+// Move enters calls using source breakpoints, but steps over/out using Delve
+// native operations so skipped callees run without per-statement traps.
 func (c *Controller) Move(mode string) (err error) {
 	c.interrupted.Store(false)
 	if c.broken != nil {
@@ -207,6 +207,15 @@ func (c *Controller) Move(mode string) (err error) {
 	if mode != "step" && mode != "next" && mode != "finish" {
 		return fmt.Errorf("unknown stepping mode %q", mode)
 	}
+	if mode != "step" {
+		return c.moveOver(mode)
+	}
+	return c.stepSource()
+}
+
+// stepSource seeks a single Fango stop, including callbacks across native code.
+// It must not reset the interrupt flag when called as part of another move.
+func (c *Controller) stepSource() (err error) {
 	if err := c.resolveSites(); err != nil {
 		return err
 	}
@@ -217,7 +226,6 @@ func (c *Controller) Move(mode string) (err error) {
 	if len(frames) == 0 {
 		return fmt.Errorf("no stack for the selected goroutine")
 	}
-	start := frames[0]
 	gid := c.Goroutine()
 	var existing struct{ Breakpoints []Breakpoint }
 	if err := c.call("ListBreakpoints", map[string]any{}, &existing); err != nil {
@@ -253,34 +261,111 @@ func (c *Controller) Move(mode string) (err error) {
 		}
 		temporary[bp.ID] = true
 	}
+	if c.interrupted.Load() {
+		return nil
+	}
+	// Every resulting stop is observable: either the next source site, an
+	// explicit breakpoint, an interrupt, or process exit.
+	return c.command("continue")
+}
+
+// moveOver leaves called functions uninstrumented. After returning into
+// generated scaffolding it seeks the next Fango site, preserving the original
+// activation until it actually returns (including recursive and tail calls).
+func (c *Controller) moveOver(mode string) (err error) {
+	frames, err := c.Frames()
+	if err != nil {
+		return err
+	}
+	if len(frames) == 0 {
+		return fmt.Errorf("no stack for the selected goroutine")
+	}
+	start := frames[0]
+	// A breakpoint, interrupt, or failed RPC can leave Delve's native stepping
+	// breakpoints pending. Never let a later continue inherit that operation.
+	defer func() {
+		if !c.State.Exited {
+			if e := c.call("CancelNext", map[string]any{}, &struct{}{}); e != nil {
+				c.broken = fmt.Errorf("cannot cancel native stepping: %w", e)
+				err = errors.Join(err, c.broken)
+			} else {
+				c.State.NextInProgress = false
+			}
+		}
+	}()
+	// Delve's line-based next skips a loop whose body occupies one source
+	// line. Keep just the current PC armed for the current activation so a
+	// Fango tail iteration remains observable without trapping in callees.
+	if mode == "next" && start.PC != 0 && c.Goroutine() > 0 {
+		if _, source := c.Manifest.Sources[start.File]; source {
+			var existing struct{ Breakpoints []Breakpoint }
+			if err := c.call("ListBreakpoints", map[string]any{}, &existing); err != nil {
+				return err
+			}
+			occupied := false
+			for _, bp := range existing.Breakpoints {
+				if bp.Addr == start.PC {
+					occupied = true
+				}
+				for _, pc := range bp.Addrs {
+					if pc == start.PC {
+						occupied = true
+					}
+				}
+			}
+			if !occupied {
+				bp, createErr := c.create(map[string]any{"addr": start.PC, "cond": fmt.Sprintf("runtime.curg.goid == %d && runtime.frameoff == %d", c.Goroutine(), start.FrameOffset)})
+				if createErr != nil {
+					return createErr
+				}
+				defer func() {
+					if e := c.clear(bp.ID); e != nil && !c.State.Exited {
+						c.broken = fmt.Errorf("cannot remove loop breakpoint %d: %w", bp.ID, e)
+						err = errors.Join(err, c.broken)
+					}
+				}()
+			}
+		}
+	}
+	command := "next"
+	if mode == "finish" {
+		command = "stepOut"
+	}
 	for {
 		if c.interrupted.Load() {
 			return nil
 		}
-		if err := c.command("continue"); err != nil {
+		if err := c.command(command); err != nil {
 			return err
 		}
-		if c.State.Exited || c.interrupted.Load() {
+		if c.State.Exited || c.interrupted.Load() || c.State.NextInProgress {
 			return nil
 		}
-		// Never swallow explicit breakpoints, signals, or a user's interrupt,
-		// including stops on another goroutine during next/finish.
-		threads := append([]*Thread{c.State.CurrentThread}, c.State.Threads...)
-		for _, t := range threads {
-			if t != nil && t.Breakpoint != nil && !temporary[t.Breakpoint.ID] {
+		// User breakpoints (including runtime panic breakpoints) take priority.
+		for _, thread := range append([]*Thread{c.State.CurrentThread}, c.State.Threads...) {
+			if thread != nil && thread.Breakpoint != nil {
 				return nil
 			}
 		}
-		thread := c.State.CurrentThread
-		if thread == nil || thread.Breakpoint == nil || !temporary[thread.Breakpoint.ID] {
+		if reason := c.State.StopReason; reason != "" && reason != "next finished" {
 			return nil
 		}
-		frames, err := c.Frames()
+		frames, err = c.Frames()
 		if err != nil {
 			return err
 		}
-		if shouldStop(mode, start, frames) {
-			return nil
+		t := c.State.CurrentThread
+		if t != nil {
+			if _, ok := c.Manifest.Sources[t.File]; ok && shouldStop(mode, start, frames) {
+				return nil
+			}
+		}
+		if shouldStop("finish", start, frames) {
+			return c.stepSource()
+		}
+		command = "stepOut"
+		if mode == "next" && len(frames) > 0 && sameFrame(start, frames[0]) {
+			command = "next"
 		}
 	}
 }

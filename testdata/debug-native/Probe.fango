@@ -27,4 +27,17 @@ run seed =
     handled =
         handle read() on
             read () -> resume (loop 3 total)
-    handled + seed
+    handled + seed + names seed
+
+-- Exercise captures, pattern bindings, and repeated names across functions.
+names seed =
+    outer = seed + 10
+    callback = { value ->
+        shadow = value + outer
+        shadow
+    }
+    ignored = callback 2
+    case Just ignored of
+        Just number ->
+            number - number
+        Nothing -> 0

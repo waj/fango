@@ -23,6 +23,9 @@ type fakeRPC struct {
 	onCreate     func()
 	failClear    bool
 	continued    int
+	commands     []string
+	canceled     int
+	failCancel   bool
 }
 
 func frame(name string, offset int64, line int) Frame {
@@ -37,6 +40,12 @@ func reply(out, v any) error {
 }
 func (f *fakeRPC) Call(method string, in, out any) error {
 	switch strings.TrimPrefix(method, "RPCServer.") {
+	case "CancelNext":
+		f.canceled++
+		if f.failCancel {
+			return fmt.Errorf("injected cancellation failure")
+		}
+		return nil
 	case "Stacktrace":
 		return reply(out, map[string]any{"Locations": f.frames})
 	case "ListBreakpoints":
@@ -64,9 +73,11 @@ func (f *fakeRPC) Call(method string, in, out any) error {
 		delete(f.active, in.(map[string]any)["Id"].(int))
 		return nil
 	case "Command":
-		if in.(map[string]any)["name"] != "continue" {
+		command := in.(map[string]any)["name"].(string)
+		if command == "halt" {
 			return nil
 		}
+		f.commands = append(f.commands, command)
 		f.continued++
 		if len(f.stops) == 0 {
 			return fmt.Errorf("unexpected continue")
@@ -76,11 +87,15 @@ func (f *fakeRPC) Call(method string, in, out any) error {
 		f.frames = s.frames
 		state := State{Exited: s.exited}
 		if !s.exited {
-			bp := Breakpoint{ID: f.nextID}
+			bp := &Breakpoint{ID: f.nextID}
 			if s.user {
 				bp.ID = 99
 			}
-			state.CurrentThread = &Thread{Location: s.frames[0].Location, Breakpoint: &bp, GoroutineID: 1}
+			if command != "continue" && !s.user {
+				bp = nil
+			}
+			state.NextInProgress = command != "continue" && (s.user || s.interrupted)
+			state.CurrentThread = &Thread{Location: s.frames[0].Location, Breakpoint: bp, GoroutineID: 1}
 			if s.interrupted {
 				state.CurrentThread.Breakpoint = nil
 			}
@@ -92,7 +107,7 @@ func (f *fakeRPC) Call(method string, in, out any) error {
 func controller(stops ...stop) (*Controller, *fakeRPC) {
 	start := frame("main.V_run", 10, 1)
 	f := &fakeRPC{active: map[int]Breakpoint{}, frames: []Frame{start}, stops: stops}
-	c := &Controller{RPC: f, Manifest: &Manifest{}, sites: []uint64{10, 20}, State: State{CurrentThread: &Thread{Location: start.Location, GoroutineID: 1}}}
+	c := &Controller{RPC: f, Manifest: &Manifest{Sources: map[string]string{"Main.fango": ""}}, sites: []uint64{10, 20}, State: State{CurrentThread: &Thread{Location: start.Location, GoroutineID: 1}}}
 	return c, f
 }
 func TestSourceStepModes(t *testing.T) {
@@ -200,5 +215,99 @@ func TestCleanupFailurePreventsFurtherExecution(t *testing.T) {
 	}
 	if f.continued != n {
 		t.Fatal("continued after cleanup failure")
+	}
+}
+
+func TestNativeOverDoesNotInstrumentCallees(t *testing.T) {
+	for _, tc := range []struct {
+		mode, command string
+		target        Frame
+	}{
+		{"next", "next", frame("main.V_run", 10, 2)},
+		{"finish", "stepOut", frame("main.V_main", 1, 4)},
+	} {
+		c, rpc := controller(stop{frames: []Frame{tc.target}})
+		if err := c.Move(tc.mode); err != nil {
+			t.Fatal(err)
+		}
+		wantBreakpoints := 0
+		if tc.mode == "next" {
+			wantBreakpoints = 1
+		}
+		if rpc.calls != wantBreakpoints || len(rpc.commands) != 1 || rpc.commands[0] != tc.command {
+			t.Fatalf("%s instrumented skipped work: %d breakpoints, commands %v", tc.mode, rpc.calls, rpc.commands)
+		}
+	}
+}
+
+func TestNativeNextFiltersGeneratedStops(t *testing.T) {
+	generated := frame("main.V_run", 10, 1)
+	generated.File = "<fango-generated>"
+	c, rpc := controller(stop{frames: []Frame{generated}}, stop{frames: []Frame{frame("main.V_run", 10, 2)}})
+	if err := c.Move("next"); err != nil {
+		t.Fatal(err)
+	}
+	if rpc.calls != 1 || strings.Join(rpc.commands, ",") != "next,next" || c.State.CurrentThread.Line != 2 {
+		t.Fatalf("generated stop: %v, %+v", rpc.commands, c.State)
+	}
+}
+
+func TestInterruptedNativeStepIsCanceled(t *testing.T) {
+	for _, mode := range []string{"next", "finish"} {
+		c, rpc := controller(stop{frames: []Frame{frame("leaf", 20, 3)}, interrupted: true})
+		if err := c.Move(mode); err != nil {
+			t.Fatal(err)
+		}
+		if rpc.canceled != 1 || c.State.NextInProgress {
+			t.Fatal("left native stepping active after interruption")
+		}
+		rpc.stops = append(rpc.stops, stop{exited: true})
+		if err := c.Move("continue"); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(rpc.commands, ",") != map[string]string{"next": "next,continue", "finish": "stepOut,continue"}[mode] {
+			t.Fatalf("commands %v", rpc.commands)
+		}
+	}
+}
+
+func TestNativeCleanupFailurePreventsResume(t *testing.T) {
+	c, rpc := controller(stop{frames: []Frame{frame("main.V_run", 10, 2)}})
+	rpc.failCancel = true
+	if err := c.Move("next"); err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	n := rpc.continued
+	if err := c.Move("continue"); err == nil || rpc.continued != n {
+		t.Fatal("resumed with stale native stepping")
+	}
+}
+
+func TestLoopBreakpointCleanupFailureIsReturned(t *testing.T) {
+	c, rpc := controller(stop{frames: []Frame{frame("main.V_run", 10, 2)}})
+	rpc.failClear = true
+	if err := c.Move("next"); err == nil {
+		t.Fatal("loop breakpoint cleanup failure was swallowed")
+	}
+	if rpc.canceled != 1 {
+		t.Fatal("did not also cancel native stepping")
+	}
+	if err := c.Move("continue"); err == nil {
+		t.Fatal("resumed after cleanup failure")
+	}
+}
+
+func TestInterruptDuringNativeNextSetupDoesNotResume(t *testing.T) {
+	c, rpc := controller()
+	rpc.onCreate = func() {
+		if err := c.Interrupt(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Move("next"); err != nil {
+		t.Fatal(err)
+	}
+	if rpc.continued != 0 || len(rpc.active) != 0 || rpc.canceled != 1 {
+		t.Fatalf("continued %d, remaining breakpoints %v, canceled %d", rpc.continued, rpc.active, rpc.canceled)
 	}
 }

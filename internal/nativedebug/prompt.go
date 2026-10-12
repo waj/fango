@@ -17,8 +17,10 @@ break FILE:LINE   set an exact-line native breakpoint
 breaks            list user breakpoints
 delete ID         delete a user breakpoint
 stack             show the native stack (including generated frames)
-args / locals     inspect arguments or locals using generated Go names
-print EXPR        inspect a read-only Go expression in the current frame
+args / locals     inspect arguments or locals using Fango names
+print NAME        inspect a visible Fango binding
+raw args / locals inspect generated Go variables
+raw print EXPR    inspect a read-only Go expression
 quit (q)          terminate the launched process
 Ctrl-C            interrupt execution
 `
@@ -64,7 +66,7 @@ func showVariable(w io.Writer, v variable, indent string) {
 		fmt.Fprintf(w, "%s  …\n", indent)
 	}
 }
-func (c *Controller) inspect(command, expr string, w io.Writer) error {
+func (c *Controller) inspectRaw(command, expr string, w io.Writer) error {
 	scope := map[string]any{"GoroutineID": c.Goroutine(), "Frame": 0}
 	cfg := map[string]any{"FollowPointers": true, "MaxVariableRecurse": 2, "MaxStringLen": 256, "MaxArrayValues": 50, "MaxStructFields": 50}
 	if command == "print" {
@@ -172,6 +174,13 @@ func (c *Controller) Prompt(input io.Reader, out io.Writer) error {
 			}
 		case "args", "locals", "print":
 			err = c.inspect(cmd, arg, out)
+		case "raw":
+			command, expr, _ := strings.Cut(arg, " ")
+			if command != "args" && command != "locals" && command != "print" {
+				err = fmt.Errorf("usage: raw args | raw locals | raw print EXPR")
+			} else {
+				err = c.inspectRaw(command, strings.TrimSpace(expr), out)
+			}
 		default:
 			err = fmt.Errorf("unknown command %q; type help", cmd)
 		}

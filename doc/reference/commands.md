@@ -474,7 +474,8 @@ members, and the representation of an opaque type never appear.
 
 `fango build --debug [-o out] main.fango` produces a native executable and a
 companion `out.fango-debug.json` file (using the actual executable path for
-`out`). The companion contains source snapshots and linked statement locations,
+`out`). The companion contains source snapshots, linked statement locations,
+and source binding mappings,
 matched to the executable by its SHA-256 digest. Keep both files together.
 Missing, incompatible, or mismatched metadata is rejected by `fango debug`
 with a diagnostic asking for a rebuild.
@@ -487,12 +488,14 @@ runtime. The default Nix shell includes Delve:
 
 ```sh
 nix develop
-fango build --debug -o main-debug main.fango
-fango debug ./main-debug
+fango debug main.fango
 ```
 
+`fango debug main.fango` builds with this profile and launches from the debug
+cache in one command. To keep a standalone executable, use
+`fango build --debug -o main-debug main.fango`, then `fango debug ./main-debug`.
 See [native source debugging](native-debugging.md) for stepping, breakpoints,
-and inspection. Raw `dlv exec ./main-debug` remains available; its stepping
+and source-name inspection. Raw `dlv exec ./main-debug` remains available; its stepping
 commands operate on generated Go and runtime instructions.
 
 `--debug` cannot be combined with `--emit-go` (usage error, exit status 2).

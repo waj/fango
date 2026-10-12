@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/debugger"
 	"github.com/waj/fango/internal/lower"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
@@ -392,6 +393,8 @@ type gen struct {
 	directActivations    map[string]map[string]directOperation
 	disableOptimizations bool
 	debug                bool
+	debugSite            *debugger.Site
+	debugOrigins         map[goast.Node]*debugger.Site
 	// abi selects the Direct/Exit representation family for controlled
 	// function and ADT values in the declaration currently being emitted.
 	// Unlike control, it does not change when emission enters a pure nested
@@ -961,7 +964,7 @@ func (g *gen) retStmtsFor(e core.Expr, unitResult bool) (out []goast.Stmt) {
 	if g.debug {
 		defer func() { g.debugStatements(out, e) }()
 	}
-	defer g.enter(g.exprOrigin(e))()
+	defer g.enterExpr(e)()
 	if stmts, ok := g.immediateUnitApplication(e, func(body core.Expr) []goast.Stmt {
 		return g.retStmtsFor(body, unitResult)
 	}); ok {
@@ -1364,7 +1367,7 @@ const unaryPrec = 6
 // expr emits e in expression context; parentPrec is the precedence of the
 // enclosing operator (0 = none) for minimal parenthesization.
 func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
-	defer g.enter(g.exprOrigin(e))()
+	defer g.enterExpr(e)()
 	switch e := e.(type) {
 	case *core.IntLit:
 		return intLit(e.Val)
@@ -2632,7 +2635,11 @@ func (g *gen) letBindingStmts(let *core.Let) (out []goast.Stmt) {
 	if g.debug {
 		defer func() { g.debugStatements(out, let.Rhs) }()
 	}
-	defer g.enter(let.Origin)()
+	if g.debug {
+		defer g.enterExpr(let.Rhs)()
+	} else {
+		defer g.enter(let.Origin)()
+	}
 	if g.rememberForwarder(let) {
 		return nil
 	}
@@ -2701,7 +2708,7 @@ func (g *gen) stmts(e core.Expr) (out []goast.Stmt) {
 	if g.debug {
 		defer func() { g.debugStatements(out, e) }()
 	}
-	defer g.enter(g.exprOrigin(e))()
+	defer g.enterExpr(e)()
 	if stmts, ok := g.immediateUnitApplication(e, g.stmts); ok {
 		return stmts
 	}

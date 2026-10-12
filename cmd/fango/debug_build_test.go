@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -125,5 +126,61 @@ func TestNativeDebugProfileIsolationAndSourceSnapshots(t *testing.T) {
 	}
 	if moved.Sources["Main.fango"] != "\n"+source || !slices.Contains(moved.Lines["Main.fango"], 7) {
 		t.Fatal("debug cache reused stale positions")
+	}
+}
+
+func TestDebugSourceLaunchPreparation(t *testing.T) {
+	entry := writeEntry(t, "main() = print 42\n")
+	var stderr bytes.Buffer
+	binary, args, code := prepareDebug([]string{"-v", entry, "--", "--program-option", "value"}, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if !slices.Equal(args, []string{"--program-option", "value"}) {
+		t.Fatalf("target args: %v", args)
+	}
+	if !strings.Contains(binary, string(filepath.Separator)+"debug"+string(filepath.Separator)) {
+		t.Fatalf("debug output outside cache: %s", binary)
+	}
+	m, err := nativedebug.ReadManifest(binary)
+	if err != nil || len(m.Scopes) == 0 {
+		t.Fatalf("missing scope metadata: %v", err)
+	}
+	info, err := buildinfo.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range info.Settings {
+		if s.Key == "-gcflags" && s.Value == "all=-N -l" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("source launch did not select debug flags")
+	}
+	stderr.Reset()
+	warm, _, code := prepareDebug([]string{"-v", entry}, &stderr)
+	if code != 0 || warm != binary || strings.Contains(stderr.String(), "Linking  go build") {
+		t.Fatalf("warm source launch: %s", stderr.String())
+	}
+	cached, err := nativedebug.ReadManifest(warm)
+	if err != nil || !reflect.DeepEqual(m.Scopes, cached.Scopes) {
+		t.Fatalf("warm build lost binding metadata: %v", err)
+	}
+	direct, args, code := prepareDebug([]string{binary, "arg"}, &stderr)
+	if code != 0 || direct != binary || !slices.Equal(args, []string{"arg"}) {
+		t.Fatal("binary launch changed")
+	}
+	for _, input := range [][]string{nil, {"--unknown"}} {
+		if _, _, code := prepareDebug(input, &stderr); code != 2 {
+			t.Fatalf("usage: %v returned %d", input, code)
+		}
+	}
+	if err := os.WriteFile(entry, []byte("main() = invalidName\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := prepareDebug([]string{entry}, &stderr); code != 1 {
+		t.Fatalf("invalid source must fail before launch, got %d", code)
 	}
 }
