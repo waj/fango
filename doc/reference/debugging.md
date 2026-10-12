@@ -60,11 +60,11 @@ captures, with their source names and types. `:print NAME` inspects one such
 binding. It accepts a name, not an expression. It does not force global cells,
 run `Show`, or add private names to the REPL scope.
 
-Previews use at most two structural levels, 50 children per collection, and
-256 characters per string. Records, ADTs, and materialized lists expose
-structural children. Functions and native/resource values remain opaque.
-Expandable values show a handle: `:expand HANDLE [OFFSET]` returns up to 50
-children from that offset. Handles expire on every resume, step, or stop.
+Values use the [shared structural preview rules](debugger-commands.md#structural-value-previews).
+Records, ADTs, and materialized lists expose structural children; functions
+and native/resource values remain opaque. Expandable values show a handle:
+`:expand HANDLE [OFFSET]` returns a page of children from that offset.
+Handles expire on every resume, step, or stop.
 
 ## Input, cancellation, and handler levels
 

@@ -57,11 +57,11 @@ func TestFangoValueRendering(t *testing.T) {
 		{variable{Type: "main.Pair[int64,string]", Children: []variable{scalar("F0", "int64", "7"), scalar("F1", "string", "hi")}}, `(7, "hi")`},
 		{variable{Kind: uint(reflect.Func)}, "<function>"},
 		{variable{Unreadable: "cannot read memory"}, "<cannot read memory>"},
-		{variable{Type: "foreign.Struct"}, "<opaque; use raw print>"},
+		{variable{Type: "foreign.Struct"}, "<opaque>"},
 	} {
 		rpc := &renderRPC{values: map[string]variable{"v": tc.v}}
 		c := &Controller{RPC: rpc, Manifest: &Manifest{Types: layouts}}
-		if got := c.preview("v"); got != tc.want {
+		if got := debugger.RenderValue(c.preview("v")); got != tc.want {
 			t.Errorf("%+v: got %q, want %q", tc.v, got, tc.want)
 		}
 		if rpc.calls != 1 {
@@ -91,7 +91,7 @@ func TestListBoundsAndCycles(t *testing.T) {
 	} {
 		rpc := &renderRPC{values: map[string]variable{"v": tc.v}}
 		c := &Controller{RPC: rpc, Manifest: &Manifest{}}
-		out := c.preview("v")
+		out := debugger.RenderValue(c.preview("v"))
 		if !strings.HasPrefix(out, tc.prefix) || !strings.HasSuffix(out, tc.suffix) {
 			t.Fatal(out)
 		}
@@ -103,10 +103,10 @@ func TestListBoundsAndCycles(t *testing.T) {
 func TestRenderReadAndNodeBudgets(t *testing.T) {
 	rpc := &renderRPC{values: map[string]variable{"v": scalar("", "int64", "1")}}
 	r := &valueReader{c: &Controller{RPC: rpc, Manifest: &Manifest{}}, remaining: 1, nodes: 1, visiting: map[uint64]bool{}}
-	if got := r.render(r.read("v"), "v", 4); got != "1" {
+	if got := debugger.RenderValue(r.describe(r.read("v"), "v", 4)); got != "1" {
 		t.Fatal(got)
 	}
-	if got := r.render(r.read("v"), "v", 4); got != "…" {
+	if got := debugger.RenderValue(r.describe(r.read("v"), "v", 4)); got != "…" {
 		t.Fatal(got)
 	}
 	if rpc.calls != 1 {

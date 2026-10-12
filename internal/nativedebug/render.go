@@ -8,10 +8,10 @@ import (
 	"github.com/waj/fango/internal/debugger"
 )
 
-const previewDepth = 4
-const previewItems = 50
+const previewDepth = debugger.PreviewDepth
+const previewItems = debugger.PreviewItems
 const previewReads = 256
-const previewNodes = 512
+const previewNodes = debugger.PreviewNodes
 
 // valueReader bounds both rendered structure and debugger traffic. It reads
 // memory through identifiers, selectors and Delve's dynamic-data projection;
@@ -32,7 +32,7 @@ func (r *valueReader) read(expr string) variable {
 	err := r.c.call("Eval", map[string]any{
 		"Scope": map[string]any{"GoroutineID": r.c.Goroutine(), "Frame": 0},
 		"Expr":  expr,
-		"Cfg":   map[string]any{"FollowPointers": true, "MaxVariableRecurse": 1, "MaxStringLen": 256, "MaxArrayValues": 50, "MaxStructFields": 50},
+		"Cfg":   map[string]any{"FollowPointers": true, "MaxVariableRecurse": 1, "MaxStringLen": debugger.PreviewStringBytes, "MaxArrayValues": previewItems, "MaxStructFields": previewItems},
 	}, &out)
 	if err != nil {
 		return variable{Unreadable: "unavailable in this native frame"}
@@ -62,43 +62,43 @@ func baseType(name string) string {
 	}
 	return strings.TrimSuffix(name, "_exit")
 }
-func (r *valueReader) render(v variable, expr string, depth int) string {
+func (r *valueReader) describe(v variable, expr string, depth int) debugger.Value {
 	if r.nodes == 0 {
-		return "…"
+		return debugger.Value{Kind: debugger.LimitValue}
 	}
 	r.nodes--
 	if v.Unreadable != "" {
-		return "<" + v.Unreadable + ">"
+		return debugger.Value{Kind: debugger.UnavailableValue, Text: v.Unreadable}
 	}
 	if v.OnlyAddr {
 		v = r.read(expr)
 		if v.OnlyAddr {
-			return "<unavailable>"
+			return debugger.Value{Kind: debugger.UnavailableValue, Text: "unavailable"}
 		}
-		return r.render(v, expr, depth)
+		return r.describe(v, expr, depth)
 	}
 	if depth < 0 {
-		return "…"
+		return debugger.Value{Kind: debugger.LimitValue}
 	}
 	name := baseType(v.Type)
 	layout, known := r.c.Manifest.Types[name]
 	if known && layout.Kind == "opaque" {
-		return "<opaque " + layout.Name + ">"
+		return debugger.Value{Kind: debugger.OpaqueValue, Text: layout.Name}
 	}
 	if reflect.Kind(v.Kind) == reflect.Ptr {
 		if len(v.Children) == 0 {
-			return "<unavailable pointer>"
+			return debugger.Value{Kind: debugger.UnavailableValue, Text: "unavailable pointer"}
 		}
 		addr := v.Children[0].Addr
 		if addr == 0 {
-			return "<nil>"
+			return debugger.Value{Kind: debugger.UnavailableValue, Text: "nil"}
 		}
 		if r.visiting[addr] {
-			return "<cycle>"
+			return debugger.Value{Kind: debugger.CycleValue}
 		}
 		r.visiting[addr] = true
 		defer delete(r.visiting, addr)
-		return r.render(v.Children[0], "(*("+expr+"))", depth)
+		return r.describe(v.Children[0], "(*("+expr+"))", depth)
 	}
 	if name == "fangobuild/fangort.List" {
 		return r.list(v, expr, depth)
@@ -108,58 +108,50 @@ func (r *valueReader) render(v variable, expr string, depth int) string {
 	}
 	if reflect.Kind(v.Kind) == reflect.Interface {
 		if len(v.Children) == 0 {
-			return "<opaque>"
+			return debugger.Value{Kind: debugger.OpaqueValue}
 		}
 		// Delve's .(data) exposes an interface's concrete value without a call.
-		return r.render(v.Children[0], "("+expr+").(data)", depth)
+		return r.describe(v.Children[0], "("+expr+").(data)", depth)
 	}
 	switch v.Type {
 	case "bool":
 		if v.Value == "true" {
-			return "True"
+			return debugger.Value{Kind: debugger.BoolValue, Text: "true"}
 		}
 		if v.Value == "false" {
-			return "False"
+			return debugger.Value{Kind: debugger.BoolValue, Text: "false"}
 		}
 	case "string":
-		s := strings.ReplaceAll(strconv.Quote(v.Value), "#{", "\\#{")
-		if v.Len > int64(len(v.Value)) {
-			s += "…"
-		}
-		return s
+		return debugger.StringPreview(v.Value, v.Len > int64(len(v.Value)))
 	case "int32", "rune":
 		n, err := strconv.ParseInt(v.Value, 10, 32)
 		if err == nil {
-			return strconv.QuoteRune(rune(n))
+			return debugger.Value{Kind: debugger.CharValue, Text: string(rune(n))}
 		}
 	}
 	switch reflect.Kind(v.Kind) {
 	case reflect.Bool:
 		if v.Value == "true" {
-			return "True"
+			return debugger.Value{Kind: debugger.BoolValue, Text: "true"}
 		}
 		if v.Value == "false" {
-			return "False"
+			return debugger.Value{Kind: debugger.BoolValue, Text: "false"}
 		}
 	case reflect.String:
-		s := strings.ReplaceAll(strconv.Quote(v.Value), "#{", "\\#{")
-		if v.Len > int64(len(v.Value)) {
-			s += "…"
-		}
-		return s
+		return debugger.StringPreview(v.Value, v.Len > int64(len(v.Value)))
 	case reflect.Func:
-		return "<function>"
+		return debugger.Value{Kind: debugger.FunctionValue}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
 		if v.Value != "" {
-			return v.Value
+			return debugger.Value{Kind: debugger.NumberValue, Text: v.Value}
 		}
 	}
 	if name == "fangobuild/fangort.Unit" {
-		return "()"
+		return debugger.Value{Kind: debugger.UnitValue}
 	}
 	if _, ok := child(v, "Direct"); ok {
 		if _, ok := child(v, "Exit"); ok {
-			return "<function>"
+			return debugger.Value{Kind: debugger.FunctionValue}
 		}
 	}
 	// Primitive fake responses in protocol tests and older Delve versions may
@@ -167,18 +159,18 @@ func (r *valueReader) render(v variable, expr string, depth int) string {
 	switch v.Type {
 	case "int64", "float64":
 		if v.Value != "" {
-			return v.Value
+			return debugger.Value{Kind: debugger.NumberValue, Text: v.Value}
 		}
 	}
-	return "<opaque; use raw print>"
+	return debugger.Value{Kind: debugger.OpaqueValue}
 }
-func (r *valueReader) construct(v variable, expr string, depth int, layout debugger.NativeType) string {
+func (r *valueReader) construct(v variable, expr string, depth int, layout debugger.NativeType) debugger.Value {
 	var ctor *debugger.NativeConstructor
 	if layout.Kind == "tagged" {
 		tag, _ := r.field(v, expr, "Tag")
 		n, err := strconv.Atoi(tag.Value)
 		if err != nil || tag.Unreadable != "" {
-			return "<unreadable constructor tag>"
+			return debugger.Value{Kind: debugger.UnavailableValue, Text: "unreadable constructor tag"}
 		}
 		for i := range layout.Constructors {
 			if layout.Constructors[i].Tag == n {
@@ -190,63 +182,39 @@ func (r *valueReader) construct(v variable, expr string, depth int, layout debug
 		ctor = &layout.Constructors[0]
 	}
 	if ctor == nil {
-		return "<invalid constructor tag>"
+		return debugger.Value{Kind: debugger.UnavailableValue, Text: "invalid constructor tag"}
 	}
-	if len(ctor.Fields) == 0 {
-		if layout.Kind == "record" {
-			return "{}"
-		}
-		return ctor.Name
+	out := debugger.Value{Kind: debugger.ConstructorValue, Text: ctor.Name}
+	if layout.Kind == "record" {
+		out.Kind = debugger.RecordValue
 	}
-	if depth == 0 {
-		if layout.Kind == "tuple" {
-			return "(…)"
-		}
-		if layout.Kind == "record" {
-			return "{ … }"
-		}
-		return ctor.Name + " …"
+	if layout.Kind == "tuple" {
+		out.Kind = debugger.TupleValue
 	}
-	var parts []string
 	for i, f := range ctor.Fields {
-		if i == previewItems || r.nodes == 0 {
-			parts = append(parts, "…")
+		if depth == 0 || i == previewItems || r.nodes == 0 {
+			out.Truncated = true
 			break
 		}
 		value, path := r.field(v, expr, f.Runtime)
-		part := r.render(value, path, depth-1)
-		if layout.Kind == "record" {
-			part = f.Name + " = " + part
-		} else if layout.Kind != "tuple" && strings.ContainsAny(part, " \t") && !strings.HasPrefix(part, "[") && !strings.HasPrefix(part, "{") && !strings.HasPrefix(part, "\"") && !strings.HasPrefix(part, "<") && !strings.HasPrefix(part, "(") && !strings.HasPrefix(part, "'") {
-			part = "(" + part + ")"
-		}
-		parts = append(parts, part)
+		out.Fields = append(out.Fields, debugger.ValueField{Name: f.Name, Value: r.describe(value, path, depth-1)})
 	}
-	if layout.Kind == "record" {
-		return "{ " + strings.Join(parts, ", ") + " }"
-	}
-	if layout.Kind == "tuple" {
-		return "(" + strings.Join(parts, ", ") + ")"
-	}
-	return ctor.Name + " " + strings.Join(parts, " ")
+	return out
 }
-func (r *valueReader) list(v variable, expr string, depth int) string {
-	if depth == 0 {
-		return "[…]"
-	}
-	var parts []string
+func (r *valueReader) list(v variable, expr string, depth int) debugger.Value {
+	out := debugger.Value{Kind: debugger.ListValue}
 	seen := map[uint64]bool{}
 	for i := 0; i <= previewItems; i++ {
 		node, nodeExpr := r.field(v, expr, "node")
 		if node.Unreadable != "" {
-			parts = append(parts, "<"+node.Unreadable+">")
+			out.Fields = append(out.Fields, debugger.ValueField{Value: debugger.Value{Kind: debugger.UnavailableValue, Text: node.Unreadable}})
 			break
 		}
 		if len(node.Children) == 0 {
 			node = r.read(nodeExpr)
 		}
 		if len(node.Children) == 0 {
-			parts = append(parts, "<unavailable spine>")
+			out.Fields = append(out.Fields, debugger.ValueField{Value: debugger.Value{Kind: debugger.UnavailableValue, Text: "unavailable spine"}})
 			break
 		}
 		addr := node.Children[0].Addr
@@ -254,24 +222,23 @@ func (r *valueReader) list(v variable, expr string, depth int) string {
 			break
 		}
 		if seen[addr] {
-			parts = append(parts, "<cycle>")
+			out.Fields = append(out.Fields, debugger.ValueField{Value: debugger.Value{Kind: debugger.CycleValue}})
 			break
 		}
-		if i == previewItems || r.remaining == 0 || r.nodes == 0 {
-			parts = append(parts, "…")
+		if depth == 0 || i == previewItems || r.remaining == 0 || r.nodes == 0 {
+			out.Truncated = true
 			break
 		}
 		seen[addr] = true
-		// Field selectors implicitly dereference node. Fetch only the head;
-		// recurse into the tail iteratively so list length doesn't eat depth.
+		// Selectors implicitly dereference node; walk tails without spending depth.
 		head, headExpr := r.field(node.Children[0], nodeExpr, "head")
-		parts = append(parts, r.render(head, headExpr, depth-1))
+		out.Fields = append(out.Fields, debugger.ValueField{Value: r.describe(head, headExpr, depth-1)})
 		v, expr = r.field(node.Children[0], nodeExpr, "tail")
 	}
-	return "[" + strings.Join(parts, ", ") + "]"
+	return out
 }
 
-func (c *Controller) preview(expr string) string {
+func (c *Controller) preview(expr string) debugger.Value {
 	r := &valueReader{c: c, remaining: previewReads, nodes: previewNodes, visiting: map[uint64]bool{}}
-	return r.render(r.read(expr), expr, previewDepth)
+	return r.describe(r.read(expr), expr, previewDepth)
 }

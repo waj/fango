@@ -43,7 +43,7 @@ func Variable(w io.Writer, v debugger.Variable) {
 	if v.Type != "" {
 		fmt.Fprintf(w, " : %s", v.Type)
 	}
-	fmt.Fprintf(w, " = %s", v.Value)
+	fmt.Fprintf(w, " = %s", debugger.RenderValue(v.Value))
 	if v.Handle != 0 {
 		fmt.Fprintf(w, " [handle %d]", v.Handle)
 	}

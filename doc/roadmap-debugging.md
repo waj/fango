@@ -41,14 +41,11 @@ The [shared session API](design/debugging.md#shared-debugger-sessions) and
 interpreter and Delve adapters. Requests, stop events, source snapshots,
 breakpoint statuses, selected frames, and pause-scoped handles use structured
 data, with parser, session, adapter, and backend transcript tests.
+[Structural value descriptions and rendering](design/debugging.md#shared-structural-values)
+are also shared, with bounded backend readers and one Fango formatter.
 
 Remaining steps:
 
-- Separate reading values from formatting them. Backends supply bounded
-  structural descriptions and lazy child handles; one formatter owns Fango
-  notation, truncation, opaque/unavailable markers, and expansion presentation.
-  Keep target reads and traversal budgets in the adapters, never invoke target
-  functions, and invalidate handles on resume.
 - Close capability gaps, including native frame selection and expansion,
   source stack names, and consistent argument/local views. Advertise supported
   operations explicitly instead of silently approximating unsupported ones.

@@ -99,21 +99,15 @@ source line or use the raw view to investigate.
 read-only Go expressions. Inspection does not inject target function calls.
 `stack` also continues to list native frames, including generated frames.
 
-Source inspection renders values structurally in Fango notation: Lists as
-`[1, 2, 3]`, records as `{ name = "Ada", age = 42 }`, ADTs as `Just 42`
-or `Branch (Leaf 1) (Leaf 2)`, and tuples as `(7, "seven")`. It selects only
-the active constructor's fields. Booleans, characters, strings, and unit use
-their Fango forms. This also works when the source type is generic. Rendering
-reads memory without invoking `Show`, List accessors, or other target code.
-Functions display as `<function>`; native resources and unknown
-representations remain opaque. The raw view is available for investigation.
+Source inspection uses the [shared structural preview rules](debugger-commands.md#structural-value-previews),
+including for generic source types. Native decoding reads memory without
+invoking `Show`, List accessors, or other target code. Each preview additionally
+allows at most 256 debugger reads; pointer and List-spine addresses detect
+cycles. Unknown representations remain opaque; the raw view is available for
+investigation. Native child expansion is not yet supported.
 
-Each source value preview is bounded to four structural levels, 50 items per
-collection or record, 512 visited values, and 256 debugger reads. Strings load
-at most 256 bytes. Truncation uses `…`; cycles and unreadable fields have
-explicit markers. These are previews, so truncated or opaque output is not a
-complete Fango expression. Raw inspection retains its limits of two nested
-levels, 50 children, and 256 string bytes.
+Raw inspection retains its limits of two nested levels, 50 children, and
+256 string bytes.
 
 Source stepping supports stacks up to
 1024 native frames; deeper or unreadable stacks report an error. Temporary

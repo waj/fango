@@ -310,6 +310,11 @@ func probeSourceStepping(t *testing.T, client *rpc.Client, binary string) {
 	if err := c.Delete(pattern.ID); err != nil {
 		t.Fatal(err)
 	}
+	expectedPreview, err := os.ReadFile("../../testdata/debug-native/Values.preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := strings.TrimSpace(string(expectedPreview))
 	// Decode actual generated representations, including dynamic generic data,
 	// through read-only inspection. Source underlines use the saved snapshot.
 	for _, point := range []struct {
@@ -318,13 +323,10 @@ func probeSourceStepping(t *testing.T, client *rpc.Client, binary string) {
 		expected []string
 	}{
 		{"Values.fango:28", "print value\nraw print v_value\n", []string{
-			"value : Preview = { numbers = [10, 2, 3], person = { name = \"Ada\", age = 10 }",
-			"optional = Just 42", "result = Err \"oops\"", "tree = Branch (Leaf 1) (Leaf 2)",
-			"color = Green", "box = Box [4, 5]", "empty = []", "text = \"hello\\nworld\"",
-			"character = 'λ'", "flag = True", "pair = (7, \"seven\")",
+			"value : Preview = " + preview,
 			"28|     value.person.age\n        ^^^^^^^^^^^^", "C_Values_dot_Preview",
 		}},
-		{"Values.fango:49", "print value\n", []string{"value : a = { numbers = [10, 2, 3]", "tree = Branch (Leaf 1) (Leaf 2)"}},
+		{"Values.fango:49", "print value\n", []string{"value : a = " + preview}},
 		{"Values.fango:53", "print items\n", []string{"items : List Int = [1, 2, 3,", "49, 50, …]"}},
 	} {
 		bp, err := c.Break(point.line)

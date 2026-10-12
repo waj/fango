@@ -1,0 +1,1 @@
+{ numbers = [10, 2, 3], person = { name = "Ada", age = 10 }, optional = Just 42, result = Err "oops", tree = Branch (Leaf 1) (Leaf 2), color = Green, box = Box [4, 5], empty = [], text = "hello\nworld", character = 'λ', flag = True, pair = (7, "seven") }

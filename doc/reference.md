@@ -99,7 +99,7 @@ defines the default scope.
 
 [REPL](reference/repl.md) — Prompt scope, imports, redefinition, rollback, commands, and line editing.
 
-[Debugger commands](reference/debugger-commands.md) — Shared stopped-prompt syntax, presentation, and backend capabilities.
+[Debugger commands](reference/debugger-commands.md) — Shared stopped-prompt syntax, structural value previews, and backend capabilities.
 
 [REPL debugging](reference/debugging.md) — Breakpoints, stepping, scoped inspection, and cancellation.
 

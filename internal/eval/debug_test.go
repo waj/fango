@@ -10,6 +10,7 @@ import (
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
 )
 
@@ -54,7 +55,7 @@ func TestDebugLocalsRejectInvalidHandle(t *testing.T) {
 		case 1:
 			return debugger.Command{Kind: "locals"}
 		case 2:
-			if len(e.Variables) != 1 || e.Variables[0].Name != "x" || e.Variables[0].Value != "41" {
+			if len(e.Variables) != 1 || e.Variables[0].Name != "x" || debugger.RenderValue(e.Variables[0].Value) != "41" {
 				t.Fatalf("locals: %+v", e)
 			}
 			return debugger.Command{Kind: "expand", Handle: 0}
@@ -101,7 +102,7 @@ func TestDebugHandlesExpireAcrossStops(t *testing.T) {
 			}
 			return debugger.Command{Kind: "expand", Handle: handle}
 		case 3:
-			if len(event.Variables) != 1 || event.Variables[0].Value != "7" {
+			if len(event.Variables) != 1 || debugger.RenderValue(event.Variables[0].Value) != "7" {
 				t.Fatalf("expansion: %+v", event)
 			}
 			return debugger.Command{Kind: "step"}
@@ -129,10 +130,10 @@ func (poisonStringer) String() string { panic("inspection called user code") }
 
 func TestDebugBoundedStructuralInspection(t *testing.T) {
 	in := &interp{env: NewEnv(), debug: &debugExecution{handles: map[uint64]debugValue{}}}
-	if got := in.debugPreview(poisonStringer{}, 2); got != "<opaque>" {
+	if got := debugger.RenderValue(in.debugPreview(poisonStringer{})); got != "<opaque>" {
 		t.Fatal(got)
 	}
-	if got := in.debugPreview(strings.Repeat("界", 1000), 2); got != "\""+strings.Repeat("界", 256)+"\"…" {
+	if got := debugger.RenderValue(in.debugPreview(strings.Repeat("界", 1000))); got != "\""+strings.Repeat("界", 85)+"\"…" {
 		t.Fatal("string preview not bounded")
 	}
 	values := fangort.List[Value]{}
@@ -140,11 +141,11 @@ func TestDebugBoundedStructuralInspection(t *testing.T) {
 		values = fangort.ListCons(Value(i), values)
 	}
 	preview := in.debugVariable("xs", "List Int", values)
-	if preview.Handle == 0 || !strings.HasSuffix(preview.Value, ", …]") {
+	if preview.Handle == 0 || !strings.HasSuffix(debugger.RenderValue(preview.Value), ", …]") {
 		t.Fatalf("list preview: %+v", preview)
 	}
 	children, more := in.debugChildren(values, 50)
-	if len(children) != 50 || more || children[0].Value != "50" || children[49].Value != "99" {
+	if len(children) != 50 || more || debugger.RenderValue(children[0].Value) != "50" || debugger.RenderValue(children[49].Value) != "99" {
 		t.Fatalf("list page: %+v %v", children, more)
 	}
 }
@@ -158,5 +159,62 @@ func TestDebugRejectsTaskCreationBeforeOperands(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "concurrent task creation is not supported") {
 			t.Fatalf("%T: %v", e, err)
 		}
+	}
+}
+
+func TestDebugReaderBoundsCyclesAndOpaqueValues(t *testing.T) {
+	in := &interp{env: NewEnv()}
+	con := &types.TCon{Unique: 1, Name: "Test.Box"}
+	ctor := &types.CtorInfo{Name: "Test.Box", Result: con}
+	cyclic := &CtorVal{Ctor: ctor}
+	cyclic.Fields = []Value{cyclic}
+	if got := debugger.RenderValue(in.debugPreview(cyclic)); got != "Box <cycle>" {
+		t.Fatal(got)
+	}
+	// Shared substructure is not a cycle: only the active traversal path counts.
+	leaf := &CtorVal{Ctor: ctor, Fields: []Value{int64(7)}}
+	shared := &CtorVal{Ctor: ctor, Fields: []Value{leaf, leaf}}
+	if got := debugger.RenderValue(in.debugPreview(shared)); got != "Box (Box 7) (Box 7)" {
+		t.Fatal(got)
+	}
+	in.env.adts[1] = &types.ADTInfo{Con: con, Resource: true}
+	if got := debugger.RenderValue(in.debugPreview(cyclic)); got != "<opaque Box>" {
+		t.Fatal(got)
+	}
+	// Empty nominal records have no synthetic constructor in the source display.
+	in.env.adts[1] = &types.ADTInfo{Con: con, RecordFields: []types.RecordFieldInfo{}}
+	if got := debugger.RenderValue(in.debugPreview(&CtorVal{Ctor: ctor})); got != "{}" {
+		t.Fatal(got)
+	}
+	delete(in.env.adts, 1)
+	var deep Value = int64(1)
+	for range 10 {
+		deep = &CtorVal{Ctor: ctor, Fields: []Value{deep}}
+	}
+	if got := debugger.RenderValue(in.debugPreview(deep)); got != "Box (Box (Box (Box (Box …))))" {
+		t.Fatal(got)
+	}
+	// Bound the detached tree before transport, even for a broad value graph.
+	fields := make([]Value, 50)
+	for i := range fields {
+		fields[i] = int64(i)
+	}
+	wide := &CtorVal{Ctor: ctor, Fields: fields}
+	top := &CtorVal{Ctor: ctor}
+	for range 50 {
+		top.Fields = append(top.Fields, wide)
+	}
+	value := in.debugPreview(top)
+	count := 0
+	var visit func(debugger.Value)
+	visit = func(v debugger.Value) {
+		count++
+		for _, f := range v.Fields {
+			visit(f.Value)
+		}
+	}
+	visit(value)
+	if count > debugger.PreviewNodes {
+		t.Fatalf("transport tree exceeded node budget: %d", count)
 	}
 }

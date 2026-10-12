@@ -95,12 +95,12 @@ func TestDebugScopesHandlersAndTailIterations(t *testing.T) {
 					return debugger.Command{Kind: "locals"}
 				}
 				for _, v := range e.Variables {
-					if v.Value == "<unavailable>" {
+					if debugger.RenderValue(v.Value) == "<unavailable>" {
 						t.Errorf("unavailable %s in %s at %d", v.Name, frame.Name, frame.Site.Line)
 					}
-					seen[v.Name+"="+v.Value] = true
+					seen[v.Name+"="+debugger.RenderValue(v.Value)] = true
 					if v.Name == "n" && strings.HasSuffix(frame.Name, "loop") {
-						iterations[v.Value] = true
+						iterations[debugger.RenderValue(v.Value)] = true
 					}
 				}
 				return debugger.Command{Kind: "continue"}

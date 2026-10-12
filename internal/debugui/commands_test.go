@@ -94,7 +94,13 @@ func TestInputRepeatsOnlyValidCommands(t *testing.T) {
 
 func TestPresentation(t *testing.T) {
 	var out bytes.Buffer
-	Variable(&out, debugger.Variable{Name: "items", Type: "List Int", Value: "[1, 2]", Handle: 7})
+	Variable(&out, debugger.Variable{
+		Name: "items", Type: "List Int", Handle: 7,
+		Value: debugger.Value{Kind: debugger.ListValue, Fields: []debugger.ValueField{
+			{Value: debugger.Value{Kind: debugger.NumberValue, Text: "1"}},
+			{Value: debugger.Value{Kind: debugger.NumberValue, Text: "2"}},
+		}},
+	})
 	Breakpoint(&out, 3, "Main.fango", 4, "verified")
 	Frame(&out, 0, "main", Location{File: "Main.fango", Line: 4, Column: 2})
 	want := "items : List Int = [1, 2] [handle 7]\nbreakpoint 3: Main.fango:4 (verified)\n#0 main at Main.fango:4:2\n"

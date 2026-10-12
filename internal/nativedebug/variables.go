@@ -87,7 +87,7 @@ func (c *Controller) variables(command, name string) ([]debugger.Variable, error
 	for _, name := range names {
 		b := bindings[name]
 		if ambiguous[name] {
-			values = append(values, debugger.Variable{Name: name, Type: b.Type, Value: "<unavailable: multiple lexical scopes share this source line>"})
+			values = append(values, debugger.Variable{Name: name, Type: b.Type, Value: debugger.Value{Kind: debugger.UnavailableValue, Text: "unavailable: multiple lexical scopes share this source line"}})
 			continue
 		}
 		values = append(values, debugger.Variable{Name: name, Type: b.Type, Value: c.preview(b.Runtime)})

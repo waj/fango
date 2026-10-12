@@ -275,3 +275,20 @@ func TestDebugSharedCommandsAndPresentation(t *testing.T) {
 		}
 	}
 }
+
+// One expected preview is shared with live Delve coverage. This exercises the
+// interpreter worker transport and frontend, not just the pure formatter.
+func TestDebugStructuralValuesMatchNative(t *testing.T) {
+	root, err := filepath.Abs("../../testdata/debug-native")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := os.ReadFile(filepath.Join(root, "Values.preview"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := debugTranscript(t, "import Values\n:break Values.fango:28\nValues.run 10\nprint value\ncontinue\n:quit\n", Options{Root: root})
+	if !strings.Contains(got, strings.TrimSpace(string(expected))) {
+		t.Fatalf("shared value preview missing:\n%s", got)
+	}
+}

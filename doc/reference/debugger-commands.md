@@ -54,5 +54,29 @@ Source bindings display as `name : Type = value`, with `[handle ID]` when
 expansion is available. Frames use `#INDEX name at FILE:LINE[:COLUMN]`;
 breakpoints include their ID, location, and status. Errors use a `debugger:`
 prefix. Source excerpts share caret underlines and retain explicit enclosing
-or unavailable-span notices. Structural value formatting and preview bounds
-remain backend-specific; see each backend's inspection reference.
+or unavailable-span notices.
+
+## Structural value previews
+
+Both debuggers use the same formatter for source inspection. Lists display as
+`[1, 2, 3]`, records as `{ name = "Ada", age = 42 }`, constructors as
+`Just 42` or `Branch (Leaf 1) (Leaf 2)`, and tuples as `(7, "seven")`.
+Empty records display as `{}`. Only the active constructor's fields appear.
+Booleans, characters, strings, and unit use their Fango forms; string contents
+escape interpolation markers. Inspection never invokes `Show` or other target
+functions. Functions display as `<function>`, resources as `<opaque Type>`,
+and unknown representations as `<opaque>`. Unavailable values carry a marker
+such as `<unavailable>` or a more specific backend reason.
+
+Each value preview allows four structural levels, 50 children per collection
+or record, 512 visited values, and 256 bytes per string. String truncation
+preserves complete UTF-8 characters. Lists spend depth on their elements,
+not on their spine. Truncation uses `…`, and detected cycles use `<cycle>`.
+These are previews: truncated or opaque output is not a complete Fango
+expression. Native inspection also bounds debugger reads; an earlier backend
+read limit or unavailable memory can yield a shorter preview.
+
+Where expansion is supported, `expand HANDLE [OFFSET]` returns up to 50
+children, each with the same formatting and preview bounds. Handles expire
+when execution resumes or ends. See the backend references for frame access,
+raw inspection, and expansion availability.

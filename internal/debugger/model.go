@@ -42,8 +42,9 @@ type Frame struct {
 }
 
 type Variable struct {
-	Name, Type, Value string
-	Handle            uint64
+	Name, Type string
+	Value      Value
+	Handle     uint64
 }
 
 // Event is either a stop notification or an inspection response. Handles and

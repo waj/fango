@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"sync/atomic"
 
 	"github.com/waj/fango/internal/core"
@@ -135,7 +134,7 @@ func (in *interp) debugPoint(e core.Expr, fr *Frame) error {
 				found = true
 				v, ok := frame.debugScope.lookup(binding.Runtime)
 				if !ok {
-					event.Variables = append(event.Variables, debugger.Variable{Name: binding.Name, Type: binding.Type, Value: "<unavailable>"})
+					event.Variables = append(event.Variables, debugger.Variable{Name: binding.Name, Type: binding.Type, Value: debugger.Value{Kind: debugger.UnavailableValue}})
 					continue
 				}
 				event.Variables = append(event.Variables, in.debugVariable(binding.Name, binding.Type, v))
@@ -176,7 +175,7 @@ func (in *interp) debugFrames() ([]debugger.Frame, []*traceFrame) {
 }
 
 func (in *interp) debugVariable(name, typ string, v Value) debugger.Variable {
-	out := debugger.Variable{Name: name, Type: typ, Value: in.debugPreview(v, 2)}
+	out := debugger.Variable{Name: name, Type: typ, Value: in.debugPreview(v)}
 	if in.debugExpandable(v) {
 		out.Handle = debugIDs.Add(1)
 		in.debug.handles[out.Handle] = debugValue{value: v}
@@ -195,77 +194,85 @@ func (in *interp) debugExpandable(v Value) bool {
 	return false
 }
 
-func (in *interp) debugPreview(v Value, depth int) string {
+// The reader owns traversal of the interpreter heap. Only detached structure
+// crosses the worker protocol; formatting is shared with native inspection.
+func (in *interp) debugPreview(v Value) debugger.Value {
+	r := debugValueReader{in: in, nodes: debugger.PreviewNodes, visiting: map[*CtorVal]bool{}}
+	return r.describe(v, debugger.PreviewDepth)
+}
+
+type debugValueReader struct {
+	in       *interp
+	nodes    int
+	visiting map[*CtorVal]bool
+}
+
+func (r *debugValueReader) describe(v Value, depth int) debugger.Value {
+	if r.nodes == 0 || depth < 0 {
+		return debugger.Value{Kind: debugger.LimitValue}
+	}
+	r.nodes--
 	switch v := v.(type) {
 	case nil:
-		return "<unavailable>"
+		return debugger.Value{Kind: debugger.UnavailableValue}
 	case int64:
-		return strconv.FormatInt(v, 10)
+		return debugger.Value{Kind: debugger.NumberValue, Text: strconv.FormatInt(v, 10)}
 	case float64:
-		return strconv.FormatFloat(v, 'g', -1, 64)
+		return debugger.Value{Kind: debugger.NumberValue, Text: strconv.FormatFloat(v, 'g', -1, 64)}
 	case bool:
-		if v {
-			return "True"
-		}
-		return "False"
+		return debugger.Value{Kind: debugger.BoolValue, Text: strconv.FormatBool(v)}
 	case rune:
-		return strconv.QuoteRune(v)
+		return debugger.Value{Kind: debugger.CharValue, Text: string(v)}
 	case string:
-		n := 0
-		for i := range v {
-			if n == 256 {
-				return strconv.Quote(v[:i]) + "…"
-			}
-			n++
-		}
-		return strconv.Quote(v)
+		return debugger.StringPreview(v, false)
 	case struct{}:
-		return "()"
+		return debugger.Value{Kind: debugger.UnitValue}
 	case *Closure:
-		return "<function>"
+		return debugger.Value{Kind: debugger.FunctionValue}
 	case *CtorVal:
-		name := types.SurfaceName(v.Ctor.Name)
-		adt := in.env.adts[v.Ctor.Result.Unique]
+		if v == nil {
+			return debugger.Value{Kind: debugger.UnavailableValue}
+		}
+		adt := r.in.env.adts[v.Ctor.Result.Unique]
 		if adt != nil && (adt.Resource || adt.NativeIndexed) {
-			return "<opaque " + types.SurfaceName(adt.Con.Name) + ">"
+			return debugger.Value{Kind: debugger.OpaqueValue, Text: types.SurfaceName(adt.Con.Name)}
 		}
-		if len(v.Fields) == 0 {
-			return name
+		if r.visiting[v] {
+			return debugger.Value{Kind: debugger.CycleValue}
 		}
-		if depth == 0 {
-			return name + " …"
+		r.visiting[v] = true
+		defer delete(r.visiting, v)
+		out := debugger.Value{Kind: debugger.ConstructorValue, Text: types.SurfaceName(v.Ctor.Name)}
+		if v.Ctor.Result.Name == "Tuple.Pair" || v.Ctor.Result.Name == "Tuple.Triple" {
+			out.Kind = debugger.TupleValue
+		} else if adt != nil && adt.IsRecord() {
+			out.Kind = debugger.RecordValue
 		}
-		parts := []string{}
 		for i, field := range v.Fields {
-			if i == 50 {
-				parts = append(parts, "…")
+			if depth == 0 || i == debugger.PreviewItems || r.nodes == 0 {
+				out.Truncated = true
 				break
 			}
-			part := in.debugPreview(field, depth-1)
-			if adt != nil && adt.IsRecord() && i < len(adt.RecordFields) {
-				part = adt.RecordFields[i].Name + " = " + part
+			f := debugger.ValueField{Value: r.describe(field, depth-1)}
+			if out.Kind == debugger.RecordValue && i < len(adt.RecordFields) {
+				f.Name = adt.RecordFields[i].Name
 			}
-			parts = append(parts, part)
+			out.Fields = append(out.Fields, f)
 		}
-		if adt != nil && adt.IsRecord() {
-			return "{ " + strings.Join(parts, ", ") + " }"
-		}
-		return name + " (" + strings.Join(parts, ", ") + ")"
+		return out
 	case fangort.List[Value]:
-		if depth == 0 {
-			return "[…]"
-		}
-		parts := []string{}
-		for !v.IsEmpty() && len(parts) < 50 {
-			parts = append(parts, in.debugPreview(v.Head(), depth-1))
+		out := debugger.Value{Kind: debugger.ListValue}
+		for !v.IsEmpty() {
+			if depth == 0 || len(out.Fields) == debugger.PreviewItems || r.nodes == 0 {
+				out.Truncated = true
+				break
+			}
+			out.Fields = append(out.Fields, debugger.ValueField{Value: r.describe(v.Head(), depth-1)})
 			v = v.Tail()
 		}
-		if !v.IsEmpty() {
-			parts = append(parts, "…")
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
+		return out
 	default:
-		return "<opaque>"
+		return debugger.Value{Kind: debugger.OpaqueValue}
 	}
 }
 
@@ -274,7 +281,7 @@ func (in *interp) debugChildren(value Value, offset int) ([]debugger.Variable, b
 	switch v := value.(type) {
 	case *CtorVal:
 		adt := in.env.adts[v.Ctor.Result.Unique]
-		for i := offset; i < len(v.Fields) && len(out) < 50; i++ {
+		for i := offset; i < len(v.Fields) && len(out) < debugger.PreviewItems; i++ {
 			name := strconv.Itoa(i)
 			if adt != nil && adt.IsRecord() && i < len(adt.RecordFields) {
 				name = adt.RecordFields[i].Name
@@ -290,7 +297,7 @@ func (in *interp) debugChildren(value Value, offset int) ([]debugger.Variable, b
 		for i := 0; i < offset && !v.IsEmpty(); i++ {
 			v = v.Tail()
 		}
-		for !v.IsEmpty() && len(out) < 50 {
+		for !v.IsEmpty() && len(out) < debugger.PreviewItems {
 			out = append(out, in.debugVariable(strconv.Itoa(offset+len(out)), "", v.Head()))
 			v = v.Tail()
 		}

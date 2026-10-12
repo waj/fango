@@ -26,7 +26,7 @@ func TestInterpreterSessionDeferredInspectionAndExpansion(t *testing.T) {
 		t.Fatal(b.pending)
 	}
 	b.pending = nil
-	response := b.event(debugger.Event{Kind: "inspection", Variables: []debugger.Variable{{Name: "x", Type: "List Int", Value: "[1, 2]", Handle: 9001}}})
+	response := b.event(debugger.Event{Kind: "inspection", Variables: []debugger.Variable{{Name: "x", Type: "List Int", Handle: 9001}}})
 	event := front.Session.Accept(response)
 	handle := event.Variables[0].Handle
 	if handle == 0 || handle == 9001 {

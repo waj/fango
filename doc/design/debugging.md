@@ -104,8 +104,8 @@ canonical requests, structured events, capability flags, source locations and
 snapshots, frame records, breakpoint statuses, and inspection results.
 `Session.Execute` validates capabilities and lifecycle state before dispatch;
 `Session.Accept` consumes backend events. The API has no input reader, output
-writer, or dependency on an execution engine. Structural previews remain
-backend-produced strings; raw inspection returns a separate structured tree.
+writer, or dependency on an execution engine. Inspection returns bounded
+source-value descriptions; raw inspection returns a separate Go-level tree.
 
 A host serializes requests and events. Native execution completes a request
 synchronously through the existing Delve controller. The interpreter adapter
@@ -138,9 +138,35 @@ Hosts retain resource ownership: native termination returns from the prompt
 so the launcher's cleanup terminates its process group; interpreter quit
 delivers its stop reply before ending handler levels. The session coordinates
 state and data, not launch or transport ownership. All of these layers are
-frontend-only and add no hooks to ordinary compiled programs. Shared structural
-value rendering and capability parity remain in the
-[unification roadmap](../roadmap-debugging.md#unified-debugger-frontend).
+frontend-only and add no hooks to ordinary compiled programs. Capability
+parity remains in the [unification roadmap](../roadmap-debugging.md#unified-debugger-frontend).
+
+## Shared structural values
+
+`debugger.Value` describes detached source structure: scalar data, constructor
+names, ordered record fields, tuples, Lists, and explicit opaque, unavailable,
+cycle, and truncation states. `debugger.Variable` carries that tree together
+with a source name, type, and optional lazy expansion handle. The interpreter
+worker serializes these descriptions rather than formatted strings or heap
+objects. Native inspection decodes shallow Delve values and compiler layout
+metadata into the same description.
+
+Each backend bounds reads and traversal before constructing a description.
+The shared limits cover depth, children, visited values, and string bytes;
+native inspection additionally bounds RPC reads and pointer traversal.
+Interpreter constructor cycles are detected on the current path, allowing
+shared substructure to appear more than once. List traversal is iterative.
+Neither reader calls user code or the normal value-display machinery; opaque
+resources never expose their payload. `StringPreview` clips transport strings
+at complete UTF-8 boundaries, including incomplete native reads.
+
+`debugger.RenderValue` is a pure formatter used by the terminal. It owns
+quoting, constructor precedence, record and tuple notation, and truncation
+markers, with its own bounds on supplied descriptions. It never requests
+children or accesses a backend. Expansion pages use the same variable
+presentation and formatter; their handles retain the shared session's pause
+lifetime. Raw Go presentation remains separate. Exact limits belong in the
+[shared inspection reference](../reference/debugger-commands.md#structural-value-previews).
 
 ## Native source stepping
 
@@ -218,7 +244,7 @@ The native argument list classifies source arguments without loading synthetic
 values. Missing bindings remain visible as unavailable. A raw view retains
 Go inspection.
 
-The native structural renderer starts with compiler-recorded identifiers and
+The native structural reader starts with compiler-recorded identifiers and
 uses read-only selectors, pointer dereferences, and Delve's dynamic interface
 data projection to load shallow fields on demand. It decodes the active tag
 for tagged unions, the concrete constructor of interface unions, records,
@@ -227,8 +253,9 @@ walked iteratively, so its length does not consume structural nesting depth.
 Generic values use the concrete dynamic representation. Native resources are
 opaque. Inspection never invokes target functions, including `Show` or List
 accessors. Depth, item, node, and RPC budgets bound inspection; visited pointer
-addresses detect cycles. [Inspection limits](../reference/native-debugging.md#inspection-and-limits)
-own the exact bounds and presentation.
+addresses detect cycles. The shared formatter presents its decoded tree;
+[native inspection limits](../reference/native-debugging.md#inspection-and-limits)
+own the additional read bounds.
 
 Source excerpts use the shared presentation layer with binary-matched snapshots.
 Since the linked line table cannot disambiguate columns, the frontend checks

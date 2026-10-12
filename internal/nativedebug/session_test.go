@@ -26,7 +26,7 @@ func TestSessionSourceSnapshotsAndStructuredInspection(t *testing.T) {
 		t.Fatal(sources, err)
 	}
 	values, err := s.Execute(debugsession.Request{Kind: "print", Arg: "x", Epoch: event.Epoch})
-	if err != nil || len(values.Variables) != 1 || values.Variables[0].Value != "20" || values.Variables[0].Type != "Int" {
+	if err != nil || len(values.Variables) != 1 || debugger.RenderValue(values.Variables[0].Value) != "20" || values.Variables[0].Type != "Int" {
 		t.Fatal(values, err)
 	}
 	raw, err := s.Execute(debugsession.Request{Kind: "raw", RawCommand: "print", Arg: "v_x"})
