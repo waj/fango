@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/debugui"
 )
 
 func TestSourceUnderlines(t *testing.T) {
@@ -27,7 +28,7 @@ func TestSourceUnderlines(t *testing.T) {
 				c.Manifest.Scopes = append(c.Manifest.Scopes, debugger.NativeScope{File: "Main.fango", Line: 1, Span: s})
 			}
 			var out bytes.Buffer
-			c.show(&out)
+			(&debugui.Terminal{Out: &out}).Present((&SessionBackend{Controller: c}).Snapshot())
 			if !strings.Contains(out.String(), tc.want) {
 				t.Fatalf("%q", out.String())
 			}

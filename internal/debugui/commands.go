@@ -7,6 +7,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/waj/fango/internal/debugsession"
 )
 
 const Prompt = "debug> "
@@ -14,18 +16,17 @@ const Prompt = "debug> "
 // Features describe the operations a host can currently serve. They also drive
 // help, so unsupported commands never appear as working commands.
 type Features struct {
-	Name                           string
-	Frame, Expand, Args, Raw, Stop bool
+	debugsession.Capabilities
 	Quit, Stack, Locals, Interrupt string
 }
 
 func Interpreter() Features {
-	return Features{Name: "interpreter", Frame: true, Expand: true, Stop: true,
+	return Features{Capabilities: debugsession.Capabilities{Name: "interpreter", Frame: true, Expand: true, Stop: true},
 		Quit: "cancel this input and leave the REPL", Stack: "list source frames",
 		Locals: "inspect parameters, locals, and captures", Interrupt: "cancel the current input"}
 }
 func Native() Features {
-	return Features{Name: "native", Args: true, Raw: true,
+	return Features{Capabilities: debugsession.Capabilities{Name: "native", Args: true, Raw: true, Interrupt: true},
 		Quit: "terminate the launched process", Stack: "list native frames, including generated frames",
 		Locals: "inspect locals and captures", Interrupt: "interrupt execution"}
 }
@@ -54,27 +55,7 @@ var commands = []commandSpec{
 	{"help", "h", "help", "list debugger commands"},
 }
 
-func (f Features) supports(name string) bool {
-	switch name {
-	case "frame":
-		return f.Frame
-	case "expand":
-		return f.Expand
-	case "args":
-		return f.Args
-	case "raw":
-		return f.Raw
-	case "stop":
-		return f.Stop
-	}
-	return true
-}
-
-type Command struct {
-	Kind, Arg, File, RawCommand string
-	Index, Line, Offset         int
-	Handle                      uint64
-}
+type Command = debugsession.Request
 
 // Parse validates a stopped command before any backend operation is attempted.
 // Source expressions are never parsed here. Raw expressions are only passed to
@@ -100,7 +81,7 @@ func Parse(text string, features Features) (Command, error) {
 	if spec == nil {
 		return cmd, fmt.Errorf("unknown command %q; only debugger commands are available while stopped; type help", fields[0])
 	}
-	if !features.supports(spec.name) {
+	if !features.Supports(spec.name) {
 		return cmd, fmt.Errorf("%s is not supported by the %s debugger", spec.name, features.Name)
 	}
 	cmd.Kind = spec.name
@@ -197,7 +178,7 @@ func (i *Input) Parse(text string, features Features) (Command, error) {
 func Help(w io.Writer, features Features) {
 	fmt.Fprintln(w, "debugger commands (optional ':' prefix; blank input repeats the last valid command):")
 	for _, s := range commands {
-		if !features.supports(s.name) {
+		if !features.Supports(s.name) {
 			continue
 		}
 		description := s.description

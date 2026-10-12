@@ -3,10 +3,13 @@ package nativedebug
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/debugsession"
+	"github.com/waj/fango/internal/debugui"
 )
 
 type inspectionRPC struct {
@@ -47,6 +50,18 @@ func TestSourceInspection(t *testing.T) {
 		{Name: "absent", Runtime: "v_absent", Type: "Int"},
 	}
 	c := &Controller{RPC: r, Manifest: &Manifest{Scopes: []debugger.NativeScope{{File: "Main.fango", Line: 12, Bindings: bindings}}}, State: State{CurrentThread: &Thread{Location: Location{File: "Main.fango", Line: 12}, GoroutineID: 1}}}
+	inspect := func(command, name string, out io.Writer) error {
+		backend := &SessionBackend{Controller: c}
+		session := debugsession.New(backend)
+		session.Accept(backend.Snapshot())
+		req := debugsession.Request{Kind: command, Arg: name}
+		if command == "raw" {
+			req.RawCommand, req.Arg = name, ""
+		}
+		event, err := session.Execute(req)
+		(&debugui.Terminal{Out: out}).Present(event)
+		return err
+	}
 	for _, tc := range []struct{ command, name, want string }{
 		{"args", "", "argument : Int = 3"},
 		{"locals", "", "shadow : Int = 7"},
@@ -54,7 +69,7 @@ func TestSourceInspection(t *testing.T) {
 		{"print", "absent", "absent : Int = <unavailable in this native frame>"},
 	} {
 		var out bytes.Buffer
-		if err := c.inspect(tc.command, tc.name, &out); err != nil {
+		if err := inspect(tc.command, tc.name, &out); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(out.String(), tc.want) {
@@ -67,19 +82,19 @@ func TestSourceInspection(t *testing.T) {
 		}
 	}
 	before := len(r.evaluated)
-	if err := c.inspect("print", "shadow + 1", &bytes.Buffer{}); err == nil {
+	if err := inspect("print", "shadow + 1", &bytes.Buffer{}); err == nil {
 		t.Fatal("accepted an expression as a source name")
 	}
 	if len(r.evaluated) != before {
 		t.Fatal("executed unknown source expression")
 	}
 	var raw bytes.Buffer
-	if err := c.inspectRaw("locals", "", &raw); err != nil || !strings.Contains(raw.String(), "t_anf") {
+	if err := inspect("raw", "locals", &raw); err != nil || !strings.Contains(raw.String(), "t_anf") {
 		t.Fatalf("raw locals: %s, %v", raw.String(), err)
 	}
 	c.Manifest.Scopes = append(c.Manifest.Scopes, debugger.NativeScope{File: "Main.fango", Line: 12, Bindings: []debugger.Binding{{Name: "shadow", Runtime: "v_outer", Type: "Int"}}})
 	var ambiguous bytes.Buffer
-	if err := c.inspect("print", "shadow", &ambiguous); err != nil || !strings.Contains(ambiguous.String(), "multiple lexical scopes") {
+	if err := inspect("print", "shadow", &ambiguous); err != nil || !strings.Contains(ambiguous.String(), "multiple lexical scopes") {
 		t.Fatalf("ambiguous scope guessed: %s, %v", ambiguous.String(), err)
 	}
 }

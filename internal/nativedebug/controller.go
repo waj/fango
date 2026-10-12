@@ -40,6 +40,7 @@ type Thread struct {
 	Breakpoint  *Breakpoint `json:"breakPoint"`
 }
 type State struct {
+	Running           bool
 	CurrentThread     *Thread `json:"currentThread"`
 	SelectedGoroutine *struct {
 		ID int64 `json:"id"`

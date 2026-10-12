@@ -76,7 +76,7 @@ comment anchors, verbatim fallback, and round-trip verification.
 import increments, generations, transactions, and module reload.
 
 [Source debugging](design/debugging.md) — Debug metadata, execution control,
-shared terminal commands and presentation, inspection, worker transport,
+shared sessions, terminal commands and presentation, inspection, worker transport,
 native source stepping, expression underlines,
 and Fango value presentation.
 

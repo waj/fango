@@ -91,16 +91,56 @@ manufactures an exact location from incomplete native metadata. The
 [shared command reference](../reference/debugger-commands.md) owns syntax and
 observable presentation.
 
-The REPL input pump and native scanner still own their input lifetimes, and
-their dispatch code adapts parsed commands to the existing evaluator exchange
-or Delve controller. REPL command history spans stops within one evaluation
-and resets for the next input. Ordinary REPL parsing, source-generation
-tracking, process ownership, stepping, and cancellation remain with the
-hosts and backends. The presentation package is frontend-only, with no
-dependency on either execution engine. Value decoding and structural preview
-formatting are still backend-specific; the
-[unification roadmap](../roadmap-debugging.md#unified-debugger-frontend) owns
-the remaining session and value-model extraction.
+The REPL input pump and native scanner still own their input lifetimes.
+Both host `debugui.Terminal`, which sends parsed requests to the shared
+session and renders its structured responses. REPL command history spans stops
+within one evaluation and resets for the next input. Ordinary REPL parsing
+and host cancellation remain outside this terminal adapter.
+
+## Shared debugger sessions
+
+`internal/debugsession` defines a terminal-independent backend interface,
+canonical requests, structured events, capability flags, source locations and
+snapshots, frame records, breakpoint statuses, and inspection results.
+`Session.Execute` validates capabilities and lifecycle state before dispatch;
+`Session.Accept` consumes backend events. The API has no input reader, output
+writer, or dependency on an execution engine. Structural previews remain
+backend-produced strings; raw inspection returns a separate structured tree.
+
+A host serializes requests and events. Native execution completes a request
+synchronously through the existing Delve controller. The interpreter adapter
+queues a wire command for the REPL host to return from its current debug
+exchange. An inspection reports pending until the next exchange supplies its
+response; resume reports running until the next stop or evaluation completion.
+This preserves the evaluator's live stack and worker heap without blocking
+the REPL host on a second exchange or replaying effects. Breakpoint resolution
+and source-generation validation remain in the respective adapters. Source
+snapshots and their hashes travel with locations; a `sources` API request
+returns the backend's current source catalogue.
+
+The shared session owns selected-frame state and public inspection handles.
+A stop starts a new epoch and selects frame zero. Optional request epochs
+reject stale frame operations; deferred responses carry their originating
+epoch. Public handles map to backend handles only for the current pause and
+are never reused within a session. Resume, cancellation, completion, and
+termination discard them before further execution. Frame selection is local
+to the session; inspection and next/finish receive the selected backend frame
+index. Native frame selection and expansion remain unavailable capabilities.
+
+Resume failures must provide an authoritative state event or leave the session
+in an unknown state, where inspection and execution are rejected. The native
+adapter queries Delve's state after an error rather than showing its old cached
+stop. Quit remains available. Only `Interrupt` may run concurrently with a
+request; the native launcher routes signals through it. Interpreter input
+cancellation continues to use the host's context and cleanup rules.
+
+Hosts retain resource ownership: native termination returns from the prompt
+so the launcher's cleanup terminates its process group; interpreter quit
+delivers its stop reply before ending handler levels. The session coordinates
+state and data, not launch or transport ownership. All of these layers are
+frontend-only and add no hooks to ordinary compiled programs. Shared structural
+value rendering and capability parity remain in the
+[unification roadmap](../roadmap-debugging.md#unified-debugger-frontend).
 
 ## Native source stepping
 

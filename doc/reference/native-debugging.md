@@ -119,7 +119,10 @@ Source stepping supports stacks up to
 1024 native frames; deeper or unreadable stacks report an error. Temporary
 stepping breakpoints are removed after each command, including failure and
 interruption. A cleanup failure prevents further execution through the
-frontend; quit and restart the session.
+frontend; quit and restart the session. After another failed movement command,
+the debugger verifies the process state with Delve. If that state cannot be
+verified, further inspection and execution report that the debugger is not
+stopped; quit and restart rather than inspecting a stale frame.
 
 The frontend owns its launched process; attaching to an existing process,
 restarting, editor integration, and redirecting target input are not yet

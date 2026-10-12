@@ -2,11 +2,9 @@ package nativedebug
 
 import (
 	"fmt"
-	"io"
 	"sort"
 
 	"github.com/waj/fango/internal/debugger"
-	"github.com/waj/fango/internal/debugui"
 )
 
 // sourceBindings is deliberately conservative when separate statement scopes
@@ -45,20 +43,20 @@ func (c *Controller) sourceBindings() (map[string]debugger.Binding, map[string]b
 	return bindings, ambiguous, nil
 }
 
-func (c *Controller) inspect(command, name string, w io.Writer) error {
+func (c *Controller) variables(command, name string) ([]debugger.Variable, error) {
 	if command != "print" && name != "" {
-		return fmt.Errorf("%s takes no arguments", command)
+		return nil, fmt.Errorf("%s takes no arguments", command)
 	}
 	if command == "print" && name == "" {
-		return fmt.Errorf("usage: print NAME (use raw print EXPR for Go expressions)")
+		return nil, fmt.Errorf("usage: print NAME (use raw print EXPR for Go expressions)")
 	}
 	bindings, ambiguous, err := c.sourceBindings()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if command == "print" {
 		if _, ok := bindings[name]; !ok {
-			return fmt.Errorf("no visible Fango binding %q; use raw print EXPR for Go expressions", name)
+			return nil, fmt.Errorf("no visible Fango binding %q; use raw print EXPR for Go expressions", name)
 		}
 	}
 	scope := map[string]any{"GoroutineID": c.Goroutine(), "Frame": 0}
@@ -68,7 +66,7 @@ func (c *Controller) inspect(command, name string, w io.Writer) error {
 		var args struct{ Args []variable }
 		namesOnly := map[string]any{"FollowPointers": false, "MaxVariableRecurse": 0, "MaxStringLen": 0, "MaxArrayValues": 0, "MaxStructFields": 0}
 		if err := c.call("ListFunctionArgs", map[string]any{"Scope": scope, "Cfg": namesOnly}, &args); err != nil {
-			return err
+			return nil, err
 		}
 		for _, v := range args.Args {
 			arguments[v.Name] = true
@@ -85,13 +83,14 @@ func (c *Controller) inspect(command, name string, w io.Writer) error {
 		}
 		sort.Strings(names)
 	}
+	var values []debugger.Variable
 	for _, name := range names {
 		b := bindings[name]
 		if ambiguous[name] {
-			debugui.Variable(w, debugger.Variable{Name: name, Type: b.Type, Value: "<unavailable: multiple lexical scopes share this source line>"})
+			values = append(values, debugger.Variable{Name: name, Type: b.Type, Value: "<unavailable: multiple lexical scopes share this source line>"})
 			continue
 		}
-		debugui.Variable(w, debugger.Variable{Name: name, Type: b.Type, Value: c.preview(b.Runtime)})
+		values = append(values, debugger.Variable{Name: name, Type: b.Type, Value: c.preview(b.Runtime)})
 	}
-	return nil
+	return values, nil
 }

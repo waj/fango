@@ -12,6 +12,7 @@ import (
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/debugsession"
 	"github.com/waj/fango/internal/debugui"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/eval"
@@ -35,7 +36,8 @@ type replBreakpoint struct {
 	invalid bool
 }
 type replDebug struct {
-	commands    debugui.Input
+	terminal    *debugui.Terminal
+	backend     *interpreterSession
 	active      core.Expr
 	events      chan debugExchange
 	input       *linePump
@@ -43,8 +45,6 @@ type replDebug struct {
 	breakpoints []*replBreakpoint
 	nextID      int
 	step, quit  bool
-	frames      []debugger.Frame
-	selected    int
 }
 
 func newReplDebug() *replDebug {
@@ -75,6 +75,9 @@ func (s *Session) waitEvaluation(replies <-chan eval.LevelReply) eval.LevelReply
 	for {
 		select {
 		case result := <-replies:
+			if s.debug.terminal != nil && s.debug.terminal.Session.State() != "terminated" {
+				s.debug.terminal.Session.Accept(debugsession.Event{Kind: "completed"})
+			}
 			return result
 		case exchange := <-s.debug.events:
 			cmd := debugger.Command{Kind: "continue", ReplaceBreakpoints: true}
@@ -86,9 +89,10 @@ func (s *Session) waitEvaluation(replies <-chan eval.LevelReply) eval.LevelReply
 	}
 }
 
-func (s *Session) debugRefresh(expr core.Expr) {
+func (s *Session) debugRefresh(expr core.Expr) []string {
+	var messages []string
 	if s.debug == nil {
-		return
+		return nil
 	}
 	if expr == nil {
 		expr = s.debug.active
@@ -141,12 +145,13 @@ func (s *Session) debugRefresh(expr core.Expr) {
 		}
 		if (current.changed || bp.Hash != "" && bp.Hash != current.source.Hash) && !bp.invalid {
 			bp.invalid = true
-			fmt.Fprintf(s.out, "breakpoint %d invalidated: source changed; set it again\n", bp.ID)
+			messages = append(messages, fmt.Sprintf("breakpoint %d invalidated: source changed; set it again", bp.ID))
 		}
 		if !current.changed && bp.Hash == "" && current.lines[bp.Line] {
 			bp.Hash = current.source.Hash
 		}
 	}
+	return messages
 }
 
 func (s *Session) debugBreakpoints() []debugger.Breakpoint {
@@ -163,9 +168,14 @@ func (s *Session) debugConfig(expr core.Expr) *debugger.Config {
 	if s.debug == nil {
 		return nil
 	}
-	s.debug.commands = debugui.Input{}
+	s.ensureDebugSession()
+	s.debug.terminal.Input = debugui.Input{}
+	s.debug.backend.pending = nil
+	s.debug.terminal.Session.Accept(debugsession.Event{Kind: "running"})
 	s.debug.active = expr
-	s.debugRefresh(expr)
+	for _, message := range s.debugRefresh(expr) {
+		fmt.Fprintln(s.out, message)
+	}
 	config := &debugger.Config{Step: s.debug.step, Breakpoints: s.debugBreakpoints()}
 	s.debug.step = false
 	return config
@@ -216,60 +226,13 @@ func (s *Session) debugCommand(text string) bool {
 		debugui.Error(s.out, err)
 		return true
 	}
-	s.debugRefresh(nil)
-	switch cmd.Kind {
-	case "break":
-		line, file := cmd.Line, s.debugFile(cmd.File)
-		var bp *replBreakpoint
-		for _, old := range s.debug.breakpoints {
-			if old.File == file && old.Line == line {
-				bp = old
-				break
-			}
-		}
-		if bp == nil {
-			s.debug.nextID++
-			bp = &replBreakpoint{Breakpoint: debugger.Breakpoint{ID: s.debug.nextID, File: file, Line: line}}
-			s.debug.breakpoints = append(s.debug.breakpoints, bp)
-		}
-		bp.Hash = ""
-		bp.invalid = false
-		if src := s.debug.sources[file]; src != nil && src.lines[line] {
-			bp.Hash = src.source.Hash
-			bp.invalid = src.changed
-		}
-		s.debugPrintBreakpoint(bp)
-	case "breaks":
-		if len(s.debug.breakpoints) == 0 {
-			fmt.Fprintln(s.out, "no breakpoints")
-		}
-		for _, bp := range s.debug.breakpoints {
-			s.debugPrintBreakpoint(bp)
-		}
-	case "delete":
-		id := cmd.Index
-		for i, bp := range s.debug.breakpoints {
-			if bp.ID == id {
-				s.debug.breakpoints = append(s.debug.breakpoints[:i], s.debug.breakpoints[i+1:]...)
-				fmt.Fprintf(s.out, "deleted breakpoint %d\n", id)
-				return true
-			}
-		}
-		debugui.Error(s.out, fmt.Errorf("unknown breakpoint ID"))
+	s.ensureDebugSession()
+	event, err := s.debug.terminal.Session.Execute(cmd)
+	s.debug.terminal.Present(event)
+	if err != nil {
+		debugui.Error(s.out, err)
 	}
 	return true
-}
-
-func (s *Session) debugPrintBreakpoint(bp *replBreakpoint) {
-	status := "pending import"
-	if bp.invalid {
-		status = "source changed"
-	} else if bp.Hash != "" {
-		status = "verified"
-	} else if s.debug.sources[bp.File] != nil {
-		status = "unresolved: no executable site on this line"
-	}
-	debugui.Breakpoint(s.out, bp.ID, bp.File, bp.Line, status)
 }
 
 func (s *Session) debugStepExpression(text string) {
@@ -292,24 +255,11 @@ func (s *Session) debugStepExpression(text string) {
 }
 
 func (s *Session) debugPrompt(event debugger.Event) debugger.Command {
+	s.ensureDebugSession()
 	d := s.debug
-	if event.Kind == "stopped" {
-		d.frames, d.selected = event.Frames, 0
-		debugui.Stopped(s.out, event.Reason)
-		if len(d.frames) > 0 {
-			s.debugPrintFrame(0, true)
-		}
-	}
-	if event.Error != "" {
-		debugui.Error(s.out, fmt.Errorf("%s", event.Error))
-	}
-	for _, v := range event.Variables {
-		debugui.Variable(s.out, v)
-	}
-	if event.More {
-		fmt.Fprintln(s.out, "more children; use expand HANDLE OFFSET")
-	}
+	d.terminal.Accept(d.backend.event(event))
 	if d.input == nil {
+		d.terminal.Session.Accept(debugsession.Event{Kind: "running"})
 		return debugger.Command{Kind: "stop"}
 	}
 	for {
@@ -321,59 +271,19 @@ func (s *Session) debugPrompt(event debugger.Event) debugger.Command {
 			if err == io.EOF && !s.options.Interactive {
 				d.quit = true
 			}
+			kind := "running"
+			if d.quit {
+				kind = "terminated"
+			}
+			d.terminal.Session.Accept(debugsession.Event{Kind: kind, Reason: "input closed"})
 			return debugger.Command{Kind: "stop"}
 		}
-		parsed, err := d.commands.Parse(string(data), debugui.Interpreter())
-		if err != nil {
-			debugui.Error(s.out, err)
-			continue
+		d.terminal.Handle(string(data))
+		if d.backend.pending != nil {
+			command := *d.backend.pending
+			d.backend.pending = nil
+			return command
 		}
-		command := debugger.Command{Kind: parsed.Kind, Frame: d.selected}
-		switch parsed.Kind {
-		case "":
-			continue
-		case "break", "breaks", "delete":
-			s.debugCommand(":" + parsed.Kind + " " + parsed.Arg)
-		case "continue", "step", "next", "finish", "stop":
-			command.Breakpoints = s.debugBreakpoints()
-			command.ReplaceBreakpoints = true
-			return command
-		case "quit":
-			d.quit = true
-			return debugger.Command{Kind: "stop"}
-		case "stack":
-			for i := range d.frames {
-				s.debugPrintFrame(i, false)
-			}
-		case "frame":
-			if parsed.Index >= len(d.frames) {
-				debugui.Error(s.out, fmt.Errorf("invalid frame"))
-				continue
-			}
-			d.selected = parsed.Index
-			s.debugPrintFrame(d.selected, true)
-		case "locals":
-			return command
-		case "print":
-			command.Name = parsed.Arg
-			return command
-		case "expand":
-			command.Handle, command.Offset = parsed.Handle, parsed.Offset
-			return command
-		case "help":
-			debugui.Help(s.out, debugui.Interpreter())
-		}
-	}
-}
-
-func (s *Session) debugPrintFrame(index int, excerpt bool) {
-	f := s.debug.frames[index]
-	site := f.Site
-	loc := debugui.Location{File: site.Source.Name, Text: site.Source.Text,
-		Line: site.Line, Column: site.Column, Start: site.Start, End: site.End, Precision: debugui.Exact}
-	debugui.Frame(s.out, index, f.Name, loc)
-	if excerpt {
-		debugui.Excerpt(s.out, loc)
 	}
 }
 

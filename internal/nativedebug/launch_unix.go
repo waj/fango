@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/waj/fango/internal/debugsession"
 )
 
 // Run owns one Delve child and its debuggee. Target stdin is deliberately EOF;
@@ -89,6 +91,8 @@ connecting:
 	client := jsonrpc.NewClient(conn)
 	defer client.Close()
 	c := &Controller{RPC: client, Manifest: manifest}
+	backend := &SessionBackend{Controller: c}
+	session := debugsession.New(backend)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -99,14 +103,14 @@ connecting:
 			case <-signals:
 				// Halt is safe concurrently with a pending Continue RPC. Do not consume
 				// this stop in the source-stepping controller.
-				_ = c.Interrupt()
+				_ = session.Interrupt()
 			}
 		}
 	}()
 	if err := c.Start(); err != nil {
 		return err
 	}
-	return c.Prompt(input, output)
+	return c.prompt(input, output, backend, session)
 }
 
 type lockedWriter struct {

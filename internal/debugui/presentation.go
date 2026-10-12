@@ -6,30 +6,20 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/debugsession"
 	"github.com/waj/fango/internal/source"
 )
 
-type Precision uint8
+type Precision = debugsession.Precision
 
 const (
-	LineOnly Precision = iota
-	Exact
-	Enclosing
+	LineOnly  = debugsession.LineOnly
+	Exact     = debugsession.Exact
+	Enclosing = debugsession.Enclosing
 )
 
-// Location carries a snapshot and an explicit precision, not a guessed column.
-type Location struct {
-	File, Text               string
-	Line, Column, Start, End int
-	Precision                Precision
-}
+type Location = debugsession.Location
 
-func (l Location) String() string {
-	if l.Column > 0 {
-		return fmt.Sprintf("%s:%d:%d", l.File, l.Line, l.Column)
-	}
-	return fmt.Sprintf("%s:%d", l.File, l.Line)
-}
 func Excerpt(w io.Writer, l Location) {
 	if l.Precision != LineOnly && l.Start >= 0 && l.End > l.Start && l.End <= len(l.Text) {
 		if l.Precision == Enclosing {
