@@ -3,28 +3,10 @@ package nativedebug
 import (
 	"bufio"
 	"fmt"
-	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/debugui"
 	"io"
 	"sort"
-	"strconv"
-	"strings"
 )
-
-const help = `step (s)          enter the next Fango source location
-next (n)          step over calls in the current activation
-finish (f)        run until the current activation returns
-continue (c)      run until a breakpoint or exit
-break FILE:LINE   set an exact-line native breakpoint
-breaks            list user breakpoints
-delete ID         delete a user breakpoint
-stack             show the native stack (including generated frames)
-args / locals     inspect arguments or locals using Fango names
-print NAME        inspect a visible Fango binding
-raw args / locals inspect generated Go variables
-raw print EXPR    inspect a read-only Go expression
-quit (q)          terminate the launched process
-Ctrl-C            interrupt execution
-`
 
 func (c *Controller) show(out io.Writer) {
 	if c.State.Exited {
@@ -41,20 +23,16 @@ func (c *Controller) show(out io.Writer) {
 		fmt.Fprintf(out, "Stopped at %s:%d (generated or native code; use step to reach Fango)\n", t.File, t.Line)
 		return
 	}
-	fmt.Fprintf(out, "%s:%d\n", t.File, t.Line)
+	debugui.Stopped(out, c.State.StopReason)
+	loc := debugui.Location{File: t.File, Text: text, Line: t.Line}
 	if span, enclosing := c.currentSpan(t.File, t.Line); span != nil {
+		loc.Start, loc.End, loc.Precision = span.Start, span.End, debugui.Exact
 		if enclosing {
-			fmt.Fprintln(out, "  (enclosing expression; multiple native sites)")
+			loc.Precision = debugui.Enclosing
 		}
-		file := source.NewFile(t.File, []byte(text))
-		fmt.Fprintln(out, file.Excerpt(source.Span{File: file, Start: span.Start, End: span.End}))
-		return
 	}
-	lines := strings.Split(text, "\n")
-	if t.Line > 0 && t.Line <= len(lines) {
-		fmt.Fprintf(out, "  %s\n", lines[t.Line-1])
-	}
-	fmt.Fprintln(out, "  (expression span unavailable at this native location)")
+	fmt.Fprintln(out, loc)
+	debugui.Excerpt(out, loc)
 }
 
 type variable struct {
@@ -117,45 +95,33 @@ func (c *Controller) Prompt(input io.Reader, out io.Writer) error {
 	fmt.Fprintln(out, "Fango native debugger. Type help for commands.")
 	c.show(out)
 	scanner := bufio.NewScanner(input)
-	last := ""
+	var commands debugui.Input
 	for !c.State.Exited {
-		fmt.Fprint(out, "debug> ")
+		fmt.Fprint(out, debugui.Prompt)
 		if !scanner.Scan() {
 			return scanner.Err()
 		}
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			line = last
-		}
-		if line == "" {
+		cmd, err := commands.Parse(scanner.Text(), debugui.Native())
+		if err != nil {
+			debugui.Error(out, err)
 			continue
 		}
-		last = line
-		cmd, arg, _ := strings.Cut(line, " ")
-		arg = strings.TrimSpace(arg)
-		var err error
 		moved := false
-		switch cmd {
-		case "q", "quit", "exit":
+		switch cmd.Kind {
+		case "":
+			continue
+		case "quit":
 			return nil
-		case "h", "help":
-			fmt.Fprint(out, help)
-		case "s", "step", "n", "next", "f", "finish", "c", "continue":
-			if arg != "" {
-				err = fmt.Errorf("%s takes no arguments", cmd)
-				break
-			}
-			mode := map[string]string{"s": "step", "n": "next", "f": "finish", "c": "continue"}[cmd]
-			if mode == "" {
-				mode = cmd
-			}
-			err = c.Move(mode)
+		case "help":
+			debugui.Help(out, debugui.Native())
+		case "step", "next", "finish", "continue":
+			err = c.Move(cmd.Kind)
 			moved = err == nil
-		case "b", "break":
+		case "break":
 			var bp Breakpoint
-			bp, err = c.Break(arg)
+			bp, err = c.Break(cmd.Arg)
 			if err == nil {
-				fmt.Fprintf(out, "Breakpoint %d at %s:%d\n", bp.ID, bp.File, bp.Line)
+				debugui.Breakpoint(out, bp.ID, bp.File, bp.Line, "verified")
 			}
 		case "breaks":
 			var ids []int
@@ -163,15 +129,17 @@ func (c *Controller) Prompt(input io.Reader, out io.Writer) error {
 				ids = append(ids, id)
 			}
 			sort.Ints(ids)
+			if len(ids) == 0 {
+				fmt.Fprintln(out, "no breakpoints")
+			}
 			for _, id := range ids {
 				bp := c.users[id]
-				fmt.Fprintf(out, "%d %s:%d\n", id, bp.File, bp.Line)
+				debugui.Breakpoint(out, id, bp.File, bp.Line, "verified")
 			}
 		case "delete":
-			var id int
-			id, err = strconv.Atoi(arg)
+			err = c.Delete(cmd.Index)
 			if err == nil {
-				err = c.Delete(id)
+				fmt.Fprintf(out, "deleted breakpoint %d\n", cmd.Index)
 			}
 		case "stack":
 			var frames []Frame
@@ -182,23 +150,16 @@ func (c *Controller) Prompt(input io.Reader, out io.Writer) error {
 					if f.Function != nil {
 						name = f.Function.Name
 					}
-					fmt.Fprintf(out, "%d %s %s:%d\n", i, name, f.File, f.Line)
+					debugui.Frame(out, i, name, debugui.Location{File: f.File, Line: f.Line})
 				}
 			}
 		case "args", "locals", "print":
-			err = c.inspect(cmd, arg, out)
+			err = c.inspect(cmd.Kind, cmd.Arg, out)
 		case "raw":
-			command, expr, _ := strings.Cut(arg, " ")
-			if command != "args" && command != "locals" && command != "print" {
-				err = fmt.Errorf("usage: raw args | raw locals | raw print EXPR")
-			} else {
-				err = c.inspectRaw(command, strings.TrimSpace(expr), out)
-			}
-		default:
-			err = fmt.Errorf("unknown command %q; type help", cmd)
+			err = c.inspectRaw(cmd.RawCommand, cmd.Arg, out)
 		}
 		if err != nil {
-			fmt.Fprintf(out, "error: %v\n", err)
+			debugui.Error(out, err)
 		}
 		if moved {
 			c.show(out)

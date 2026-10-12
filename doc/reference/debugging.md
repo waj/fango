@@ -35,17 +35,11 @@ Evaluate an expression normally to run until a breakpoint. `:step EXPR` starts
 stepping an expression from the ordinary prompt. At a stop the debugger prints
 the reason, current source location and excerpt, and a `debug>` prompt.
 
-| Command while stopped | Action |
-| --- | --- |
-| `:continue` | Resume until another breakpoint or completion |
-| `:step` | Stop before the next source expression, entering Fango calls |
-| `:next` | Stop at the next expression in the selected activation, stepping over calls |
-| `:finish` | Resume until the selected activation exits, then stop at the next source expression |
-| `:stack` | List source frames, innermost first |
-| `:frame INDEX` | Select a frame for inspection and `:next`/`:finish` |
-| `:stop` | Cancel the current input and return to the ordinary prompt |
-| `:quit`, `:q` | Cancel the input, end handler levels, and leave the session |
-| `:help` | List debugger commands |
+The [shared command reference](debugger-commands.md) defines commands,
+aliases, optional colons, repetition, and output formats for both debuggers.
+The interpreter additionally supports `frame INDEX`, `expand HANDLE [OFFSET]`,
+and `stop`. Frame selection controls inspection and the activation targeted by
+`next` and `finish`; `stop` cancels the input and returns to the ordinary REPL.
 
 Stops occur **before** evaluating the indicated expression. A binding becomes
 inspectable in subsequent expressions after its initializer completes. Call

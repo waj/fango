@@ -75,6 +75,33 @@ the worker's persistent heap. Quitting suppresses further pauses while ending
 levels. Source mutation commands are available only after evaluation resumes
 or is cancelled.
 
+## Shared terminal frontend
+
+`internal/debugui` owns the stopped-command registry, canonical names and
+aliases, argument parsing, feature checks, command repetition, and generated
+help for both debugger hosts. A feature profile advertises each backend's
+supported operations and supplies descriptions for differing lifecycle and
+inspection semantics. Invalid syntax and unsupported commands fail before
+dispatch and do not replace the repeatable command.
+
+The shared presentation functions format source bindings, frame headings,
+breakpoint statuses, errors, stop notices, and source excerpts. Excerpts carry
+an explicit exact, enclosing, or line-only precision; the frontend never
+manufactures an exact location from incomplete native metadata. The
+[shared command reference](../reference/debugger-commands.md) owns syntax and
+observable presentation.
+
+The REPL input pump and native scanner still own their input lifetimes, and
+their dispatch code adapts parsed commands to the existing evaluator exchange
+or Delve controller. REPL command history spans stops within one evaluation
+and resets for the next input. Ordinary REPL parsing, source-generation
+tracking, process ownership, stepping, and cancellation remain with the
+hosts and backends. The presentation package is frontend-only, with no
+dependency on either execution engine. Value decoding and structural preview
+formatting are still backend-specific; the
+[unification roadmap](../roadmap-debugging.md#unified-debugger-frontend) owns
+the remaining session and value-model extraction.
+
 ## Native source stepping
 
 `build --debug` and source-file `debug` launches select the debug checker for every imported module, reusing
@@ -163,7 +190,7 @@ accessors. Depth, item, node, and RPC budgets bound inspection; visited pointer
 addresses detect cycles. [Inspection limits](../reference/native-debugging.md#inspection-and-limits)
 own the exact bounds and presentation.
 
-Source excerpts reuse the REPL's span renderer with binary-matched snapshots.
+Source excerpts use the shared presentation layer with binary-matched snapshots.
 Since the linked line table cannot disambiguate columns, the frontend checks
 all spans recorded for the stopped file and line. Identical spans can be
 underlined directly. A recorded span enclosing all the others is displayed

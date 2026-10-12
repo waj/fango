@@ -8,11 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/debugui"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/lexer"
@@ -35,6 +35,7 @@ type replBreakpoint struct {
 	invalid bool
 }
 type replDebug struct {
+	commands    debugui.Input
 	active      core.Expr
 	events      chan debugExchange
 	input       *linePump
@@ -162,6 +163,7 @@ func (s *Session) debugConfig(expr core.Expr) *debugger.Config {
 	if s.debug == nil {
 		return nil
 	}
+	s.debug.commands = debugui.Input{}
 	s.debug.active = expr
 	s.debugRefresh(expr)
 	config := &debugger.Config{Step: s.debug.step, Breakpoints: s.debugBreakpoints()}
@@ -209,21 +211,15 @@ func (s *Session) debugCommand(text string) bool {
 		fmt.Fprintln(s.out, "start with fango repl --debug to use debugger commands")
 		return true
 	}
+	cmd, err := debugui.Parse(text, debugui.Interpreter())
+	if err != nil {
+		debugui.Error(s.out, err)
+		return true
+	}
 	s.debugRefresh(nil)
-	switch parts[0] {
-	case ":break":
-		arg := strings.TrimSpace(strings.TrimPrefix(text, ":break"))
-		at := strings.LastIndex(arg, ":")
-		if at < 1 {
-			fmt.Fprintln(s.out, "usage: :break FILE:LINE")
-			return true
-		}
-		line, err := strconv.Atoi(arg[at+1:])
-		if err != nil || line < 1 {
-			fmt.Fprintln(s.out, "line must be a positive integer")
-			return true
-		}
-		file := s.debugFile(arg[:at])
+	switch cmd.Kind {
+	case "break":
+		line, file := cmd.Line, s.debugFile(cmd.File)
 		var bp *replBreakpoint
 		for _, old := range s.debug.breakpoints {
 			if old.File == file && old.Line == line {
@@ -243,23 +239,15 @@ func (s *Session) debugCommand(text string) bool {
 			bp.invalid = src.changed
 		}
 		s.debugPrintBreakpoint(bp)
-	case ":breaks":
+	case "breaks":
 		if len(s.debug.breakpoints) == 0 {
 			fmt.Fprintln(s.out, "no breakpoints")
 		}
 		for _, bp := range s.debug.breakpoints {
 			s.debugPrintBreakpoint(bp)
 		}
-	case ":delete":
-		if len(parts) != 2 {
-			fmt.Fprintln(s.out, "usage: :delete ID")
-			return true
-		}
-		id, err := strconv.Atoi(parts[1])
-		if err != nil {
-			fmt.Fprintln(s.out, "invalid breakpoint ID")
-			return true
-		}
+	case "delete":
+		id := cmd.Index
 		for i, bp := range s.debug.breakpoints {
 			if bp.ID == id {
 				s.debug.breakpoints = append(s.debug.breakpoints[:i], s.debug.breakpoints[i+1:]...)
@@ -267,7 +255,7 @@ func (s *Session) debugCommand(text string) bool {
 				return true
 			}
 		}
-		fmt.Fprintln(s.out, "unknown breakpoint ID")
+		debugui.Error(s.out, fmt.Errorf("unknown breakpoint ID"))
 	}
 	return true
 }
@@ -281,7 +269,7 @@ func (s *Session) debugPrintBreakpoint(bp *replBreakpoint) {
 	} else if s.debug.sources[bp.File] != nil {
 		status = "unresolved: no executable site on this line"
 	}
-	fmt.Fprintf(s.out, "breakpoint %d: %s:%d (%s)\n", bp.ID, bp.File, bp.Line, status)
+	debugui.Breakpoint(s.out, bp.ID, bp.File, bp.Line, status)
 }
 
 func (s *Session) debugStepExpression(text string) {
@@ -307,113 +295,73 @@ func (s *Session) debugPrompt(event debugger.Event) debugger.Command {
 	d := s.debug
 	if event.Kind == "stopped" {
 		d.frames, d.selected = event.Frames, 0
-		fmt.Fprintln(s.out, "stopped: "+event.Reason)
+		debugui.Stopped(s.out, event.Reason)
 		if len(d.frames) > 0 {
 			s.debugPrintFrame(0, true)
 		}
 	}
 	if event.Error != "" {
-		fmt.Fprintln(s.out, "debugger: "+event.Error)
+		debugui.Error(s.out, fmt.Errorf("%s", event.Error))
 	}
 	for _, v := range event.Variables {
-		fmt.Fprintf(s.out, "%s = %s", v.Name, v.Value)
-		if v.Type != "" {
-			fmt.Fprintf(s.out, " : %s", v.Type)
-		}
-		if v.Handle != 0 {
-			fmt.Fprintf(s.out, " [handle %d]", v.Handle)
-		}
-		fmt.Fprintln(s.out)
+		debugui.Variable(s.out, v)
 	}
 	if event.More {
-		fmt.Fprintln(s.out, "more children; use :expand HANDLE OFFSET")
+		fmt.Fprintln(s.out, "more children; use expand HANDLE OFFSET")
 	}
 	if d.input == nil {
 		return debugger.Command{Kind: "stop"}
 	}
 	for {
 		if !s.options.Interactive {
-			fmt.Fprint(s.out, "debug> ")
+			fmt.Fprint(s.out, debugui.Prompt)
 		}
-		data, err := d.input.next(lineRequest{prompt: "debug> "})
+		data, err := d.input.next(lineRequest{prompt: debugui.Prompt})
 		if err != nil {
 			if err == io.EOF && !s.options.Interactive {
 				d.quit = true
 			}
 			return debugger.Command{Kind: "stop"}
 		}
-		text := strings.TrimSpace(string(data))
-		parts := strings.Fields(text)
-		if len(parts) == 0 {
+		parsed, err := d.commands.Parse(string(data), debugui.Interpreter())
+		if err != nil {
+			debugui.Error(s.out, err)
 			continue
 		}
-		if s.debugCommand(text) {
+		command := debugger.Command{Kind: parsed.Kind, Frame: d.selected}
+		switch parsed.Kind {
+		case "":
 			continue
-		}
-		command := debugger.Command{Frame: d.selected}
-		switch parts[0] {
-		case ":continue", ":step", ":next", ":finish", ":stop":
-			if len(parts) != 1 {
-				fmt.Fprintln(s.out, "this command takes no arguments while stopped")
-				continue
-			}
-			command.Kind = strings.TrimPrefix(parts[0], ":")
+		case "break", "breaks", "delete":
+			s.debugCommand(":" + parsed.Kind + " " + parsed.Arg)
+		case "continue", "step", "next", "finish", "stop":
 			command.Breakpoints = s.debugBreakpoints()
 			command.ReplaceBreakpoints = true
 			return command
-		case ":quit", ":q":
+		case "quit":
 			d.quit = true
 			return debugger.Command{Kind: "stop"}
-		case ":stack":
+		case "stack":
 			for i := range d.frames {
 				s.debugPrintFrame(i, false)
 			}
-		case ":frame":
-			if len(parts) != 2 {
-				fmt.Fprintln(s.out, "usage: :frame INDEX")
+		case "frame":
+			if parsed.Index >= len(d.frames) {
+				debugui.Error(s.out, fmt.Errorf("invalid frame"))
 				continue
 			}
-			i, err := strconv.Atoi(parts[1])
-			if err != nil || i < 0 || i >= len(d.frames) {
-				fmt.Fprintln(s.out, "invalid frame")
-				continue
-			}
-			d.selected = i
-			s.debugPrintFrame(i, true)
-		case ":locals":
-			command.Kind = "locals"
+			d.selected = parsed.Index
+			s.debugPrintFrame(d.selected, true)
+		case "locals":
 			return command
-		case ":print":
-			if len(parts) != 2 {
-				fmt.Fprintln(s.out, "usage: :print NAME (expressions are not evaluated)")
-				continue
-			}
-			command.Kind, command.Name = "print", parts[1]
+		case "print":
+			command.Name = parsed.Arg
 			return command
-		case ":expand":
-			if len(parts) < 2 || len(parts) > 3 {
-				fmt.Fprintln(s.out, "usage: :expand HANDLE [OFFSET]")
-				continue
-			}
-			handle, err := strconv.ParseUint(parts[1], 10, 64)
-			if err != nil {
-				fmt.Fprintln(s.out, "invalid handle")
-				continue
-			}
-			offset := 0
-			if len(parts) == 3 {
-				offset, err = strconv.Atoi(parts[2])
-			}
-			if err != nil || offset < 0 {
-				fmt.Fprintln(s.out, "invalid offset")
-				continue
-			}
-			command.Kind, command.Handle, command.Offset = "expand", handle, offset
+		case "expand":
+			command.Handle, command.Offset = parsed.Handle, parsed.Offset
 			return command
-		case ":help":
-			fmt.Fprint(s.out, debugHelp)
-		default:
-			fmt.Fprintln(s.out, "only debugger commands are available while stopped; :help lists them")
+		case "help":
+			debugui.Help(s.out, debugui.Interpreter())
 		}
 	}
 }
@@ -421,27 +369,15 @@ func (s *Session) debugPrompt(event debugger.Event) debugger.Command {
 func (s *Session) debugPrintFrame(index int, excerpt bool) {
 	f := s.debug.frames[index]
 	site := f.Site
-	fmt.Fprintf(s.out, "#%d %s at %s:%d:%d\n", index, f.Name, site.Source.Name, site.Line, site.Column)
+	loc := debugui.Location{File: site.Source.Name, Text: site.Source.Text,
+		Line: site.Line, Column: site.Column, Start: site.Start, End: site.End, Precision: debugui.Exact}
+	debugui.Frame(s.out, index, f.Name, loc)
 	if excerpt {
-		file := source.NewFile(site.Source.Name, []byte(site.Source.Text))
-		fmt.Fprintln(s.out, file.Excerpt(source.Span{File: file, Start: site.Start, End: site.End}))
+		debugui.Excerpt(s.out, loc)
 	}
 }
 
-const debugHelp = `debugger commands:
-  :break FILE:LINE  set an exact-line breakpoint
-  :breaks          list breakpoints
-  :delete ID       remove a breakpoint
-  :step EXPR       start stepping an expression (ordinary prompt)
-  :continue        resume execution
-  :step            step into the next source expression
-  :next            step over calls
-  :finish          step out of the selected frame
-  :stack           list frames
-  :frame INDEX     select a frame for inspection
-  :locals          inspect parameters, locals, and captures
-  :print NAME      inspect one binding without evaluation
-  :expand ID [N]   inspect up to 50 children starting at offset N
-  :stop            cancel this input
-  :quit            cancel this input and leave the REPL
-`
+func (s *Session) debugHelp() {
+	debugui.Help(s.out, debugui.Interpreter())
+	fmt.Fprintln(s.out, "At the ordinary REPL prompt, use colon commands; :step EXPR starts stepping an expression.")
+}

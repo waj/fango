@@ -199,7 +199,8 @@ and [editor support](reference/commands.md#language-server-and-editor-support) a
 
 [Interpreter debugging](reference/debugging.md) provides sequential breakpoints,
 stepping, and scoped inspection. The [debugging roadmap](roadmap-debugging.md)
-tracks native platform coverage and finer source locations, interpreted entry-point launching,
+tracks shared debugger sessions and value presentation, native platform coverage,
+finer source locations, interpreted entry-point launching,
 editor integration, and concurrent debugging.
 
 ## Test framework

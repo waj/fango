@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/debugui"
 )
 
 // sourceBindings is deliberately conservative when separate statement scopes
@@ -87,10 +88,10 @@ func (c *Controller) inspect(command, name string, w io.Writer) error {
 	for _, name := range names {
 		b := bindings[name]
 		if ambiguous[name] {
-			fmt.Fprintf(w, "%s : %s = <unavailable: multiple lexical scopes share this source line>\n", name, b.Type)
+			debugui.Variable(w, debugger.Variable{Name: name, Type: b.Type, Value: "<unavailable: multiple lexical scopes share this source line>"})
 			continue
 		}
-		fmt.Fprintf(w, "%s : %s = %s\n", name, b.Type, c.preview(b.Runtime))
+		debugui.Variable(w, debugger.Variable{Name: name, Type: b.Type, Value: c.preview(b.Runtime)})
 	}
 	return nil
 }

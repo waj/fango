@@ -34,6 +34,39 @@ objects, and exact-line breakpoint matching are
 - Measure stepping gaps from semantic lowering and extend explicit sites where
   a concrete fixture needs finer source attribution.
 
+## Unified debugger frontend
+
+Converge on one Fango debugger session and presentation layer with interpreter
+and Delve adapters. The REPL and native launcher remain hosts of that layer.
+Keep the evaluator's live pause protocol and Delve's native stepping machinery
+behind the adapters; preserve efficient native next/finish, tail activations,
+worker heap ownership, and ordinary-build isolation.
+
+[Shared terminal commands and presentation](design/debugging.md#shared-terminal-frontend)
+are implemented, with parser and backend transcript tests. Remaining steps:
+
+- Introduce a backend-neutral session API for commands, stop events, source
+  snapshots, breakpoint statuses, selected frames, and inspection handles.
+  Adapt the interpreter's reverse event/command exchange and Delve RPC without
+  making either execution engine depend on terminal input.
+- Separate reading values from formatting them. Backends supply bounded
+  structural descriptions and lazy child handles; one formatter owns Fango
+  notation, truncation, opaque/unavailable markers, and expansion presentation.
+  Keep target reads and traversal budgets in the adapters, never invoke target
+  functions, and invalidate handles on resume.
+- Close capability gaps, including native frame selection and expansion,
+  source stack names, and consistent argument/local views. Advertise supported
+  operations explicitly instead of silently approximating unsupported ones.
+- Reuse this session API for the editor adapter described under
+  [delivery](#delivery-and-verification).
+
+Carry source precision explicitly as exact, enclosing, or line-only. Distinguish
+interrupting execution, cancelling one REPL evaluation, and terminating a
+session; preserve host-specific input and cleanup lifetimes. Share breakpoint
+status presentation while leaving source generations, pending imports, and
+binary validation with their respective backends. Matching command vocabulary
+must not imply identical expression stop sequences or concurrency semantics.
+
 ## Compiled-binary feasibility experiment
 
 The [opt-in harness](design/debugging.md#native-experiment-harness) builds a
@@ -125,9 +158,9 @@ cancellation, handler-level requests, and worker control are
 Extend the native launcher with process attachment, restart, and redirected
 target input.
 
-Use DAP for editor integration, with a Fango adapter over the interpreter
-controller and the native source controller over Delve, extended with the
-[native presentation layer](#native-variable-presentation). Add a
+Use DAP for editor integration over the
+[unified session API](#unified-debugger-frontend), backed by the interpreter
+controller and native source controller over Delve. Add a
 debug configuration and `.fango` breakpoint support to the VS Code extension;
 keep language-server analysis separate from execution control.
 

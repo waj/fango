@@ -414,7 +414,7 @@ func (s *Session) command(cmd string) (quit bool) {
 		s.reload()
 	case cmd == ":help":
 		if s.debug != nil {
-			fmt.Fprint(s.out, debugHelp)
+			s.debugHelp()
 		}
 		fmt.Fprint(s.out, `commands:
   :type <expr>   show an expression's type without evaluating

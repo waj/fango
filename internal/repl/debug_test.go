@@ -174,7 +174,7 @@ z = 3
 :continue
 :quit
 `, Options{})
-	for _, want := range []string{"stopped: step", "#0 f at <repl:", ">:3:9", "#1 <expression>", "x = 20 : Int", "expressions are not evaluated", "only debugger commands", "42 : Int"} {
+	for _, want := range []string{"stopped: step", "#0 f at <repl:", ">:3:9", "#1 <expression>", "x : Int = 20", "expressions are not evaluated", "only debugger commands", "42 : Int"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q:\n%s", want, got)
 		}
@@ -206,7 +206,7 @@ Probe.run 20
 :continue
 :quit
 `, Options{Root: root})
-		for _, want := range []string{"pending import", "Probe.fango:6 (verified)", "unresolved: no executable site", "stopped: breakpoint 1", "x = 20 : Int", "y = 21 : Int", "42 : Int"} {
+		for _, want := range []string{"pending import", "Probe.fango:6 (verified)", "unresolved: no executable site", "stopped: breakpoint 1", "x : Int = 20", "y : Int = 21", "42 : Int"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("pass %d missing %q:\n%s", i, want, got)
 			}
@@ -229,7 +229,7 @@ func TestDebugStopAndEOF(t *testing.T) {
 func TestDebugNativeSidecarAndOutcomeParity(t *testing.T) {
 	root := filepath.Join("..", "..", "testdata", "debug-native")
 	got := debugTranscript(t, ":break Probe.fango:18\nimport Probe\nProbe.run 10\n:locals\n:delete 1\n:continue\n:quit\n", Options{Root: root})
-	if !strings.Contains(got, "number = 12 : Int") || !strings.Contains(got, "94 : Int") {
+	if !strings.Contains(got, "number : Int = 12") || !strings.Contains(got, "94 : Int") {
 		t.Fatalf("native call or pattern scope failed:\n%s", got)
 	}
 	var ordinary strings.Builder
@@ -256,5 +256,22 @@ run() =
 	got := debugTranscript(t, ":break Probe.fango:7\nimport Probe\nProbe.run()\n:stop\n7\n:quit\n", Options{Root: root})
 	if strings.Count(got, "once\n") != 1 || strings.Count(got, "cleanup\n") != 1 || !strings.Contains(got, "7 :") || strings.Contains(got, "42 : Int") {
 		t.Fatalf("stop replayed IO or skipped cleanup:\n%s", got)
+	}
+}
+
+func TestDebugSharedCommandsAndPresentation(t *testing.T) {
+	got := debugTranscript(t, "f : Int -> Int\nf x =\n    y = x + 1\n    y * 2\n\n:step f 20\ns\n:s\nprint\tx\nprint x + 1\n\nraw print x\nlocals extra\nh\nc\n:quit\n", Options{})
+	if strings.Count(got, "x : Int = 20") != 2 {
+		t.Fatalf("inspection or repeat failed:\n%s", got)
+	}
+	for _, want := range []string{
+		"debugger: usage: print NAME (expressions are not evaluated)",
+		"raw is not supported by the interpreter debugger",
+		"locals takes no arguments while stopped",
+		"blank input repeats the last valid command", "42 : Int",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
 	}
 }

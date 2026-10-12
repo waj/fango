@@ -35,19 +35,11 @@ explicit span-unavailable notice.
 
 ## Stepping and breakpoints
 
-Commands have no leading colon. Blank input repeats the previous command.
-
-| Command | Behavior |
-| --- | --- |
-| `step`, `s` | Stop at the next Fango source location, entering calls and callbacks |
-| `next`, `n` | Advance in the current activation, skipping called activations |
-| `finish`, `f` | Resume until the current activation returns or unwinds, then stop at the next Fango location |
-| `continue`, `c` | Run until a user breakpoint, interruption, or process exit |
-| `break FILE:LINE`, `b FILE:LINE` | Set a breakpoint at a linked Fango statement |
-| `breaks` | List user breakpoints |
-| `delete ID` | Remove a user breakpoint |
-| `help`, `h` | List commands |
-| `quit`, `q` | Terminate the launched process and debugger |
+The [shared command reference](debugger-commands.md) defines commands,
+aliases, optional colons, repetition, and output formats for both debuggers.
+Native inspection additionally provides `args` and the `raw` commands.
+Frame selection, expansion, and cancelling a single REPL input are not native
+capabilities; unsupported commands report that explicitly.
 
 Use the logical filenames shown at stops, such as `mandelbrot.fango` or
 `<stdlib>/Range.fango`. Unambiguous path suffixes are accepted. For Mandelbrot,
