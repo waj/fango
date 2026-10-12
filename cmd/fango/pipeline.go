@@ -34,6 +34,7 @@ type compilationSession struct {
 	debug        bool
 	debugSources map[string]string
 	debugScopes  []debugger.NativeScope
+	debugTypes   map[string]debugger.NativeType
 }
 
 func (s *compilationSession) debugEnabled() bool { return s != nil && s.debug }
@@ -151,6 +152,7 @@ func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Wr
 	}
 	if session.debugEnabled() {
 		session.debugScopes = nil
+		session.debugTypes = map[string]debugger.NativeType{}
 		for _, file := range files {
 			scopes, err := codegen.DebugScopes(file.Data)
 			if err != nil {
@@ -158,6 +160,14 @@ func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Wr
 				return nil, nil, "", false
 			}
 			session.debugScopes = append(session.debugScopes, scopes...)
+			layouts, err := codegen.DebugTypes(file.Data)
+			if err != nil {
+				reportInternal(stderr, err)
+				return nil, nil, "", false
+			}
+			for name, layout := range layouts {
+				session.debugTypes[name] = layout
+			}
 		}
 	}
 	hostSource, err := runtimefiles.NativeHost()

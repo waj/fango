@@ -3,6 +3,7 @@ package nativedebug
 import (
 	"bufio"
 	"fmt"
+	"github.com/waj/fango/internal/source"
 	"io"
 	"sort"
 	"strconv"
@@ -41,13 +42,25 @@ func (c *Controller) show(out io.Writer) {
 		return
 	}
 	fmt.Fprintf(out, "%s:%d\n", t.File, t.Line)
+	if span, enclosing := c.currentSpan(t.File, t.Line); span != nil {
+		if enclosing {
+			fmt.Fprintln(out, "  (enclosing expression; multiple native sites)")
+		}
+		file := source.NewFile(t.File, []byte(text))
+		fmt.Fprintln(out, file.Excerpt(source.Span{File: file, Start: span.Start, End: span.End}))
+		return
+	}
 	lines := strings.Split(text, "\n")
 	if t.Line > 0 && t.Line <= len(lines) {
 		fmt.Fprintf(out, "  %s\n", lines[t.Line-1])
 	}
+	fmt.Fprintln(out, "  (expression span unavailable at this native location)")
 }
 
 type variable struct {
+	Addr                          uint64
+	Kind                          uint
+	OnlyAddr                      bool
 	Name, Type, Value, Unreadable string
 	Children                      []variable
 	Len                           int64

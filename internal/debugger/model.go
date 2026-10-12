@@ -75,7 +75,24 @@ type Host interface {
 // Runtime names are Go identifiers supplied by the emitter, not reconstructed
 // by the debugger. Multiple scopes can share a source line.
 type NativeScope struct {
+	Span     *NativeSpan `json:",omitempty"`
 	File     string
 	Line     int
 	Bindings []Binding
 }
+
+// NativeSpan is a byte range in the binary's immutable source snapshot.
+type NativeSpan struct{ Start, End int }
+
+// NativeType describes emitted nominal layouts. Keys use fully qualified Go
+// type names without generic arguments; the value names are source names.
+type NativeType struct {
+	Name, Kind   string
+	Constructors []NativeConstructor
+}
+type NativeConstructor struct {
+	Name   string
+	Tag    int
+	Fields []NativeField
+}
+type NativeField struct{ Name, Runtime string }

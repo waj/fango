@@ -17,7 +17,7 @@ import (
 )
 
 const Suffix = ".fango-debug.json"
-const version = 2
+const version = 3
 
 type Manifest struct {
 	Version    int
@@ -25,14 +25,15 @@ type Manifest struct {
 	Sources    map[string]string
 	Lines      map[string][]int
 	Scopes     []debugger.NativeScope
+	Types      map[string]debugger.NativeType
 }
 
-func WriteManifest(binary string, data []byte, sources map[string]string, scopes []debugger.NativeScope) error {
+func WriteManifest(binary string, data []byte, sources map[string]string, scopes []debugger.NativeScope, layouts map[string]debugger.NativeType) error {
 	lines, err := StatementLines(binary, sources)
 	if err != nil {
 		return err
 	}
-	m := Manifest{version, fmt.Sprintf("%x", sha256.Sum256(data)), sources, lines, scopes}
+	m := Manifest{version, fmt.Sprintf("%x", sha256.Sum256(data)), sources, lines, scopes, layouts}
 	encoded, err := json.Marshal(m)
 	if err != nil {
 		return err

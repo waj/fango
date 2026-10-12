@@ -73,24 +73,24 @@ debugging.
 
 ## Native variable presentation
 
-[Source-name lookup and raw inspection](reference/native-debugging.md#inspection-and-limits)
+[Source-name lookup, bounded Fango value rendering, and raw inspection](reference/native-debugging.md#inspection-and-limits)
 are implemented in `fango debug`. The binary-matched manifest carries emitted
-binding names, source types, and lexical scopes. Unavailable bindings are
-explicit, and compiler temporaries are hidden by default. Remaining work:
+binding names, source types, lexical scopes, representation layouts, and
+expression spans. Unavailable bindings are explicit, and compiler temporaries
+are hidden by default. Source excerpts underline recorded expressions,
+label enclosing spans, and report ambiguous locations. Remaining work:
 
 1. Disambiguate expression scopes sharing a source line with finer linked
    location metadata. Current lookup conservatively reports a name unavailable
-   when those scopes disagree. Preserve capture and pattern-binding mappings
+   when those scopes disagree. Resolve precise active subexpressions for
+   underlining instead of the current enclosing-span or unavailable fallback.
+   Preserve capture and pattern-binding mappings
    and validate against any future debug-profile inlining.
 2. Optional Delve terminal helpers using its
    [Starlark commands](https://github.com/go-delve/delve/blob/master/Documentation/cli/starlark.md)
    could reuse the manifest outside `fango debug`. Ordinary Delve commands
    continue to use Go names and expressions; the Fango frontend already
    provides name lookup, filtered locals, and a raw view.
-3. Add bounded structural rendering for ADTs, records, and Lists, such as
-   `Just 42` and `[1, 2, 3]`, using type and representation metadata. Inspect
-   memory without invoking `Show` or other target functions. Preserve raw
-   inspection and report unreadable or truncated values explicitly.
 4. After terminal presentation is validated, reuse its mapping and rendering
    rules alongside the native source controller in a Fango editor adapter for
    editor variables, hover inspection, and source-level stack names. Keep
@@ -99,7 +99,7 @@ explicit, and compiler temporaries are hidden by default. Remaining work:
 Retain coverage for original-name lookup, closure captures, pattern bindings,
 unavailable bindings, synthetic-variable filtering, and mismatched-build
 rejection. Extend it with exact same-line scopes, any future inlined bindings,
-and representation decoding. Confirm that
+and additional representation decoding cases. Confirm that
 inspection does not execute target code and that raw inspection remains
 available. Native fixtures must establish these behaviors independently of
 the interpreter debugger.

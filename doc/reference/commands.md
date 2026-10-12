@@ -475,7 +475,7 @@ members, and the representation of an opaque type never appear.
 `fango build --debug [-o out] main.fango` produces a native executable and a
 companion `out.fango-debug.json` file (using the actual executable path for
 `out`). The companion contains source snapshots, linked statement locations,
-and source binding mappings,
+expression spans, source binding mappings, and value representation layouts,
 matched to the executable by its SHA-256 digest. Keep both files together.
 Missing, incompatible, or mismatched metadata is rejected by `fango debug`
 with a diagnostic asking for a rebuild.

@@ -96,7 +96,8 @@ passes; no target-side stepping hooks or debugger dependency are emitted.
 
 `internal/nativedebug` reads linked DWARF statement entries and writes the
 binary-adjacent manifest with source snapshots, executable lines, binding
-scopes, a format version, and the binary digest. The frontend validates that identity before
+scopes with expression spans, representation layouts, a format version, and
+the binary digest. The frontend validates that identity before
 launching Delve over a private Unix socket. Source excerpts come from the
 snapshots. Delve resolves file/line locations to relocated addresses, including
 multiple generic instantiations.
@@ -134,20 +135,41 @@ own the user-visible behavior and limitations.
 Debug emission associates Core lexical scopes with the same Go AST nodes
 that claim source lines. Each recorded binding includes its original name,
 source type, and the exact generated identifier from the emitter's mangler.
-The generated Go carries deterministic JSON comments containing those scopes;
-reading both fresh and cached output supplies the companion manifest. This
+The generated Go carries deterministic JSON comments containing those scopes,
+their source byte spans, and nominal representation layouts. Layouts reuse the
+emitter's actual constructor tags and field selectors, keyed by qualified Go
+type name; generic instantiations share a layout. Reading both fresh and
+cached output supplies the companion manifest. This
 avoids a second cache artifact and emits no target-side metadata tables.
-Ordinary emission does not collect scopes or add these comments.
+Ordinary emission does not collect scopes or layouts or add these comments.
 
 The frontend resolves bindings only from the scopes recorded for the current
 Fango file and line. Go's line table does not distinguish expression columns;
 when scopes on one line disagree about a name, lookup reports it unavailable.
 It never selects a binding by stripping a prefix or guessing between scopes.
 The native argument list classifies source arguments without loading synthetic
-values. Inspection evaluates only compiler-recorded identifiers, including
-captures, and applies bounded loading to the requested source values. Missing
-bindings remain visible as unavailable. A raw view retains Go inspection;
-structural Fango value rendering is not yet implemented.
+values. Missing bindings remain visible as unavailable. A raw view retains
+Go inspection.
+
+The native structural renderer starts with compiler-recorded identifiers and
+uses read-only selectors, pointer dereferences, and Delve's dynamic interface
+data projection to load shallow fields on demand. It decodes the active tag
+for tagged unions, the concrete constructor of interface unions, records,
+products, and tuples from the layout metadata. The runtime List spine is
+walked iteratively, so its length does not consume structural nesting depth.
+Generic values use the concrete dynamic representation. Native resources are
+opaque. Inspection never invokes target functions, including `Show` or List
+accessors. Depth, item, node, and RPC budgets bound inspection; visited pointer
+addresses detect cycles. [Inspection limits](../reference/native-debugging.md#inspection-and-limits)
+own the exact bounds and presentation.
+
+Source excerpts reuse the REPL's span renderer with binary-matched snapshots.
+Since the linked line table cannot disambiguate columns, the frontend checks
+all spans recorded for the stopped file and line. Identical spans can be
+underlined directly. A recorded span enclosing all the others is displayed
+with an explicit enclosing-expression label. Disjoint, invalid, or missing
+spans produce a line-only excerpt with an unavailable notice. No arbitrary
+subexpression is selected from ambiguous metadata.
 
 Source-file launches call the same build pipeline as `build --debug`, write
 metadata beside the cached executable, and launch only after a successful
@@ -161,7 +183,9 @@ launches continue to validate the companion version and binary digest.
 reads DWARF, and exercises the source controller through live Delve JSON-RPC.
 It checks source stepping into stdlib, next, finish, callback breakpoint
 precedence, native sidecars, self tail-loop activation identity, and completion.
-The fixture also includes matching, captures, and an effect handler.
+The fixture also includes matching, captures, an effect handler, nested
+records and ADTs, Lists, tuples, and generic value inspection. It verifies
+Fango rendering, long-List truncation, raw inspection, and source underlines.
 
 The target is opt-in and requires host permission to debug a child process.
 `FANGO_DEBUG_NATIVE_DWARF_ONLY=1` runs the build, execution, and static

@@ -61,7 +61,6 @@ func (c *Controller) inspect(command, name string, w io.Writer) error {
 		}
 	}
 	scope := map[string]any{"GoroutineID": c.Goroutine(), "Frame": 0}
-	cfg := map[string]any{"FollowPointers": true, "MaxVariableRecurse": 2, "MaxStringLen": 256, "MaxArrayValues": 50, "MaxStructFields": 50}
 	arguments := map[string]bool{}
 	if command != "print" {
 		// Classify names without loading synthetic dictionaries or adapters.
@@ -91,16 +90,7 @@ func (c *Controller) inspect(command, name string, w io.Writer) error {
 			fmt.Fprintf(w, "%s : %s = <unavailable: multiple lexical scopes share this source line>\n", name, b.Type)
 			continue
 		}
-		// Only evaluate compiler-recorded identifiers. This also retrieves
-		// captures Delve can evaluate but does not include in its local list.
-		var out struct{ Variable variable }
-		if e := c.call("Eval", map[string]any{"Scope": scope, "Expr": b.Runtime, "Cfg": cfg}, &out); e != nil {
-			fmt.Fprintf(w, "%s : %s = <unavailable in this native frame>\n", name, b.Type)
-			continue
-		}
-		v := out.Variable
-		v.Name, v.Type = name, b.Type
-		showVariable(w, v, "")
+		fmt.Fprintf(w, "%s : %s = %s\n", name, b.Type, c.preview(b.Runtime))
 	}
 	return nil
 }

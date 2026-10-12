@@ -25,6 +25,14 @@ to the binary's build, even if the files have since changed. Rebuild and start
 a new session to debug changed source. Startup does not stop in module
 initialization before main.
 
+At a Fango stop, a caret underline marks the recorded expression, using the
+same excerpt format as the REPL. Native locations identify lines rather than
+expression columns. If several sites on a line share a recorded enclosing
+expression, the debugger underlines it and labels it as enclosing; it does
+not claim to identify the active subexpression. If the sites have no common
+recorded enclosure, or the span is missing, the line is shown with an
+explicit span-unavailable notice.
+
 ## Stepping and breakpoints
 
 Commands have no leading colon. Blank input repeats the previous command.
@@ -97,12 +105,25 @@ source line or use the raw view to investigate.
 
 `raw args`, `raw locals`, and `raw print EXPR` retain Go names, types, and
 read-only Go expressions. Inspection does not inject target function calls.
-Values and their children still use Go representations; Fango rendering for
-ADTs, records, and Lists remains [roadmap work](../roadmap-debugging.md#native-variable-presentation).
 `stack` also continues to list native frames, including generated frames.
 
-Inspection bounds string previews to 256 characters, collection children to
-50, and nested values to two levels. Source stepping supports stacks up to
+Source inspection renders values structurally in Fango notation: Lists as
+`[1, 2, 3]`, records as `{ name = "Ada", age = 42 }`, ADTs as `Just 42`
+or `Branch (Leaf 1) (Leaf 2)`, and tuples as `(7, "seven")`. It selects only
+the active constructor's fields. Booleans, characters, strings, and unit use
+their Fango forms. This also works when the source type is generic. Rendering
+reads memory without invoking `Show`, List accessors, or other target code.
+Functions display as `<function>`; native resources and unknown
+representations remain opaque. The raw view is available for investigation.
+
+Each source value preview is bounded to four structural levels, 50 items per
+collection or record, 512 visited values, and 256 debugger reads. Strings load
+at most 256 bytes. Truncation uses `…`; cycles and unreadable fields have
+explicit markers. These are previews, so truncated or opaque output is not a
+complete Fango expression. Raw inspection retains its limits of two nested
+levels, 50 children, and 256 string bytes.
+
+Source stepping supports stacks up to
 1024 native frames; deeper or unreadable stacks report an error. Temporary
 stepping breakpoints are removed after each command, including failure and
 interruption. A cleanup failure prevents further execution through the

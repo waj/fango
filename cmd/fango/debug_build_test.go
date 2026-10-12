@@ -143,8 +143,11 @@ func TestDebugSourceLaunchPreparation(t *testing.T) {
 		t.Fatalf("debug output outside cache: %s", binary)
 	}
 	m, err := nativedebug.ReadManifest(binary)
-	if err != nil || len(m.Scopes) == 0 {
-		t.Fatalf("missing scope metadata: %v", err)
+	if err != nil || len(m.Scopes) == 0 || len(m.Types) == 0 {
+		t.Fatalf("missing scope/layout metadata: %v", err)
+	}
+	if m.Scopes[0].Span == nil {
+		t.Fatal("missing source expression span")
 	}
 	info, err := buildinfo.ReadFile(binary)
 	if err != nil {
@@ -165,8 +168,8 @@ func TestDebugSourceLaunchPreparation(t *testing.T) {
 		t.Fatalf("warm source launch: %s", stderr.String())
 	}
 	cached, err := nativedebug.ReadManifest(warm)
-	if err != nil || !reflect.DeepEqual(m.Scopes, cached.Scopes) {
-		t.Fatalf("warm build lost binding metadata: %v", err)
+	if err != nil || !reflect.DeepEqual(m.Scopes, cached.Scopes) || !reflect.DeepEqual(m.Types, cached.Types) {
+		t.Fatalf("warm build lost scope/layout metadata: %v", err)
 	}
 	direct, args, code := prepareDebug([]string{binary, "arg"}, &stderr)
 	if code != 0 || direct != binary || !slices.Equal(args, []string{"arg"}) {

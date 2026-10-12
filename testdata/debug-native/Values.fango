@@ -1,0 +1,53 @@
+module Values exposing (run)
+
+import List
+import Tuple
+import Result exposing (..)
+
+type Person = { name : String, age : Int }
+type Color = Red | Green | Blue
+type Tree = Leaf Int | Branch Tree Tree
+type Box a = Box a
+type Preview =
+    { numbers : List Int
+    , person : Person
+    , optional : Maybe Int
+    , result : Result String Int
+    , tree : Tree
+    , color : Color
+    , box : Box (List Int)
+    , empty : List Int
+    , text : String
+    , character : Char
+    , flag : Bool
+    , pair : Tuple.Pair Int String
+    }
+
+inspect : Preview -> Int
+inspect value =
+    value.person.age
+
+run : Int -> Int
+run seed =
+    value =
+        { numbers = [seed, 2, 3]
+        , person = { name = "Ada", age = seed }
+        , optional = Just 42
+        , result = Err "oops"
+        , tree = Branch (Leaf 1) (Leaf 2)
+        , color = Green
+        , box = Box [4, 5]
+        , empty = []
+        , text = "hello\nworld"
+        , character = 'λ'
+        , flag = True
+        , pair = (7, "seven")
+        }
+    inspect value - seed + generic value + inspectLong (List.range 1 80)
+
+generic value =
+    0
+
+inspectLong : List Int -> Int
+inspectLong items =
+    List.length items - 80

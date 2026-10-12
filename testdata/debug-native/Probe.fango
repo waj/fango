@@ -1,7 +1,7 @@
 module Probe exposing (run)
 
 import List
-
+import Values
 effect Read
     read : () -> Int
 
@@ -27,7 +27,7 @@ run seed =
     handled =
         handle read() on
             read () -> resume (loop 3 total)
-    handled + seed + names seed
+    handled + seed + names seed + Values.run seed
 
 -- Exercise captures, pattern bindings, and repeated names across functions.
 names seed =

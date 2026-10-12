@@ -76,7 +76,8 @@ comment anchors, verbatim fallback, and round-trip verification.
 import increments, generations, transactions, and module reload.
 
 [Source debugging](design/debugging.md) — Debug metadata, execution control,
-inspection, worker transport, native source stepping, and source binding mappings.
+inspection, worker transport, native source stepping, expression underlines,
+and Fango value presentation.
 
 ## Testing and performance
 

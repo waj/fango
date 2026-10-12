@@ -225,6 +225,7 @@ func (g *gen) insertDirectives(file *goast.File, formatted []byte, unitPath stri
 		for line, sp := range claims {
 			scope := debugger.NativeScope{File: g.source, Line: sp.StartPos().Line}
 			if site := claimedScopes[line]; site != nil {
+				scope.Span = &debugger.NativeSpan{Start: site.Start, End: site.End}
 				for _, b := range site.Bindings {
 					b.Runtime = mangleValue(b.Runtime)
 					scope.Bindings = append(scope.Bindings, b)
@@ -247,6 +248,11 @@ func (g *gen) insertDirectives(file *goast.File, formatted []byte, unitPath stri
 			return nil, err
 		}
 		out = append(out, debugScopePrefix+string(encoded))
+		layouts, err := json.Marshal(g.nativeDebugTypes(unitPath))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, debugTypePrefix+string(layouts))
 		return format.Source([]byte(strings.Join(out, "\n") + "\n"))
 	}
 	redirected := false
@@ -353,4 +359,17 @@ func (g *gen) enterExpr(e core.Expr) func() {
 		g.debugSite = e.DebugSite()
 	}
 	return func() { restore(); g.debugSite = saved }
+}
+
+const debugTypePrefix = "//fango:debug-types "
+
+func DebugTypes(data []byte) (map[string]debugger.NativeType, error) {
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if bytes.HasPrefix(line, []byte(debugTypePrefix)) {
+			var layouts map[string]debugger.NativeType
+			err := json.Unmarshal(line[len(debugTypePrefix):], &layouts)
+			return layouts, err
+		}
+	}
+	return nil, nil
 }
