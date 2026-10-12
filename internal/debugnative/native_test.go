@@ -9,6 +9,8 @@ import (
 	"debug/dwarf"
 	"debug/elf"
 	"debug/macho"
+	"github.com/waj/fango/internal/debugger"
+	"github.com/waj/fango/internal/debugsession"
 	"github.com/waj/fango/internal/nativedebug"
 	"net"
 	"net/rpc"
@@ -68,6 +70,16 @@ func TestNativeDebugging(t *testing.T) {
 		t.Log("DWARF-only run: live Delve operations not tested")
 		return
 	}
+	withDelve(t, ctx, dlv, binary, func(client *rpc.Client) { probeSourceStepping(t, client, binary) })
+	for _, mode := range []string{"next", "finish"} {
+		t.Run("selected-caller-"+mode, func(t *testing.T) {
+			withDelve(t, ctx, dlv, binary, func(client *rpc.Client) { probeCallerStep(t, client, binary, mode) })
+		})
+	}
+}
+
+func withDelve(t *testing.T, ctx context.Context, dlv, binary string, probe func(*rpc.Client)) {
+	t.Helper()
 	// A short Unix socket path works on macOS too (its socket path limit is 104).
 	sockDir, err := os.MkdirTemp("", "fdlv-")
 	if err != nil {
@@ -75,7 +87,7 @@ func TestNativeDebugging(t *testing.T) {
 	}
 	defer os.RemoveAll(sockDir)
 	socket := filepath.Join(sockDir, "rpc")
-	log, err := os.Create(filepath.Join(dir, "delve.log"))
+	log, err := os.Create(filepath.Join(t.TempDir(), "delve.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +101,7 @@ func TestNativeDebugging(t *testing.T) {
 			t.Logf("Delve log (last 16 KB):\n%s", out)
 		}
 	}()
-	cmd = exec.CommandContext(ctx, dlv, "exec", binary, "--headless", "--api-version=2", "--log", "--log-output=debugger,rpc,lldbout", "--listen=unix:"+socket)
+	cmd := exec.CommandContext(ctx, dlv, "exec", binary, "--headless", "--api-version=2", "--log", "--log-output=debugger,rpc,lldbout", "--listen=unix:"+socket)
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
@@ -111,7 +123,7 @@ func TestNativeDebugging(t *testing.T) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	client := jsonrpc.NewClient(conn)
-	probeSourceStepping(t, client, binary)
+	probe(client)
 }
 
 func inspectDWARF(t *testing.T, path string) {
@@ -335,6 +347,7 @@ func probeSourceStepping(t *testing.T, client *rpc.Client, binary string) {
 		}
 		move("continue")
 		inspect(point.commands, point.expected...)
+		probeNativeInspection(t, c, point.line)
 		if err := c.Delete(bp.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -344,5 +357,150 @@ func probeSourceStepping(t *testing.T, client *rpc.Client, binary string) {
 	}
 	if !c.State.Exited || c.State.ExitStatus != 0 {
 		t.Fatalf("program did not finish: %+v", c.State)
+	}
+}
+
+func probeNativeInspection(t *testing.T, c *nativedebug.Controller, line string) {
+	t.Helper()
+	b := &nativedebug.SessionBackend{Controller: c}
+	s := debugsession.New(b)
+	stop := s.Accept(b.Snapshot())
+	if stop.Error != "" {
+		t.Fatal(stop.Error)
+	}
+	execute := func(r debugsession.Request) debugsession.Event {
+		t.Helper()
+		e, err := s.Execute(r)
+		if err != nil || e.Error != "" {
+			t.Fatalf("%+v: %v %+v", r, err, e)
+		}
+		return e
+	}
+	binding := "value"
+	if line == "Values.fango:53" {
+		binding = "items"
+	}
+	values := execute(debugsession.Request{Kind: "print", Arg: binding})
+	if len(values.Variables) != 1 || values.Variables[0].Handle == 0 {
+		t.Fatalf("missing handle: %+v", values)
+	}
+	handle := values.Variables[0].Handle
+	// Find a source caller with seed in scope, retaining the callee's handle.
+	if line == "Values.fango:28" {
+		caller := -1
+		for i, f := range stop.Frames {
+			if i > 0 && strings.Contains(f.Name, "V_Values_dot_run") && f.Location.File == "Values.fango" {
+				caller = i
+				break
+			}
+		}
+		if caller < 0 {
+			t.Fatalf("source caller missing: %+v", stop.Frames)
+		}
+		execute(debugsession.Request{Kind: "frame", Index: caller})
+		callerValue := execute(debugsession.Request{Kind: "print", Arg: "seed"})
+		if len(callerValue.Variables) != 1 || debugger.RenderValue(callerValue.Variables[0].Value) != "10" {
+			t.Fatalf("caller seed: %+v", callerValue)
+		}
+		raw := execute(debugsession.Request{Kind: "raw", RawCommand: "print", Arg: "v_seed"})
+		if len(raw.Raw) != 1 || raw.Raw[0].Value != "10" {
+			t.Fatalf("caller raw seed: %+v", raw)
+		}
+	}
+	page := execute(debugsession.Request{Kind: "expand", Handle: handle})
+	if line == "Values.fango:53" {
+		if len(page.Variables) != 50 || !page.More || debugger.RenderValue(page.Variables[49].Value) != "50" {
+			t.Fatalf("first list page: %+v", page)
+		}
+		page = execute(debugsession.Request{Kind: "expand", Handle: handle, Offset: 50})
+		if len(page.Variables) != 30 || page.More || page.Variables[0].Name != "50" || debugger.RenderValue(page.Variables[29].Value) != "80" {
+			t.Fatalf("second list page: %+v", page)
+		}
+		return
+	}
+	if len(page.Variables) != 12 || page.More {
+		t.Fatalf("record fields: %+v", page)
+	}
+	for _, field := range page.Variables {
+		if field.Name == "person" || field.Name == "tree" || field.Name == "pair" || field.Name == "numbers" || field.Name == "optional" || field.Name == "box" {
+			if field.Handle == 0 {
+				t.Fatalf("no nested handle for %s", field.Name)
+			}
+			children := execute(debugsession.Request{Kind: "expand", Handle: field.Handle})
+			if len(children.Variables) == 0 {
+				t.Fatalf("no children for %s", field.Name)
+			}
+			for _, v := range children.Variables {
+				rendered := debugger.RenderValue(v.Value)
+				if strings.Contains(rendered, "<unavailable") {
+					t.Fatalf("%s.%s = %s", field.Name, v.Name, rendered)
+				}
+			}
+			if field.Name == "person" && (children.Variables[0].Name != "name" || debugger.RenderValue(children.Variables[0].Value) != `"Ada"`) {
+				t.Fatalf("person: %+v", children)
+			}
+		}
+	}
+}
+
+func probeCallerStep(t *testing.T, client *rpc.Client, binary, mode string) {
+	manifest, err := nativedebug.ReadManifest(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &nativedebug.Controller{RPC: client, Manifest: manifest}
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	bp, err := c.Break("Values.fango:28")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Move("continue"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Delete(bp.ID); err != nil {
+		t.Fatal(err)
+	}
+	b := &nativedebug.SessionBackend{Controller: c}
+	s := debugsession.New(b)
+	event := s.Accept(b.Snapshot())
+	caller := -1
+	for i, frame := range event.Frames {
+		if i > 0 && strings.Contains(frame.Name, "V_Values_dot_run") && frame.Location.File == "Values.fango" {
+			caller = i
+			break
+		}
+	}
+	if caller < 0 {
+		t.Fatal("missing caller", event)
+	}
+	if _, err := s.Execute(debugsession.Request{Kind: "frame", Index: caller}); err != nil {
+		t.Fatal(err)
+	}
+	event, err = s.Execute(debugsession.Request{Kind: mode})
+	if err != nil || event.Error != "" {
+		t.Fatal(err, event.Error)
+	}
+	if s.SelectedFrame() != 0 {
+		t.Fatal("selection survived resume")
+	}
+	frames, err := c.Frames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, frame := range frames {
+		if frame.Function != nil && strings.Contains(frame.Function.Name, "V_Values_dot_run") && (mode == "finish" || i != 0) {
+			t.Fatalf("%s stopped inside selected caller's callee: %+v", mode, frames)
+		}
+	}
+	if _, source := manifest.Sources[c.State.CurrentThread.File]; !source {
+		t.Fatal("selected step stopped in generated code")
+	}
+	if err := c.Move("continue"); err != nil {
+		t.Fatal(err)
+	}
+	if !c.State.Exited || c.State.ExitStatus != 0 {
+		t.Fatal("selected stepping changed program outcome")
 	}
 }

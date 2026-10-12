@@ -44,7 +44,7 @@ func TestCapabilitiesAndHelp(t *testing.T) {
 		yes, no []string
 	}{
 		{Interpreter(), []string{"frame 0", "expand 1 50", "stop"}, []string{"args", "raw print x"}},
-		{Native(), []string{"args", "raw print x + 1", "raw locals"}, []string{"frame 0", "expand 1", "stop"}},
+		{Native(), []string{"args", "raw print x + 1", "raw locals", "frame 0", "expand 1"}, []string{"stop"}},
 	} {
 		var out bytes.Buffer
 		Help(&out, tc.f)

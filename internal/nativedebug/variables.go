@@ -10,14 +10,14 @@ import (
 // sourceBindings is deliberately conservative when separate statement scopes
 // share a line. The Go line table has no expression-column information. Never
 // guess which shadowed binding is current merely because DWARF exposes both.
-func (c *Controller) sourceBindings() (map[string]debugger.Binding, map[string]bool, error) {
-	t := c.State.CurrentThread
-	if t == nil {
-		return nil, nil, fmt.Errorf("no current frame")
+func (c *Controller) sourceBindings(frame int) (map[string]debugger.Binding, map[string]bool, error) {
+	loc, err := c.frameLocation(frame)
+	if err != nil {
+		return nil, nil, err
 	}
 	var scopes []debugger.NativeScope
 	for _, scope := range c.Manifest.Scopes {
-		if scope.File == t.File && scope.Line == t.Line {
+		if scope.File == loc.File && scope.Line == loc.Line {
 			scopes = append(scopes, scope)
 		}
 	}
@@ -43,14 +43,14 @@ func (c *Controller) sourceBindings() (map[string]debugger.Binding, map[string]b
 	return bindings, ambiguous, nil
 }
 
-func (c *Controller) variables(command, name string) ([]debugger.Variable, error) {
+func (c *Controller) variables(command, name string, frame int) ([]debugger.Variable, error) {
 	if command != "print" && name != "" {
 		return nil, fmt.Errorf("%s takes no arguments", command)
 	}
 	if command == "print" && name == "" {
 		return nil, fmt.Errorf("usage: print NAME (use raw print EXPR for Go expressions)")
 	}
-	bindings, ambiguous, err := c.sourceBindings()
+	bindings, ambiguous, err := c.sourceBindings(frame)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (c *Controller) variables(command, name string) ([]debugger.Variable, error
 			return nil, fmt.Errorf("no visible Fango binding %q; use raw print EXPR for Go expressions", name)
 		}
 	}
-	scope := map[string]any{"GoroutineID": c.Goroutine(), "Frame": 0}
+	scope := map[string]any{"GoroutineID": c.Goroutine(), "Frame": frame}
 	arguments := map[string]bool{}
 	if command != "print" {
 		// Classify names without loading synthetic dictionaries or adapters.
@@ -90,7 +90,19 @@ func (c *Controller) variables(command, name string) ([]debugger.Variable, error
 			values = append(values, debugger.Variable{Name: name, Type: b.Type, Value: debugger.Value{Kind: debugger.UnavailableValue, Text: "unavailable: multiple lexical scopes share this source line"}})
 			continue
 		}
-		values = append(values, debugger.Variable{Name: name, Type: b.Type, Value: c.preview(b.Runtime)})
+		r := c.reader(frame)
+		values = append(values, c.inspectWithReader(name, b.Type, valueRef{frame: frame, gid: c.Goroutine(), value: r.read(b.Runtime), expr: b.Runtime}, r))
 	}
 	return values, nil
+}
+
+func (c *Controller) frameLocation(frame int) (Location, error) {
+	frames, err := c.Frames()
+	if err != nil {
+		return Location{}, err
+	}
+	if frame < 0 || frame >= len(frames) {
+		return Location{}, fmt.Errorf("invalid frame")
+	}
+	return frames[frame].Location, nil
 }

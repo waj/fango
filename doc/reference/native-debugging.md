@@ -38,8 +38,7 @@ explicit span-unavailable notice.
 The [shared command reference](debugger-commands.md) defines commands,
 aliases, optional colons, repetition, and output formats for both debuggers.
 Native inspection additionally provides `args` and the `raw` commands.
-Frame selection, expansion, and cancelling a single REPL input are not native
-capabilities; unsupported commands report that explicitly.
+The REPL-only `stop` command is unsupported; `quit` terminates the native process.
 
 Use the logical filenames shown at stops, such as `mandelbrot.fango` or
 `<stdlib>/Range.fango`. Unambiguous path suffixes are accepted. For Mandelbrot,
@@ -67,6 +66,13 @@ the entire render; use `step` to enter it. Skipped calls can produce output or
 wait for IO before the next stop. Ctrl-C cancels the pending step, so a later
 `continue` runs with only the user breakpoints.
 
+`frame INDEX` selects a frame from `stack` without running the program and
+shows its source excerpt. `next` then runs until that activation reaches its
+next Fango location or returns; `finish` runs until it returns. Selecting a
+caller therefore runs through younger activations, while explicit breakpoints
+and interrupts still take precedence. `step` always starts from the actual
+execution point. Every new stop selects frame zero.
+
 Stepping follows the goroutine at the current stop; other goroutines may run.
 User breakpoints in other goroutines still stop execution. This is not an
 all-task stepping model. Ctrl-C interrupts execution; an interruption can
@@ -79,7 +85,7 @@ to the debugger.
 
 `args` and `locals` display source-visible bindings with their Fango names and
 source types. Compiler temporaries and evidence dictionaries are hidden.
-`print NAME` looks up one Fango binding in the current frame; it accepts a
+`print NAME` looks up one Fango binding in the selected frame; it accepts a
 name, not a Fango expression. For example, at Mandelbrot line 36, `print real`
 shows `real : Float = -2.3` on the first iteration.
 
@@ -97,14 +103,35 @@ source line or use the raw view to investigate.
 
 `raw args`, `raw locals`, and `raw print EXPR` retain Go names, types, and
 read-only Go expressions. Inspection does not inject target function calls.
-`stack` also continues to list native frames, including generated frames.
+`stack` lists native frames, including generated frames, with zero-based
+indexes for `frame INDEX`. All source and raw inspection commands use the
+selected frame. A generated/native frame without Fango scope metadata reports
+that explicitly; its raw view remains available.
 
 Source inspection uses the [shared structural preview rules](debugger-commands.md#structural-value-previews),
 including for generic source types. Native decoding reads memory without
 invoking `Show`, List accessors, or other target code. Each preview additionally
 allows at most 256 debugger reads; pointer and List-spine addresses detect
 cycles. Unknown representations remain opaque; the raw view is available for
-investigation. Native child expansion is not yet supported.
+investigation.
+
+Expandable records, tuples, ADTs, and Lists display `[handle ID]`.
+`expand ID [OFFSET]` reads up to 50 children: records use field names; tuple
+and constructor fields and List elements use zero-based indexes. Nested
+structural values receive their own handles. Child values use the shared
+renderer; native child entries do not currently include source type labels.
+Functions and opaque resources have no expansion handle. Handles retain the
+frame and goroutine where they were obtained, even after `frame INDEX`, and
+expire on resume or session exit.
+
+List expansion retains paging checkpoints for the current pause. Each request
+visits at most 512 spine nodes and uses at most 256 traversal reads; each child
+has its own bounded preview. A distant uncached offset can reach a traversal
+limit before producing a page. The diagnostic gives the reached offset;
+expand the same handle from that offset to continue. Cyclic or unreadable
+spines report a diagnostic instead of pretending the List ends. Native
+inspection paths are limited to 16 KiB; loaded addresses normally keep paths
+short across pages. Expansion never invokes target functions.
 
 Raw inspection retains its limits of two nested levels, 50 children, and
 256 string bytes.

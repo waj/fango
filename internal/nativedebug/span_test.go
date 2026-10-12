@@ -23,7 +23,7 @@ func TestSourceUnderlines(t *testing.T) {
 		{"invalid", []*debugger.NativeSpan{{Start: -1, End: 100}}, "expression span unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &Controller{Manifest: &Manifest{Sources: map[string]string{"Main.fango": text}}, State: State{CurrentThread: &Thread{Location: Location{File: "Main.fango", Line: 1}}}}
+			c := &Controller{RPC: &inspectionRPC{}, Manifest: &Manifest{Sources: map[string]string{"Main.fango": text}}, State: State{CurrentThread: &Thread{Location: Location{File: "Main.fango", Line: 1}}}}
 			for _, s := range tc.spans {
 				c.Manifest.Scopes = append(c.Manifest.Scopes, debugger.NativeScope{File: "Main.fango", Line: 1, Span: s})
 			}

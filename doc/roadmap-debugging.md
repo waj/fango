@@ -43,12 +43,14 @@ breakpoint statuses, selected frames, and pause-scoped handles use structured
 data, with parser, session, adapter, and backend transcript tests.
 [Structural value descriptions and rendering](design/debugging.md#shared-structural-values)
 are also shared, with bounded backend readers and one Fango formatter.
+Native frame selection, caller stepping, and paged value expansion follow the
+[inspection contract](reference/native-debugging.md#inspection-and-limits).
 
 Remaining steps:
 
-- Close capability gaps, including native frame selection and expansion,
-  source stack names, and consistent argument/local views. Advertise supported
-  operations explicitly instead of silently approximating unsupported ones.
+- Close capability gaps, including source stack names, source type labels
+  on native expansion children, and consistent argument/local views. Advertise
+  supported operations explicitly instead of silently approximating unsupported ones.
 - Reuse this session API for the editor adapter described under
   [delivery](#delivery-and-verification).
 

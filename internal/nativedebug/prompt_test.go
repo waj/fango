@@ -19,7 +19,7 @@ func TestSharedPromptInspection(t *testing.T) {
 	if strings.Count(out.String(), "x : Int = 20") != 2 || len(rpc.evaluated) != 2 {
 		t.Fatalf("%s; reads %v", &out, rpc.evaluated)
 	}
-	for _, want := range []string{"debugger: usage: print NAME (expressions are not evaluated)", "frame is not supported by the native debugger", "expand is not supported by the native debugger", "locals takes no arguments while stopped"} {
+	for _, want := range []string{"debugger: usage: print NAME (expressions are not evaluated)", "invalid or expired value handle", "locals takes no arguments while stopped"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q:\n%s", want, &out)
 		}

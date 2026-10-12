@@ -25,6 +25,8 @@ stopped. Debug command aliases do not reserve identifiers in Fango source.
 | `next` | `n` | Step over calls |
 | `finish` | `f` | Run until the activation returns |
 | `stack` | | List frames |
+| `frame INDEX` | | Select a frame for inspection and next/finish |
+| `expand HANDLE [OFFSET]` | | Page through structural children |
 | `locals` | | Inspect visible local bindings |
 | `print NAME` | | Inspect one binding without evaluating a Fango expression |
 | `quit` | `q`, `exit` | End the debugging session |
@@ -34,8 +36,6 @@ Backend capabilities and execution semantics still differ:
 
 | Operation | Interpreter | Native |
 | --- | --- | --- |
-| `frame INDEX` | Select a frame for inspection and next/finish | Not yet supported |
-| `expand HANDLE [OFFSET]` | Page through structural children | Not yet supported |
 | `args` | Parameters are included in locals | Separate argument view |
 | `locals` | Parameters, lexical locals, and captures | Locals and captures, excluding values classified as arguments |
 | `raw args`, `raw locals`, `raw print EXPR` | Not yet supported | Go-level inspection |
@@ -76,7 +76,7 @@ These are previews: truncated or opaque output is not a complete Fango
 expression. Native inspection also bounds debugger reads; an earlier backend
 read limit or unavailable memory can yield a shorter preview.
 
-Where expansion is supported, `expand HANDLE [OFFSET]` returns up to 50
+`expand HANDLE [OFFSET]` returns up to 50
 children, each with the same formatting and preview bounds. Handles expire
 when execution resumes or ends. See the backend references for frame access,
-raw inspection, and expansion availability.
+raw inspection, and additional traversal limits.

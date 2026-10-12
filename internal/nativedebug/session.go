@@ -14,7 +14,7 @@ import (
 type SessionBackend struct{ Controller *Controller }
 
 func (b *SessionBackend) Capabilities() debugsession.Capabilities {
-	return debugsession.Capabilities{Name: "native", Args: true, Raw: true, Interrupt: true}
+	return debugsession.Capabilities{Name: "native", Frame: true, Expand: true, Args: true, Raw: true, Interrupt: true}
 }
 func (b *SessionBackend) Interrupt() error { return b.Controller.Interrupt() }
 
@@ -36,18 +36,43 @@ func (b *SessionBackend) location(file string, line int) debugsession.Location {
 // Snapshot is available after launch and after every synchronous move.
 func (b *SessionBackend) Snapshot() debugsession.Event {
 	c := b.Controller
+	c.handles = nil
 	if c.State.Exited {
 		return debugsession.Event{Kind: "terminated", Reason: "exited", ExitStatus: c.State.ExitStatus}
 	}
 	event := debugsession.Event{Kind: "stopped", Reason: c.State.StopReason}
-	if t := c.State.CurrentThread; t != nil {
+	frames, err := b.frames()
+	if err != nil {
+		event.Error = err.Error()
+	}
+	event.Frames = frames
+	if len(frames) == 0 && c.State.CurrentThread != nil {
+		t := c.State.CurrentThread
 		event.Frames = []debugsession.Frame{{Location: b.location(t.File, t.Line)}}
+	}
+	if t := c.State.CurrentThread; t != nil {
 		if _, ok := c.Manifest.Sources[t.File]; !ok {
 			event.Messages = []string{"generated or native code; use step to reach Fango"}
 		}
 	}
 	return event
 }
+func (b *SessionBackend) frames() ([]debugsession.Frame, error) {
+	frames, err := b.Controller.Frames()
+	if err != nil {
+		return nil, err
+	}
+	var result []debugsession.Frame
+	for _, f := range frames {
+		name := "?"
+		if f.Function != nil {
+			name = f.Function.Name
+		}
+		result = append(result, debugsession.Frame{Name: name, Location: b.location(f.File, f.Line)})
+	}
+	return result, nil
+}
+
 func (b *SessionBackend) breakpoint(bp Breakpoint) debugsession.Breakpoint {
 	return debugsession.Breakpoint{ID: bp.ID, File: bp.File, Line: bp.Line, Hash: b.location(bp.File, bp.Line).Hash, Status: "verified"}
 }
@@ -56,7 +81,7 @@ func (b *SessionBackend) Execute(req debugsession.Request) (debugsession.Event, 
 	c := b.Controller
 	switch req.Kind {
 	case "continue", "step", "next", "finish":
-		err := c.Move(req.Kind)
+		err := c.moveFrame(req.Kind, req.Frame)
 		if err != nil {
 			var out struct{ State State }
 			if stateErr := c.call("State", map[string]any{"NonBlocking": true}, &out); stateErr != nil {
@@ -69,6 +94,7 @@ func (b *SessionBackend) Execute(req debugsession.Request) (debugsession.Event, 
 		}
 		return b.Snapshot(), err
 	case "quit":
+		c.handles = nil
 		return debugsession.Event{Kind: "terminated", Reason: "quit"}, nil
 	case "break":
 		bp, err := c.Break(fmt.Sprintf("%s:%d", req.File, req.Line))
@@ -93,24 +119,19 @@ func (b *SessionBackend) Execute(req debugsession.Request) (debugsession.Event, 
 		}
 		return debugsession.Event{Kind: "deleted", Index: req.Index}, nil
 	case "stack":
-		frames, err := c.Frames()
+		frames, err := b.frames()
 		if err != nil {
 			return debugsession.Event{}, err
 		}
-		event := debugsession.Event{Kind: "frames"}
-		for _, f := range frames {
-			name := "?"
-			if f.Function != nil {
-				name = f.Function.Name
-			}
-			event.Frames = append(event.Frames, debugsession.Frame{Name: name, Location: b.location(f.File, f.Line)})
-		}
-		return event, nil
+		return debugsession.Event{Kind: "frames", Frames: frames}, nil
 	case "locals", "args", "print":
-		values, err := c.variables(req.Kind, req.Arg)
+		values, err := c.variables(req.Kind, req.Arg, req.Frame)
 		return debugsession.Event{Kind: "inspection", Variables: values}, err
+	case "expand":
+		values, more, err := c.expand(req.Handle, req.Offset)
+		return debugsession.Event{Kind: "inspection", Variables: values, More: more}, err
 	case "raw":
-		values, err := c.rawVariables(req.RawCommand, req.Arg)
+		values, err := c.rawVariables(req.RawCommand, req.Arg, req.Frame)
 		return debugsession.Event{Kind: "raw", Raw: values}, err
 	case "sources":
 		event := debugsession.Event{Kind: "sources"}

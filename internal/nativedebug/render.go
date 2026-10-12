@@ -18,6 +18,8 @@ const previewNodes = debugger.PreviewNodes
 // it never calls target code, including Show or List accessors.
 type valueReader struct {
 	c         *Controller
+	frame     int
+	gid       int64
 	remaining int
 	nodes     int
 	visiting  map[uint64]bool
@@ -30,7 +32,7 @@ func (r *valueReader) read(expr string) variable {
 	r.remaining--
 	var out struct{ Variable variable }
 	err := r.c.call("Eval", map[string]any{
-		"Scope": map[string]any{"GoroutineID": r.c.Goroutine(), "Frame": 0},
+		"Scope": map[string]any{"GoroutineID": r.gid, "Frame": r.frame},
 		"Expr":  expr,
 		"Cfg":   map[string]any{"FollowPointers": true, "MaxVariableRecurse": 1, "MaxStringLen": debugger.PreviewStringBytes, "MaxArrayValues": previewItems, "MaxStructFields": previewItems},
 	}, &out)
@@ -165,24 +167,9 @@ func (r *valueReader) describe(v variable, expr string, depth int) debugger.Valu
 	return debugger.Value{Kind: debugger.OpaqueValue}
 }
 func (r *valueReader) construct(v variable, expr string, depth int, layout debugger.NativeType) debugger.Value {
-	var ctor *debugger.NativeConstructor
-	if layout.Kind == "tagged" {
-		tag, _ := r.field(v, expr, "Tag")
-		n, err := strconv.Atoi(tag.Value)
-		if err != nil || tag.Unreadable != "" {
-			return debugger.Value{Kind: debugger.UnavailableValue, Text: "unreadable constructor tag"}
-		}
-		for i := range layout.Constructors {
-			if layout.Constructors[i].Tag == n {
-				ctor = &layout.Constructors[i]
-				break
-			}
-		}
-	} else if len(layout.Constructors) == 1 {
-		ctor = &layout.Constructors[0]
-	}
-	if ctor == nil {
-		return debugger.Value{Kind: debugger.UnavailableValue, Text: "invalid constructor tag"}
+	ctor, reason := r.constructor(v, expr, layout)
+	if reason != "" {
+		return debugger.Value{Kind: debugger.UnavailableValue, Text: reason}
 	}
 	out := debugger.Value{Kind: debugger.ConstructorValue, Text: ctor.Name}
 	if layout.Kind == "record" {
@@ -239,6 +226,33 @@ func (r *valueReader) list(v variable, expr string, depth int) debugger.Value {
 }
 
 func (c *Controller) preview(expr string) debugger.Value {
-	r := &valueReader{c: c, remaining: previewReads, nodes: previewNodes, visiting: map[uint64]bool{}}
+	r := c.reader(0)
 	return r.describe(r.read(expr), expr, previewDepth)
+}
+
+func (r *valueReader) constructor(v variable, expr string, layout debugger.NativeType) (*debugger.NativeConstructor, string) {
+	var ctor *debugger.NativeConstructor
+	if layout.Kind == "tagged" {
+		tag, _ := r.field(v, expr, "Tag")
+		n, err := strconv.Atoi(tag.Value)
+		if err != nil || tag.Unreadable != "" {
+			return nil, "unreadable constructor tag"
+		}
+		for i := range layout.Constructors {
+			if layout.Constructors[i].Tag == n {
+				ctor = &layout.Constructors[i]
+				break
+			}
+		}
+	} else if len(layout.Constructors) == 1 {
+		ctor = &layout.Constructors[0]
+	}
+	if ctor == nil {
+		return nil, "invalid constructor tag"
+	}
+	return ctor, ""
+}
+
+func (c *Controller) reader(frame int) *valueReader {
+	return &valueReader{c: c, frame: frame, gid: c.Goroutine(), remaining: previewReads, nodes: previewNodes, visiting: map[uint64]bool{}}
 }

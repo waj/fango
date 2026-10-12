@@ -26,6 +26,7 @@ type fakeRPC struct {
 	commands     []string
 	canceled     int
 	failCancel   bool
+	failStack    bool
 }
 
 func frame(name string, offset int64, line int) Frame {
@@ -47,6 +48,9 @@ func (f *fakeRPC) Call(method string, in, out any) error {
 		}
 		return nil
 	case "Stacktrace":
+		if f.failStack {
+			return fmt.Errorf("unreadable stack")
+		}
 		return reply(out, map[string]any{"Locations": f.frames})
 	case "ListBreakpoints":
 		var bps []Breakpoint
@@ -309,5 +313,38 @@ func TestInterruptDuringNativeNextSetupDoesNotResume(t *testing.T) {
 	}
 	if rpc.continued != 0 || len(rpc.active) != 0 || rpc.canceled != 1 {
 		t.Fatalf("continued %d, remaining breakpoints %v, canceled %d", rpc.continued, rpc.active, rpc.canceled)
+	}
+}
+
+func TestSelectedCallerStepping(t *testing.T) {
+	parent := frame("main.V_parent", 10, 2)
+	child := frame("main.V_child", 20, 3)
+	caller := frame("main.V_main", 1, 4)
+	for _, mode := range []string{"next", "finish"} {
+		c, rpc := controller(stop{frames: []Frame{parent, caller}}, stop{frames: []Frame{caller}})
+		rpc.frames = []Frame{child, parent, caller}
+		c.State.CurrentThread.Location = child.Location
+		if err := c.moveFrame(mode, 1); err != nil {
+			t.Fatal(err)
+		}
+		want := "stepOut"
+		if mode == "finish" {
+			want += ",stepOut"
+		}
+		if strings.Join(rpc.commands, ",") != want {
+			t.Fatalf("%s: %v", mode, rpc.commands)
+		}
+		if len(rpc.active) != 0 || rpc.canceled != 1 {
+			t.Fatal("selected step leaked breakpoints")
+		}
+	}
+	// A breakpoint in a younger activation must interrupt the caller operation.
+	c, rpc := controller(stop{frames: []Frame{child, parent}, user: true})
+	rpc.frames = []Frame{child, parent}
+	if err := c.moveFrame("finish", 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(rpc.commands) != 1 || c.State.NextInProgress {
+		t.Fatal("ignored user breakpoint")
 	}
 }

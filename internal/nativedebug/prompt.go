@@ -18,8 +18,8 @@ type variable struct {
 	Len                           int64
 }
 
-func (c *Controller) rawVariables(command, expr string) ([]debugsession.RawValue, error) {
-	scope := map[string]any{"GoroutineID": c.Goroutine(), "Frame": 0}
+func (c *Controller) rawVariables(command, expr string, frame int) ([]debugsession.RawValue, error) {
+	scope := map[string]any{"GoroutineID": c.Goroutine(), "Frame": frame}
 	cfg := map[string]any{"FollowPointers": true, "MaxVariableRecurse": 2, "MaxStringLen": 256, "MaxArrayValues": 50, "MaxStructFields": 50}
 	if command == "print" {
 		if expr == "" {
@@ -69,6 +69,7 @@ func (c *Controller) prompt(input io.Reader, out io.Writer, backend *SessionBack
 	for terminal.Session.State() != "terminated" {
 		fmt.Fprint(out, debugui.Prompt)
 		if !scanner.Scan() {
+			c.handles = nil
 			session.Accept(debugsession.Event{Kind: "terminated", Reason: "input closed"})
 			return scanner.Err()
 		}

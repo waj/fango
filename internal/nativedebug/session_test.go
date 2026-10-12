@@ -34,7 +34,7 @@ func TestSessionSourceSnapshotsAndStructuredInspection(t *testing.T) {
 		t.Fatal(raw, err)
 	}
 	_, err = s.Execute(debugsession.Request{Kind: "expand", Handle: 1})
-	if err == nil || !strings.Contains(err.Error(), "not supported") {
+	if err == nil || !strings.Contains(err.Error(), "invalid or expired") {
 		t.Fatal(err)
 	}
 }

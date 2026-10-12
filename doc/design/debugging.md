@@ -125,7 +125,10 @@ epoch. Public handles map to backend handles only for the current pause and
 are never reused within a session. Resume, cancellation, completion, and
 termination discard them before further execution. Frame selection is local
 to the session; inspection and next/finish receive the selected backend frame
-index. Native frame selection and expansion remain unavailable capabilities.
+index. Native stop snapshots include the bounded Delve stack, so frame
+selection works without a preceding `stack` request. Frame indexes preserve
+Delve's native stack, including generated frames; raw inspection can access
+frames without source scope metadata.
 
 Resume failures must provide an authoritative state event or leave the session
 in an unknown state, where inspection and execution are rejected. The native
@@ -206,8 +209,12 @@ location. No replay or target function injection is involved.
 The selected goroutine restricts temporary stops; explicit user breakpoints
 retain precedence across goroutines. Next accepts the current activation or
 its caller; finish waits until the activation disappears. Activation identity
-combines function identity with Delve's stack-relative frame offset, so
+uses the selected stack frame, combining function identity with Delve's
+stack-relative frame offset, so
 recursion and goroutine stack movement do not reduce to a depth comparison.
+Selecting a caller starts with native step-out operations through younger
+activations, then uses the same next/finish stopping predicate. `step` ignores
+inspection selection and starts at the actual execution point.
 Next also keeps the starting PC armed for that goroutine and frame offset:
 this preserves same-line tail-loop iteration stops, which native line-based
 next would otherwise skip. An existing user breakpoint at that address is
@@ -237,7 +244,7 @@ avoids a second cache artifact and emits no target-side metadata tables.
 Ordinary emission does not collect scopes or layouts or add these comments.
 
 The frontend resolves bindings only from the scopes recorded for the current
-Fango file and line. Go's line table does not distinguish expression columns;
+selected frame's Fango file and line. Go's line table does not distinguish expression columns;
 when scopes on one line disagree about a name, lookup reports it unavailable.
 It never selects a binding by stripping a prefix or guessing between scopes.
 The native argument list classifies source arguments without loading synthetic
@@ -256,6 +263,28 @@ accessors. Depth, item, node, and RPC budgets bound inspection; visited pointer
 addresses detect cycles. The shared formatter presents its decoded tree;
 [native inspection limits](../reference/native-debugging.md#inspection-and-limits)
 own the additional read bounds.
+
+Native expansion references retain the original Delve frame, goroutine,
+loaded value, and compiler-derived access path. The controller owns the
+pause-scoped reference table; the shared session maps it to public handles.
+Movement, including failed attempts, stop snapshots, quit, and EOF discard
+the table. Frame selection leaves existing value references intact.
+
+Expansion unwraps pointer/interface representations and selects only the
+active constructor's fields using the same layout decoder as previews.
+Records return source field names; positional fields and List elements use
+indexes. Each child is a bounded shared preview with an optional new handle.
+Opaque values never expose their representation. Child source types are not
+in the layout metadata and are omitted rather than replaced with Go types.
+
+List paging walks from the nearest saved checkpoint, with a bounded number
+of spine visits and RPC reads. Reaching a limit retains a checkpoint and
+reports its offset, allowing continued traversal without an unbounded seek.
+Address-to-index tracking detects cycles while permitting a page to be read
+again. Read-only casts to Delve-reported addresses and quoted DWARF types
+anchor loaded children, keeping selector paths short across pages; neither
+addresses nor Go expressions become public handles. These references are
+valid only while the target is stopped. Inspection performs no target calls.
 
 Source excerpts use the shared presentation layer with binary-matched snapshots.
 Since the linked line table cannot disambiguate columns, the frontend checks

@@ -60,6 +60,8 @@ type Controller struct {
 	users       map[int]Breakpoint
 	broken      error
 	interrupted atomic.Bool
+	handles     map[uint64]*valueRef
+	nextHandle  uint64
 }
 
 func (c *Controller) call(method string, in, out any) error {
@@ -194,7 +196,10 @@ func shouldStop(mode string, start Frame, frames []Frame) bool {
 
 // Move enters calls using source breakpoints, but steps over/out using Delve
 // native operations so skipped callees run without per-statement traps.
-func (c *Controller) Move(mode string) (err error) {
+func (c *Controller) Move(mode string) error { return c.moveFrame(mode, 0) }
+
+func (c *Controller) moveFrame(mode string, selected int) (err error) {
+	c.handles = nil
 	c.interrupted.Store(false)
 	if c.broken != nil {
 		return c.broken
@@ -209,7 +214,7 @@ func (c *Controller) Move(mode string) (err error) {
 		return fmt.Errorf("unknown stepping mode %q", mode)
 	}
 	if mode != "step" {
-		return c.moveOver(mode)
+		return c.moveOver(mode, selected)
 	}
 	return c.stepSource()
 }
@@ -273,7 +278,7 @@ func (c *Controller) stepSource() (err error) {
 // moveOver leaves called functions uninstrumented. After returning into
 // generated scaffolding it seeks the next Fango site, preserving the original
 // activation until it actually returns (including recursive and tail calls).
-func (c *Controller) moveOver(mode string) (err error) {
+func (c *Controller) moveOver(mode string, selected int) (err error) {
 	frames, err := c.Frames()
 	if err != nil {
 		return err
@@ -281,7 +286,10 @@ func (c *Controller) moveOver(mode string) (err error) {
 	if len(frames) == 0 {
 		return fmt.Errorf("no stack for the selected goroutine")
 	}
-	start := frames[0]
+	if selected < 0 || selected >= len(frames) {
+		return fmt.Errorf("invalid frame")
+	}
+	start := frames[selected]
 	// A breakpoint, interrupt, or failed RPC can leave Delve's native stepping
 	// breakpoints pending. Never let a later continue inherit that operation.
 	defer func() {
@@ -329,7 +337,7 @@ func (c *Controller) moveOver(mode string) (err error) {
 		}
 	}
 	command := "next"
-	if mode == "finish" {
+	if mode == "finish" || selected > 0 {
 		command = "stepOut"
 	}
 	for {

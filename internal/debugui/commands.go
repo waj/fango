@@ -26,7 +26,7 @@ func Interpreter() Features {
 		Locals: "inspect parameters, locals, and captures", Interrupt: "cancel the current input"}
 }
 func Native() Features {
-	return Features{Capabilities: debugsession.Capabilities{Name: "native", Args: true, Raw: true, Interrupt: true},
+	return Features{Capabilities: debugsession.Capabilities{Name: "native", Frame: true, Expand: true, Args: true, Raw: true, Interrupt: true},
 		Quit: "terminate the launched process", Stack: "list native frames, including generated frames",
 		Locals: "inspect locals and captures", Interrupt: "interrupt execution"}
 }

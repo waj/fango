@@ -14,11 +14,18 @@ import (
 
 type inspectionRPC struct {
 	args, locals []variable
+	frames       []Frame
 	evaluated    []string
 }
 
 func (r *inspectionRPC) Call(method string, in, out any) error {
 	switch strings.TrimPrefix(method, "RPCServer.") {
+	case "Stacktrace":
+		frames := r.frames
+		if frames == nil {
+			frames = []Frame{frame("test", 1, 1)}
+		}
+		return reply(out, map[string]any{"Locations": frames})
 	case "ListFunctionArgs":
 		return reply(out, map[string]any{"Args": r.args})
 	case "ListLocalVars":
@@ -40,6 +47,7 @@ func (r *inspectionRPC) Call(method string, in, out any) error {
 }
 func TestSourceInspection(t *testing.T) {
 	r := &inspectionRPC{
+		frames: []Frame{frame("test", 1, 12)},
 		args:   []variable{{Name: "v_arg", Type: "int64", Value: "3"}, {Name: "ev_Num", Type: "dictionary"}},
 		locals: []variable{{Name: "v_inner", Type: "int64", Value: "7"}, {Name: "v_outer", Type: "int64", Value: "99"}, {Name: "t_anf", Value: "42"}},
 	}
