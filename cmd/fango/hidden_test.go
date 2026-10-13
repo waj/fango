@@ -168,6 +168,9 @@ consume n source =
 main = PackageUse.consume 1000 (PackageUse.make 7)
 `)
 	runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{}, "7000\n")
+	// Only the interpreter backend checks in this process; warm the cache here
+	// so the assertion holds with the compiled backend alone.
+	buildVerbose(t, path)
 	_, warm := buildVerbose(t, path, "-v")
 	if !strings.Contains(warm, "Checking  PackageTypes (from cache)") {
 		t.Fatal(warm)
