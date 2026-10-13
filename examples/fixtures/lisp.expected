@@ -1,0 +1,12 @@
+lisp> ...> make-adder
+lisp> add7
+lisp> 12
+lisp> (hello "world" #t)
+lisp> <stdin>:1:4: unbound symbol: missing
+lisp> retained
+<stdin>:1:21: car expects a nonempty list
+lisp> 9
+lisp> <stdin>:1:1: unbound symbol: skipped
+lisp> <stdin>:1:1: expected end of input
+lisp> 5
+lisp> 

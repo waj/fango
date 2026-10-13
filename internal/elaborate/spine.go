@@ -503,8 +503,8 @@ func matchShape(gen, occ types.Type, m map[int]types.Type, rows *[]rowPair) {
 	}
 }
 
-// matchAssignedRowLabel is matchAppliedRowLabel that first prefers a label
-// whose arguments agree with the parameters assigned so far.
+// matchAssignedRowLabel selects a label whose nominal argument structure and
+// already-assigned parameters agree with the occurrence.
 func matchAssignedRowLabel(pattern types.EffLabel, actual []types.EffLabel, used []bool, m map[int]types.Type) int {
 	for i, label := range actual {
 		if !used[i] && types.EffectLabelKey(pattern) == types.EffectLabelKey(label) {
@@ -517,8 +517,7 @@ func matchAssignedRowLabel(pattern types.EffLabel, actual []types.EffLabel, used
 		}
 		agrees := true
 		for j, arg := range pattern.Args {
-			assigned := types.SubstRigid(arg, m)
-			if len(types.RigidVarsIn(assigned)) == 0 && !types.Equal(assigned, label.Args[j]) {
+			if !assignedShapeAgrees(arg, label.Args[j], m) {
 				agrees = false
 				break
 			}
@@ -527,7 +526,41 @@ func matchAssignedRowLabel(pattern types.EffLabel, actual []types.EffLabel, used
 			return i
 		}
 	}
-	return matchAppliedRowLabel(pattern, actual, used)
+	return -1
+}
+
+// Even before every parameter is assigned, nominal structure distinguishes
+// Fail (Error a) from Fail String. Assigned parameters can themselves be
+// rigid occurrence variables: those are fixed identities, not wildcards.
+func assignedShapeAgrees(pattern, actual types.Type, assigned map[int]types.Type) bool {
+	resolved := types.SubstRigid(pattern, assigned)
+	if len(types.RigidVarsIn(resolved)) == 0 {
+		return types.Equal(resolved, actual)
+	}
+	switch p := pattern.(type) {
+	case *types.TVar:
+		if value, ok := assigned[p.ID]; ok {
+			return types.Equal(value, actual)
+		}
+		return true
+	case *types.TCon:
+		a, ok := actual.(*types.TCon)
+		if !ok || p.Unique != a.Unique || len(p.Args) != len(a.Args) {
+			return false
+		}
+		for i, arg := range p.Args {
+			if !assignedShapeAgrees(arg, a.Args[i], assigned) {
+				return false
+			}
+		}
+		return true
+	case *types.TFun:
+		a, ok := actual.(*types.TFun)
+		return ok && assignedShapeAgrees(p.Arg, a.Arg, assigned) && assignedShapeAgrees(p.Eff, a.Eff, assigned) && assignedShapeAgrees(p.Ret, a.Ret, assigned)
+	default:
+		// Row arguments are matched by matchType after value parameters.
+		return true
+	}
 }
 
 func matchAppliedRowLabel(pattern types.EffLabel, actual []types.EffLabel, used []bool) int {

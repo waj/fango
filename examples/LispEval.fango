@@ -1,0 +1,288 @@
+-- Strict Lisp evaluation. Closures capture immutable lexical bindings; global
+-- names use the current top-level table. Continue describes a tail call without
+-- retaining a Fango call frame. Non-tail operands use ordinary recursion.
+module LispEval exposing (Value, evaluate, initial, render, top)
+
+import Basics exposing (quotientBy, remainderBy)
+import Dict exposing (Dict)
+import Fail exposing (Fail)
+import LispReader exposing (Error(..), Expr(..), Form(..))
+import List
+import Result exposing (Result(..))
+import String
+
+type Value
+    = Number Int
+    | BooleanValue Bool
+    | TextValue String
+    | SymbolValue String
+    | ListValue (List Value)
+    | Builtin String
+    | Closure (List String) (List Expr) (Dict String Value)
+
+type Step = Finished Value | Continue (Dict String Value) (List Expr)
+
+bad : Expr -> String ->{Fail Error} value
+bad site message = Fail.fail (Error { offset = site.start, message = message, incomplete = False })
+
+initial : Dict String Value
+initial = Dict.fromList (List.map { name -> (name, Builtin name) }
+        ["+", "*", "-", "quotient", "remainder", "=", "<", "<=", ">", ">=", "list", "cons", "car", "cdr", "null?", "list?", "length", "equal?", "not"]
+)
+
+lookup : Dict String Value -> Dict String Value -> Expr -> String ->{Fail Error} Value
+lookup globals locals site name = case Dict.get name locals of
+    Just value -> value
+    Nothing -> case Dict.get name globals of
+        Just value -> value
+        Nothing -> bad site ("unbound symbol: " ++ name)
+
+quoted : Expr -> Value
+quoted expression = case expression.form of
+    Numeric n -> Number n
+    Boolean b -> BooleanValue b
+    Text text -> TextValue text
+    Symbol name -> SymbolValue name
+    Forms children -> ListValue (List.map quoted children)
+
+truth value = case value of
+    BooleanValue False -> False
+    _ -> True
+
+nameOf : Expr ->{Fail Error} String
+nameOf expression = case expression.form of
+    Symbol name -> name
+    _ -> bad expression "expected a symbol"
+
+parameters : Expr ->{Fail Error} List String
+parameters expression = case expression.form of
+    Forms items ->
+        names = List.map nameOf items
+        _ = List.foldl { name seen ->
+            if Dict.member name seen then bad expression ("duplicate parameter: " ++ name)
+            else Dict.insert name () seen
+        } Dict.empty names
+        names
+    _ -> bad expression "expected a parameter list"
+
+bodyRequired : Expr -> List Expr ->{Fail Error} ()
+bodyRequired site body = case body of
+    [] -> bad site "expected at least one body expression"
+    _ -> ()
+
+bindArguments : Expr -> Dict String Value -> List String -> List Value ->{Fail Error} Dict String Value
+bindArguments site locals names values = case (names, values) of
+    ([], []) -> locals
+    ([name | restNames], [value | restValues]) -> bindArguments site (Dict.insert name value locals) restNames restValues
+    _ -> bad site "wrong number of procedure arguments"
+
+integer : Expr -> Value ->{Fail Error} Int
+integer site value = case value of
+    Number number -> number
+    _ -> bad site "expected an integer"
+
+listValue : Expr -> Value ->{Fail Error} List Value
+listValue site value = case value of
+    ListValue items -> items
+    _ -> bad site "expected a proper list"
+
+same left right = case (left, right) of
+    (Number a, Number b) -> a == b
+    (BooleanValue a, BooleanValue b) -> a == b
+    (TextValue a, TextValue b) -> a == b
+    (SymbolValue a, SymbolValue b) -> a == b
+    (ListValue a, ListValue b) -> sameList a b
+    _ -> False
+
+sameList left right = case (left, right) of
+    ([], []) -> True
+    ([a | restA], [b | restB]) -> same a b && sameList restA restB
+    _ -> False
+
+numericPair : Expr -> String -> Value -> Value ->{Fail Error} Value
+numericPair site name left right =
+    a = integer site left
+    b = integer site right
+    case name of
+        "=" -> BooleanValue (a == b)
+        "<" -> BooleanValue (a < b)
+        "<=" -> BooleanValue (a <= b)
+        ">" -> BooleanValue (a > b)
+        ">=" -> BooleanValue (a >= b)
+        "quotient" -> if b == 0 then bad site "division by zero" else Number (quotientBy b a)
+        _ -> if b == 0 then bad site "division by zero" else Number (remainderBy b a)
+
+isNumericPair name = name == "=" || name == "<" || name == "<=" || name == ">" || name == ">=" || name == "quotient" || name == "remainder"
+
+builtin : Expr -> String -> List Value ->{Fail Error} Value
+builtin site name arguments =
+    if name == "+" then Number (List.foldl { item acc -> acc + integer site item } 0 arguments)
+    else if name == "*" then Number (List.foldl { item acc -> acc * integer site item } 1 arguments)
+    else if name == "list" then ListValue arguments
+    else if name == "-" then case arguments of
+        [] -> bad site "- expects at least one argument"
+        [only] -> Number (0 - integer site only)
+        [first | rest] -> Number (List.foldl { item acc -> acc - integer site item } (integer site first) rest)
+    else if isNumericPair name then case arguments of
+        [left, right] -> numericPair site name left right
+        _ -> bad site (name ++ " expects two arguments")
+    else case (name, arguments) of
+        ("cons", [first, rest]) -> ListValue [first | listValue site rest]
+        ("car", [value]) -> case listValue site value of
+            [first | _] -> first
+            [] -> bad site "car expects a nonempty list"
+        ("cdr", [value]) -> case listValue site value of
+            [_ | rest] -> ListValue rest
+            [] -> bad site "cdr expects a nonempty list"
+        ("null?", [value]) -> BooleanValue (case value of
+                ListValue [] -> True
+                _ -> False
+        )
+        ("list?", [value]) -> BooleanValue (case value of
+                ListValue _ -> True
+                _ -> False
+        )
+        ("length", [value]) -> Number (List.length (listValue site value))
+        ("equal?", [left, right]) -> BooleanValue (same left right)
+        ("not", [value]) -> BooleanValue (if truth value then False else True)
+        _ -> bad site ("wrong number of arguments to " ++ name)
+
+apply : Expr -> Value -> List Value ->{Fail Error} Step
+apply site procedure arguments = case procedure of
+    Builtin name -> Finished (builtin site name arguments)
+    Closure names body captured -> Continue (bindArguments site captured names arguments) body
+    _ -> bad site "expected a procedure"
+
+letBindings : Dict String Value -> Dict String Value -> Expr ->{Fail Error} Dict String Value
+letBindings globals locals bindings = case bindings.form of
+    Forms items -> List.foldl { item added ->
+        case item.form of
+            Forms [nameExpression, valueExpression] ->
+                name = nameOf nameExpression
+                if Dict.member name added then bad nameExpression ("duplicate binding: " ++ name)
+                else Dict.insert name (evaluate globals locals valueExpression) added
+            _ -> bad item "expected a binding (name expression)"
+    } Dict.empty items
+    _ -> bad bindings "expected a binding list"
+
+step : Dict String Value -> Dict String Value -> Expr ->{Fail Error} Step
+step globals locals expression = case expression.form of
+    Numeric n -> Finished (Number n)
+    Boolean b -> Finished (BooleanValue b)
+    Text text -> Finished (TextValue text)
+    Symbol name -> Finished (lookup globals locals expression name)
+    Forms [] -> bad expression "cannot evaluate an empty application"
+    Forms [head | arguments] -> case head.form of
+        Symbol "quote" -> case arguments of
+            [value] -> Finished (quoted value)
+            _ -> bad expression "quote expects one expression"
+        Symbol "if" -> case arguments of
+            [condition, yes, no] -> Continue locals [if truth (evaluate globals locals condition) then yes else no]
+            _ -> bad expression "if expects condition, then, and else expressions"
+        Symbol "lambda" -> case arguments of
+            [params | body] ->
+                names = parameters params
+                bodyRequired expression body
+                Finished (Closure names body locals)
+            _ -> bad expression "lambda expects parameters and a body"
+        Symbol "let" -> case arguments of
+            [bindings | body] ->
+                bodyRequired expression body
+                added = letBindings globals locals bindings
+                Continue (Dict.foldl { (name, value) env -> Dict.insert name value env } locals added) body
+            _ -> bad expression "let expects bindings and a body"
+        Symbol "begin" -> bodyRequired expression arguments; Continue locals arguments
+        Symbol "define" -> bad expression "define is only allowed at top level"
+        _ ->
+            procedure = evaluate globals locals head
+            values = List.map (evaluate globals locals) arguments
+            apply expression procedure values
+
+-- Every tail transition returns to this self-recursive loop. Closure calls
+-- extend the captured environment, never the caller's environment.
+drive : Dict String Value -> Dict String Value -> List Expr ->{Fail Error} Value
+drive globals locals expressions = case expressions of
+    [] -> ListValue []
+    [last] -> case step globals locals last of
+        Finished value -> value
+        Continue nextLocals body -> drive globals nextLocals body
+    [first | rest] ->
+        _ = evaluate globals locals first
+        drive globals locals rest
+
+evaluate : Dict String Value -> Dict String Value -> Expr ->{Fail Error} Value
+evaluate globals locals expression = drive globals locals [expression]
+
+define : Dict String Value -> Expr -> List Expr ->{Fail Error} (Dict String Value, Value)
+define globals site arguments = case arguments of
+    [target | body] -> case target.form of
+        Symbol name -> case body of
+            [valueExpression] ->
+                value = evaluate globals Dict.empty valueExpression
+                (Dict.insert name value globals, SymbolValue name)
+            _ -> bad site "define expects a name and one value expression"
+        Forms [nameExpression | params] ->
+            name = nameOf nameExpression
+            names = parameters { target | form = Forms params }
+            bodyRequired site body
+            (Dict.insert name (Closure names body Dict.empty) globals, SymbolValue name)
+        _ -> bad target "invalid definition target"
+    _ -> bad site "define expects a target and value or body"
+
+topOne : Dict String Value -> Expr ->{Fail Error} (Dict String Value, Value)
+topOne globals expression = case expression.form of
+    Forms [head | arguments] -> case head.form of
+        Symbol "define" -> define globals expression arguments
+        _ -> (globals, evaluate globals Dict.empty expression)
+    _ -> (globals, evaluate globals Dict.empty expression)
+
+topSequence globals expressions = case expressions of
+    [] -> (globals, Ok (ListValue []))
+    [last] -> top globals last
+    [first | rest] ->
+        (next, result) = top globals first
+        case result of
+            Err error -> (next, Err error)
+            Ok _ -> topSequence next rest
+
+-- Evaluates one top-level form. Successful definitions, including those in a
+-- top-level begin, remain visible if a later expression fails. A begin returns
+-- its last value. Failures return the still-valid definition table.
+top : Dict String Value -> Expr -> (Dict String Value, Result Error Value)
+top globals expression = case expression.form of
+    Forms [head | arguments] -> case head.form of
+        Symbol "begin" -> case arguments of
+            [] -> (globals, Err (Error { offset = expression.start, message = "expected at least one body expression", incomplete = False }))
+            _ -> topSequence globals arguments
+        _ -> captureTop globals expression
+    _ -> captureTop globals expression
+
+captureTop globals expression = case Fail.attempt { topOne globals expression } of
+    Ok (next, value) -> (next, Ok value)
+    Err error -> (globals, Err error)
+
+escapeText text reversed = case String.uncons text of
+    Nothing -> String.concat (List.reverse reversed)
+    Just part ->
+        escaped = case part.first of
+            '"' -> "\\\""
+            '\\' -> "\\\\"
+            '\n' -> "\\n"
+            '\r' -> "\\r"
+            '\t' -> "\\t"
+            _ -> String.fromChar part.first
+        escapeText part.rest [escaped | reversed]
+
+renderItems items = case items of
+    [] -> ""
+    [first | rest] -> List.foldl { item text -> text ++ " " ++ render item } (render first) rest
+
+render : Value -> String
+render value = case value of
+    Number number -> show number
+    BooleanValue boolean -> if boolean then "#t" else "#f"
+    TextValue text -> "\"" ++ escapeText text [] ++ "\""
+    SymbolValue name -> name
+    ListValue items -> "(" ++ renderItems items ++ ")"
+    Builtin _ -> "#<procedure>"
+    Closure _ _ _ -> "#<procedure>"

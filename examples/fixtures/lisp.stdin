@@ -1,0 +1,12 @@
+(define (make-adder x)
+  (lambda (y) (+ x y)))
+(define add7 (make-adder 7))
+(add7 5)
+'(hello "world" #t)
+(+ missing 1)
+(define retained 9) (car '()) (define skipped 1)
+retained
+skipped
+)
+(+ 2 3)
+:quit

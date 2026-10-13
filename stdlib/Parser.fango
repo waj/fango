@@ -1,0 +1,256 @@
+{-# no-prelude #-}
+-- Direct-style parsers over immutable lists of arbitrary tokens.
+--
+-- A parser is an ordinary function performing `Parse token` and
+-- `Fail (Error token)`. Sequencing uses ordinary calls and bindings.
+-- Alternatives commit when they consume input; `attempt` explicitly permits
+-- backtracking. Only the private cursor is restored: IO and other effects
+-- performed by a failed branch remain visible. Nested runners are independent.
+-- Tokens may carry source spans; offsets here count tokens, not text bytes.
+--
+-- ```fango
+-- import Parser
+-- import Result exposing (Result(..))
+--
+-- pair _ =
+--     left = Parser.satisfy "positive integer" { n -> n > 0 }
+--     right = Parser.any()
+--     (left, right)
+--
+-- Parser.runAll [2, 3] pair == Ok (2, 3)
+-- ```
+module Parser exposing
+    ( Error(..), Parse, Parsed(..), Reason(..)
+    , any, attempt, between, end, fail, label, many, offset, optional, orElse
+    , peek, run, runAll, satisfy, sepBy, some, token
+    )
+
+import Basics exposing (..)
+import Fail exposing (Fail)
+import List exposing (List)
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+
+-- Why parsing stopped.
+type Reason token
+    -- A mismatching token, or `Nothing` for end of input.
+    = Unexpected (Maybe token)
+    -- An application-supplied explanation.
+    | Message String
+    -- A repeated parser succeeded without advancing. This is an error in
+    -- the grammar; combinators never recover from it, including `attempt`.
+    | NonProgress
+    deriving (Eq, Show)
+
+-- A failure at a token boundary. The unexpected token can carry source spans;
+-- applications supply their own end-of-input position and rendering.
+type Error token =
+    {
+      -- Zero-based token offset, retained even when `attempt` rewinds.
+      offset : Int
+      -- Expected descriptions, in branch order with duplicates removed on ties.
+    , expected : List String
+      -- The mismatch, custom explanation, or invalid repetition.
+    , reason : Reason token
+    }
+    deriving (Eq, Show)
+
+-- A successful prefix parse.
+type Parsed token value =
+    {
+      -- The parser's result.
+      value : value
+      -- The unconsumed suffix of the original input.
+    , remaining : List token
+      -- The number of consumed tokens.
+    , offset : Int
+    }
+    deriving (Eq, Show)
+
+type Cursor token = { remaining : List token, offset : Int }
+
+-- Permission to read one token stream. `run` and `runAll` handle it;
+-- its checkpoint operations are private to this module.
+effect Parse token
+    parserCursor : () -> Cursor token
+    parserRestore : Cursor token -> ()
+
+-- Parses a prefix and returns its value and remaining input. Parse failures
+-- become `Err`; ambient effects pass through without being rolled back.
+run : List token -> (() ->{Parse token, Fail (Error token) | e} value) ->{e} Result (Error token) (Parsed token value)
+run input action = Fail.attempt {
+    handle action() with cursor = Cursor { remaining = input, offset = 0 } on
+        parserCursor () -> resume cursor with cursor
+        parserRestore nextCursor -> resume () with nextCursor
+        return value -> Parsed { value = value, remaining = cursor.remaining, offset = cursor.offset }
+}
+
+-- Parses the complete input, failing if any token remains after `action`.
+runAll : List token -> (() ->{Parse token, Fail (Error token) | e} value) ->{e} Result (Error token) value
+runAll input action =
+    case run input { value = action(); end(); value } of
+        Ok parsed -> Ok parsed.value
+        Err error -> Err error
+
+-- The next token without consumption, or `Nothing` at the end.
+peek : () ->{Parse token} Maybe token
+peek() = case parserCursor().remaining of
+    [] -> Nothing
+    [item | _] -> Just item
+
+-- The zero-based position of the next token.
+offset : () ->{Parse token} Int
+offset() = parserCursor().offset
+
+expected : String ->{Parse token, Fail (Error token)} value
+expected description = Fail.fail (Error { offset = offset(), expected = [description], reason = Unexpected peek() })
+
+-- Fails at the current token boundary with an application-supplied message.
+fail : String ->{Parse token, Fail (Error token)} value
+fail message = Fail.fail (Error { offset = offset(), expected = [], reason = Message message })
+
+-- Consumes one token, failing without consumption at end of input.
+any : () ->{Parse token, Fail (Error token)} token
+any() =
+    cursor = parserCursor()
+    case cursor.remaining of
+        [] -> expected "token"
+        [item | rest] ->
+            parserRestore { remaining = rest, offset = cursor.offset + 1 }
+            item
+
+-- Consumes the next token if the pure predicate accepts it. A mismatch leaves
+-- input untouched and expects `description`.
+satisfy : String -> (token -> Bool) ->{Parse token, Fail (Error token)} token
+satisfy description predicate = case peek() of
+    Just item -> if predicate item then any() else expected description
+    Nothing -> expected description
+
+-- Consumes a token equal to `wanted`, using the supplied expectation text.
+token : Eq token => String -> token ->{Parse token, Fail (Error token)} token
+token description wanted = satisfy description { item -> item == wanted }
+
+-- Succeeds only at end of input; consumes nothing.
+end : () ->{Parse token, Fail (Error token)} ()
+end() = case peek() of
+    Nothing -> ()
+    Just _ -> expected "end of input"
+
+fatal : Error token -> Bool
+fatal error = case error.reason of
+    NonProgress -> True
+    _ -> False
+
+recoverable : Int -> Error token ->{Parse token} Bool
+recoverable start error = if fatal error then False else offset() == start
+
+contains item items = case items of
+    [] -> False
+    [first | rest] -> first == item || contains item rest
+
+mergeLabels left right = case right of
+    [] -> left
+    [item | rest] -> mergeLabels (if contains item left then left else List.foldr { entry tail -> [entry | tail] } [item] left) rest
+
+mergeErrors : Error token -> Error token -> Error token
+mergeErrors left right =
+    if left.offset > right.offset then left
+    else if right.offset > left.offset then right
+    else case (left.reason, right.reason) of
+        (Unexpected _, Unexpected _) -> { left | expected = mergeLabels left.expected right.expected }
+        _ -> left
+
+-- Tries `right` only when `left` fails without net consumption. If both fail
+-- recoverably, keeps the farther error and combines tied expectations. A
+-- consuming failure wins immediately. On a tied custom error, the left wins.
+--
+-- ```fango
+-- import Parser
+-- import Result exposing (Result(..))
+--
+-- ab _ = _ = Parser.token "a" 'a'; Parser.token "b" 'b'
+-- ac _ = _ = Parser.token "a" 'a'; Parser.token "c" 'c'
+--
+-- Parser.runAll ['a', 'c'] { Parser.orElse { Parser.attempt ab } ac } == Ok 'c'
+-- ```
+orElse : (() ->{Parse token, Fail (Error token) | e} value) -> (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} value
+orElse left right =
+    start = offset()
+    case Fail.attempt left of
+        Ok value -> value
+        Err first ->
+            if recoverable start first then
+                case Fail.attempt right of
+                    Ok value -> value
+                    Err second -> Fail.fail (if recoverable start second then mergeErrors first second else second)
+            else Fail.fail first
+
+-- Restores the cursor on ordinary parse failure, preserving the diagnostic.
+-- Success retains consumption. Other effects are never undone; non-progress
+-- errors propagate without recovery.
+attempt : (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} value
+attempt action =
+    saved = parserCursor()
+    case Fail.attempt action of
+        Ok value -> value
+        Err error ->
+            if fatal error then Fail.fail error
+            else
+                parserRestore saved
+                Fail.fail error
+
+-- Answers `Nothing` on a non-consuming failure, otherwise preserves success
+-- or propagates the failure.
+optional : (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} Maybe value
+optional action = orElse { Just action() } { Nothing }
+
+collect action reversed =
+    start = offset()
+    case Fail.attempt action of
+        Ok value ->
+            if offset() == start then Fail.fail (Error { offset = start, expected = [], reason = NonProgress })
+            else collect action [value | reversed]
+        Err error -> if recoverable start error then List.reverse reversed else Fail.fail error
+
+-- Repeats until a non-consuming failure, returning values in input order.
+-- Consuming failures propagate. Empty success raises `NonProgress`.
+many : (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} List value
+many action = collect action []
+
+-- Like `many`, but requires at least one value and progress on every success.
+some : (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} List value
+some action =
+    start = offset()
+    first = action()
+    if offset() == start then Fail.fail (Error { offset = start, expected = [], reason = NonProgress })
+    else [first | many action]
+
+-- Zero or more values separated by a Unit-returning parser. A consumed
+-- separator must be followed by a value; trailing separators are rejected.
+sepBy : (() ->{Parse token, Fail (Error token) | e} value) -> (() ->{Parse token, Fail (Error token) | e} ()) ->{Parse token, Fail (Error token) | e} List value
+sepBy action separator = orElse {
+    first = action()
+    rest = many { separator(); action() }
+    [first | rest]
+} { [] }
+
+-- Parses opening and closing delimiters around `action`, returning its value.
+between : (() ->{Parse token, Fail (Error token) | e} ()) -> (() ->{Parse token, Fail (Error token) | e} ()) -> (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} value
+between opening closing action =
+    opening()
+    value = action()
+    closing()
+    value
+
+-- Replaces expectations on a non-consuming mismatch at the starting offset.
+-- Deeper errors, custom messages, and non-progress errors retain their detail.
+label : String -> (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} value
+label description action =
+    start = offset()
+    case Fail.attempt action of
+        Ok value -> value
+        Err error -> case error.reason of
+            Unexpected _ ->
+                if recoverable start error && error.offset == start then Fail.fail { error | expected = [description] }
+                else Fail.fail error
+            _ -> Fail.fail error

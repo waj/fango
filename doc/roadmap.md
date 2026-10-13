@@ -84,6 +84,11 @@ source lowering to ordinary delayed producer values. The proposal is separate
 from the deferred coroutine machinery and does not change current Stream or
 handler behavior.
 
+Syntax work waits for a concrete second consumer beyond generators. The
+effect-based [Parser](../stdlib/Parser.fango), exercised by the
+[Lisp interpreter](../examples/lisp.fango), already sequences through ordinary
+calls and does not require builder notation.
+
 ## Standard library expansion
 
 Add APIs when programs need them, preferably in Fango; use bundled natives only

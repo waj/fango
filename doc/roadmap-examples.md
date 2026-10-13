@@ -14,11 +14,6 @@ tests live in [CLI tests](../cmd/fango/e2e_test.go).
 - **Markov-chain generator:** Dict of List values, seeded Random, and large-input
   performance coverage against Go.
 
-## Interpreters and solvers
-
-- **Lisp interpreter:** reader, Dict environments, closures, special forms, and a
-  REPL loop; use it to assess language ergonomics across these features.
-
 ## Systems and performance
 
 - Add the unimplemented grep-lite performance comparison against Go.

@@ -1,0 +1,91 @@
+-- A small, strict Scheme-like Lisp built with effect-based parser combinators.
+--
+--     fango run examples/lisp.fango             # multiline REPL; :quit exits
+--     fango run examples/lisp.fango program.lisp
+--
+-- Values: signed Fango Int integers, #t/#f, Unicode strings, symbols, proper
+-- lists, and procedures. Only #f is false. Quote shorthand is supported; ;
+-- comments end at a line break. Strings accept \", \\, \n, \r, \t and literal
+-- newlines. Source columns count Unicode scalars, with LF starting a new line.
+--
+-- Forms: quote, if (three operands), lambda, parallel-binding let, begin, and
+-- top-level define (including procedure shorthand). Bodies are nonempty.
+-- Closures capture lexical bindings; global names see current definitions,
+-- supporting recursion, mutual recursion, and redefinition. Calls evaluate
+-- left to right. Tail calls use an explicit loop, including mutual tail calls.
+--
+-- Built-ins: + and * (zero or more arguments), - (one or more), quotient and
+-- remainder, binary = < <= > >=, list, cons, car, cdr, null?, list?, length,
+-- equal?, and not. cons requires a proper-list tail; procedures compare false.
+-- Arithmetic follows Fango Int, with division by zero reported as an error.
+--
+-- Every top-level result is printed; define returns its name and begin its
+-- last value. A file stops on its first error with status 1. The REPL preserves
+-- successful definitions after evaluation errors, discards the rest of the
+-- submission, and continues. It buffers the whole submission before evaluating
+-- anything; only unexpected EOF requests continuation. EOF during an unfinished
+-- submission reports an error and exits with status 1.
+--
+-- This is an example dialect, not Scheme compatibility: no mutation, macros,
+-- quasiquote, dotted pairs, floats, or local recursive definitions. Deeply nested
+-- non-tail expressions still use the host stack.
+
+import Dict exposing (Dict)
+import File
+import LispEval
+import LispReader
+import Process
+import Result exposing (Result(..))
+import String
+
+execute : String -> String -> Dict String LispEval.Value -> List LispReader.Expr ->{IO} (Dict String LispEval.Value, Bool)
+execute filename source globals forms = case forms of
+    [] -> (globals, True)
+    [first | rest] ->
+        (next, result) = LispEval.top globals first
+        case result of
+            Ok value ->
+                print (LispEval.render value)
+                execute filename source next rest
+            Err error ->
+                print (LispReader.diagnostic filename source error)
+                (next, False)
+
+repl : Dict String LispEval.Value -> String ->{IO} ()
+repl globals pending =
+    Console.write (if pending == "" then "lisp> " else "...> ")
+    case readLine() of
+        Nothing ->
+            if pending == "" then ()
+            else case LispReader.read pending of
+                Err error ->
+                    print (LispReader.diagnostic "<stdin>" pending error)
+                    Process.exit 1
+                Ok _ -> ()
+        Just line ->
+            if pending == "" && String.trim line.text == ":quit" then ()
+            else
+                source = pending ++ line.text ++ line.ending
+                case LispReader.read source of
+                    Err error ->
+                        if error.incomplete then repl globals source
+                        else
+                            print (LispReader.diagnostic "<stdin>" source error)
+                            repl globals ""
+                    Ok forms ->
+                        (next, _) = execute "<stdin>" source globals forms
+                        repl next ""
+
+file : String ->{IO} ()
+file path = case File.read path of
+    Err error -> print (IO.describeError error); Process.exit 1
+    Ok source -> case LispReader.read source of
+        Err error -> print (LispReader.diagnostic path source error); Process.exit 1
+        Ok forms ->
+            (_, succeeded) = execute path source LispEval.initial forms
+            if succeeded then () else Process.exit 1
+
+main() = case Process.args() of
+    [] -> repl LispEval.initial ""
+    [path] -> file path
+    _ -> print "usage: lisp [file]"; Process.exit 2

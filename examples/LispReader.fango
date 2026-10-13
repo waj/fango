@@ -1,0 +1,186 @@
+-- A Lisp lexer and reader using Parser at both character and token level.
+-- Positions are half-open Unicode-scalar offsets into the original text.
+module LispReader exposing (Error(..), Expr(..), Form(..), diagnostic, read)
+
+import Char
+import Fail exposing (Fail)
+import List
+import Parser
+import Result exposing (Result(..))
+import String
+
+type Expr = { form : Form, start : Int, end : Int }
+
+type Form
+    = Numeric Int
+    | Boolean Bool
+    | Text String
+    | Symbol String
+    | Forms (List Expr)
+
+type Error = { offset : Int, message : String, incomplete : Bool }
+
+type TokenKind = Open | Close | Quote | Atom Form
+type Token = { kind : TokenKind, start : Int, end : Int }
+
+characters text reversed = case String.uncons text of
+    Nothing -> List.reverse reversed
+    Just part -> characters part.rest [part.first | reversed]
+
+white char = char == ' ' || char == '\t' || char == '\n' || char == '\r' || Char.toCode char == 11 || Char.toCode char == 12
+
+delimiter char = white char || char == '(' || char == ')' || char == '\'' || char == '"' || char == ';'
+
+comment : () ->{Parser.Parse Char, Fail (Parser.Error Char)} ()
+comment() = case Parser.peek() of
+    Nothing -> ()
+    Just char ->
+        if char == '\n' || char == '\r' then ()
+        else
+            _ = Parser.any()
+            comment()
+
+trivia : () ->{Parser.Parse Char, Fail (Parser.Error Char)} ()
+trivia() = case Parser.peek() of
+    Nothing -> ()
+    Just char ->
+        if white char then
+            _ = Parser.any()
+            trivia()
+        else if char == ';' then
+            comment()
+            trivia()
+        else ()
+
+lexFailAt : Int -> String ->{Fail (Parser.Error Char)} value
+lexFailAt start message = Fail.fail (Parser.Error { offset = start, expected = [], reason = Parser.Message message })
+
+escape : () ->{Parser.Parse Char, Fail (Parser.Error Char)} Char
+escape() =
+    start = Parser.offset()
+    char = Parser.any()
+    case char of
+        'n' -> '\n'
+        'r' -> '\r'
+        't' -> '\t'
+        '"' -> '"'
+        '\\' -> '\\'
+        _ -> lexFailAt start "unsupported string escape"
+
+stringChars : List Char ->{Parser.Parse Char, Fail (Parser.Error Char)} String
+stringChars reversed =
+    char = Parser.label "closing quote" Parser.any
+    case char of
+        '"' -> String.fromList (List.reverse reversed)
+        '\\' -> stringChars [escape() | reversed]
+        _ -> stringChars [char | reversed]
+
+digit char = char >= '0' && char <= '9'
+
+digits text = case String.uncons text of
+    Nothing -> True
+    Just part -> digit part.first && digits part.rest
+
+integerText text = case String.uncons text of
+    Nothing -> False
+    Just part ->
+        if part.first == '+' || part.first == '-' then part.rest /= "" && digits part.rest
+        else digit part.first && digits part.rest
+
+atom : Int -> String ->{Fail (Parser.Error Char)} Form
+atom start text =
+    if text == "#t" then Boolean True
+    else if text == "#f" then Boolean False
+    else if text == "." then lexFailAt start "dotted lists are not supported"
+    else if integerText text then case String.toInt text of
+        Just number -> Numeric number
+        Nothing -> lexFailAt start "integer literal out of range"
+    else Symbol text
+
+lexToken : () ->{Parser.Parse Char, Fail (Parser.Error Char)} Token
+lexToken() =
+    start = Parser.offset()
+    first = Parser.peek()
+    kind = case first of
+        Just '(' -> _ = Parser.any(); Open
+        Just ')' -> _ = Parser.any(); Close
+        Just '\'' -> _ = Parser.any(); Quote
+        Just '"' -> _ = Parser.any(); Atom (Text (stringChars []))
+        _ -> Atom (atom start (String.fromList (Parser.some { Parser.satisfy "atom" { char -> if delimiter char then False else True } })))
+    Token { kind = kind, start = start, end = Parser.offset() }
+
+lexAll() =
+    trivia()
+    Parser.many { item = lexToken(); trivia(); item }
+
+expressionToken : Token -> Bool
+expressionToken item = case item.kind of
+    Close -> False
+    _ -> True
+
+isClosing : Token -> Bool
+isClosing item = case item.kind of
+    Close -> True
+    _ -> False
+
+closing : () ->{Parser.Parse Token, Fail (Parser.Error Token)} Token
+closing() = Parser.satisfy ")" isClosing
+
+expression : () ->{Parser.Parse Token, Fail (Parser.Error Token)} Expr
+expression() =
+    item = Parser.satisfy "expression" expressionToken
+    case item.kind of
+        Atom form -> Expr { form = form, start = item.start, end = item.end }
+        Open ->
+            children = Parser.many expression
+            last = closing()
+            Expr { form = Forms children, start = item.start, end = last.end }
+        Quote ->
+            child = expression()
+            name = Expr { form = Symbol "quote", start = item.start, end = item.end }
+            Expr { form = Forms [name, child], start = item.start, end = child.end }
+        Close -> Parser.fail "unexpected closing parenthesis"
+
+join separator texts = case texts of
+    [] -> ""
+    [first | rest] -> List.foldl { item acc -> acc ++ separator ++ item } first rest
+
+explanation : Parser.Error token -> String
+explanation error = case error.reason of
+    Parser.Unexpected _ -> "expected " ++ join " or " error.expected
+    Parser.Message message -> message
+    Parser.NonProgress -> "parser succeeded without consuming input"
+
+incomplete : Parser.Error token -> Bool
+incomplete error = case error.reason of
+    Parser.Unexpected Nothing -> True
+    _ -> False
+
+tokenPosition : Int -> Int -> List Token -> Int
+tokenPosition ending index tokens = case tokens of
+    [] -> ending
+    [item | rest] -> if index == 0 then item.start else tokenPosition ending (index - 1) rest
+
+-- Reads the complete submission. No evaluation occurs while input is incomplete.
+read : String -> Result Error (List Expr)
+read source =
+    case Parser.runAll (characters source []) lexAll of
+        Err error -> Err (Error { offset = error.offset, message = explanation error, incomplete = incomplete error })
+        Ok tokens -> case Parser.runAll tokens { Parser.many expression } of
+            Ok forms -> Ok forms
+            Err error -> Err (Error { offset = tokenPosition (String.length source) error.offset tokens, message = explanation error, incomplete = incomplete error })
+
+lineColumn text remaining line column =
+    if remaining <= 0 then (line, column)
+    else case String.uncons text of
+        Nothing -> (line, column)
+        Just part ->
+            if part.first == '\n' then lineColumn part.rest (remaining - 1) (line + 1) 1
+            else lineColumn part.rest (remaining - 1) line (column + 1)
+
+-- Renders source positions in scalars. LF starts a line; CR and tabs each
+-- count as one column, so CRLF starts one new line.
+diagnostic : String -> String -> Error -> String
+diagnostic filename source error =
+    (line, column) = lineColumn source error.offset 1 1
+    filename ++ ":" ++ show line ++ ":" ++ show column ++ ": " ++ error.message

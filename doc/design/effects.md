@@ -126,6 +126,15 @@ permission.
 
 ## Abort and cleanup protocol
 
+The [Parser library](../../stdlib/Parser.fango) composes a private resumptive
+cursor with aborting failures. A checkpoint saves an immutable token suffix
+and its offset. Alternatives determine commitment from the current cursor,
+while failures retain their diagnostic offset across explicit rewinds. Each
+runner installs its own cursor activation; rollback changes only that cell,
+not ambient effects. Repetition rejects successful callbacks that make no
+progress. All of this runs through ordinary calls and handler boundaries,
+without capturing or replaying a continuation.
+
 Abort evidence carries a fresh runtime target pointer to a non-zero-sized
 object. Performing evaluates payloads left to right and returns an ExitRequest;
 it does not execute the clause. The matching boundary restores definition-site

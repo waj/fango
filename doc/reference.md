@@ -27,6 +27,7 @@ defines the default scope.
 | Dates, times, and clocks | [Time](../stdlib/Time.fango), [Time.Date](../stdlib/Time/Date.fango), [Time.TimeOfDay](../stdlib/Time/TimeOfDay.fango), [Time.Instant](../stdlib/Time/Instant.fango), [Time.DateTime](../stdlib/Time/DateTime.fango), [Time.Duration](../stdlib/Time/Duration.fango), [Time.Period](../stdlib/Time/Period.fango), [Time.Zone](../stdlib/Time/Zone.fango), [Time.Clock](../stdlib/Time/Clock.fango) |
 | Streams and cursors | [Stream](../stdlib/Stream.fango), [Iterator](../stdlib/Iterator.fango) |
 | Text | [String](../stdlib/String.fango), [Char](../stdlib/Char.fango), [Regex](../stdlib/Regex.fango), [Encoding](../stdlib/Encoding.fango), [Text.Builder](../stdlib/Text/Builder.fango) |
+| Token-generic parsing | [Parser](../stdlib/Parser.fango) |
 | Bytes and buffered IO | [Bytes](../stdlib/Bytes.fango), [Reader](../stdlib/Reader.fango), [Writer](../stdlib/Writer.fango), [Text.Reader](../stdlib/Text/Reader.fango), [Text.Writer](../stdlib/Text/Writer.fango) |
 | Handles, console, process, files, and sockets | [IO](../stdlib/IO.fango), [Console](../stdlib/Console.fango), [Process](../stdlib/Process.fango), [File](../stdlib/File.fango), [Net](../stdlib/Net.fango) |
 | URLs and HTTP | [Url](../stdlib/Url.fango), [Http](../stdlib/Http.fango), [Http.Wire](../stdlib/Http/Wire.fango), [Http.Server](../stdlib/Http/Server.fango), [Http.Server.Route](../stdlib/Http/Server/Route.fango), [Http.GZip](../stdlib/Http/GZip.fango), [Http.Client](../stdlib/Http/Client.fango) |

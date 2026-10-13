@@ -13,6 +13,11 @@ It names a module whose ordinary functions supply sequencing and delay. It is
 not a new algebraic effect handler: `yield` in this proposal builds a producer
 value, and a call to an ordinary function cannot suspend its caller.
 
+Implementation is deferred until a concrete second consumer justifies the
+shared syntax. The effect-based [Parser](../stdlib/Parser.fango) and its
+[Lisp consumer](../examples/lisp.fango) use ordinary direct-style sequencing;
+they do not establish a need for a parser builder.
+
 ## Start with a producer value
 
 Imagine a bundled `Generator` module with this private representation. These
@@ -60,7 +65,7 @@ work is an ordinary Fango value containing a closure.
 The representation can be the state of today's stream:
 
 ```fango
-toStream : Producer a e () -> Stream.Stream (Producer a e ()) a e
+toStream : Producer a e () -> Stream.Stream a e
 toStream producer = Stream.unfold producer step
 ```
 
@@ -215,19 +220,10 @@ than proving those laws or `delay`'s timing.
 `pure`, `bind`, and `delay` in another module may have
 different concrete types, provided the lowered calls type-check and the module
 defines coherent sequencing and timing. `yield` is optional and its meaning
-belongs to that module. A parser builder, for example, could use the same
-`return`, bare-action, and `=` forms without providing `yield`:
+belongs to that module. A second consumer must demonstrate why its sequencing
+needs this translation rather than ordinary calls and effects.
 
-```fango
-pair =
-    build Parser
-        left = Parser.integer
-        right = Parser.integer
-        return (left, right)
-```
-
-`Parser` and its operations are only an example of the generic syntax; no
-parser builder is proposed for the first delivery. The module is selected by
+The module is selected by
 name, rather than inferred from the block's expected result type, so name
 resolution and error messages have an unambiguous target. The name must resolve
 through an ordinary import; a builder is not a runtime value.
@@ -347,8 +343,8 @@ it restore owned coroutine execution.
    `Generator` or `Stream` identities.
 
 When implemented, move the durable syntax and diagnostics to the reference,
-the lowering invariant to design, and library behavior to the Stream or a new
-Generator reference topic. Update the VS Code grammar and tokenizer fixture
+the lowering invariant to design, and library behavior to the module's source
+comments. Update the VS Code grammar and tokenizer fixture
 for new syntax, retain Core lint and differential checks, run `make
 test-grammar`, `make test`, and `go vet ./benchmarks`. Benchmark only on an
 otherwise idle machine if measurements are needed to judge this allocation

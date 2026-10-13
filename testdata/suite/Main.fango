@@ -265,6 +265,7 @@ import SubsumptionSharedOpenRow
 import TailLoopSwap
 import TailLoopUnitarg
 import Test
+import ParserCombinators
 import TestEffectfulBody
 import TestReporter
 import TextBuilder
@@ -574,5 +575,6 @@ main() =
             , WriterCollecting.tests
             , WriterScopedPure.tests
             , WriterWindow.tests
+            , ParserCombinators.tests
             ]
     )

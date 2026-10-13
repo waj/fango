@@ -1,0 +1,149 @@
+module ParserCombinators exposing (tests)
+
+import Expect
+import Fail exposing (Fail)
+import List
+import Parser
+import Result exposing (Result(..))
+import State
+import Test
+
+eat char = _ = Parser.token (show char) char; ()
+ab() = eat 'a'; Parser.token "b" 'b'
+ac() = eat 'a'; Parser.token "c" 'c'
+abc() = eat 'a'; eat 'b'; Parser.token "c" 'c'
+
+type Token = Word String | Number Int deriving (Eq, Show)
+
+word : () ->{Parser.Parse Token, Fail (Parser.Error Token)} Token
+word() = Parser.satisfy "word" { item ->
+    case item of
+        Word _ -> True
+        _ -> False
+}
+
+outside : () ->{Fail String} Char
+outside() = Fail.fail "outside"
+
+foreignItem : () ->{Parser.Parse Char, Fail (Parser.Error Char), Fail String} Char
+foreignItem() = eat 'a'; outside()
+
+foreignFailure : () ->{Fail String} Result (Parser.Error Char) (List Char)
+foreignFailure() = Parser.runAll ['a'] { Parser.many foreignItem }
+
+tests : Test.Test {}
+tests = Test.describe "Parser"
+    [ Test.test "generic tokens and prefix result" {
+        result = Expect.ok (Parser.run [Word "hello", Number 7] word)
+        Expect.equal (Word "hello") result.value
+        Expect.equal [Number 7] result.remaining
+        Expect.equal 1 result.offset
+        error = Expect.err (Parser.runAll [Word "hello", Number 7] word)
+        Expect.equal 1 error.offset
+        Expect.equal (Parser.Unexpected (Just (Number 7))) error.reason
+        Expect.equal ["end of input"] error.expected
+    }
+    , Test.test "primitives and empty input" {
+        Expect.equal (Ok ((Just 'a', 0), 'a', (Nothing, 1))) (Parser.runAll ['a'] {
+                before = Parser.peek()
+                start = Parser.offset()
+                value = Parser.any()
+                after = Parser.peek()
+                ((before, start), value, (after, Parser.offset()))
+        })
+        empty : List Char
+        empty = []
+        error = Expect.err (Parser.runAll empty Parser.any)
+        Expect.equal (Parser.Unexpected Nothing) error.reason
+        Expect.equal 0 error.offset
+    }
+    , Test.test "consumption commits" {
+        error = Expect.err (Parser.runAll ['a', 'c'] { Parser.orElse ab ac })
+        Expect.equal 1 error.offset
+        Expect.equal ["b"] error.expected
+        Expect.equal (Ok 'c') (Parser.runAll ['a', 'c'] { Parser.orElse { Parser.attempt ab } ac })
+        Expect.equal (Ok 'b') (Parser.runAll ['a', 'b'] { Parser.attempt ab })
+    }
+    , Test.test "farthest error survives rewind" {
+        error = Expect.err (Parser.runAll ['a', 'b', 'x'] { Parser.orElse { Parser.attempt abc } { Parser.token "z" 'z' } })
+        Expect.equal 2 error.offset
+        Expect.equal ["c"] error.expected
+        Expect.equal (Parser.Unexpected (Just 'x')) error.reason
+        committed = Expect.err (Parser.runAll ['a', 'b', 'x'] { Parser.orElse { Parser.attempt abc } ac })
+        Expect.equal 1 committed.offset
+        Expect.equal ["c"] committed.expected
+    }
+    , Test.test "ties merge and deduplicate" {
+        error = Expect.err (Parser.runAll ['x'] { Parser.orElse { Parser.token "a" 'a' } { Parser.orElse { Parser.token "b" 'b' } { Parser.token "a" 'a' } } })
+        Expect.equal ["a", "b"] error.expected
+        first : Result (Parser.Error Char) Char
+        first = Parser.runAll ['x'] { Parser.orElse { Parser.fail "first" } { Parser.fail "second" } }
+        Expect.equal (Parser.Message "first") (Expect.err first).reason
+    }
+    , Test.test "optional and repetition preserve consuming failures" {
+        Expect.equal (Ok Nothing) (Parser.runAll [] { Parser.optional ab })
+        Expect.equal (Ok (Just 'b')) (Parser.runAll ['a', 'b'] { Parser.optional ab })
+        Expect.equal 1 (Expect.err (Parser.runAll ['a', 'c'] { Parser.optional ab })).offset
+        Expect.equal (Ok ['b', 'b']) (Parser.runAll ['a', 'b', 'a', 'b'] { Parser.many ab })
+        Expect.equal 3 (Expect.err (Parser.runAll ['a', 'b', 'a', 'c'] { Parser.many ab })).offset
+        Expect.equal (Ok []) (Parser.runAll [] { Parser.many ab })
+        Expect.equal 0 (Expect.err (Parser.runAll [] { Parser.some ab })).offset
+        Expect.equal (Ok ['b']) (Parser.runAll ['a', 'b'] { Parser.some ab })
+    }
+    , Test.test "nonprogress cannot be swallowed" {
+        input : List Char
+        input = []
+        empty() = 7
+        Expect.equal Parser.NonProgress (Expect.err (Parser.runAll input { Parser.many empty })).reason
+        Expect.equal Parser.NonProgress (Expect.err (Parser.runAll input { Parser.some empty })).reason
+        result = Parser.runAll input { Parser.orElse { Parser.attempt { Parser.many empty } } { [] } }
+        Expect.equal Parser.NonProgress (Expect.err result).reason
+        Expect.equal Parser.NonProgress (Expect.err (Parser.runAll input { Parser.optional { Parser.many empty } })).reason
+    }
+    , Test.test "delimiters and separators" {
+        parse() = Parser.between { eat '(' } { eat ')' } { Parser.sepBy { Parser.token "a" 'a' } { eat ',' } }
+        Expect.equal (Ok ['a', 'a']) (Parser.runAll ['(', 'a', ',', 'a', ')'] parse)
+        Expect.equal (Ok []) (Parser.runAll ['(', ')'] parse)
+        error = Expect.err (Parser.runAll ['(', 'a', ',', ')'] parse)
+        Expect.equal 3 error.offset
+        Expect.equal ["a"] error.expected
+    }
+    , Test.test "labels preserve deeper and custom errors" {
+        shallow = Expect.err (Parser.runAll ['x'] { Parser.label "pair" ab })
+        Expect.equal ["pair"] shallow.expected
+        deep = Expect.err (Parser.runAll ['a', 'x'] { Parser.label "pair" { Parser.attempt ab } })
+        Expect.equal ["b"] deep.expected
+        custom : Result (Parser.Error Char) Char
+        custom = Parser.runAll [] { Parser.label "ignored" { Parser.fail "custom" } }
+        Expect.equal (Parser.Message "custom") (Expect.err custom).reason
+    }
+    , Test.test "backtracking retains ambient state" {
+        observed = State.run 0 {
+            Parser.runAll ['a', 'c'] {
+                Parser.orElse { Parser.attempt { State.put (State.get() + 1); ab() } } ac
+            }
+        }
+        Expect.equal (Ok 'c') observed.value
+        Expect.equal 1 observed.state
+    }
+    , Test.test "unrelated failures propagate" {
+        result : Result String (Result (Parser.Error Char) (List Char))
+        result = Fail.attempt foreignFailure
+        Expect.equal (Err "outside") result
+    }
+    , Test.test "nested runners of the same token type are independent" {
+        observed = Parser.runAll ['a', 'b'] {
+            eat 'a'
+            inner = Parser.runAll ['a', 'c'] { Parser.orElse { Parser.attempt ab } ac }
+            last = Parser.any()
+            (inner, last)
+        }
+        Expect.equal (Ok (Ok 'c', 'b')) observed
+    }
+    , Test.test "long repetition" {
+        result = Parser.runAll (List.range 1 5000) { Parser.many Parser.any }
+        Expect.equal 5000 (List.length (Expect.ok result))
+    }
+    ]
+
+main() = Test.run tests
