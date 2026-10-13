@@ -51,7 +51,10 @@ arguments in the flat Go function signature.
 The explicit annotation on `Stream.foldStep` fixes the combining callback's
 first arrow to be pure. Its flat callback can therefore run without constructing
 an intermediate callable for each element; a compiled allocation test covers
-empty, singleton, and long scalar streams.
+empty, singleton, and long scalar streams. `Stream.takeStep` is annotated for a
+different reason: inferred alone, its counter generalizes over `Num` and `Ord`,
+so each step would compare and decrement through class dictionaries even though
+`take` supplies an `Int`.
 
 Workers with a qualifying parameter receive a plain Go function for the selected
 mode. A known sequence of lambda bodies becomes one literal with all saturated

@@ -164,6 +164,38 @@ func TestStreamFoldAllocationSlope(t *testing.T) {
 	}
 }
 
+// Stream.takeStep's annotation fixes its counter to Int. Inferred alone it
+// generalizes over Num and Ord, and every step would compare and decrement
+// through class dictionaries.
+func TestStreamTakeCountsWithoutDictionaries(t *testing.T) {
+	files := emittedProject(t, filepath.Join("..", "..", "benchmarks", "existentialcompare", "workload.fango"))
+	file, err := parser.ParseFile(token.NewFileSet(), "Stream.go", generatedFile(t, files, "modules/Stream/module.go"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*goast.FuncDecl)
+		if !ok || (fn.Name.Name != "V_Stream_dot_takeStep" && fn.Name.Name != "V_Stream_dot_takeStep_exit") {
+			continue
+		}
+		found++
+		var params bytes.Buffer
+		for _, param := range fn.Type.Params.List {
+			goast.Fprint(&params, token.NewFileSet(), param.Type, nil)
+		}
+		if strings.Contains(params.String(), "_dictionary_") {
+			t.Errorf("%s receives class dictionaries", fn.Name.Name)
+		}
+		if !strings.Contains(params.String(), "int64") {
+			t.Errorf("%s does not count with int64", fn.Name.Name)
+		}
+	}
+	if found != 2 {
+		t.Fatalf("found %d take workers", found)
+	}
+}
+
 func TestOptimizedAndGeneralLoweringAgree(t *testing.T) {
 	testLoweringAgreement(t, "backend_lowering")
 }

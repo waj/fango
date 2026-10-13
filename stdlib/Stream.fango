@@ -69,6 +69,7 @@ listStep values = case values of
 fromList : List a -> Stream a e
 fromList values = unfold values listStep
 
+mapStep : (a ->{e} b) -> (state ->{e} Maybe (a, state)) -> state ->{e} Maybe (b, state)
 mapStep action step state = case step state of
     Nothing -> Nothing
     Just (value, next) -> Just (action value, next)
@@ -101,6 +102,7 @@ filterStep predicate step state = case step state of
 filter : (a ->{e} Bool) -> Stream a e -> Stream a e
 filter predicate (Stream { initial = initial, step = step }) = unfold initial (filterStep predicate step)
 
+takeStep : (state ->{e} Maybe (a, state)) -> (Int, state) ->{e} Maybe (a, (Int, state))
 takeStep step (remaining, state) =
     if remaining <= 0 then Nothing
     else case step state of
@@ -159,6 +161,7 @@ forEach action source = fold { value _ -> action value } () source
 toList : Stream a e ->{e} List a
 toList source = List.reverse (fold { value values -> [value | values] } [] source)
 
+zipStep : (left ->{e} Maybe (a, left)) -> (right ->{e} Maybe (b, right)) -> (left, right) ->{e} Maybe ((a, b), (left, right))
 zipStep left right (leftState, rightState) = case left leftState of
     Nothing -> Nothing
     Just (a, leftNext) -> case right rightState of
