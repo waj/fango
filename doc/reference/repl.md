@@ -14,9 +14,11 @@ scope. Names resolve exactly as they do in a module: an unqualified name must
 be exposed by the prelude, an import, or a prompt declaration, and a qualifier
 must be an imported module's name or alias, so `Dict.empty` is an
 `UNKNOWN QUALIFIER` until `import Dict`, while `IO.write` works because the
-prelude imports `IO`. The prompt owns the session's standard streams as a
-program's entry does: an input that uses the `Console` effect runs under
-[`Console.runSystem`](../../stdlib/Console.fango). Definitions echo
+prelude imports `IO`. An input runs under the
+[default handlers](commands.md#default-handlers) of the effects it performs
+that no handler level grants, as a program's entry runs `main`: `print` uses
+the session's standard streams and `Random.int` draws from system entropy.
+Definitions echo
 their inferred types; expressions print a value and type. Errors do not end the
 session. Redefinition is allowed at the prompt, while existing memoized values
 and closures retain earlier bindings.
@@ -223,7 +225,8 @@ The head runs once, so what it holds lasts for the level: `use Client.run`
 keeps its connection pool across inputs, and `use State.run 0` its state. An
 input may perform what any level's callback may, besides IO and `Fail`; when
 several levels grant the same effect, one whose type arguments already agree is
-used, and otherwise the innermost. `:uses` lists each level's item, the effects
+used, and otherwise the innermost. A level takes precedence over an effect's
+default handler. `:uses` lists each level's item, the effects
 its callback may perform, and its binders.
 
 `use patterns <- head` binds the callback's parameters for the inputs that

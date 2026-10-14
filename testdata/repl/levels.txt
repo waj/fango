@@ -27,13 +27,14 @@ loaded Http.Client
 > 1> 10 : Int
 1> () : ()
 1> 15 : Int
+1> | | Ask : effect
 1> -- UNHANDLED EFFECT ------------------------------------- <repl>
 
-This performs `Http`, and nothing at the prompt handles it. Run it inside
+This performs `Ask`, and nothing at the prompt handles it. Run it inside
 a handler, or install one with `use` for the inputs that follow.
 
-1| Client.getText "http://example.com/"
-   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1| ask()
+   ^^^^^
 1> StateResult { value = (), state = 15 } : StateResult Int ()
 > answer : a -> Result b Bytes
 > 1> 2> "ok" : String

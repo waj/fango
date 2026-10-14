@@ -564,3 +564,37 @@ func TestMainIsAnOrdinaryPromptName(t *testing.T) {
 		t.Fatalf("prompt main:\n%s", got)
 	}
 }
+
+// The prompt runs an input under the default handlers of the effects it
+// performs, as a program's entry runs `main`; a level takes precedence.
+func TestPromptUsesDefaultHandlers(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader(`import Random
+import Runtime.Entry
+#[Runtime.Entry.DefaultHandler `+"`runGreeter`"+`]
+effect Greeter
+    greet : String -> String
+
+runGreeter : (() ->{Greeter | e} a) ->{e} a
+runGreeter action =
+    handle action() on
+        greet name -> resume ("Hello, " ++ name)
+
+greet "prompt"
+Random.int 3 3
+saved = greet "value"
+saved
+use Random.runSeeded 1
+Random.int 4 4
+:quit
+`), &out)
+	got := out.String()
+	for _, want := range []string{`"Hello, prompt" : String`, "3 : Int", `saved : String`, `"Hello, value" : String`, "4 : Int"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "UNHANDLED") || strings.Contains(got, "FAILURE") {
+		t.Fatalf("default handlers were not applied:\n%s", got)
+	}
+}

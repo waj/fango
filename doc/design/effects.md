@@ -234,8 +234,8 @@ and encoding stay in Fango above them. `Console.runSystem` answers them with
 the IO handle natives on the host's standard handles, and turns a stream
 error into the host panic that ends the program, so no Console call raises
 and the diagnostic never becomes program output. Programs get that runner as
-`main`'s [default handler](pipeline.md#entry-assembly); the REPL applies it
-to inputs that use the console.
+`main`'s [default handler](pipeline.md#entry-assembly), and the REPL applies
+defaults to its inputs the same way.
 
 A callee row that lists a label and also has a tail, such as a runner's
 `{Out | e}`, forwards that label's evidence in the residual row too. Rows

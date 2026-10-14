@@ -40,10 +40,13 @@ leaves nothing to undo but the installation, which the session restores from
 the names' prior bindings before any level it may have ended is popped.
 
 Print is ordinary Display-constrained Console code over `display` and the
-`Console` effect's byte write; the session's console runner answers it with
-the session's standard streams. An input or an effectful value definition
-that uses the console is checked a second time under `Console.runSystem`, so
-one that does not keeps its own shape, laziness, and stack. Tooling evaluates
+`Console` effect's byte write. An input or an effectful value definition is
+checked first with the effects no level grants deferred, when they declare
+default handlers. If any were, the checker restores its checkpoint and checks
+the input again inside the same `Runtime.Entry.assemble` splice a program's
+entry uses, built around a thunk of the input; an input that performs none
+keeps its own shape, laziness, and stack. The session's standard handles make
+`Console.runSystem` answer with the session's streams. Tooling evaluates
 an observed expression once. The REPL echoes a result through available Show
 evidence, the representation, so a String result is quoted. Without evidence
 it shows an opaque typed placeholder or `<function>`, and observation never

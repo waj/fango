@@ -8,7 +8,10 @@ use State.run 10
 State.get()
 State.put (State.get() + 5)
 State.get()
-Client.getText "http://example.com/"
+effect Ask
+    ask : () -> Int
+
+ask()
 :end
 answer _ = Ok (Bytes.fromString "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
 use Client.stub answer
