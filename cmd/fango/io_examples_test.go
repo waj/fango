@@ -20,10 +20,12 @@ func TestFileExampleFailures(t *testing.T) {
 		name, example, store, want string
 		args                       []string
 		symlink                    bool
+		// toStderr says the example reports the failure on standard error.
+		toStderr bool
 	}{
-		{"csv directory", "csv", "input.csv", "input.csv: is a directory\n", []string{"input.csv"}, false},
-		{"todo directory", "todo", "todo.json", "todo.json: is a directory\n", []string{"list"}, false},
-		{"todo write failure", "todo", "todo.json", "todo.json: no such file or directory\n", []string{"add", "unsaved"}, true},
+		{"csv directory", "csv", "input.csv", "input.csv: is a directory\n", []string{"input.csv"}, false, false},
+		{"todo directory", "todo", "todo.json", "todo.json: is a directory\n", []string{"list"}, false, true},
+		{"todo write failure", "todo", "todo.json", "todo.json: no such file or directory\n", []string{"add", "unsaved"}, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.symlink && runtime.GOOS == "windows" {
@@ -49,13 +51,18 @@ func TestFileExampleFailures(t *testing.T) {
 				prog, executor := compileWithWorker(t, path)
 				env := eval.NewEnv()
 				env.DefineProg(prog)
-				var output bytes.Buffer
+				var output, errorOutput bytes.Buffer
 				ioctx := eval.NewIOContext(strings.NewReader(""), &output)
+				ioctx.ErrorWriter = &errorOutput
 				ioctx.Dir, ioctx.Args, ioctx.Natives = seed(), tc.args, executor
 				_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
 				var exit *natives.ExitError
-				if !errors.As(err, &exit) || exit.Code != 1 || output.String() != tc.want {
-					t.Fatalf("interpreter = %v, %q", err, output.String())
+				reported := output.String()
+				if tc.toStderr {
+					reported = errorOutput.String()
+				}
+				if !errors.As(err, &exit) || exit.Code != 1 || reported != tc.want {
+					t.Fatalf("interpreter = %v, %q, stderr %q", err, output.String(), errorOutput.String())
 				}
 			}
 
@@ -67,7 +74,11 @@ func TestFileExampleFailures(t *testing.T) {
 			cmd.Dir, cmd.Stdout, cmd.Stderr = seed(), &compiled, &errorOutput
 			err := cmd.Run()
 			var compiledExit *exec.ExitError
-			if !errors.As(err, &compiledExit) || compiledExit.ExitCode() != 1 || compiled.String() != tc.want || errorOutput.Len() != 0 {
+			reported, other := compiled.String(), errorOutput.String()
+			if tc.toStderr {
+				reported, other = other, reported
+			}
+			if !errors.As(err, &compiledExit) || compiledExit.ExitCode() != 1 || reported != tc.want || other != "" {
 				t.Fatalf("compiled = %v, %q, stderr %q", err, compiled.String(), errorOutput.String())
 			}
 		})

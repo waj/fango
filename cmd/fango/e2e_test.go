@@ -470,8 +470,9 @@ func TestTodoExampleFailures(t *testing.T) {
 				}
 				env := eval.NewEnv()
 				env.DefineProg(prog)
-				var output bytes.Buffer
+				var output, errorOutput bytes.Buffer
 				ioctx := eval.NewIOContext(strings.NewReader(""), &output)
+				ioctx.ErrorWriter = &errorOutput
 				ioctx.Args, ioctx.Dir, ioctx.Natives = tc.args, dir, executor
 				err := withInterpreter(func() error {
 					_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
@@ -481,8 +482,9 @@ func TestTodoExampleFailures(t *testing.T) {
 				if !errors.As(err, &exitErr) || exitErr.Code != tc.wantStatus {
 					t.Fatalf("exit = %v, want status %d", err, tc.wantStatus)
 				}
-				if output.String() != tc.wantOutput {
-					t.Fatalf("output = %q, want %q", output.String(), tc.wantOutput)
+				// The problem is reported on standard error, not as output.
+				if output.Len() != 0 || errorOutput.String() != tc.wantOutput {
+					t.Fatalf("output = %q, errors = %q, want %q", output.String(), errorOutput.String(), tc.wantOutput)
 				}
 			})
 
@@ -506,8 +508,8 @@ func TestTodoExampleFailures(t *testing.T) {
 			if !errors.As(err, &exitErr) || exitErr.ExitCode() != tc.wantStatus {
 				t.Fatalf("exit = %v, want status %d; stderr: %s", err, tc.wantStatus, stderr.String())
 			}
-			if stdout.String() != tc.wantOutput {
-				t.Fatalf("output = %q, want %q", stdout.String(), tc.wantOutput)
+			if stdout.Len() != 0 || stderr.String() != tc.wantOutput {
+				t.Fatalf("output = %q, errors = %q, want %q", stdout.String(), stderr.String(), tc.wantOutput)
 			}
 		})
 	}

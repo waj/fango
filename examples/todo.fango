@@ -5,7 +5,12 @@
 --     todo done 2
 --
 -- State is compact JSON in todo.json in the current working directory.
+-- Every way a command can go wrong is a `Problem`, raised with `Fail` where
+-- it happens and reported once, by `main`, on standard error with the
+-- matching exit status.
 
+import Console exposing (Output(..))
+import Fail exposing (Fail)
 import File
 import Json exposing (Decode, Encode(..))
 import Process
@@ -14,36 +19,59 @@ import String
 
 type Todo = { text : String, done : Bool } deriving (Encode, Decode)
 
+-- What can stop a command.
+type Problem
+    -- The arguments name no command.
+    = Usage
+    -- `done` named a todo that does not exist.
+    | MissingIndex Int
+    -- The store could not be read or written.
+    | Storage IO.Error
+    -- The store is not a list of todos.
+    | InvalidStore
+    -- The todos could not be encoded.
+    | Unencodable Json.Error
+
+describe : Problem -> String
+describe problem =
+    case problem of
+        Usage -> "Usage: todo add TEXT | todo list | todo done NUMBER"
+        MissingIndex index -> "No todo at index " ++ show index ++ "."
+        Storage error -> IO.describeError error
+        InvalidStore -> "Invalid todo.json."
+        Unencodable error -> "Cannot encode the todos: " ++ error.message
+
+-- A mistake in the command line is status 2; anything else is a failure.
+statusOf : Problem -> Process.Status
+statusOf problem =
+    case problem of
+        Usage -> Process.status 2
+        MissingIndex _ -> Process.status 2
+        _ -> Process.failure
+
 storagePath : String
 storagePath = "todo.json"
 
-load : () ->{IO, Console} Maybe (List Todo)
+load : () ->{IO, Fail Problem} List Todo
 load() =
     case File.read storagePath of
         Err error ->
             case error.kind of
-                IO.NotFound -> Just []
-                _ ->
-                    print (IO.describeError error)
-                    Process.exit Process.failure
-                    Nothing
+                IO.NotFound -> []
+                _ -> Fail.fail (Storage error)
         Ok text ->
-            parsed : Result Json.Error (List Todo)
-            parsed = Json.parse @(List Todo) text
-            case parsed of
-                Ok todos -> Just todos
-                Err _ -> Nothing
+            case Json.parse @(List Todo) text of
+                Ok todos -> todos
+                Err _ -> Fail.fail InvalidStore
 
-save : List Todo ->{IO, Console} ()
+save : List Todo ->{IO, Fail Problem} ()
 save todos =
     case Json.stringify todos of
+        Err error -> Fail.fail (Unencodable error)
         Ok text ->
             case File.writeAll storagePath text of
                 Ok () -> ()
-                Err error ->
-                    print (IO.describeError error)
-                    Process.exit Process.failure
-        Err _ -> Process.exit Process.failure
+                Err error -> Fail.fail (Storage error)
 
 append : List Todo -> Todo -> List Todo
 append todos todo =
@@ -78,54 +106,43 @@ printTodos index todos =
             print (show index ++ " " ++ marker ++ " " ++ todo.text)
             printTodos (index + 1) rest
 
-storageFailure : () ->{IO, Console} ()
-storageFailure() =
-    print "Invalid todo.json."
-    Process.exit Process.failure
-
-usage : () ->{IO, Console} ()
-usage() =
-    print "Usage: todo add TEXT | todo list | todo done NUMBER"
-    Process.exit (Process.status 2)
-
-addTodo : String ->{IO, Console} ()
+addTodo : String ->{IO, Console, Fail Problem} ()
 addTodo text =
-    case load() of
-        Nothing -> storageFailure()
-        Just todos ->
-            updated = append todos { text = text, done = False }
-            save updated
-            print ("Added " ++ show (count updated) ++ ": " ++ text)
+    updated = append load() { text = text, done = False }
+    save updated
+    print ("Added " ++ show (count updated) ++ ": " ++ text)
 
-listTodos : () ->{IO, Console} ()
+listTodos : () ->{IO, Console, Fail Problem} ()
 listTodos() =
     case load() of
-        Nothing -> storageFailure()
-        Just [] -> print "No todos."
-        Just todos -> printTodos 1 todos
+        [] -> print "No todos."
+        todos -> printTodos 1 todos
 
-completeTodo : String ->{IO, Console} ()
+completeTodo : String ->{IO, Console, Fail Problem} ()
 completeTodo raw =
     case String.toInt raw of
-        Nothing -> usage()
+        Nothing -> Fail.fail Usage
         Just wanted ->
             if wanted < 1 then
-                usage()
+                Fail.fail Usage
             else
-                case load() of
-                    Nothing -> storageFailure()
-                    Just todos ->
-                        case completeAt wanted 1 todos of
-                            Nothing ->
-                                print ("No todo at index " ++ show wanted ++ ".")
-                                Process.exit (Process.status 2)
-                            Just updated ->
-                                save updated
-                                print ("Completed " ++ show wanted ++ ".")
+                case completeAt wanted 1 load() of
+                    Nothing -> Fail.fail (MissingIndex wanted)
+                    Just updated ->
+                        save updated
+                        print ("Completed " ++ show wanted ++ ".")
 
-main() =
-    case Process.args() of
+command : List String ->{IO, Console, Fail Problem} ()
+command args =
+    case args of
         ["add", text] -> addTodo text
         ["list"] -> listTodos()
         ["done", raw] -> completeTodo raw
-        _ -> usage()
+        _ -> Fail.fail Usage
+
+main() =
+    case Fail.attempt { command Process.args() } of
+        Ok () -> Process.success
+        Err problem ->
+            Console.writeTo Stderr (describe problem ++ "\n")
+            statusOf problem
