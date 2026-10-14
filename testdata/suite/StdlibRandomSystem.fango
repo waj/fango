@@ -3,7 +3,6 @@ module StdlibRandomSystem exposing (tests)
 import Expect
 import Random
 import Test
-import Process
 
 inRange value = if value < 1 then False else value <= 6
 
@@ -13,4 +12,4 @@ tests = Test.test "stdlib_random_system" {
     Expect.equal True (Random.runSystem { inRange (Random.int 6 1) })
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

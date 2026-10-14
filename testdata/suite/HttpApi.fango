@@ -12,7 +12,6 @@ import Reader
 import Result exposing (Result(..))
 import Test
 import Writer
-import Process
 
 hello : List Route.Param -> Http.Server.Request e ->{e} Http.Server.Response e
 hello params _ = Http.Server.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString (show params)) }
@@ -50,4 +49,4 @@ tests = Test.test "http_api" {
     Expect.equal (Ok expected) fixtureBody()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

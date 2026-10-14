@@ -4,7 +4,6 @@ import Dict
 import Expect
 import Test
 import Text.Builder
-import Process
 
 -- Show is the representation: strings and characters quoted and escaped,
 -- nested constructors and negative numbers parenthesized as arguments.
@@ -45,4 +44,4 @@ tests = Test.test "show_representation" {
     Expect.equal "$5" (report (Money 5))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

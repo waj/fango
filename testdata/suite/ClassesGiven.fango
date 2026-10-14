@@ -3,7 +3,6 @@ module ClassesGiven exposing (tests)
 import Expect
 import Test
 import Text.Builder
-import Process
 
 -- A polymorphic function uses the evidence its caller supplies, so the same
 -- body selects different instances at different instantiations. The two
@@ -32,4 +31,4 @@ tests = Test.test "classes_given" {
     Expect.equal "generic 2" (renderer (Box 2))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

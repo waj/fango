@@ -4,7 +4,6 @@ import Expect
 import Meta
 import Runtime.Local
 import Test
-import Process
 
 compute : Int
 compute = Runtime.Local.run 1 { cell ->
@@ -17,4 +16,4 @@ tests = Test.test "local_state_staging" {
     Expect.equal 7 $(Meta.lift compute)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

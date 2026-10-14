@@ -2,7 +2,6 @@ module AnnTypevar exposing (tests)
 
 import Expect
 import Test
-import Process
 id : a -> a
 id x = x
 
@@ -11,4 +10,4 @@ tests = Test.test "ann_typevar" {
     Expect.equal 5 (id 5)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

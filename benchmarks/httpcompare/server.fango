@@ -15,7 +15,7 @@ respond _ = Http.Server.Response
     }
 
 main() =
-    case Process.runSystem Process.args of
+    case Process.args() of
         [raw] ->
             case String.toInt raw of
                 Just port ->

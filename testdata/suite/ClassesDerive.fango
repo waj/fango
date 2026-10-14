@@ -2,7 +2,6 @@ module ClassesDerive exposing (tests)
 
 import Expect
 import Test
-import Process
 type Box a = Box a deriving (Eq, Show)
 
 equalBoxes : Eq (Box a) => Box a -> Box a -> Bool
@@ -14,4 +13,4 @@ tests = Test.test "classes_derive" {
     Expect.equal "Box \"hello\"" (show (Box "hello"))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -4,7 +4,6 @@ import Expect
 import State
 import Stream
 import Test
-import Process
 
 effect Observe
     observe : Int -> ()
@@ -27,4 +26,4 @@ tests = Test.test "stream_handler" {
     Expect.equal [1] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

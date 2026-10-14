@@ -2,7 +2,6 @@ module RecordPinChar exposing (tests)
 
 import Expect
 import Test
-import Process
 type Item = { marker : Char, count : Int, label : String } deriving (Eq, Show)
 
 expected = 'λ'
@@ -22,4 +21,4 @@ tests = Test.test "record_pin_char" {
     Expect.equal "Item { marker = 'λ', count = 3, label = \"line\" }" (show (Item { marker = 'λ', count = 3, label = "line" }))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

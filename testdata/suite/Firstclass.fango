@@ -2,7 +2,6 @@ module Firstclass exposing (tests)
 
 import Expect
 import Test
-import Process
 add x y = x + y
 f = add
 tests : Test.Test {}
@@ -10,4 +9,4 @@ tests = Test.test "firstclass" {
     Expect.equal 5 (f 2 3)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

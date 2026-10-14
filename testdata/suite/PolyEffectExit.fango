@@ -4,7 +4,6 @@ import Expect
 import Fail
 import Result exposing (Result(..))
 import Test
-import Process
 
 effect Echo
     echo : a -> a
@@ -19,4 +18,4 @@ tests = Test.test "poly_effect_exit" {
     Expect.equal (Err "stopped") (Fail.attempt { _ -> run False 42 })
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

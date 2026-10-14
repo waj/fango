@@ -3,7 +3,6 @@ module StdlibModby exposing (tests)
 import Basics exposing (modBy, remainderBy)
 import Expect
 import Test
-import Process
 
 tests : Test.Test {}
 tests = Test.test "stdlib_modby" {
@@ -18,4 +17,4 @@ tests = Test.test "stdlib_modby" {
     Expect.equal (-1) (remainderBy (-3) (-4))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -4,7 +4,6 @@ import Expect
 import List
 import Test
 import Trace
-import Process
 
 -- Recursion keeps this out of the inliner, so it has a frame of its own.
 capturing : Int -> List Trace.Frame
@@ -22,7 +21,7 @@ tests = Test.test "trace_capture" {
     frames = firstTwo (capturing 2)
     Expect.equal [ "TraceCapture.capturing", "TraceCapture.<lambda>" ] (List.map { f -> f.function } frames)
     Expect.equal [ "TraceCapture.fango", "TraceCapture.fango" ] (List.map { f -> f.file } frames)
-    Expect.equal [ 12, 22 ] (List.map { f -> f.line } frames)
+    Expect.equal [ 11, 21 ] (List.map { f -> f.line } frames)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

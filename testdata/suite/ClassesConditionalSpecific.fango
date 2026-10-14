@@ -3,7 +3,6 @@ module ClassesConditionalSpecific exposing (tests)
 import Expect
 import Test
 import Text.Builder
-import Process
 
 type Tag a b = Tag a b
 
@@ -18,4 +17,4 @@ tests = Test.test "classes_conditional_specific" {
     Expect.equal "tag 2 True" (show (Tag 2 True))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

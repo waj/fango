@@ -3,7 +3,6 @@ module EffectRowNestedArguments exposing (tests)
 import Expect
 import State
 import Test
-import Process
 type Key a = Key a
 
 effect Put a
@@ -42,4 +41,4 @@ tests = Test.test "effect_row_nested_arguments" {
     Expect.equal [Flag True, Text "answer"] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

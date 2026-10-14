@@ -5,7 +5,6 @@ import Expect
 -- right-hand side runs once and all binders appear together.
 import List exposing (List)
 import Test
-import Process
 
 type Pair = Pair Int Int
 type Point = { x : Int, y : Int }
@@ -32,4 +31,4 @@ tests = Test.test "pattern_bindings" {
     Expect.equal 2 (count [localLeft, localRight])
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

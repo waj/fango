@@ -6,7 +6,6 @@ import List
 import String
 import Test
 import Text.Builder as Builder exposing (append, appendChar, appendFloat, appendInt)
-import Process
 
 build : List String -> Builder.Builder
 build parts = List.foldl Builder.append Builder.empty parts
@@ -34,4 +33,4 @@ tests = Test.test "text_builder" {
     Expect.equal "foo123!1.25" (Builder.toString piped)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

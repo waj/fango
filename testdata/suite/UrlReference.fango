@@ -5,7 +5,6 @@ import List exposing (List)
 import Maybe exposing (Maybe(..))
 import Test
 import Url exposing (Component(..))
-import Process
 
 -- RFC 3986 §5.4 against the base `http://a/b/c/d;p?q`.
 examples : List (String, String)
@@ -80,4 +79,4 @@ tests = Test.test "url_reference" {
     Expect.equal "http://h/x?a=1" (Url.toString (Url.withQuery [("a", "1")] (Url.appendPath ["x"] host)))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

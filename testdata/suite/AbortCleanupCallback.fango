@@ -3,7 +3,6 @@ module AbortCleanupCallback exposing (tests)
 import Expect
 import State
 import Test
-import Process
 effect Exception ex
     abort throw : ex -> a
 
@@ -40,4 +39,4 @@ tests = Test.test "abort_cleanup_callback" {
     Expect.equal ["cleanup", "boom"] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -2,7 +2,6 @@ module EquationTwoProducts exposing (tests)
 
 import Expect
 import Test
-import Process
 -- Equations whose columns are all constructor patterns on single-constructor
 -- products, in pure functions small enough to be inlined at their call sites.
 type Pair = Pair Int Int deriving (Eq, Show)
@@ -24,4 +23,4 @@ tests = Test.test "equation_two_products" {
     Expect.equal 9 (total (scaleBy (Box 3) first))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

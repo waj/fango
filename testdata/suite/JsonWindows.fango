@@ -14,7 +14,6 @@ import Stream
 import String
 import Test
 import Text.Reader as TextReader
-import Process
 
 all predicate values = List.foldl { value result -> predicate value && result } True values
 
@@ -204,4 +203,4 @@ tests = Test.test "json_windows" {
     } })
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

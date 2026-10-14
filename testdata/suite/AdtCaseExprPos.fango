@@ -2,7 +2,6 @@ module AdtCaseExprPos exposing (tests)
 
 import Expect
 import Test
-import Process
 type MaybeInt = NothingI | JustI Int deriving (Eq, Show)
 
 orZero m = (case m of
@@ -25,4 +24,4 @@ tests = Test.test "adt_case_expr_pos" {
     Expect.equal 36 (orZero (JustI 3) + top + nested NothingI)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

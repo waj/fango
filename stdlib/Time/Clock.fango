@@ -25,6 +25,7 @@ module Time.Clock exposing (Clock(..), now, nowIn, runFixed, runOffset, runStepp
 import Fail
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
+import Runtime.Entry
 import Runtime.Native
 import Time.Date as Date
 import Time.DateTime as DateTime
@@ -33,7 +34,9 @@ import Time.Instant as Instant
 import Time.Internal as Checked
 import Time.Zone as Zone
 
--- Reads the clock. There is no ambient default handler.
+-- Reads the clock. A `main` that performs it runs under `runSystem` unless
+-- it installs another runner; elsewhere it needs a handler.
+#[Runtime.Entry.DefaultHandler `runSystem`]
 effect Clock
     -- The current moment.
     instant : () -> Instant.Instant

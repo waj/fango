@@ -4,7 +4,6 @@ import Expect
 import List
 import String
 import Test
-import Process
 
 wordCount text = List.foldl { _ total -> total + 1 } 0 (String.words text)
 
@@ -15,4 +14,4 @@ tests = Test.test "stdlib_words_foldl" {
     Expect.equal 2 (wordCount "héllo 二")
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

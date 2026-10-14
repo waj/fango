@@ -1,24 +1,24 @@
 FAIL  unwrapping > ok fails on Err
 
-    test_unwrap.fango:31
+    test_unwrap.fango:30
     Expected: Ok _
     Actual:   Err "not a number: x"
 
 FAIL  unwrapping > err fails on Ok
 
-    test_unwrap.fango:32
+    test_unwrap.fango:31
     Expected: Err _
     Actual:   Ok 3
 
 FAIL  unwrapping > just fails on Nothing
 
-    test_unwrap.fango:33
+    test_unwrap.fango:32
     Expected: Just _
     Actual:   Nothing
 
 FAIL  unwrapping > nothing fails on Just
 
-    test_unwrap.fango:34
+    test_unwrap.fango:33
     Expected: Nothing
     Actual:   Just 3
 

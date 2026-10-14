@@ -2,7 +2,6 @@ module PolyTwoTypes exposing (tests)
 
 import Expect
 import Test
-import Process
 id x = x
 a = id 1
 b = id "s"
@@ -11,4 +10,4 @@ fixtureBody() = a
 tests : Test.Test {}
 tests = Test.test "poly_two_types" { Expect.equal 1 fixtureBody() }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

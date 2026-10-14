@@ -1,6 +1,5 @@
 import Expect
 import Test exposing (Test, describe, only, test)
-import Process
 
 -- With `only` in the tree just the focused tests run; the rest count as
 -- skipped, and the run is incomplete even though nothing failed.
@@ -17,4 +16,4 @@ suite =
         , only (test "a focused test" { Expect.equal 3 3 })
         ]
 
-main() = Process.runSystem { Test.run suite }
+main() = Test.run suite

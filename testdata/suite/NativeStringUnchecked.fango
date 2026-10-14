@@ -3,7 +3,6 @@ module NativeStringUnchecked exposing (tests)
 import Expect
 import String
 import Test
-import Process
 
 raw : () -> String
 raw = native
@@ -15,4 +14,4 @@ tests = Test.test "native_string_unchecked" {
     Expect.equal 6 (String.byteLength raw())
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

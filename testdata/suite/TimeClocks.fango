@@ -13,7 +13,6 @@ import Time.Date as Date
 import Time.DateTime as DT
 import Time.Duration as Duration
 import Time.Zone as Zone
-import Process
 
 check : String -> Bool ->{Fail Error} ()
 check label passed = if passed then () else Fail.fail (InvalidComponent label)
@@ -157,4 +156,4 @@ tests = Test.describe "Clock runners"
     , Test.test "stepped compile-time evaluation" { Expect.equal 2 $(Meta.lift stagedSeconds) }
     ]
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -3,7 +3,6 @@ module EffectRowSharedCallback exposing (tests)
 import Expect
 import State
 import Test
-import Process
 effect Put a
     put : a -> ()
 
@@ -38,4 +37,4 @@ tests = Test.test "effect_row_shared_callback" {
     Expect.equal [Flag True, Text "answer"] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -8,7 +8,6 @@ import Reader
 import Result exposing (Result(..))
 import State exposing (State, get, put)
 import Test
-import Process
 
 bump : () ->{State Int} ()
 bump () = put (get() + 1)
@@ -46,4 +45,4 @@ tests = Test.test "use_blocks" {
     Expect.equal [3, 6, 9] (List.map { n -> use (a, b) <- { k -> k (n, n * 2) }; a + b } [1, 2, 3])
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

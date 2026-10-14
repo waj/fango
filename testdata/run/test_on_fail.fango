@@ -1,7 +1,6 @@
 import Expect
 import String
 import Test exposing (Test, describe, test)
-import Process
 
 -- `onFail` adds a context line above a failure's message, nests, and as a
 -- `use` item covers the rest of the block.
@@ -26,4 +25,4 @@ suite =
           }
         ]
 
-main() = Process.runSystem { Test.run suite }
+main() = Test.run suite

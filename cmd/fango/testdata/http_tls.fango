@@ -20,7 +20,7 @@ fetchWith caFile target =
     outcome (Fail.attempt { Client.run { Client.configure { config -> { config | caFile = caFile } } { Client.getText target } } })
 
 main() =
-    case Process.runSystem Process.args of
+    case Process.args() of
         [target, caFile, otherHost] ->
             print (fetchWith (Just caFile) target)
             print (fetchWith Nothing target)

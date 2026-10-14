@@ -6,7 +6,6 @@ import Result exposing (Result(..))
 import State
 import Test
 import Text.Builder
-import Process
 
 type Money = Money Int deriving (Show)
 instance Display Money
@@ -53,4 +52,4 @@ tests = Test.test "string_interpolation" {
     Expect.equal "staged 3" $(`"staged #{1 + 2}"`)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

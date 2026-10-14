@@ -4,7 +4,6 @@ import Expect
 import IO
 import Runtime.Native
 import Test
-import Process
 
 {-# resource #-}
 type Box a = Box Runtime.Native.Any
@@ -41,4 +40,4 @@ tests = Test.test "native_storage" {
     Expect.equal 43 (read integer)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -2,7 +2,6 @@ module AdtShowEq exposing (tests)
 
 import Expect
 import Test
-import Process
 type MaybeInt = NothingI | JustI Int deriving (Eq, Show)
 
 type Wrap = Wrap MaybeInt String deriving (Eq, Show)
@@ -23,4 +22,4 @@ tests = Test.test "adt_show_eq" {
     Expect.notEqual (Wrap NothingI "hi") a
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

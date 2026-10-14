@@ -28,6 +28,7 @@ import Maybe exposing (Maybe(..))
 import Net
 import Reader exposing (Reader(..))
 import Result exposing (Result(..))
+import Runtime.Entry
 import Runtime.Local
 import Runtime.Scope
 import String
@@ -169,7 +170,9 @@ type Endpoint = { secure : Bool, host : String, port : Int, connectTimeoutMs : I
 type Connection = Socket Net.Connection Bool | Memory Int
 
 -- Sending requests over some transport: `run` for sockets, `stub` for
--- raw response bytes, and `mock` for server handlers in memory.
+-- raw response bytes, and `mock` for server handlers in memory. A `main`
+-- that performs it runs under `run` unless it installs another runner.
+#[Runtime.Entry.DefaultHandler `run`]
 effect Http
     connect : Endpoint -> Result Error Connection
     transmit : Connection -> Bytes -> Int -> Result Error ()

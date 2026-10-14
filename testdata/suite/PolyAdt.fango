@@ -2,7 +2,6 @@ module PolyAdt exposing (tests)
 
 import Expect
 import Test
-import Process
 type Opt a = None | Some a deriving (Eq, Show)
 
 withDefault : a -> Opt a -> a
@@ -16,4 +15,4 @@ tests = Test.test "poly_adt" {
     Expect.equal 42 (withDefault 0 (Some 42))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

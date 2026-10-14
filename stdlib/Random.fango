@@ -8,8 +8,11 @@ module Random exposing (Random(..), int, runSeeded, runSystem)
 
 import Basics exposing (..)
 import IO exposing (IO)
+import Runtime.Entry
 
--- Drawing random integers. It has no default handler.
+-- Drawing random integers. A `main` that performs it runs under
+-- `runSystem` unless it installs another runner.
+#[Runtime.Entry.DefaultHandler `runSystem`]
 effect Random
     -- A draw from `lo` to `hi` inclusive; reversed bounds are swapped.
     int : Int -> Int -> Int

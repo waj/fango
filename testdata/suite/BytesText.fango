@@ -3,7 +3,6 @@ module BytesText exposing (tests)
 import Bytes exposing (Bytes)
 import Expect
 import Test
-import Process
 
 text : Maybe String -> String
 text value =
@@ -35,4 +34,4 @@ tests = Test.test "bytes_text" {
     Expect.equal "" (text (Bytes.toString Bytes.empty))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

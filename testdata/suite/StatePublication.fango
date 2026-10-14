@@ -4,7 +4,6 @@ import Expect
 import Fail
 import Result exposing (Result(..))
 import Test
-import Process
 
 effect Counter
     next : Bool -> Int
@@ -31,4 +30,4 @@ tests = Test.test "state_publication" {
     Expect.equal ((1, 2), 3) success()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

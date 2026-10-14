@@ -19,7 +19,7 @@ peek path =
     }
 
 main() =
-    case Process.runSystem Process.args of
+    case Process.args() of
         [base] ->
             print (Fail.attempt {
                     Client.run {

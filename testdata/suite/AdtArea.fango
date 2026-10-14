@@ -2,7 +2,6 @@ module AdtArea exposing (tests)
 
 import Expect
 import Test
-import Process
 type Shape = Circle Float | Rect Float Float deriving (Eq, Show)
 
 area : Shape -> Float
@@ -16,4 +15,4 @@ tests = Test.test "adt_area" {
     Expect.equal 12.56636 (area (Circle 2.0))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

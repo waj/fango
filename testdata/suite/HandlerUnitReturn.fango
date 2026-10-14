@@ -3,7 +3,6 @@ module HandlerUnitReturn exposing (tests)
 import Expect
 import State
 import Test
-import Process
 -- Return transformations that produce Unit, and that ignore the handled
 -- value or the final state. The handler's Go closure declares fangort.Unit,
 -- so its body must return the singleton rather than the bare return an
@@ -62,4 +61,4 @@ tests = Test.test "handler_unit_return" {
     Expect.equal [Text "asked yes", Text "answered", Integer 5, Text "rescued stopped", Text "quiet", Integer 1, Text "counted"] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

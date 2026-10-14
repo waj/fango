@@ -5,7 +5,6 @@ import Expect
 import Reader
 import Test
 import Writer
-import Process
 
 assembled : Bytes.Bytes
 assembled =
@@ -23,4 +22,4 @@ tests = Test.test "writer_scoped_pure" {
     Expect.equal (Bytes.fromString "abcXY") assembled
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

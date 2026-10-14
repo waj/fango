@@ -3,7 +3,6 @@ module EmptyEffect exposing (tests)
 import Expect
 import IO
 import Test
-import Process
 effect Marker a
 
 tag : Int ->{IO} Int
@@ -20,4 +19,4 @@ tests = Test.test "empty_effect" {
     Expect.equal 42 (tag 42)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

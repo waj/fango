@@ -7,7 +7,6 @@ import Runtime.Scope
 import State
 import Stream
 import Test
-import Process
 
 withSource label action = Runtime.Scope.finally { _ ->
     recordTrace label
@@ -66,4 +65,4 @@ tests = Test.test "stream_cleanup" {
                  ] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

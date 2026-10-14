@@ -3,11 +3,10 @@ module ErrPrintLambda exposing (tests)
 import Expect
 import State
 import Test
-import Process
 tests : Test.Test {}
 tests = Test.test "err_print_lambda" {
     observed = State.run [] { { x -> State.put [x | State.get()] } 1 }
     Expect.equal [1] (List.reverse observed.state)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

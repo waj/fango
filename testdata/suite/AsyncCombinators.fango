@@ -9,7 +9,6 @@ import Result exposing (Result(..))
 import Runtime.Scope
 import State
 import Test
-import Process
 
 type Observation
     = ListOutcome (Async.Outcome (List Int))
@@ -175,4 +174,4 @@ tests = Test.test "async_combinators" {
                  ] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

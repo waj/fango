@@ -82,7 +82,7 @@ parseOptions args =
         [] -> Nothing
 
 main() =
-    case parseOptions (Process.runSystem Process.args) of
+    case parseOptions Process.args() of
         Nothing ->
             print "Usage: grep [-r] PATTERN PATH..."
             Process.exit (Process.status 2)

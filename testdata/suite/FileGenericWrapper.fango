@@ -5,7 +5,6 @@ import Fail exposing (Fail)
 import File
 import IO exposing (Error)
 import Test
-import Process
 
 -- The wrapper exports the callback lifetime obligation to its callers.
 
@@ -21,4 +20,4 @@ tests = Test.test "file_generic_wrapper" {
     Expect.equal path error.path
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

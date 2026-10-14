@@ -5,7 +5,6 @@ module UserOperators exposing (tests)
 import List exposing (List(..), foldl, range)
 import Expect
 import Test
-import Process
 
 (<+>) : Int -> Int -> Int
 (<+>) a b = a * 10 + b
@@ -51,4 +50,4 @@ tests = Test.test "user_operators" {
     Expect.equal "Money (-250)" (show (-(Money 250)))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

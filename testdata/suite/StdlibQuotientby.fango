@@ -3,7 +3,6 @@ module StdlibQuotientby exposing (tests)
 import Basics exposing (modBy, quotientBy, remainderBy)
 import Expect
 import Test
-import Process
 
 -- quotientBy pairs with remainderBy (both truncate); divBy would pair with
 -- modBy (both floor) but does not exist yet.
@@ -30,4 +29,4 @@ tests = Test.test "stdlib_quotientby" {
     Expect.equal 2 (modBy 3 (-7))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

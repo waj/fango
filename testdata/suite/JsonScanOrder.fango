@@ -14,7 +14,6 @@ import Stream
 import String
 import Test
 import Text.Reader as TextReader
-import Process
 
 type Wide =
     { a : Int
@@ -181,4 +180,4 @@ tests = Test.test "json_scan_order" {
     Expect.equal (True) (scanAtLimit 255 && scanAtLimit 256)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

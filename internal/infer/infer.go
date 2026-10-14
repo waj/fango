@@ -226,6 +226,9 @@ type Checker struct {
 	// It remains "main" for headerless single-file programs and is empty at
 	// the REPL, which has no entry point.
 	EntryName string
+	// assemblingEntry is set while the assembled program entry is checked:
+	// unlike `main`, it may perform only IO.
+	assemblingEntry bool
 
 	// Templates numbers this compilation's quotes; QuoteTemplates and
 	// QuoteHoles index back into it from the surface nodes elaboration and
@@ -535,6 +538,11 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 	ds, es := batch.run()
 	infos = append(infos, ds...)
 	errs = append(errs, es...)
+	if len(errs) == 0 {
+		entry, es := ck.assembleEntry(infos)
+		infos = append(infos, entry...)
+		errs = append(errs, es...)
+	}
 	return infos, errs
 }
 
@@ -1333,13 +1341,17 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	return info, errs
 }
 
-// mainShape constrains the entry to a nullary function over the closed IO
-// row. Its result stays open here; checkMainResult settles it once the body
-// is solved and defaulted.
+// mainShape constrains the entry to a nullary function. `main`'s own row is
+// open: entry assembly installs default handlers for what it performs. The
+// assembled entry that runs it has the closed IO row. The result stays open
+// here; checkMainResult settles it once the body is solved and defaulted.
 func (ck *Checker) mainShape(ty types.Type, sp source.Span) Constraint {
-	row := types.Row{}
-	if ck.IO != nil {
-		row.Labels = []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}
+	row := types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}
+	if ck.assemblingEntry {
+		row = types.Row{}
+		if ck.IO != nil {
+			row.Labels = []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}
+		}
 	}
 	want := &types.TFun{Arg: ck.B.Unit, Eff: row, Ret: ck.Sup.FreshVar(types.General)}
 	return Constraint{Left: ty, Right: want, Span: sp, Why: Why{Kind: WhyAnnotation, Name: "main"}}
@@ -1353,6 +1365,9 @@ func (ck *Checker) checkMainResult(ty types.Type, d *ast.ValueDecl) []diag.Error
 		return nil
 	}
 	var errs []diag.Error
+	if tail, open := fn.Eff.Tail.(*types.TVar); open && !tail.Rigid {
+		ck.Sub[tail.ID] = types.Row{}
+	}
 	result := fn.Ret
 	if v, open := result.(*types.TVar); open && !v.Rigid {
 		ck.Sub[v.ID] = ck.B.Unit

@@ -2,7 +2,6 @@ module ClassesSpecific exposing (tests)
 
 import Expect
 import Test
-import Process
 -- Specificity still orders a blanket default against a constructor head: the
 -- constructor instance wins wherever it matches, including through evidence
 -- the caller supplied. Two heads for the same constructor cannot differ in
@@ -28,4 +27,4 @@ tests = Test.test "classes_specific" {
     Expect.equal "box" (viaEvidence (Box 3))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

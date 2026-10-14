@@ -2,7 +2,6 @@ module PolyNumber exposing (tests)
 
 import Expect
 import Test
-import Process
 double x = x + x
 
 addOne x = x + 1
@@ -15,4 +14,4 @@ tests = Test.test "poly_number" {
     Expect.equal 4.0 (b + c)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -2,10 +2,9 @@ module PrintBool exposing (tests)
 
 import Expect
 import Test
-import Process
 tests : Test.Test {}
 tests = Test.test "print_bool" {
     Expect.equal True (1 == 1)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

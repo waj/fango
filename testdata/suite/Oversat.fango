@@ -2,11 +2,10 @@ module Oversat exposing (tests)
 
 import Expect
 import Test
-import Process
 mk x = { y -> x + y }
 tests : Test.Test {}
 tests = Test.test "oversat" {
     Expect.equal 42 (mk 40 2)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

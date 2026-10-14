@@ -2,7 +2,6 @@ module PolyEffectEcho exposing (tests)
 
 import Expect
 import Test
-import Process
 effect Echo
     echo : a -> a
 
@@ -15,4 +14,4 @@ tests = Test.test "poly_effect_echo" {
     )
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -8,7 +8,6 @@ import Runtime.Scope
 import State
 import Stream
 import Test
-import Process
 
 source = Stream.unfold 0 { state ->
     if state == 0 then Just (9, 1) else Fail.fail "producer failed"
@@ -61,4 +60,4 @@ tests = Test.test "stream_recovery" {
                  ] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

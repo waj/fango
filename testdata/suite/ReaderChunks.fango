@@ -7,7 +7,6 @@ import Reader exposing (Reader)
 import State
 import Stream
 import Test
-import Process
 
 -- Streaming steps share this reader's scoped cursor.
 
@@ -43,4 +42,4 @@ tests = Test.test "reader_chunks" {
     Expect.equal [] (Reader.overBytes Bytes.empty { input -> Stream.toList (Reader.chunks input) })
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -439,8 +439,8 @@ hand-written test handlers, not extra work for scripts alone.
 Implemented: see [Process](../stdlib/Process.fango) for the `Arguments`
 effect, its runners, `Status`, and `exit`, and the
 [entry points reference](reference/commands.md#entry-points) for `main`'s
-shape and status. Entry assembly will declare `Process.runSystem` as the
-`Arguments` default; until then programs install it explicitly.
+shape and status. `Process.runSystem` is the `Arguments`
+[default handler](reference/commands.md#default-handlers).
 
 ## Clock and randomness
 

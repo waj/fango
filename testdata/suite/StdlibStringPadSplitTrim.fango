@@ -4,7 +4,6 @@ import Expect
 import List
 import String
 import Test exposing (Test, describe, test)
-import Process
 
 suite : Test {}
 suite =
@@ -58,4 +57,4 @@ suite =
             }
             ]
         ]
-main() = Process.runSystem { Test.run suite }
+main() = Test.run suite

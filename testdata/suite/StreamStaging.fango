@@ -6,7 +6,6 @@ import Maybe exposing (Maybe(..))
 import Meta exposing (Code)
 import Stream
 import Test
-import Process
 
 foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
@@ -35,4 +34,4 @@ tests = Test.test "stream_staging" {
     Expect.equal 7 $(Meta.lift (Stream.withCursor (Stream.fromList [seven]) { cursor -> foldCursor { element acc -> element + acc } 0 cursor }))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

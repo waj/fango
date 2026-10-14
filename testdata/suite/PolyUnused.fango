@@ -2,7 +2,6 @@ module PolyUnused exposing (tests)
 
 import Expect
 import Test
-import Process
 id x = x
 
 tests : Test.Test {}
@@ -10,4 +9,4 @@ tests = Test.test "poly_unused" {
     Expect.equal 1 1
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

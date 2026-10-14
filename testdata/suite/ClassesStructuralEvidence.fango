@@ -3,7 +3,6 @@ module ClassesStructuralEvidence exposing (tests)
 import Expect
 import Test
 import Text.Builder
-import Process
 
 type Box a = Box a
 instance Show a => Show (Box a)
@@ -44,4 +43,4 @@ tests = Test.test "classes_structural_evidence" {
     Expect.equal (Branch (Leaf True) (Leaf False)) (Branch (Leaf True) (Leaf False))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

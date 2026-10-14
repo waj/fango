@@ -6,7 +6,6 @@ import List exposing (each)
 import Result exposing (Result(..))
 import State
 import Test
-import Process
 
 checkAll : List Int ->{Fail String, State.State (List Int) | e} ()
 checkAll xs = each { x -> if x > 2 then fail "big" else note x } xs
@@ -28,4 +27,4 @@ tests = Test.test "poly_abort_row" {
     Expect.equal (Err "big", [1]) observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

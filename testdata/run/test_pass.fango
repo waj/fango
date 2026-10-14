@@ -2,7 +2,6 @@ import Expect
 import List
 import String
 import Test exposing (Test, describe, test)
-import Process
 
 -- A suite in which every test passes: the report is the summary alone and
 -- the program exits with status 0.
@@ -29,4 +28,4 @@ suite =
           }
         ]
 
-main() = Process.runSystem { Test.run suite }
+main() = Test.run suite

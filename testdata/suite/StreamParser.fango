@@ -5,7 +5,6 @@ import Iterator
 import Stream
 import String
 import Test
-import Process
 
 isDigit char = char >= '0' && char <= '9'
 digit char = case String.toInt (String.fromChar char) of
@@ -49,4 +48,4 @@ tests = Test.test "stream_parser" {
     Expect.equal [12, 120, 3, 30, 45] (Stream.toList (Stream.take 5 (expand (numbers input))))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

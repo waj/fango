@@ -18,7 +18,7 @@ attemptClient action = Fail.attempt action
 -- Forwards each request body to the upstream URL as it arrives, and answers
 -- with the upstream reply.
 main() =
-    case Process.runSystem Process.args of
+    case Process.args() of
         [raw, upstream] ->
             case String.toInt raw of
                 Just port ->

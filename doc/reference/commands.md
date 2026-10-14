@@ -554,10 +554,37 @@ main : () ->{IO} ()
 main() = print "hello"
 ```
 
-`main _ = ...` is the same shape. Its row is `IO` and nothing else; an
-unhandled effect is `EFFECT MISMATCH`, so a program installs the runners it
-needs inside `main`, such as `Process.runSystem` for command-line arguments.
-Without an annotation an unconstrained result is `()`.
+`main _ = ...` is the same shape. Without an annotation an unconstrained
+result is `()`.
+
+### Default handlers
+
+`main`'s row may contain `IO` and any effect that declares a default handler
+with a [`Runtime.Entry.DefaultHandler`](../../stdlib/Runtime/Entry.fango)
+attribute, such as `Process.Arguments`, `Random`, `Time.Clock.Clock`, and
+`Http.Client.Http`. The program then starts at an entry the compiler
+assembles by splicing `Runtime.Entry.assemble`: `main` runs inside each of
+those defaults, and inside the defaults of the effects those runners perform
+in turn, each runner nested inside the runners it relies on. A default applies
+only there, so a missing handler anywhere else is still a compile error, and a
+runner installed inside `main` takes precedence for the code it wraps.
+
+```fango
+import Process
+
+main : () ->{IO, Process.Arguments} ()
+main() = print (Process.args())
+```
+
+Like any annotation, an annotated row is exact, so it limits which services
+the program reaches; an unannotated `main` is inferred and gets the defaults of
+whatever it performs. Library and program effects declare defaults alike.
+Failures are `COMPILE-TIME FAILURE`, reported at `main` for an effect with no
+default, and at the attribute for an effect with several, a runner whose type
+does not have the shape the attribute's documentation gives, or runners that
+depend on one another in a cycle. When no imported module declares defaults at
+all, an effect besides `IO` in `main`'s row is `UNHANDLED EFFECT`. A `main`
+that performs only `IO` is its own entry.
 
 A `()` result ends the program with status 0. A returned status takes effect
 only after `main` completes normally, so every cleanup scope has released and

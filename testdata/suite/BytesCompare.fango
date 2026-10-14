@@ -3,7 +3,6 @@ module BytesCompare exposing (tests)
 import Bytes exposing (Bytes)
 import Expect
 import Test
-import Process
 
 tests : Test.Test {}
 tests = Test.test "bytes_compare" {
@@ -27,4 +26,4 @@ tests = Test.test "bytes_compare" {
     Expect.equal "\"x\"!" (show (Bytes.fromString "x") ++ "!")
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

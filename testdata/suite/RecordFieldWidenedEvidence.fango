@@ -2,7 +2,6 @@ module RecordFieldWidenedEvidence exposing (tests)
 
 import Expect
 import Test
-import Process
 -- The same widening where the label it adds carries runtime evidence, which
 -- is what decides where the adaptation belongs. `read` is stored performing
 -- `Cell` alone; the body around the projection performs `Extra` too, so the
@@ -34,4 +33,4 @@ tests = Test.test "record_field_widened_evidence" {
     Expect.equal 9 answer
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

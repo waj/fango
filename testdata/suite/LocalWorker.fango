@@ -5,7 +5,6 @@ import Fail exposing (Fail)
 import Result exposing (Result(..))
 import Runtime.Local
 import Test
-import Process
 
 effect Probe
     value : () -> Int
@@ -84,4 +83,4 @@ tests = Test.test "local_worker" {
     })
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -7,7 +7,6 @@ import IO
 import Result exposing (Result(..))
 import State
 import Test
-import Process
 
 effect Lookup
     lookup : () -> Int
@@ -60,4 +59,4 @@ tests = Test.test "async_effect_permissions" {
                  ] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

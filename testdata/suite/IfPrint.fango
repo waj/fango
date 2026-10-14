@@ -3,7 +3,6 @@ module IfPrint exposing (tests)
 import Expect
 import State
 import Test
-import Process
 x = 3
 tests : Test.Test {}
 tests = Test.test "if_print" {
@@ -11,4 +10,4 @@ tests = Test.test "if_print" {
     Expect.equal ["small"] (List.reverse observed.state)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

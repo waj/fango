@@ -4,7 +4,6 @@ import Expect
 import Fail exposing (Fail, attempt, fail)
 import Result exposing (Result(..))
 import Test
-import Process
 
 -- A perform on a Direct handler activation from inside an Exit context: the
 -- resumptive Count handler is installed outside `attempt`, and the aborting
@@ -45,4 +44,4 @@ tests = Test.test "perform_direct_in_exit" {
     )
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

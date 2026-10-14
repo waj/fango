@@ -2,7 +2,6 @@ module EquationsHandlerGroups exposing (tests)
 
 import Expect
 import Test
-import Process
 -- Each operation and `return` may repeat contiguously; every group must be
 -- exhaustive. Core handler cardinality is unchanged: one clause per operation.
 type Choice = Yes | No deriving (Show)
@@ -38,4 +37,4 @@ tests = Test.test "equations_handler_groups" {
     )
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

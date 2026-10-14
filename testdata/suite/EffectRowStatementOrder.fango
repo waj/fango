@@ -5,7 +5,6 @@ import Fail
 import IO
 import State
 import Test
-import Process
 -- An annotated body may call a `{e}` function before one that also performs
 -- `Exception ex`. The inclusion `{e} ⊆ ambient` waits for the label-bearing
 -- call instead of closing the surrounding row on statement order, so
@@ -71,4 +70,4 @@ tests = Test.test "effect_row_statement_order" {
     Expect.equal ["open one", "use one", "close one", "plain", "risky", "reported", "open two", "close two", "caught boom"] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

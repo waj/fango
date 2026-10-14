@@ -94,6 +94,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 		installCaptureSummaries(p.Defs, ck)
 		core.SummarizeABI(p, nil)
 	}
+	p.Entry = programEntry(p.Defs, p.Entry)
 	return p, errs
 }
 
@@ -177,12 +178,20 @@ func AssembleModuleProgram(defs []core.Def, infos []infer.DeclInfo, entry string
 			adts = append(adts, adt)
 		}
 	}
-	p := &core.Prog{ADTs: adts, Effects: effectList(ck), Defs: defs, Entry: entry, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}
-	spans := map[string]source.Span{}
-	for _, info := range infos {
-		spans[info.Name] = info.NameSpan
-	}
+	p := &core.Prog{ADTs: adts, Effects: effectList(ck), Defs: defs, Entry: programEntry(defs, entry), Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}
 	return p, nil
+}
+
+// programEntry is the definition the program starts at: the assembled entry
+// when `main` performs effects with default handlers, otherwise `main`.
+func programEntry(defs []core.Def, entry string) string {
+	assembled := infer.AssembledEntryName(entry)
+	for i := range defs {
+		if defs[i].Name == assembled {
+			return assembled
+		}
+	}
+	return entry
 }
 
 // Decl elaborates one declaration — also the REPL's per-input entry point.

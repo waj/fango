@@ -2,7 +2,6 @@ module ClassesContextMaximal exposing (tests)
 
 import Expect
 import Test
-import Process
 class Inspect a
     inspect : a -> String
 instance (Eq a, Show a) => Inspect a
@@ -28,4 +27,4 @@ tests = Test.test "classes_context_maximal" {
     Expect.equal "show" (label 42)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

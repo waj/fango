@@ -2,7 +2,6 @@ module AdtPartialCtor exposing (tests)
 
 import Expect
 import Test
-import Process
 type Pair = Pair Int Int deriving (Eq, Show)
 
 mk = Pair 1
@@ -26,4 +25,4 @@ tests = Test.test "adt_partial_ctor" {
                 Pair c d -> Expect.equal 2198 (a * 1000 + b * 100 + c * 10 + d)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

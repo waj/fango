@@ -3,7 +3,6 @@ module StdlibMaybe exposing (tests)
 import Expect
 import Maybe exposing (Maybe(..), withDefault)
 import Test
-import Process
 
 just : Maybe Int
 just = Just 42
@@ -21,4 +20,4 @@ tests = Test.test "stdlib_maybe" {
     Expect.equal 0 (withDefault 0 none)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

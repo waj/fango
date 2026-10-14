@@ -4,7 +4,6 @@ import Expect
 import Runtime.Scope
 import State
 import Test
-import Process
 
 effect Boom
     abort boom : () -> Int
@@ -131,4 +130,4 @@ tests = Test.test "compositional_callbacks" {
     Expect.equal [Text "emit", Integer 3, Text "emit", Integer 3, Text "emit", Integer 3, Text "emit", Integer 3, Integer 1, Integer 2, Text "emit", Integer 3, Text "emit", Integer 3, Integer 1, Integer 1, Integer 7, Integer 1, Text "emit", Integer 3, Text "emit", Integer 3, Integer 1, Integer 10, Integer 12, Integer 9, Text "emit", Text "release", Integer 9, Integer 4, Integer 6] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

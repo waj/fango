@@ -9,7 +9,6 @@ import Reader
 import String
 import Test
 import Writer
-import Process
 
 compress : String -> Bytes
 compress text =
@@ -66,4 +65,4 @@ tests = Test.test "http_gzip" {
     Expect.equal "\"HTTP/1.1 415 \\r\\nContent-Length: 0\\r\\n\\r\\n\"" (serve (gzipRequest "br" wire))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

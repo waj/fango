@@ -6,7 +6,6 @@ import Fail exposing (Fail)
 import IO
 import Result exposing (Result(..))
 import Test
-import Process
 
 effect Database
     lookup : Int -> Int
@@ -79,4 +78,4 @@ tests = Test.test "async_domain_setup" {
     Expect.equal (Async.Completed (3003, 74)) parallelResult()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

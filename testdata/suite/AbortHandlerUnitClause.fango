@@ -3,7 +3,6 @@ module AbortHandlerUnitClause exposing (tests)
 import Expect
 import State
 import Test
-import Process
 effect Stop
     abort stop : String -> value
 
@@ -25,4 +24,4 @@ tests = Test.test "abort_handler_unit_clause" {
     Expect.equal ["stopped"] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

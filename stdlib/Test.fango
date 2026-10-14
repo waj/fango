@@ -4,7 +4,7 @@
 -- A suite is a tree: `describe` groups tests, `test` names a body that
 -- states [`Expect`](Expect.fango) expectations, and `skip`, `only`, and
 -- `todo` mark work that is not run. A program tests itself with
--- `main() = Process.runSystem { Test.run suite }`:
+-- `main() = Test.run suite`:
 --
 -- ```fango
 -- import Expect

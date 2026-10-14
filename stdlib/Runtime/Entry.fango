@@ -1,0 +1,178 @@
+{-# no-prelude #-}
+-- Program entry assembly: the default handlers `main`'s effects run under.
+--
+-- An effect names the runner a program uses for it when nothing else handles
+-- it, with a `DefaultHandler` attribute that quotes the runner:
+--
+-- ```text
+-- #[Runtime.Entry.DefaultHandler `runSystem`]
+-- effect Arguments
+--     args : () -> List String
+-- ```
+--
+-- When `main` performs effects besides `IO`, the compiler splices
+-- `assemble` to build the program entry: `main`, nested inside the default
+-- runner of every effect it performs and of every effect those runners
+-- perform in turn. A default applies nowhere else, so a missing handler in
+-- ordinary code is still a compile error.
+module Runtime.Entry exposing (DefaultHandler(..), assemble)
+
+import Basics exposing (..)
+import IO exposing (IO)
+import Meta exposing (Arrow(..), Attached(..), Code, Effect(..), Items(..), Site, Tail(..), TypeRepr)
+
+-- The runner the program entry installs for the effect this attribute
+-- precedes. The quote names a runner of shape `(() ->{E | e} a) ->{r | e} a`,
+-- where `E` is the effect and `r` holds only `IO` and effects that declare
+-- default handlers themselves. An effect declares at most one.
+type DefaultHandler
+    -- The quoted runner.
+    = DefaultHandler Code
+
+-- An effect the entry must handle, and where the need arose.
+type Need = { service : Effect, site : Site }
+
+-- A default handler the entry installs.
+type Install =
+    { service : Effect
+    , runner : Code
+    , site : Site
+    , needs : Items Effect
+    }
+
+append : Items a -> Items a -> Items a
+append first second =
+    case first of
+        NoItems -> second
+        Item value rest -> Item value (append rest second)
+
+anyItem : (a -> Bool) -> Items a -> Bool
+anyItem test items = Meta.foldItems { found item -> found || test item } False items
+
+isIO : Effect -> Bool
+isIO service =
+    case Meta.arrow (typeOf (() ->{IO} ())) of
+        Arrow parts -> anyItem { io -> Meta.sameEffect io service } parts.effects
+        NotArrow -> False
+
+-- The effects in a row that need a handler from the entry.
+services : Site -> Items Effect -> Items Need
+services site effects =
+    case effects of
+        NoItems -> NoItems
+        Item service rest ->
+            if isIO service then
+                services site rest
+            else
+                Item (Need { service = service, site = site }) (services site rest)
+
+installed : Effect -> Items Install -> Bool
+installed service installs = anyItem { install -> Meta.sameEffect install.service service } installs
+
+-- Every default the entry needs: main's effects, then each runner's own.
+collect : Items Install -> Items Need -> Items Install
+collect done pending =
+    case pending of
+        NoItems -> done
+        Item need rest ->
+            if installed need.service done then
+                collect done rest
+            else
+                found = defaultFor need
+                collect (append done (Item found NoItems)) (append rest (services found.site found.needs))
+
+defaultFor : Need -> Install
+defaultFor need =
+    name = need.service.name
+    case Meta.attributes @DefaultHandler need.service.attributes of
+        NoItems ->
+            Meta.failAt need.site ("`" ++ name ++ "` is not handled, and it declares no default handler.")
+        Item attached more ->
+            case more of
+                Item second _ ->
+                    Meta.failAt second.site ("`" ++ name ++ "` declares more than one default handler.")
+                NoItems ->
+                    case attached.value of
+                        DefaultHandler runner -> checked need.service runner attached.site
+
+-- The runner's declared type, checked against the shape a default needs.
+checked : Effect -> Code -> Site -> Install
+checked service runner site =
+    shape = "`(() ->{" ++ service.name ++ " | e} a) ->{r | e} a`"
+    if Meta.isReference runner then
+        declared = Meta.declaredType runner
+        bad = "The default handler for `" ++ service.name ++ "` has type `" ++ Meta.typeName declared ++ "`, but it must have the shape " ++ shape ++ "."
+        case Meta.arrow declared of
+            NotArrow -> Meta.failAt site bad
+            Arrow outer ->
+                case Meta.arrow outer.param of
+                    NotArrow -> Meta.failAt site bad
+                    Arrow inner ->
+                        if runnerShape service inner outer then
+                            Install { service = service, runner = runner, site = site, needs = outer.effects }
+                        else
+                            Meta.failAt site bad
+    else
+        Meta.failAt site ("A default handler quotes a runner by name, like `runSystem`, with the shape " ++ shape ++ ".")
+
+runnerShape : Effect -> Meta.ArrowInfo -> Meta.ArrowInfo -> Bool
+runnerShape service inner outer =
+    handlesOnly service inner.effects
+        && Meta.sameType inner.param (typeOf ())
+        && Meta.isVar inner.result
+        && Meta.sameType inner.result outer.result
+        && sameTail inner.tail outer.tail
+
+handlesOnly : Effect -> Items Effect -> Bool
+handlesOnly service effects =
+    case effects of
+        Item only NoItems -> Meta.sameEffect only service
+        _ -> False
+
+sameTail : Tail -> Tail -> Bool
+sameTail a b =
+    case (a, b) of
+        (Open x, Open y) -> Meta.sameType x y
+        _ -> False
+
+neededBy : Effect -> Items Install -> Bool
+neededBy service installs = anyItem { install -> anyItem { need -> Meta.sameEffect need service } install.needs } installs
+
+without : Effect -> Items Install -> Items Install
+without service installs =
+    case installs of
+        NoItems -> NoItems
+        Item install rest ->
+            if Meta.sameEffect install.service service then rest else Item install (without service rest)
+
+-- The first install no other remaining runner performs: it can go innermost.
+innermost : Items Install -> Items Install -> Items Install
+innermost all candidates =
+    case candidates of
+        NoItems -> NoItems
+        Item install rest ->
+            if neededBy install.service (without install.service all) then
+                innermost all rest
+            else
+                Item install NoItems
+
+-- Installs ordered innermost first: a runner sits inside the runners of the
+-- effects it performs.
+nesting : Items Install -> Items Install
+nesting remaining =
+    case remaining of
+        NoItems -> NoItems
+        Item first _ ->
+            case innermost remaining remaining of
+                Item next _ -> Item next (nesting (without next.service remaining))
+                NoItems -> Meta.failAt first.site ("The default handler for `" ++ first.service.name ++ "` depends on itself through other default handlers.")
+
+-- The program entry for `main`, given its type and a reference to it.
+-- Failures point at the offending attribute or at `main`.
+assemble : TypeRepr -> Code -> Code
+assemble mainType main =
+    case Meta.arrow mainType of
+        NotArrow -> Meta.failAt (Meta.siteOf main) "`main` must be a function."
+        Arrow parts ->
+            installs = nesting (collect NoItems (services (Meta.siteOf main) parts.effects))
+            Meta.foldItems { body install -> `$(install.runner) { $(body) }` } `$(main)()` installs

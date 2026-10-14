@@ -3,7 +3,6 @@ module RecordsOrder exposing (tests)
 import Expect
 import State
 import Test
-import Process
 
 type Pair = { first : Int, second : Int }
 
@@ -28,4 +27,4 @@ tests = Test.test "records_order" {
     Expect.equal ["b", "a", "r", "y", "x"] (List.reverse observed.state)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

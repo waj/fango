@@ -5,7 +5,6 @@ import Result exposing (Result(..))
 import Runtime.Scope
 import State
 import Test
-import Process
 
 -- `finally` has no resource, so it places no restriction on the result it
 -- returns: a scope over Unit can hand back a function.
@@ -46,4 +45,4 @@ tests = Test.test "scope_finally" {
     Expect.equal ((15, Err "inside", "plain"), ["cleanup built", "cleanup failed path", "cleanup plain"]) observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

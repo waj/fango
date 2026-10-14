@@ -7,7 +7,6 @@ import Result exposing (Result(..))
 import State
 import String
 import Test
-import Process
 
 beforeSpace char = char /= ' '
 
@@ -35,4 +34,4 @@ tests = Test.test "stdlib_string_span" {
     Expect.equal (Err "stopped") (Fail.attempt { String.span { _ -> Fail.fail "stopped" } "abc" })
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

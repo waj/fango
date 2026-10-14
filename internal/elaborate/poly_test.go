@@ -249,7 +249,7 @@ func TestPolyMainDefaults(t *testing.T) {
 main() = forever()
 `)
 	dump := core.Dump(prog)
-	if !strings.Contains(dump, "(def main (params _) () ->{IO} ()") {
-		t.Errorf("main should default to () ->{IO} ():\n%s", dump)
+	if !strings.Contains(dump, "(def main (params _) () -> ()") {
+		t.Errorf("main should default to () -> ():\n%s", dump)
 	}
 }

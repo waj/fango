@@ -6,7 +6,6 @@ import Iterator
 import Maybe exposing (Maybe(..))
 import Stream
 import Test
-import Process
 
 foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
@@ -63,4 +62,4 @@ tests = Test.test "iterator_helpers" {
     Expect.equal 42 saved()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

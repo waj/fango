@@ -9,7 +9,6 @@ import Result exposing (Result(..))
 import String
 import Test
 import Text.Builder as Builder
-import Process
 
 -- Tasks extending one shared version each get their own text; whichever
 -- extends the buffer in place, the others copy the shared prefix.
@@ -37,4 +36,4 @@ tests = Test.test "text_builder_tasks" {
     Expect.equal "shared:" original
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

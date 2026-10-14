@@ -4,7 +4,6 @@ import Expect
 -- The List combinators the standard library exposes beyond range/each/foldl.
 import List
 import Test
-import Process
 
 empty : List.List Int
 empty = []
@@ -32,4 +31,4 @@ tests = Test.test "stdlib_list_combinators" {
     Expect.equal [1.0, 2.0, 3.0, 4.0, 5.0] (evens xs)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

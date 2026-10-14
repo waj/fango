@@ -2,7 +2,6 @@ module PolyShowNested exposing (tests)
 
 import Expect
 import Test
-import Process
 type Opt a = None | Some a deriving (Eq, Show)
 type Pair a b = MkPair a b deriving (Eq, Show)
 tests : Test.Test {}
@@ -10,4 +9,4 @@ tests = Test.test "poly_show_nested" {
     Expect.equal "MkPair (Some (-1)) \"hi\"" (show (MkPair (Some (0 - 1)) "hi"))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -6,7 +6,6 @@ import IO
 import Result exposing (Result(..))
 import Runtime.Scope
 import Test
-import Process
 
 type Port = { emit : String ->{IO} () }
 
@@ -23,4 +22,4 @@ fixtureBody() =
 tests : Test.Test IO.IO
 tests = Test.test "failure_report_stored_retained" { Expect.equal () fixtureBody() }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -16,7 +16,6 @@ import Time.Instant as Instant
 import Time.Period as Period
 import Time.TimeOfDay as TOD
 import Time.Zone as Zone
-import Process
 
 check : String -> Bool ->{Fail Error} ()
 check label passed = if passed then () else Fail.fail (InvalidComponent label)
@@ -146,4 +145,4 @@ fixtureBody() = Fail.attempt {
 tests : Test.Test IO.IO
 tests = Test.test "time_zones" { Expect.equal (Ok True) fixtureBody() }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

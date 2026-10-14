@@ -27,5 +27,5 @@ countFile path ok =
             False
 
 main() =
-    ok = foldl countFile True (Process.runSystem Process.args)
+    ok = foldl countFile True (Process.args())
     if ok then () else Process.exit (Process.status 2)

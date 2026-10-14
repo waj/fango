@@ -4,7 +4,6 @@ import Expect
 import Fail exposing (Fail)
 import Result exposing (Result(..))
 import Test
-import Process
 
 type Outer = Outer deriving (Show)
 type Inner = Inner deriving (Show)
@@ -29,4 +28,4 @@ tests = Test.test "attempt_inside_scoped_runner" {
     }))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -2,7 +2,6 @@ module ClassesComposeWhole exposing (tests)
 
 import Expect
 import Test
-import Process
 -- Composition stops where it could disagree with a concrete use, and the
 -- predicate stays whole for the caller to resolve. A blanket head is less
 -- specific than a constructor head that might match at some instantiation,
@@ -44,4 +43,4 @@ tests = Test.test "classes_compose_whole" {
     Expect.equal "plain" (viaGroup Opaque)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

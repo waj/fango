@@ -5,7 +5,6 @@ import Result exposing (Result(..))
 import Runtime.Scope
 import State exposing (State)
 import Test
-import Process
 
 -- A cleanup scope composes with a parameterized handler in both nestings, and
 -- the state cell survives the scope it encloses.
@@ -77,4 +76,4 @@ tests = Test.test "scope_state" {
     Expect.equal ((("inner 01", 2), ("outer 78", 9), Err "stopped at failing3"), ["open inner", "close inner", "open outer", "close outer", "open failing", "close failing"]) observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

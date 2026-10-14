@@ -8,7 +8,6 @@ import Failure
 import Result exposing (Result(..))
 import Runtime.Scope
 import Test
-import Process
 
 -- Bytes is an ordinary nominal type to the deriver, so a type holding one
 -- derives like any other.
@@ -51,4 +50,4 @@ tests = Test.test "bytes_derived" {
     } failed.suppressed
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

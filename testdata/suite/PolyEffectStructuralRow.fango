@@ -2,7 +2,6 @@ module PolyEffectStructuralRow exposing (tests)
 
 import Expect
 import Test
-import Process
 effect Read a
     read : () -> a
 
@@ -18,4 +17,4 @@ tests = Test.test "poly_effect_structural_row" {
     Expect.equal [42] result
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

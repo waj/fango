@@ -13,7 +13,6 @@ import Runtime.Local
 import String
 import Test
 import Text.Reader as TextReader
-import Process
 
 all predicate values = List.foldl { value result -> predicate value && result } True values
 
@@ -78,4 +77,4 @@ tests = Test.test "json_spans" {
     })
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

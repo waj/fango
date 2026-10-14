@@ -5,6 +5,7 @@
 -- Arguments are the `Arguments` effect: code that reads them performs it, and
 -- the program chooses where they come from by running that code under
 -- `runSystem`, for the real command line, or `withArgs`, for a fixed list.
+-- `runSystem` is its default handler, so `main` can read them directly.
 --
 -- A program ends normally by returning from `main`: `()` is status 0, and a
 -- `Status` is that status, applied after every scope has been released and
@@ -15,8 +16,11 @@ module Process exposing (Arguments(..), Status, exit, failure, runSystem, status
 import Basics exposing (..)
 import IO exposing (IO)
 import List exposing (List)
+import Runtime.Entry
 
--- Reading the program's command-line arguments.
+-- Reading the program's command-line arguments. A `main` that performs it
+-- runs under `runSystem` unless it installs another runner.
+#[Runtime.Entry.DefaultHandler `runSystem`]
 effect Arguments
     -- The arguments, without the program name. `fango run` passes every
     -- argument after the source file.

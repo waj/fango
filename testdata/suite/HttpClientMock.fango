@@ -16,7 +16,6 @@ import State
 import Test
 import Url
 import Writer
-import Process
 
 hello : Server.Request e ->{e} Server.Response e
 hello _ = Server.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString "hello") }
@@ -261,4 +260,4 @@ tests = Test.describe "http_client_mock"
       }
     ]
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

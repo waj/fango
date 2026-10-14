@@ -3,7 +3,6 @@ import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
 import String
 import Test exposing (Test, describe, test)
-import Process
 
 -- `ok`, `err`, and `just` return the value they unwrap, so the next
 -- expectation can use it; `nothing` only checks.
@@ -34,4 +33,4 @@ suite =
         , test "nothing fails on Just" { Expect.nothing (String.toInt "3") }
         ]
 
-main() = Process.runSystem { Test.run suite }
+main() = Test.run suite

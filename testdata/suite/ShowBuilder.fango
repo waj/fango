@@ -6,7 +6,6 @@ import Expect
 import Meta
 import Test
 import Text.Builder as Builder
-import Process
 
 type Tree = Leaf String | Branch Tree Tree deriving (Show)
 type Label = { title : String, tree : Tree } deriving (Show)
@@ -56,4 +55,4 @@ tests = Test.test "show_builder" {
     Expect.equal True $(Meta.lift ("#{Just (-1.25)}" == "Just (-1.25)"))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

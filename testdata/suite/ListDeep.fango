@@ -6,7 +6,6 @@ import Expect
 -- accidental quadratic in cons or tail shows up here as a timeout.
 import List
 import Test
-import Process
 
 length values = List.foldl { _ acc -> acc + 1 } 0 values
 
@@ -24,4 +23,4 @@ tests = Test.test "list_deep" {
     Expect.equal xs xs
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

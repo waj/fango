@@ -5,7 +5,6 @@ import Expect
 import Reader exposing (Reader)
 import Stream
 import Test
-import Process
 
 -- A lawful exhausted reader needs no mutable state or IO.
 emptyReader : Reader {}
@@ -30,4 +29,4 @@ tests = Test.test "reader_pure_operations" {
     Expect.equal (Reader.Ended Bytes.empty) (Reader.readUntil emptyReader (Bytes.fromString "\n") 20)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

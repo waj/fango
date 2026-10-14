@@ -5,7 +5,6 @@ import List
 import Range
 import State
 import Test
-import Process
 
 mark : (Num a, Ord a) => a ->{State.State (List String)} ()
 mark value = State.put [if value < 2 then "a" else "b" | State.get()]
@@ -20,4 +19,4 @@ tests = Test.test "stdlib_range" {
     Expect.equal [] (visited { Range.each { _ -> State.put ["bad" | State.get()] } 3 2 })
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

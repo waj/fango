@@ -47,7 +47,7 @@ app : Http.Server.Request {Protocol | e} ->{Protocol | e} Http.Server.Response {
 app request = Http.GZip.wrap route request
 
 main() =
-    case Process.runSystem Process.args of
+    case Process.args() of
         [raw] ->
             case String.toInt raw of
                 Just port ->

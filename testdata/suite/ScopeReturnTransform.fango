@@ -5,7 +5,6 @@ import Result exposing (Result(..))
 import Runtime.Scope
 import State
 import Test
-import Process
 
 -- A failure raised by a handler's return transformation is still an exit from
 -- the enclosing scope, so the release runs before it reaches the outer clause.
@@ -53,4 +52,4 @@ tests = Test.test "scope_return_transform" {
     Expect.equal (Err "return failed for a", ["open a", "note a", "close a"]) observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

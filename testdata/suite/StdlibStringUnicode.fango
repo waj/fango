@@ -3,7 +3,6 @@ module StdlibStringUnicode exposing (tests)
 import Expect
 import String
 import Test
-import Process
 
 tests : Test.Test {}
 tests = Test.test "stdlib_string_unicode" {
@@ -18,4 +17,4 @@ tests = Test.test "stdlib_string_unicode" {
     Expect.equal "二" part.rest
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

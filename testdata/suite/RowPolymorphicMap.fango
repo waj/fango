@@ -3,7 +3,6 @@ module RowPolymorphicMap exposing (tests)
 import Expect
 import State
 import Test
-import Process
 type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
 
 map : (a ->{e} b) -> Chain a ->{e} Chain b
@@ -29,4 +28,4 @@ tests = Test.test "row_polymorphic_map" {
     Expect.equal [1, 2] (List.reverse observed.state)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

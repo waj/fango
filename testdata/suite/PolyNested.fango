@@ -2,7 +2,6 @@ module PolyNested exposing (tests)
 
 import Expect
 import Test
-import Process
 type Opt a = None | Some a deriving (Eq, Show)
 type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
 
@@ -20,4 +19,4 @@ tests = Test.test "poly_nested" {
     Expect.equal 42 (heads xs)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

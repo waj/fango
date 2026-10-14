@@ -14,7 +14,6 @@ import Test
 import Text.Reader as TextReader
 import Text.Writer as TextWriter
 import Writer
-import Process
 
 decoded : String -> Result Json.Error String -> Bool
 decoded expected result = case result of
@@ -89,4 +88,4 @@ tests = Test.test "json_text" {
     })
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

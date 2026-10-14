@@ -4,7 +4,6 @@ import Expect
 import Fail
 import Result exposing (Result(..))
 import Test
-import Process
 
 type Problem = Problem
 
@@ -29,4 +28,4 @@ tests = Test.test "fail_case_binding" {
     Expect.equal "failed" (report False)
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

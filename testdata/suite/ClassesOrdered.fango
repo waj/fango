@@ -2,7 +2,6 @@ module ClassesOrdered exposing (tests)
 
 import Expect
 import Test
-import Process
 type Count = Count Int deriving (Show)
 
 unwrap x = case x of
@@ -34,4 +33,4 @@ tests = Test.test "classes_ordered" {
     Expect.equal "false" (choose (Pair False (Count 100)))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

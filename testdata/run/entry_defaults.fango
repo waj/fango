@@ -1,0 +1,34 @@
+import Process
+import Runtime.Entry
+
+-- `main` performs effects with default handlers, so the program starts at an
+-- assembled entry: `main` inside `runGreeter`, inside `runLog`, which the
+-- greeter's runner relies on, and inside the Arguments default.
+#[Runtime.Entry.DefaultHandler `runGreeter`]
+effect Greeter
+    greet : String -> String
+
+#[Runtime.Entry.DefaultHandler `runLog`]
+effect Log
+    log : String -> ()
+
+runGreeter : (() ->{Greeter | e} a) ->{Log | e} a
+runGreeter action =
+    log "greeter installed"
+    handle action() on
+        greet name ->
+            log ("greeting " ++ name)
+            resume ("Hello, " ++ name)
+
+runLog : (() ->{Log | e} a) ->{IO | e} a
+runLog action =
+    print "log installed"
+    handle action() on
+        log line ->
+            print ("log: " ++ line)
+            resume ()
+
+main() =
+    print (greet "you")
+    print (Process.args())
+    Process.status 7

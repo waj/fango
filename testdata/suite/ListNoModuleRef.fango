@@ -2,7 +2,6 @@ module ListNoModuleRef exposing (tests)
 
 import Expect
 import Test
-import Process
 -- Bracket syntax alone: this file builds and matches lists without ever naming
 -- the List module, which is the case where the bundled type contributes only
 -- its runtime representation and no module-level reference.
@@ -26,4 +25,4 @@ tests = Test.test "list_no_module_ref" {
     Expect.equal 3 (sum [0, 1, 2])
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

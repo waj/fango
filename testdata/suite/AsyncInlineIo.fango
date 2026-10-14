@@ -7,7 +7,6 @@ import IO
 import Result exposing (Result(..))
 import State
 import Test
-import Process
 
 type Observation = Trace String deriving (Eq, Show)
 
@@ -34,4 +33,4 @@ tests = Test.test "async_inline_io" {
                  ] observations()
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

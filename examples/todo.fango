@@ -124,7 +124,7 @@ completeTodo raw =
                                 print ("Completed " ++ show wanted ++ ".")
 
 main() =
-    case Process.runSystem Process.args of
+    case Process.args() of
         ["add", text] -> addTodo text
         ["list"] -> listTodos()
         ["done", raw] -> completeTodo raw

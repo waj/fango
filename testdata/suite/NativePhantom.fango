@@ -2,7 +2,6 @@ module NativePhantom exposing (tests)
 
 import Expect
 import Test
-import Process
 {-# resource #-}
 type Token a = Token Int
 
@@ -21,4 +20,4 @@ tests = Test.test "native_phantom" {
     Expect.equal 8 (value (text 8))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

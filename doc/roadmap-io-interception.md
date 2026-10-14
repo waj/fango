@@ -174,63 +174,13 @@ run outside all applications handled by their own activation.
 
 ## Entry assembly
 
-`main` is a nullary function returning `()` or `Process.Status` (see
-[entry points](reference/commands.md#entry-points)). Its row may
-contain `IO` and any effect that declares a default handler. The program entry
-installs those defaults; a default never applies anywhere else, so a missing
-handler in ordinary code remains a compile error.
-
-Like any other definition, `main` may be annotated or not. Without an
-annotation, its inferred row selects the defaults, so every service the program
-uses is provided. An annotation is exact, as everywhere else, so it limits the
-program: a service used anywhere below `main` but missing from its row is a
-compile error. An effect without a default is rejected in either case.
-
-An effect declares its default with an ordinary typed attribute whose payload
-quotes the runner:
-
-```text
-#[DefaultHandler `runSystem`]
-effect Console
-    readLine : () -> Maybe IO.Line
-    readBytes : Int -> Maybe Bytes
-    writeBytes : Output -> Bytes -> ()
-```
-
-Third-party effects use the same attribute, so a library's `Database` effect
-can name its own default. Standard-library and user effects are treated alike.
-
-The compiler hardcodes as little as possible. It knows only that:
-
-- `main` must have the shape above, whether annotated or inferred;
-- the program entry is the splice of `Runtime.Entry.assemble`, given `main`'s
-  type and a quote of `main`;
-- the assembled entry's row may contain only `IO`, and its result type is
-  `main`'s.
-
-Everything else is Fango source in `Runtime.Entry`: the `DefaultHandler`
-attribute type, and an `assemble` metaprogram that
-
-- reads `main`'s effect row and passes `IO` through;
-- reads each other effect's `DefaultHandler` attribute, rejecting an effect
-  with none or with several;
-- checks each runner's declared type has the shape
-  `(() ->{E | e} a) ->{r | e} a`, where `r` contains only `IO` and other
-  effects with defaults;
-- nests the runners so each one is inside the runners its `r` requires,
-  rejecting cycles;
-- reports failures at the attribute or at `main`.
-
-This uses the implemented [effect reflection](reference/metaprogramming.md#effect-reflection)
-in `Meta` and attribute tags on `effect` declarations.
-
-`main`'s row, annotated or shown by `fango doc` when inferred, states every
-service the program can reach. An annotated function deeper in the program
-limits its own callees in the same way. `Test.run` is unchanged: a test
-program's `main` row decides which real services, such as a database, its
-tests may reach, and services a test mocks itself never reach `main`. Annotate
-a test program's `main` when tests must not reach real services they forgot
-to mock; an inferred row provides them.
+Implemented: see [default handlers](reference/commands.md#default-handlers),
+[Runtime.Entry](../stdlib/Runtime/Entry.fango), and the
+[design](design/pipeline.md#entry-assembly). `Arguments`, `Random`, `Clock`,
+and `Http` declare defaults; Console, File, and Net declare theirs as their
+milestones land. `Test.run` is unchanged by it: a test program's `main` row
+decides which real services its tests may reach, and services a test mocks
+itself never reach `main`.
 
 ## Handler completeness and forwarding
 
@@ -349,11 +299,8 @@ committed separately.
    [effect reflection](reference/metaprogramming.md#effect-reflection) and
    [attributes](reference/metaprogramming.md#attributes).
 2. **IOI5.** DONE: see [Process](../stdlib/Process.fango) and
-   [entry points](reference/commands.md#entry-points). Until phase 3, programs
-   install the Arguments runner explicitly.
-3. **IOI9.** Entry assembly, with defaults declared for `Arguments`, `Random`,
-   `Clock`, and `Http`. Remove the explicit runner installs that defaults now
-   cover.
+   [entry points](reference/commands.md#entry-points).
+3. **IOI9.** DONE: see [default handlers](reference/commands.md#default-handlers).
 4. **IOI2.** The `Console` effect and its runners, with its default declared.
    Settle public driver visibility here, the first published driver, and apply
    the same rule to later ones.
@@ -488,6 +435,11 @@ produce deliberate diagnostics; no real implementation is accidentally selected
 inside a mock; the interpreter and compiler agree on each supported behavior.
 
 ### IOI9 Entry assembly
+
+Status: DONE. The contract lives in
+[default handlers](reference/commands.md#default-handlers) and
+[Runtime.Entry](../stdlib/Runtime/Entry.fango); Console, File, and Net add
+their defaults with IOI2, IOI4, and IOI6.
 
 Implement [entry assembly](#entry-assembly): the `Runtime.Entry` module with
 its `DefaultHandler` attribute type and `assemble` metaprogram, and the

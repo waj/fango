@@ -2,7 +2,6 @@ module EquationsUnit exposing (tests)
 
 import Expect
 import Test
-import Process
 -- `()` is an exhaustive Unit pattern. The attached `f()` spelling still means
 -- a sole Unit argument; a spaced `()` is an ordinary first parameter.
 attached() = 1
@@ -23,4 +22,4 @@ tests = Test.test "equations_unit" {
     )
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests

@@ -416,6 +416,23 @@ documents its own declaration, and any other is a re-export carrying the
 owner's ID. A type's displayed representation includes only the constructors
 or fields its exporter publishes.
 
+## Entry assembly
+
+The checker infers `main` with an open row and settles its result after
+defaulting. Once the entry module's declarations are complete, a `main` whose
+row holds effects besides `IO` gets an assembled entry: the checker builds the
+splice operand `Runtime.Entry.assemble` applied to `main`'s reflected type,
+with unrestricted reflection visibility, and a compiler-built reference to
+`main` carrying its name span. It runs the splice through the ordinary staging
+path, so the evaluated closure becomes stage cache dependencies, and checks
+the expansion as `main#entry`, a name source cannot spell, under the strict
+entry rule: a closed `IO` row and a `()` or status result. The definition is
+part of the entry module's checked object, and program assembly selects it as
+`Prog.Entry` whenever it exists; every backend then starts there. Knowledge of
+particular defaults, their order, and their failures stays in Fango source;
+the checker knows only `IO`, which needs no runner, and skips assembly for a
+`main` that performs nothing else.
+
 ## Elaboration boundary
 
 Inference determines types and contracts. Elaboration resolves defaulting,

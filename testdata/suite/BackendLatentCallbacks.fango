@@ -5,7 +5,6 @@ import Fail exposing (Fail)
 import List
 import Result exposing (Result(..))
 import Test
-import Process
 
 make : () -> () ->{Fail String} Int
 make() = { Fail.fail "deferred" }
@@ -43,4 +42,4 @@ tests = Test.test "backend_latent_callbacks" {
     Expect.equal ([1, 2, 3]) (List.map { action -> action() } (retained 3 []))
 }
 
-main() = Process.runSystem { Test.run tests }
+main() = Test.run tests
