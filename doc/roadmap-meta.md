@@ -105,6 +105,31 @@ release gates.
 Preserve the existing stage-safety, step-budget, and completion-group rules.
 Measure elaboration cost when a forcing consumer justifies declaration generation.
 
+## Effect reflection
+
+[Entry assembly](roadmap-io-interception.md#entry-assembly) is a concrete
+consumer: a Fango metaprogram reads `main`'s effect row and each effect's
+default-handler attribute, then generates the program entry. `Meta` needs:
+
+- **Attributes on effects.** Attribute tags may precede an `effect`
+  declaration, with the existing evaluation, payload, and repetition rules.
+- **Effect reflection.** A representation of an applied effect with nominal
+  identity, name, module, type arguments, and attribute collection. Visibility
+  follows the same import rules as type reflection.
+- **Arrow decomposition.** A `TypeRepr` arrow exposes its parameter, result,
+  the effect applications in its row, and whether the row is closed or ends in
+  a row variable.
+- **Types of quoted references.** A quote consisting of one top-level name
+  reports that declaration's declared type. This needs `TypeRepr` to represent
+  quantified type variables and row variables, as runner types are polymorphic,
+  for example `(() ->{Console | e} a) ->{IO | e} a`.
+- **Failure sites.** A generator can report a failure at a declaration it was
+  given, such as `main`, in addition to an attribute's site.
+
+These additions do not generate declarations and keep the existing stage,
+purity, and step-budget restrictions. Derivers may use them too, for example to
+inspect the rows of function-typed fields.
+
 ## Expression quotation blocks
 
 Deferred: allow a quotation to directly contain local bindings and statements

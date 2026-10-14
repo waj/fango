@@ -2,8 +2,8 @@
 
 Status: proposed API and implementation direction, not an implemented language
 contract. The purpose is to review the complete caller and handler experience
-before choosing representations or changing library APIs. Names, effect
-boundaries, fixture types, and signatures below remain candidates.
+before changing library APIs. Domain-specific resource handles are selected;
+names, fixture types, and signatures below remain candidates.
 
 This proposal addresses the builtin IO interception question in the
 [effects roadmap](roadmap-effects.md#deferred-topics). It uses the current
@@ -30,15 +30,16 @@ mark its milestone DONE without changing its heading.
 
 All code blocks in these proposal pages use `text`: they are design examples,
 not fixtures claimed to compile today. Imports and some qualified type names
-are omitted for readability. In proposed module-local signatures, `Access`
-means that module's effect, not one shared global effect. Public reexports of
+are omitted for readability. The service effects are `Console`, `FileSystem`
+(declared in File), `Network` (declared in Net), and `Arguments` (declared in
+Process); examples write them unqualified. Public reexports of
 driver-owned effects must preserve nominal identity.
 
 ## Intended outcome
 
 Programs should call familiar functions such as `print`, `File.read`, and
 `Net.withClient`, while a surrounding runner decides whether requests reach
-the OS, an in-memory filesystem, or a scripted transport. Tests should be able
+the OS, an in-memory filesystem, or a custom transport handler. Tests should be able
 to replace one service independently and keep the rest real.
 
 The candidate uses small domain effects and explicit runners. `IO` remains the
@@ -84,12 +85,12 @@ use the latter without first generalizing the native operation ABI.
 
 | Area | Candidate disposition | Important boundary |
 | --- | --- | --- |
-| Console | Add `Console.Access`, system and test runners | Text output and line input; `print` remains a helper |
-| Files and directories | Add `File.Access` and an in-memory runner | Acquisition, metadata, enumeration, whole-file fast paths |
-| Generic handle IO | Add `IO.Stream`, if retaining the current handle API | Line/byte reads and writes on standard or file handles |
-| Networking | Add an interceptable Net driver and test fixtures | Listeners, connections, TLS, deadlines, pools, cancellation |
+| Console | Add the `Console` effect covering all standard streams, system and test runners | Prelude helpers, stdin source, stdout/stderr sinks; calls never raise errors; `print` remains a helper |
+| Files and directories | Add the `FileSystem` effect with file-specific handles and an in-memory runner | Acquisition, handle reads/writes, metadata, enumeration, whole-file fast paths |
+| Generic handle IO | Retire the shared `IO.Handle` | Generic code takes `Bytes.Source`/`Sink` or `Reader`/`Writer` |
+| Networking | Add the interceptable `Network` effect and system runner | Listeners, connections, TLS, deadlines, pools, cancellation; scripted fixtures are left to libraries |
 | Process arguments | Add resumptive `Process.Arguments` | Whole argument list rather than exposing count/index natives |
-| Process exit | Consider separate abort-only `Process.Exit` | Test capture and cleanup; deliberate behavior change |
+| Process exit | Status returned from a function-only `main`; `Process.exit` stays a hard native | Normal completion runs cleanup before the status applies; `exit` skips cleanup and requires `IO` |
 | Clock and randomness | Keep existing domain effects and runners | Do not equate frozen clock readings with virtual sleep |
 | HTTP | Preserve domain mocks; add a runner over interceptable Net | Test either HTTP behavior or the lower transport |
 | Async | Preserve native tasks and inherited handlers | Mocked services do not imply deterministic scheduling |
@@ -106,7 +107,7 @@ security isolation mechanism.
 ### Application code
 
 ```text
-app : () ->{Console.Access, File.Access} ()
+app : () ->{Console, FileSystem} ()
 app() =
     case File.read "greeting.txt" of
         Ok text -> print text
@@ -120,32 +121,29 @@ replaceable services instead of collapsing them into `IO`.
 ### Real services
 
 ```text
-main : () ->{IO} ()
-main() =
-    use Console.runSystem
-    use File.runSystem
-    app()
+main : () ->{Console, FileSystem} ()
+main() = app()
 ```
 
-`use` already exists. No new runner syntax is proposed. A project may name
-this composition with an ordinary helper, such as `runApp`, to avoid repeating
-it at each entry point. Such a helper handles a specific chosen set of effects;
-it is not a universal eliminator for arbitrary rows.
+`main`'s row, written here or inferred, lists the services the program uses,
+and [entry assembly](#entry-assembly) installs each one's declared default
+runner around it. A runner that needs configuration is installed explicitly inside
+`main` with `use`, and its effect then does not appear in `main`'s row.
 
-The conservative file-runner candidate also supplies `IO.Stream` for streaming
-file access. Callbacks that only use whole-file operations need not perform
-that additional effect themselves.
+File handles are read and written through File operations, so `File.runSystem`
+handles only file access. Standard streams stay with the console runner,
+whatever order the runners nest in.
 
 ### Simulated services and observable results
 
 ```text
 fixture = File.withTextFile "greeting.txt" "Hello!" File.empty
 
-test = Console.runTest [] {
+test = Console.runTest Bytes.empty {
     File.runMemory fixture { app() }
 }
 
-test.output == "Hello!\n"
+test.stdout == Bytes.fromString "Hello!\n"
 ```
 
 The candidate console runner returns a transcript; the file runner returns a
@@ -161,17 +159,78 @@ filesystem does not authorize or erase unrelated native calls.
 ### Mixed services
 
 ```text
+main : () ->{Console} ()
 main() =
-    use Console.runSystem
     File.runMemory fixture { app() }
     ()
 ```
 
-This uses real output and simulated files. Explicit composition also makes
-handler dependencies visible: a handler that logs through Console must be
+This uses real output and simulated files: the entry supplies the real
+Console, and `main` itself handles files. Composition makes handler
+dependencies visible: a handler that logs through Console must be
 installed inside the Console runner it relies on. Merely handling two effects
 in sibling clauses does not allow those clauses to call each other; clauses
 run outside all applications handled by their own activation.
+
+## Entry assembly
+
+`main` is a nullary function returning `()` or `Process.Status` (see
+[exit status](roadmap-io-interception-api.md#exit-status)). Its row may
+contain `IO` and any effect that declares a default handler. The program entry
+installs those defaults; a default never applies anywhere else, so a missing
+handler in ordinary code remains a compile error.
+
+Like any other definition, `main` may be annotated or not. Without an
+annotation, its inferred row selects the defaults, so every service the program
+uses is provided. An annotation is exact, as everywhere else, so it limits the
+program: a service used anywhere below `main` but missing from its row is a
+compile error. An effect without a default is rejected in either case.
+
+An effect declares its default with an ordinary typed attribute whose payload
+quotes the runner:
+
+```text
+#[DefaultHandler `runSystem`]
+effect Console
+    readLine : () -> Maybe IO.Line
+    readBytes : Int -> Maybe Bytes
+    writeBytes : Output -> Bytes -> ()
+```
+
+Third-party effects use the same attribute, so a library's `Database` effect
+can name its own default. Standard-library and user effects are treated alike.
+
+The compiler hardcodes as little as possible. It knows only that:
+
+- `main` must have the shape above, whether annotated or inferred;
+- the program entry is the splice of `Runtime.Entry.assemble`, given `main`'s
+  type and a quote of `main`;
+- the assembled entry's row may contain only `IO`, and its result type is
+  `main`'s.
+
+Everything else is Fango source in `Runtime.Entry`: the `DefaultHandler`
+attribute type, and an `assemble` metaprogram that
+
+- reads `main`'s effect row and passes `IO` through;
+- reads each other effect's `DefaultHandler` attribute, rejecting an effect
+  with none or with several;
+- checks each runner's declared type has the shape
+  `(() ->{E | e} a) ->{r | e} a`, where `r` contains only `IO` and other
+  effects with defaults;
+- nests the runners so each one is inside the runners its `r` requires,
+  rejecting cycles;
+- reports failures at the attribute or at `main`.
+
+This depends on the [effect reflection](roadmap-meta.md#effect-reflection)
+additions to `Meta`. They are part of this work, not a later follow-up.
+
+`main`'s row, annotated or shown by `fango doc` when inferred, states every
+service the program can reach. An annotated function deeper in the program
+limits its own callees in the same way. `Test.run` is unchanged: a test
+program's `main` row decides which real services, such as a database, its
+tests may reach, and services a test mocks itself never reach `main`. Annotate
+a test program's `main` when tests must not reach real services they forgot
+to mock; an inferred row provides them.
 
 ## Handler completeness and forwarding
 
@@ -182,20 +241,21 @@ pass another onward, call the outer operation explicitly:
 ```text
 quiet action =
     handle action() on
-        Console.Driver.writeText _ -> resume ()
-        Console.Driver.readInput () ->
-            resume Console.Driver.readInput()
+        Console.Driver.writeBytes _ _ -> resume ()
+        Console.Driver.readLine () -> resume Console.Driver.readLine()
+        Console.Driver.readBytes count ->
+            resume (Console.Driver.readBytes count)
 ```
 
-The forwarded call selects the enclosing handler, not `quiet` again. Its
-`Access` requirement remains in `quiet`'s surrounding row. A handler that
-answers both operations itself can discharge the effect completely.
+The forwarded calls select the enclosing handler, not `quiet` again. Their
+`Console` requirement remains in `quiet`'s surrounding row. A handler that
+answers every operation itself can discharge the effect completely.
 
 Automatic omission-and-forwarding is a separate possible language feature.
 It would need rules for completeness, residual effects, multiple applied
 instances, exhaustiveness, and diagnostics. Do not smuggle it into this library
-proposal. Complete handlers mean that adding a public operation is a source
-compatibility event; prefer ordinary derived helpers when they suffice.
+proposal. Complete handlers mean that adding a public operation requires updating every
+handler of the effect; prefer ordinary derived helpers when they suffice.
 
 Driver modules are candidate public authoring APIs, not merely private
 implementation names. If users are expected to write custom handlers, the
@@ -209,42 +269,42 @@ public to accomplish that.
 | --- | --- | --- |
 | Effect grouping | Small domain effects | One large IO effect shortens rows but makes custom handlers broad; one effect per operation makes rows long |
 | Real default | Explicit system runners | Native fallback needs an explicit permission and effect-row story; missing handlers must not silently access the OS in tests |
-| Resource API | Preserve handle calls as the baseline | Scoped Source/Sink callbacks reduce generic handle dispatch but change caller APIs |
-| File acquisition | One File effect plus shared handle IO | A unified file effect avoids two rows but separates file handles from generic IO operations |
+| Resource API | Selected: domain-specific handles; standard streams are Console operations and generic code uses Source/Sink | A shared handle with a generic stream effect sends every handle to the innermost handler of that effect, whichever runner created it; scoped capabilities need handler-chosen rows ([resources](roadmap-io-interception-resources.md#resource-representation)) |
+| File acquisition | Selected: one File effect for acquisition and handle IO | Code choosing between a file and a standard stream takes a sink or writer rather than a shared handle |
 | Net grouping | Inventory one driver before splitting | Separate listener/connection/pool effects reduce handler size but complicate dependencies |
 | Test results | Typed transcript/snapshot per runner | A generic world is convenient but can obscure residual effects, lifetimes, and error ownership |
-| Error policy | Preserve existing Result/Fail boundaries | Uniformly switching to Fail is a separate API migration |
-| Exit | Distinct abort-only effect | Preserving immediate hard exit gives weaker test and cleanup behavior |
-| Prelude and entry points | Keep helper names; require explicit runners | An implicit entry runner is convenient but requires a precisely defined installation boundary |
+| Error policy | Preserve existing Result/Fail boundaries; Console calls never raise and the runner owns stream failures | Uniformly switching to Fail is a separate API migration |
+| Exit | Selected: `main` returns `()` or `Process.Status`; `exit : Status ->{IO} a` terminates at once | An abort-only Exit effect would duplicate `Fail` with a status payload and could not cross task boundaries |
+| Prelude and entry points | Selected: keep helper names; `main`'s annotated row selects default runners through [entry assembly](#entry-assembly) | Explicit `use` of every runner in `main` is boilerplate in every program; hardcoding standard effects in the compiler would make user effects second-class |
 
-Effect-row aliases could shorten annotations later, but are not a dependency.
+Effect-row aliases are deferred. They could shorten long rows later; no part of
+this proposal needs them.
 Operation-local class constraints are not needed for console printing when
-formatting stays outside the operation. Row-kinded effect parameters are not
-assumed by the handle-preserving baseline. A capability-based alternative must
-prove its callback rows using the existing scoped-callback contract or name the
-additional language work it requires.
+formatting stays outside the operation. Domain-specific handles need neither
+row-kinded effect parameters nor existential rows.
 
-## Migration and compatibility
+## Migration
 
-The public names can remain familiar while inferred and written types change.
-That is still a source compatibility change. Existing callers annotated with
-`IO` alone cannot automatically call a new `Console.Access` function: an effect
-row is not an inheritance relation in which every domain effect is a subtype
-of IO. Runners supply the interpretation.
+Fango has no external users, so this proposal changes signatures and entry
+rules directly, with no compatibility wrappers or migration diagnostics.
+Bundled code, examples, tests, and goldens are rewritten in the same change.
+Functions annotated `{IO}` that use a service change their annotation to the
+service's effect; `IO` remains only on code that reaches the host directly.
+Preserve the ordering of formatting, argument evaluation, failures, writes,
+and cleanup throughout.
 
-Before migrating the Prelude, choose one of these explicitly:
+Retiring the shared handle changes these calls. Calls such as
+`IO.write IO.stderr text` become Console calls, `IO.readLine file` becomes
+`File.readLine file`, and functions that accepted any `IO.Handle` take a
+`Bytes.Source`, `Bytes.Sink`, `Reader`, or `Writer`. The
+[API catalogue](roadmap-io-interception-api.md#retiring-the-shared-handle)
+lists the removed declarations.
 
-- Migrate bundled callers to explicit runners and accept the signature change.
-- Introduce opt-in effectful APIs alongside compatibility wrappers that install
-  real runners. Such wrappers must be visibly outside the interception claim;
-  silently installing a real runner can shadow a test handler.
-- Define an entry-point convenience policy, separately specified for compiled
-  programs, the interpreter, the REPL, and tests. This must not imply ambient
-  defaults for arbitrary missing user effects.
-
-The first option is the clearest candidate; this document does not silently
-select a backwards-compatibility shim. Preserve the ordering of formatting,
-argument evaluation, failures, writes, and cleanup throughout migration.
+The entry point becomes function-only, and `main`'s value is no longer printed
+by any backend. Value-style fixtures, about half of `testdata/run` and the
+`String`-valued multi-module fixtures, become `main() = print (...)` with
+unchanged expected output. The WASI build stops printing the value, and the
+differential harness drops its hidden print-main compilation mode.
 
 Audit bundled programs, standard-library examples, test framework reporting,
 REPL output, debugger/host output, and native-worker transport separately.
@@ -262,23 +322,57 @@ success with misleading semantics.
 ## Delivery and acceptance
 
 Milestone IDs and titles below are stable. They form a dependency graph, not
-a requirement to delay useful console work until network simulation is solved.
+a requirement to delay useful console work until network interpretation is
+designed. IOI6 and IOI7 wait for a concrete consumer and the
+[shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
+decision.
 
 | Milestone | Depends on | Deliverable |
 | --- | --- | --- |
-| IOI1 API and coverage contract | — | Select boundaries, naming, defaults, and compatibility policy |
-| IOI2 Console interpretation | IOI1 | Console effect, real runner, deterministic input/output runner |
-| IOI3 Resource boundary | IOI1 | Chosen handle or capability contract with checked ownership and lifetime |
-| IOI4 Files and standard handles | IOI3 | File/handle interpretation, filesystem fixtures, stream capture |
-| IOI5 Process arguments and exit | IOI1 | Argument runner and separately reviewed exit semantics |
-| IOI6 Network interpretation | IOI3 | Checked transport/cancellation boundary and scripted fixtures |
-| IOI7 HTTP and task integration | IOI6 | HTTP transport path and inherited mock behavior under real tasks |
-| IOI8 Migration and completeness audit | IOI2, IOI4, IOI5, IOI7 | Bundled caller migration, documentation, and verified coverage boundary |
+| IOI1 API and coverage contract | — | Select boundaries, naming, and defaults |
+| IOI2 Console interpretation | IOI1 | Console effect covering standard streams, real runner, deterministic input/output runner |
+| IOI3 Resource boundary | IOI1 | Provider identity and lifetime for domain-specific File and Net handles |
+| IOI4 Files and standard handles | IOI3 | File interpretation, filesystem fixtures, retirement of the shared `IO.Handle` |
+| IOI5 Process arguments and exit | IOI1 | Argument runner, function-only `main` returning a status, hard-exit contract |
+| IOI6 Network interpretation | IOI3 | Public Net driver with a checked cancellation boundary; no stdlib scripted fixtures |
+| IOI7 HTTP and task integration | IOI6, [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency) | HTTP transport path and inherited mock behavior under real tasks |
+| IOI8 Migration and completeness audit | IOI2, IOI4, IOI5, IOI7, IOI9 | Bundled caller migration, documentation, and verified coverage boundary |
+| IOI9 Entry assembly | IOI5, [effect reflection](roadmap-meta.md#effect-reflection) | `DefaultHandler` attribute, `Runtime.Entry.assemble`, compiler entry splice |
+
+### Implementation order
+
+Land the work in these phases. Each phase leaves every verification gate green,
+updates design, reference, and source documentation for what it lands, and is
+committed separately.
+
+1. **Effect reflection** in `Meta`, as listed in the
+   [metaprogramming roadmap](roadmap-meta.md#effect-reflection), including
+   attribute tags before `effect` declarations with their parser, formatter,
+   and TextMate grammar changes.
+2. **IOI5.** `Process.Status`, the hard `Process.exit`, the `Arguments`
+   effect, and the function-only `main`. Stop printing `main`'s value and
+   rewrite value-style fixtures. Until phase 3, programs install the Arguments
+   runner explicitly.
+3. **IOI9.** Entry assembly, with defaults declared for `Arguments`, `Random`,
+   `Clock`, and `Http`. Remove the explicit runner installs that defaults now
+   cover.
+4. **IOI2.** The `Console` effect and its runners, with its default declared.
+   Settle public driver visibility here, the first published driver, and apply
+   the same rule to later ones.
+5. **IOI4, whole-file part.** Whole-file and directory operations behind
+   `FileSystem`, with `runSystem`, `runMemory`, the `Image` fixture API, and
+   its default. These need no handles, so they precede IOI3.
+6. **IOI3 and the rest of IOI4.** `File.Handle` with provider identity, handle
+   operations, `File.source`/`File.sink`, and memory-backed handles. Then
+   retire `IO.Handle`, the standard handles, and the generic handle
+   operations, migrating every caller.
+7. **IOI8, partially.** Migrate the remaining bundled callers and `{IO}`
+   annotations, and publish the coverage map for what has landed. The parts
+   that depend on IOI6 and IOI7 stay open.
 
 ### IOI1 API and coverage contract
 
-Resolve the design-choice table, including public driver visibility and
-whether Prelude functions change immediately. Turn the operation inventory
+Resolve the remaining design choices, including public driver visibility. Turn the operation inventory
 into a traceable map from public calls to interpreted operations or explicit
 native exceptions. Review representative console, streaming-file, HTTP,
 concurrent-server, and test examples before settling internal representations.
@@ -290,22 +384,28 @@ from real IO. The other effects-roadmap items remain independently scoped.
 
 ### IOI2 Console interpretation
 
-Implement the two-operation console candidate, preserving public printing and
-line semantics, and document the test transcript. Verify forwarding, nested
-handlers, partial application, missing handlers, EOF, and unrelated residual
-effects. Keep native error handling in the system implementation and specify
-how test failures differ from real terminal failures.
+Implement the three-operation `Console` effect covering the Prelude helpers
+and all standard-stream access, preserving public printing and line semantics,
+and document the test transcript. Implement the
+[runner-owned failure policy](roadmap-io-interception-api.md#failure-policy):
+the system runner ends the program on a stream error with today's diagnostic,
+and Console calls never raise. Verify forwarding, nested handlers, partial
+application, missing handlers, EOF, and unrelated residual effects. The
+standard-stream `IO` declarations may remain alongside until IOI4 retires them.
 
 Acceptance: the same greeting program runs with real and scripted input;
-captured output is exact; raw `IO.write` is not falsely claimed as covered;
-no scheduler or continuation machinery is added.
+captured stdout and stderr are exact, including `writeTo` and `Console.sink`;
+a real stream failure produces the existing diagnostic outside program output;
+the REPL and interpreter worker still own the program's streams; no scheduler
+or continuation machinery is added.
 
 ### IOI3 Resource boundary
 
-Choose between the resource alternatives in
-[resources and execution](roadmap-io-interception-resources.md). Specify
-construction, identity, foreign handles, close behavior, escape, nested
-providers, and sharing before implementing a virtual handle payload.
+Specify provider identity for the
+[domain-specific handles](roadmap-io-interception-resources.md#resource-representation):
+`File.Handle`, Net connections, listeners, and pools. Cover construction by
+custom handlers, foreign handles within a domain, close behavior, escape,
+nested providers, and sharing before implementing a virtual handle payload.
 
 Acceptance: no forged or stale handle can alias a later resource; provider
 identity survives module/evidence adaptation; mock-owned state cannot escape
@@ -313,40 +413,50 @@ as an apparently pure callable; cleanup and cross-task ownership are explicit.
 
 ### IOI4 Files and standard handles
 
-Implement the selected File and raw-handle boundaries, immutable fixture
-construction, final snapshots, and standard-stream transcripts. Cover both
-streaming and whole-file native fast paths. Specify the handling of handles
-owned by another provider and retain structured error identities.
+Implement the File boundary with file-specific handles, immutable fixture
+construction, and final snapshots. Cover both streaming and whole-file native
+fast paths. Specify the handling of handles owned by another File provider
+and retain structured error identities. Retire `IO.Handle`, the standard
+handles, and the generic handle operations, moving their callers to Console,
+File, or Source/Sink parameters. Test-suite programs that write an empty string
+to `IO.stdout` only to require `IO` need another small `{IO}` call.
 
 Acceptance: memory fixtures exercise open/read/write/append/close, metadata,
 enumeration, EOF, closed/foreign handles, failure after partial progress, and
-cleanup precedence. The same parsing helpers work over real and virtual data.
-Mocks never send unsupported resources to the OS as an implicit fallback.
+cleanup precedence. The same parsing helpers work over real and virtual data
+through `Bytes.Source` and `Bytes.Sink`. Console and file runners compose in
+either nesting order. Mocks never send unsupported resources to the OS as an
+implicit fallback.
 
 ### IOI5 Process arguments and exit
 
-Add independently replaceable arguments. Decide whether exit becomes a
-language abort that unwinds cleanup, and expose that semantic change explicitly.
-Separate hard termination if retained; it must not masquerade as a capturable
-normal return. Define capture results for success, exit status, and unrelated
-failures, and the behavior when exit is requested by a child task.
+Add independently replaceable arguments. Add `Process.Status`, let a
+function-only `main` return `()` or a status, and stop printing `main`'s value,
+as described in the
+[API catalogue](roadmap-io-interception-api.md#exit-status). Change
+`Process.exit` to `Status ->{IO} a` with the documented no-cleanup contract.
+Update the entry-point reference and its diagnostics for rejected value-style
+and wrongly typed `main` declarations.
 
-Acceptance: tests inspect an exit request without terminating the test host;
-cleanup and task-local abort boundaries follow the selected contract; native
-program, interpreter, and REPL entry behavior agree where promised.
+Acceptance: a program can finish normally with a non-zero status after its
+scopes release and its tasks drain; out-of-range statuses fault at
+construction; `exit` skips Fango cleanup in both backends; the compiled
+program, `fango run`, the WASI build, the REPL, and the test harness agree on
+statuses; argument tests need no real process arguments.
 
 ### IOI6 Network interpretation
 
-Specify a checked public cancellation contract rather than exposing raw native
-context payloads. Include TLS, pooling, deadlines, synchronous and async paths,
-and foreign connection checks in the coverage audit. Choose the scripted
-fixture vocabulary and event/ordering semantics before claiming deterministic
-tests for blocked or concurrent operations.
+Publish the Net driver's operation names and types so custom handlers can
+interpret networking. Specify a checked public cancellation contract rather
+than exposing raw native context payloads. Include TLS, pooling, deadlines,
+synchronous and async paths, and foreign connection checks in the coverage
+audit. Scripted network fixtures are not a standard-library deliverable;
+libraries can build them on the public driver.
 
-Acceptance: happy-path bytes and failures use the same framing consumers;
-cancellation interrupts supported blocking operations without skipping cleanup;
-pool reuse cannot cross provider identities; unsupported scheduling simulation
-remains explicitly out of scope.
+Acceptance: a custom handler can answer connections with in-memory bytes that
+reach the same framing code as real sockets; cancellation interrupts supported
+blocking operations without skipping cleanup; pool reuse cannot cross provider
+identities; scheduling simulation remains out of scope.
 
 ### IOI7 HTTP and task integration
 
@@ -355,15 +465,19 @@ Add the candidate `Client.runNet` path while keeping existing `run`, `stub`, and
 Exercise inherited handlers, cancellation, shared fixture state, and connection
 lifetime under existing native tasks.
 
+Requires a decision on [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
+before claiming concurrent mock tests.
+
 Acceptance: HTTP domain mocks remain concise; lower-level transport tests reach
-the real parser; task mocks preserve operation-level consistency without
-claiming deterministic task ordering; application abort dependencies continue
+the real parser; task mocks preserve operation-level consistency under the
+selected concurrency mechanism, without claiming deterministic task ordering; application abort dependencies continue
 to obey the checked task boundary.
 
 ### IOI8 Migration and completeness audit
 
 Migrate public signatures, bundled callers, Prelude/entry integration, and
-native wrappers according to IOI1. Publish the exact coverage map, including
+native wrappers according to IOI1, annotating every bundled `main` with the
+services it uses. Publish the exact coverage map, including
 raw sidecar and scheduler exceptions. Move landed contracts to their proper
 design/reference/source homes rather than leaving duplicate API specifications
 in the roadmap.
@@ -372,14 +486,32 @@ Acceptance: all existing correctness gates remain; missing service handlers
 produce deliberate diagnostics; no real implementation is accidentally selected
 inside a mock; the interpreter and compiler agree on each supported behavior.
 
+### IOI9 Entry assembly
+
+Implement [entry assembly](#entry-assembly): the `Runtime.Entry` module with
+its `DefaultHandler` attribute type and `assemble` metaprogram, and the
+compiler's splice of the assembled entry. Declare defaults for the standard
+effects that have system runners: Console, File, Net, Arguments, Random, Clock,
+and Http. Use the same assembled entry for compiled programs, `fango run`, the
+WASI build, and the test harness.
+
+Acceptance: a user-defined effect with a default runs exactly like a
+standard-library one; an effect in `main`'s row without a default, with two
+defaults, with a wrongly typed runner, or in a dependency cycle is a
+compile-time failure at the attribute or `main`; annotated and unannotated
+`main` select the same defaults for the same row; nested defaults
+such as HTTP over Net are ordered correctly; the compiler contains no list of
+standard effects.
+
 ## Verification strategy
 
 For implementation, preserve the [verification contracts](design/verification.md):
 independent Core lint, malformed-IR rejection, interpreter/compiler differential
 coverage, functional tests, intentional goldens, deterministic emission, and
 `go vet`. Keep `fango doc --stdlib --strict` clean and make source API examples
-true under both backends. Add grammar/formatter coverage only if a chosen
-language extension actually changes syntax; this baseline proposes none.
+true under both backends. Allowing attribute tags before `effect` declarations
+is the one syntax change: update the parser, formatter, and TextMate grammar
+together, with a tokenizer case.
 
 Tests must distinguish mock correctness from handler wiring. A memory fixture
 alone cannot establish real socket cancellation or TLS behavior; retain real

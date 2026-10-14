@@ -20,7 +20,10 @@ runMock : Fixture -> (() ->{Domain | e} a) ->{e} Report a
 ```
 
 These are schematic conventions, not generic declarations over a type named
-`Domain`. Each real runner must have concrete handled effect labels. A runner
+`Domain`. Each real runner must have concrete handled effect labels. A system
+runner with this shape is declared as its effect's default handler, which
+[entry assembly](roadmap-io-interception.md#entry-assembly) installs for
+effects in `main`'s row. Mock runners are never defaults. A runner
 removes only the labels it supplies and preserves the full residual row `e`.
 It must expose effects performed by its own clauses.
 
@@ -32,55 +35,92 @@ universal untyped exception bucket.
 
 ## Console
 
-Current source: [Console](../stdlib/Console.fango). The proposed facade has the
-same three functions, but requires `Console.Access` instead of `IO`:
+Current source: [Console](../stdlib/Console.fango). The `Console` effect owns
+all of the program's standard streams. It replaces both the Prelude helpers'
+`IO` requirement and the standard handles currently reached through
+`IO.stdin`, `IO.stdout`, and `IO.stderr`:
 
 ```text
-write : String ->{Access} ()
-print : Display a => a ->{Access} ()
-readLine : () ->{Access} Maybe IO.Line
+type Output = Stdout | Stderr
+
+write : String ->{Console} ()
+print : Display a => a ->{Console} ()
+readLine : () ->{Console} Maybe IO.Line
+writeTo : Output -> String ->{Console} ()
+source : Bytes.Source {Console}
+sink : Output -> Bytes.Sink {Console}
 
 print value = write (display value ++ "\n")
+write text = writeTo Stdout text
 ```
 
-The driver has two operations:
+Names other than the three Prelude helpers are candidates. Writing to standard
+input is no longer expressible.
+
+The driver has three operations, none of which reports an error:
 
 ```text
 -- Candidate module Console.Driver, reexported by Console.
-effect Access
-    writeText : String -> ()
-    readInput : () -> Maybe IO.Line
+#[DefaultHandler `runSystem`]
+effect Console
+    readLine : () -> Maybe IO.Line
+    readBytes : Int -> Maybe Bytes
+    writeBytes : Output -> Bytes -> ()
 ```
 
-Keep `print`'s formatting in Fango. No operation-local `Display` dictionary or
-polymorphic native operation is needed. `write` adds no newline. Input retains
-the line ending as the current `IO.Line` contract specifies; `Nothing` means
-EOF. The candidate does not add an error-returning overload to the console
-convenience API. Recoverable handle IO remains a separate boundary.
+Keep `print`'s formatting and text encoding in Fango. No operation-local
+`Display` dictionary or polymorphic native operation is needed. `write` adds
+no newline. Input retains the line ending as the current `IO.Line` contract
+specifies; `Nothing` means EOF. A count of zero or less answers empty bytes
+while input remains, as `IO.readBytes` does today. Add a separate text-write
+operation only if measurement shows that encoding hot output costs too much.
+
+Line input stays an operation rather than being derived from `readBytes`.
+Standard input belongs to the session host (the REPL or interpreter worker
+may share it), and a buffered reader over bytes would consume input beyond
+the line it returns.
+
+### Failure policy
+
+Console calls never raise errors; the runner owns failure. Today a standard
+stream failure already ends the program, and no bundled code recovers from
+one. The only current uses of the recoverable standard handles in the test
+suite write an empty string to obtain an `IO` requirement.
 
 ```text
-runSystem : (() ->{Access | e} a) ->{IO | e} a
+runSystem : (() ->{Console | e} a) ->{IO | e} a
 
-runTest : List IO.Line
-       -> (() ->{Access | e} a)
+runTest : Bytes
+       -> (() ->{Console | e} a)
        ->{e} Transcript a
 
 type Transcript a =
     { value : a
-    , output : String
-    , remaining : List IO.Line
+    , stdout : Bytes
+    , stderr : Bytes
+    , remaining : Bytes
     }
 ```
 
-`runSystem` preserves the current fatal handling of terminal errors unless a
-separate API change is approved during design. Its clauses use private system
-helpers rather than recursively calling the new public facade. A Fango handler
-around public Console operations does not catch Go panics merely by existing.
+- `runSystem` ends the program with today's diagnostic when the host reports a
+  stream error. Its clauses run with `IO`, so they call the existing private
+  panic native; the public helpers never require `IO`. The diagnostic must
+  not become program output. A different response to a particular failure,
+  such as ending quietly when standard output is a closed pipe, is a policy of
+  this runner, not error handling at every call.
+- `runTest` never fails: writes always succeed and exhausted input is EOF.
+- A custom handler can simulate a failure by aborting through a handler that
+  encloses it, such as a `Fail` installed around the test. That abort is part
+  of the test's row, not the application's.
 
-`runTest` consumes one scripted line per read, returns EOF when exhausted,
-concatenates writes exactly, and reports unconsumed input. It neither inserts
-nor normalizes newlines. The initial list, returned output, and final remaining
-list are immutable values. Repeated runs start independently.
+`runSystem` clauses use private system helpers rather than recursively calling
+the new public facade. A Fango handler around public Console operations does
+not catch Go panics merely by existing.
+
+`runTest` answers reads from its input bytes, captures each output stream
+exactly, and reports unconsumed input. It neither inserts nor normalizes
+newlines. The input and the returned observations are immutable values.
+Repeated runs start independently. A text-input convenience may wrap it.
 
 ```text
 greet() =
@@ -89,58 +129,72 @@ greet() =
         Nothing -> print "No input"
         Just line -> print ("Hello, " ++ line.text)
 
-captured = Console.runTest [{ text = "Ana", ending = "\n" }] { greet() }
-captured.output == "Your name?\nHello, Ana\n"
+captured = Console.runTest (Bytes.fromString "Ana\n") { greet() }
+captured.stdout == Bytes.fromString "Your name?\nHello, Ana\n"
+
+warned = Console.runTest Bytes.empty { Console.writeTo Stderr "warning\n" }
+warned.stderr == Bytes.fromString "warning\n"
 ```
 
-This boundary covers the Prelude helpers that delegate to Console. It does
-not capture `IO.write IO.stdout`, stderr, or output performed directly in a
-native sidecar. Raw standard-stream capture is described below. Decide whether
-two interception levels are useful enough to keep before implementing both;
-their overlap must be documented rather than relying on user intuition.
+This one boundary covers the Prelude helpers and all standard-stream access.
+It does not cover output performed directly in a native sidecar, or a file
+path naming a device such as `/dev/stdout`: that is filesystem access, a
+separate and stronger permission.
 
 ## Files and directories
 
 Current source: [File](../stdlib/File.fango). The baseline keeps all eight public
 functions and the current distinction between whole-file `Result` APIs and
-scoped helpers that raise `Fail`:
+scoped helpers that raise `Fail`. Scoped helpers pass a file-specific
+`File.Handle`, and reading and writing it are File operations:
 
 ```text
-read : String ->{Access} Result IO.Error String
-writeAll : String -> String ->{Access} Result IO.Error ()
-isDirectory : String ->{Access} Result IO.Error Bool
-size : String ->{Access} Result IO.Error Int
-listDirectory : String ->{Access} Result IO.Error (List String)
+type Handle
+
+read : String ->{FileSystem} Result IO.Error String
+writeAll : String -> String ->{FileSystem} Result IO.Error ()
+isDirectory : String ->{FileSystem} Result IO.Error Bool
+size : String ->{FileSystem} Result IO.Error Int
+listDirectory : String ->{FileSystem} Result IO.Error (List String)
 
 withFile : String
-        -> (IO.Handle ->{Access, IO.Stream, Fail IO.Error | e} a)
-        ->{Access, IO.Stream, Fail IO.Error | e} a
+        -> (Handle ->{FileSystem, Fail IO.Error | e} a)
+        ->{FileSystem, Fail IO.Error | e} a
 
 withOutput : String
-          -> (IO.Handle ->{Access, IO.Stream, Fail IO.Error | e} a)
-          ->{Access, IO.Stream, Fail IO.Error | e} a
+          -> (Handle ->{FileSystem, Fail IO.Error | e} a)
+          ->{FileSystem, Fail IO.Error | e} a
 
 withAppend : String
-          -> (IO.Handle ->{Access, IO.Stream, Fail IO.Error | e} a)
-          ->{Access, IO.Stream, Fail IO.Error | e} a
+          -> (Handle ->{FileSystem, Fail IO.Error | e} a)
+          ->{FileSystem, Fail IO.Error | e} a
+
+readLine : Handle ->{FileSystem, Fail IO.Error} Maybe IO.Line
+readBytes : Handle -> Int ->{FileSystem, Fail IO.Error} Maybe Bytes
+write : Handle -> String ->{FileSystem, Fail IO.Error} ()
+writeBytes : Handle -> Bytes ->{FileSystem, Fail IO.Error} ()
+source : Handle -> Bytes.Source {FileSystem, Fail IO.Error}
+sink : Handle -> Bytes.Sink {FileSystem, Fail IO.Error}
 ```
 
-The callback rows conservatively include shared handle IO. Precise inferred
-rows may be smaller in individual helpers. Two effect families are visible
-because File acquires a resource while IO operates on the shared `IO.Handle`.
-Changing to file-specific operations or Source/Sink callbacks is an alternative,
-not an already settled simplification.
+One effect covers both acquisition and handle IO, so file code has one
+service row. A file handle is not interchangeable with a standard stream.
+Generic parsing and output code take a `Bytes.Source`, `Bytes.Sink`,
+`Reader`, or `Writer` instead.
 
 The first driver inventory mirrors all current private native seams, including
 whole-file fast paths:
 
 ```text
 -- Candidate module File.Driver.
-effect Access
-    openRead : String -> Result IO.Error IO.Handle
-    openWrite : String -> Result IO.Error IO.Handle
-    openAppend : String -> Result IO.Error IO.Handle
-    closeHandle : IO.Handle -> Result IO.Error ()
+effect FileSystem
+    openRead : String -> Result IO.Error Handle
+    openWrite : String -> Result IO.Error Handle
+    openAppend : String -> Result IO.Error Handle
+    closeHandle : Handle -> Result IO.Error ()
+    readHandleLine : Handle -> Result IO.Error (Maybe IO.Line)
+    readHandleBytes : Handle -> Int -> Result IO.Error (Maybe Bytes)
+    writeHandleBytes : Handle -> Bytes -> Result IO.Error ()
     readFileResult : String -> Result IO.Error String
     writeFileResult : String -> String -> Result IO.Error ()
     openDirectory : String -> Result IO.Error Directory
@@ -150,7 +204,7 @@ effect Access
     fileSize : String -> Result IO.Error Int
 ```
 
-This is a coverage inventory, not an argument that these eleven operations
+This is a coverage inventory, not an argument that these fourteen operations
 must all become permanent public API. In particular:
 
 - A structured open mode could replace three acquisition operations, but needs
@@ -169,10 +223,10 @@ Today's private Directory representation is not automatically such an API.
 ### File runners and fixtures
 
 ```text
-runSystem : (() ->{Access, IO.Stream | e} a) ->{IO | e} a
+runSystem : (() ->{FileSystem | e} a) ->{IO | e} a
 
 runMemory : Image
-         -> (() ->{Access, IO.Stream | e} a)
+         -> (() ->{FileSystem | e} a)
          ->{e} Snapshot a
 
 type Image
@@ -210,7 +264,7 @@ fixture = File.withTextFile "config.txt" "port=8080\n" File.empty
 
 readFirstLine() =
     use handle <- File.withFile "config.txt"
-    IO.readLine handle
+    File.readLine handle
 
 snapshot = File.runMemory fixture {
     Fail.attempt { readFirstLine() }
@@ -223,89 +277,60 @@ write failures. Snapshot state must represent partial progress accurately.
 Whole-file convenience calls must agree with streaming observations over the
 same virtual files.
 
-## Shared handles and standard streams
+## Retiring the shared handle
 
-Current source: [IO](../stdlib/IO.fango). If the baseline preserves generic
-handles, introduce `IO.Stream` while retaining `IO` as the real-native marker:
+Current source: [IO](../stdlib/IO.fango). Standard streams move to Console and
+file handles to File, so IO no longer has a handle type or handle operations.
+There is no generic handle-IO effect; the
+[resource proposal](roadmap-io-interception-resources.md#resource-representation)
+explains why. IO keeps the real-native marker and the data shared by every
+domain:
 
 ```text
-type Handle
+effect IO
+
 type Error
 type Kind
 type Line
 
-stdin : Handle
-stdout : Handle
-stderr : Handle
-
-readLine : Handle ->{Stream, Fail Error} Maybe Line
-write : Handle -> String ->{Stream, Fail Error} ()
-readBytes : Handle -> Int ->{Stream, Fail Error} Maybe Bytes
-writeBytes : Handle -> Bytes ->{Stream, Fail Error} ()
-source : Handle -> Bytes.Source {Stream, Fail Error}
-sink : Handle -> Bytes.Sink {Stream, Fail Error}
-
+describeError : Error -> String
 lineText : String -> String
 lineEnding : String -> String
-describeError : Error -> String
 ```
 
 The existing error and line data contracts remain authoritative in source.
-`Stream` here is an effect label owned by IO, distinct from the existing
-[Stream](../stdlib/Stream.fango) module and its traversal type. Review the name
-for confusion before publication.
+Errors on standard streams keep the paths `stdin`, `stdout`, and `stderr`.
+`IO.Handle`, `stdin`, `stdout`, `stderr`, `readLine`, `write`, `readBytes`,
+`writeBytes`, `source`, and `sink` are removed, together with the Prelude's
+reexports of the three standard handles.
+
+The Console system runner and File share the conversion from a raw native read
+to `Maybe Line` or `Maybe Bytes` and the chunk size of their sources, rather
+than copying them. Place these helpers in IO or a library-internal module.
+
+Code that chose between a standard stream and a file through a handle takes a
+sink or writer instead:
 
 ```text
--- Candidate module IO.Driver.
-effect Stream
-    handleHasInput : Handle -> Result Error Bool
-    readHandleLine : Handle -> Result Error String
-    readHandleBytes : Handle -> Int -> Result Error Bytes
-    writeHandle : Handle -> String -> Result Error ()
-    writeHandleBytes : Handle -> Bytes -> Result Error ()
+-- Before
+report out = IO.write out "done\n"
+report (if toFile then file else IO.stdout)
+
+-- After
+report : Bytes.Sink {e} ->{e} ()
+report out = out.write (Bytes.fromString "done\n")
+report (if toFile then File.sink file else Console.sink Stdout)
 ```
 
-As with File, this mirrors existing seams rather than declaring the inventory
-minimal. A direct `Maybe`-returning read operation may avoid a separate
-availability/read pair and make concurrent EOF behavior easier to specify.
-Evaluate the behavioral and ABI consequences before selecting it. Do not
-assume that locking each native call makes two adjacent calls atomic.
-
-```text
-runSystem : (() ->{Stream | e} a) ->{IO | e} a
-
-runStandardTest : Bytes
-               -> (() ->{Stream | e} a)
-               ->{e} StandardTranscript a
-
-type StandardTranscript a =
-    { value : a, stdout : Bytes, stderr : Bytes }
-```
-
-The standard-test runner maps its initial bytes to stdin and captures stdout
-and stderr independently. Unsupported file handles are rejected according to
-the selected foreign-handle contract. It does not silently fall through to the
-OS. `File.runMemory` supplies the Stream interpretation for its own handles;
-composition between standard streams and virtual files needs an explicit
-ownership/forwarding policy, described in the
-[resource proposal](roadmap-io-interception-resources.md#nested-providers-and-foreign-handles).
-
-```text
-captured = IO.runStandardTest Bytes.empty {
-    Fail.attempt { IO.write IO.stderr "warning\n" }
-}
-captured.stderr == Bytes.fromString "warning\n"
-```
-
-No general custom virtual-handle constructor is selected. Today's native
-`IO.Handle` cannot be manufactured by ordinary application Fango code. A
-public construction API must carry a real ownership and effect contract,
-rather than exposing `Runtime.Native.Any` as an escape hatch.
+The sink's row records which service each choice uses. Both branches must
+agree on one row, so the caller's row includes both services.
 
 ## Networking
 
-Current source: [Net](../stdlib/Net.fango). A complete interception boundary must
-cover the entire existing surface, not only `withClient`:
+Current source: [Net](../stdlib/Net.fango). Net already has domain-specific
+handles: connection reads and writes are Net functions on `Net.Connection`,
+not generic handle IO. A complete interception boundary must cover the entire
+existing surface, not only `withClient`:
 
 ```text
 type Listener
@@ -315,40 +340,40 @@ type Error
 type Kind
 
 withListener : Int
-            -> (Listener ->{Access, Fail Error | e} a)
-            ->{Access, Fail Error | e} a
+            -> (Listener ->{Network, Fail Error | e} a)
+            ->{Network, Fail Error | e} a
 accept : Listener
-      -> (Connection ->{Access, Fail Error | e} a)
-      ->{Access, Fail Error | e} a
+      -> (Connection ->{Network, Fail Error | e} a)
+      ->{Network, Fail Error | e} a
 acceptAsync : Listener
-           -> (Connection ->{Access, Fail Error, Async.Async | e} a)
-           ->{Access, Fail Error, Async.Async | e} a
+           -> (Connection ->{Network, Fail Error, Async.Async | e} a)
+           ->{Network, Fail Error, Async.Async | e} a
 withClient : String -> Int
-          -> (Connection ->{Access, Fail Error | e} a)
-          ->{Access, Fail Error | e} a
+          -> (Connection ->{Network, Fail Error | e} a)
+          ->{Network, Fail Error | e} a
 
-dialTimeout : String -> Int -> Int ->{Access} Result Error Connection
-dialTls : String -> Int -> Int -> String ->{Access} Result Error Connection
-closeConnection : Connection ->{Access} Result Error ()
-readConnectionBytes : Connection -> Int ->{Access} Result Error Bytes
-writeConnectionBytes : Connection -> Bytes ->{Access} Result Error ()
-setReadDeadline : Connection -> Int ->{Access} Result Error ()
-setWriteDeadline : Connection -> Int ->{Access} Result Error ()
+dialTimeout : String -> Int -> Int ->{Network} Result Error Connection
+dialTls : String -> Int -> Int -> String ->{Network} Result Error Connection
+closeConnection : Connection ->{Network} Result Error ()
+readConnectionBytes : Connection -> Int ->{Network} Result Error Bytes
+writeConnectionBytes : Connection -> Bytes ->{Network} Result Error ()
+setReadDeadline : Connection -> Int ->{Network} Result Error ()
+setWriteDeadline : Connection -> Int ->{Network} Result Error ()
 
-stopListener : Listener ->{Access} Result Error ()
-listenerStopped : Listener ->{Access} Bool
+stopListener : Listener ->{Network} Result Error ()
+listenerStopped : Listener ->{Network} Bool
 
-source : Connection -> Bytes.Source {Access, Fail Error}
-sink : Connection -> Bytes.Sink {Access, Fail Error}
-sourceAsync : Connection ->{Async.Async} Bytes.Source {Access, Fail Error}
-sinkAsync : Connection ->{Async.Async} Bytes.Sink {Access, Fail Error}
+source : Connection -> Bytes.Source {Network, Fail Error}
+sink : Connection -> Bytes.Sink {Network, Fail Error}
+sourceAsync : Connection ->{Async.Async} Bytes.Source {Network, Fail Error}
+sinkAsync : Connection ->{Async.Async} Bytes.Sink {Network, Fail Error}
 
-newPool : Int -> Int ->{Access} Pool
+newPool : Int -> Int ->{Network} Pool
 poolConnect : Pool -> String -> Int -> Int -> Bool -> String -> Bool
-           ->{Access} Result Error Connection
-poolRelease : Connection -> Bool ->{Access} Result Error ()
-connectionReused : Connection ->{Access} Bool
-closePool : Pool ->{Access} Result Error ()
+           ->{Network} Result Error Connection
+poolRelease : Connection -> Bool ->{Network} Result Error ()
+connectionReused : Connection ->{Network} Bool
+closePool : Pool ->{Network} Result Error ()
 ```
 
 These signatures deliberately expose today's awkward parameter-heavy calls
@@ -380,99 +405,123 @@ Async dependency. Each choice must account for the runner's residual effects
 and handler inheritance. Do not silently make a synchronous runner require
 Async because an unused clause references it.
 
-One `Net.Access` effect is the catalogue baseline. Splitting it into listener,
+One `Network` effect is the catalogue baseline. Splitting it into listener,
 connection, and pool effects may reduce custom-handler size but creates more
 effect rows and runner dependencies. Review real server and client examples
 before choosing. Keep the error distinctions used by HTTP transport mapping.
 
-### Network runners and script design
+### Network runners
 
 ```text
-runSystem : (() ->{Access | e} a) ->{IO | e} a
-
-runScript : Script
-          -> (() ->{Access | e} a)
-          ->{e} Report a
-
-type Script
-type Report a
+runSystem : (() ->{Network | e} a) ->{IO | e} a
 ```
 
-The `runSystem` shape above covers the synchronous candidate. Cancellable
-variants may need a different signature once their capability is selected.
-`Script` and `Report` are design placeholders, not opaque types that excuse
-omitting their construction and observation API.
+The shape above covers the synchronous candidate. Cancellable variants may
+need a different signature once their capability is selected.
 
-The fixture vocabulary must represent:
+The standard library provides the seam and the system runner, not simulated
+networks. Its own transport tests keep real loopback sockets, and HTTP
+application tests keep `Client.stub` and `Client.mock`. Scripted network
+fixtures (expected endpoints, inbound chunks, outbound expectations, listener
+and pool scripts) are left to libraries. A library can write one as an
+ordinary `Network` handler once the driver provides:
 
-- Expected endpoint, TLS mode and name, connection success/failure, and stable
-  connection identity within a run.
-- Inbound byte chunks, EOF, read failure, and timeout as distinct events.
-- Expected outbound bytes, partial progress where supported, write failure,
-  and how expectations match calls with different chunk boundaries.
-- Listener binding, incoming connection ordering, stopping, and later accept
-  attempts.
-- Deadline updates and their observation; no claim that returning a timeout
-  simulates elapsed scheduling time.
-- Pool acquisition/reuse/release, unusable connections, capacity/expiry policy,
-  and provider identity checks.
-- Cancellation for supported operations, cleanup, unused expectations,
-  unexpected operations, and mismatches with useful diagnostics.
+- Public operation names and argument/result types.
+- A checked way to construct `Connection`, `Listener`, and `Pool` values owned
+  by a non-native provider, as specified by IOI3.
+- A public cancellation contract that a custom handler can observe.
 
-The report needs the action result, consumed/remaining expectations, and an
-operation trace with typed identifiers. Decide whether mismatches are typed
-test failures, ordinary Net errors, or a separate fixture error effect. Do not
-conflate a broken test script with a simulated network failure.
-
-For concurrency, specify per-connection order and causal constraints rather
-than assuming one global order of all task events. A deterministic scheduler
-is not included. A script that answers reads immediately is useful without
-simulating blocked task execution.
+These are requirements for any custom Net handler, including small
+hand-written test handlers, not extra work for scripts alone.
 
 ## Process arguments and exit
 
-Current source: [Process](../stdlib/Process.fango). Arguments and exit have
-different operation disciplines:
+Current source: [Process](../stdlib/Process.fango). Arguments become a
+replaceable effect. Exit status and termination are not effects: a program
+finishes normally by returning a status from `main`, and `exit` stays a hard
+native termination.
 
 ```text
 effect Arguments
     args : () -> List String
 
-effect Exit
-    abort exit : Int -> a
-
 withArgs : List String
          -> (() ->{Arguments | e} a) ->{e} a
 
-captureExit : (() ->{Exit | e} a) ->{e} Result Int a
+runSystem : (() ->{Arguments | e} a) ->{IO | e} a
 
-runSystem : (() ->{Arguments, Exit | e} ()) ->{IO | e} ()
+type Status
+
+success : Status
+failure : Status
+status : Int -> Status
+
+exit : Status ->{IO} a
 ```
 
 The whole-argument operation can be interpreted by the current count/index
 native helpers without making those helpers public. Arguments retain the
 existing rule that the executable name is excluded.
 
-`captureExit` answers `Ok value` for normal completion and `Err status` for a
-language-level exit request. It does not catch unrelated `Fail` effects.
-
 ```text
 choose() =
     case Process.args() of
-        [] -> Process.exit 2
-        _ -> 42
+        [] -> 2
+        _ -> 0
 
-test = Process.withArgs [] { Process.captureExit { choose() } }
-test == Err 2
+Process.withArgs [] { choose() } == 2
 ```
 
-This changes `Process.exit` from the current immediate native `Int ->{IO} ()`
-to an explicitly non-returning language operation. The proposed runner would
-let language cleanup unwind before requesting host termination. This requires
-separate review of cleanup failures, the selected exit status, interpreter/REPL
-behavior, and child-task exit requests. If immediate emergency termination is
-retained, give it a separate explicit contract. Never implement exit as a
-resumptive operation that returns `()` and continues the caller.
+### Exit status
+
+`success` is status 0 and `failure` is status 1. `status` accepts 0 through
+255; any other value is a runtime fault, reported like an integer division by
+zero with status 2 and a Fango trace at the call. A requested failure can
+therefore never wrap around to success, as POSIX truncation of 256 would.
+
+The entry point is always a nullary function, annotated or not:
+
+```text
+main : () ->{IO} ()
+main : () ->{IO} Process.Status
+```
+
+A Unit result is status 0. A returned status takes effect after `main`
+completes normally, so `Async.run` scopes have drained and resource scopes have
+released first. An uncaught failure keeps its existing status and report. The
+row may contain `IO` and effects with default handlers; see
+[entry assembly](roadmap-io-interception.md#entry-assembly).
+
+`main` must be a function. Value-style declarations such as `main = 42` or
+`main : (); main = print 42` are rejected, and no backend prints `main`'s value.
+The current printing of a non-Unit value exists only in the WASI build and in
+the differential harness's hidden compiled mode. Programs that want output call
+`print`.
+
+### Exit
+
+`exit` ends the process at once with the given status, from any task. It is
+deliberately drastic: it runs no Fango cleanup (`bracket` and `finally`
+releases, buffered `Writer` data, task cancellation, or draining), and the OS
+closes descriptors. Console output written earlier is not lost, because the
+system host writes standard streams without Fango-side buffering. The
+interpreter and REPL report it as a program exit without ending the session,
+as they do today, and must likewise skip Fango cleanup so both backends agree.
+
+`exit` requires `IO`, so no runner absorbs it and a function that can exit
+says so in its row. Code meant to be tested computes a status and leaves the
+call to the edge of the program:
+
+```text
+run : List String ->{Console} Process.Status
+
+main : () ->{Console, Arguments} Process.Status
+main() = run Process.args()
+```
+
+`exit`'s result type means code after it needs no placeholder value. If the
+native ABI cannot return a bare type variable, a Fango wrapper can call a
+Unit-returning native and then recurse unreachably to supply the result type.
 
 ## Clock and randomness
 
@@ -522,14 +571,15 @@ the supported compact entry points for application tests.
 run : (() ->{Http | e} a) ->{IO | e} a
 
 -- Proposed additional interpretation:
-runNet : (() ->{Http | e} a) ->{Net.Access | e} a
+runNet : (() ->{Http | e} a) ->{Network | e} a
 
 -- Candidate implementation of the existing convenience runner:
 run action = Net.runSystem { runNet action }
 ```
 
-The transport-level test would install `Net.runScript` around `Client.runNet`,
-so the real HTTP parser sees the scripted bytes. Application tests can keep
+A transport-level test installs a custom `Network` handler, such as one
+from a scripted-fixture library, around `Client.runNet`, so the real HTTP
+parser sees its bytes. Application tests can keep
 using `Client.stub` or `Client.mock`, avoiding unnecessary transport fixtures.
 `Client.run` explicitly selects real Net service and therefore should not be
 used when the intention is to test through an outer fake Net handler.
@@ -559,11 +609,10 @@ existing API families:
 
 Mocks installed outside `Async.run` can be inherited where the current task
 contract permits. Application aborts must still be handled inside child
-callbacks. Mutable mock operations need operation-level synchronization, not
-only protected state-cell loads/stores.
+callbacks.
 
 ```text
-captured = Console.runTest [] {
+captured = Console.runTest Bytes.empty {
     Async.run {
         a = Async.spawn { print "A" }
         b = Async.spawn { print "B" }
@@ -573,11 +622,16 @@ captured = Console.runTest [] {
 }
 ```
 
-Both writes should be captured without loss, but their order is unspecified.
-The computation still requires IO. The fixture does not own a new scheduler.
+Under the current handler-state rule this can lose a write: each task's clause
+appends to a snapshot of the captured output, and a later commit can replace
+an earlier one. The stdlib test runners are therefore sequential fixtures
+until the [concurrency question](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
+is decided. The computation still requires IO, and the fixture does not own a
+new scheduler.
 
 [Reader](../stdlib/Reader.fango), [Writer](../stdlib/Writer.fango), and text
 adapters should continue to operate over their existing row-indexed inputs.
 Changing the effect of a source/sink must propagate through those types rather
-than creating a dedicated effect for each helper. If the resource alternative
-changes File's callback shape, document that migration explicitly.
+than creating a dedicated effect for each helper. `Console.source`,
+`Console.sink`, `File.source`, `File.sink`, and the existing Net adapters
+supply those inputs in place of `IO.source` and `IO.sink`.

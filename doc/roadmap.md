@@ -110,9 +110,9 @@ for otherwise unavailable semantics or measured performance needs.
 ## IO interception
 
 [IO interception through domain effects](roadmap-io-interception.md) proposes
-explicit real and simulated runners for console, files, handles, networking,
-and process services. Its API catalogue, resource alternatives, and delivery
-gates are proposals for review; existing Clock, Random, and HTTP domain
+explicit real and simulated runners for console and standard streams, files,
+networking, and process services, with domain-specific resource handles. Its
+API catalogue, resource design, and delivery gates are proposals for review; existing Clock, Random, and HTTP domain
 handlers remain their implemented foundations.
 
 ## HTTP and a concurrent server
@@ -180,6 +180,8 @@ Artifact framing, the binary object encoding, and deferred stage sections are
 [Declaration generation](roadmap-meta.md) waits for a concrete consumer and
 must keep public names discoverable without executing generators. Expression
 staging and deriving are already [reference contracts](reference/metaprogramming.md).
+[Effect reflection](roadmap-meta.md#effect-reflection) is needed by IO
+interception's entry assembly.
 [Direct quotation blocks](roadmap-meta.md#expression-quotation-blocks) remain deferred.
 
 ## REPL hardening
