@@ -213,14 +213,21 @@ func (el *elab) anfExprChildren(e core.Expr) (result core.Expr, hs []hoist) {
 		return &core.Perform{Origin: e.Origin, Op: e.Op, Effect: e.Effect, LocalTypes: e.LocalTypes, Args: args, Ty: e.Ty, Control: e.Control}, hoists
 
 	case *core.ResumeTail:
+		value := slot(e.Value)
 		var next core.Expr
 		if e.NextState != nil {
-			// Keep the next-state computation beneath ResumeTail. Codegen must
-			// evaluate the operation result first, even when the update is
-			// statement-shaped control flow.
-			next = el.anf(e.NextState)
+			if c := core.ExprControl(e.NextState); c.Transport != types.Direct || c.Polymorphic {
+				// A next state that performs a resumptive operation produces
+				// control, so it is hoisted like any slot, after the value.
+				next = slot(e.NextState)
+			} else {
+				// Keep the next-state computation beneath ResumeTail. Codegen
+				// must evaluate the operation result first, even when the
+				// update is statement-shaped control flow.
+				next = el.anf(e.NextState)
+			}
 		}
-		return &core.ResumeTail{Owner: e.Owner, Value: slot(e.Value), NextState: next, ClauseResult: e.ClauseResult}, hoists
+		return &core.ResumeTail{Owner: e.Owner, Value: value, NextState: next, ClauseResult: e.ClauseResult}, hoists
 	case *core.App:
 		callee := e.Callee
 		if e.CalleeKind == core.Value {

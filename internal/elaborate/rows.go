@@ -85,7 +85,12 @@ func (el *elab) residualArgument(actual, explicit types.Row) *core.RowArgument {
 		if !types.RuntimeEvidenceEffect(label) {
 			continue
 		}
-		if slices.ContainsFunc(explicit.Labels, func(want types.EffLabel) bool { return explicitApplication(want, label) }) {
+		// A label an open callee row lists explicitly is still forwarded:
+		// rows hold distinct applications, so `{Out | e}` instantiated where
+		// e also holds Out shows Out once, and a callback typed with e must
+		// still find it in the forwarded row. The extra binding is the same
+		// evidence the explicit parameter carries.
+		if explicit.Tail == nil && slices.ContainsFunc(explicit.Labels, func(want types.EffLabel) bool { return explicitApplication(want, label) }) {
 			continue
 		}
 		args := make([]types.Type, len(label.Args))
