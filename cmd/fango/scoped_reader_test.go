@@ -91,7 +91,6 @@ guarded text action = Reader.withBytes (Bytes.fromString text) { reader -> Fail.
 import Reader
 import Bytes
 import Fail
-main : () ->{IO} ()
 main() =
     first = Cursor.withTextFirst { reader -> Bytes.length (Reader.readUpTo reader 1) } "abc"
     second = Cursor.guarded "abc" { reader ->

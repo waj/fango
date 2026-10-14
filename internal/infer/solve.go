@@ -24,6 +24,9 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 		at int
 		c  Constraint
 		m  *mismatch
+		// callback marks a row bound of a scoped runner's selected
+		// callback: what the passed function performs must fit its row.
+		callback bool
 	}
 	var failures []failure
 	var vs map[int][]polarity
@@ -66,7 +69,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 				failures = append(failures, failure{at: i, err: mismatchError(c, m, sub)})
 			} else {
 				for _, r := range rows {
-					bounds = append(bounds, pending{at: i, c: r})
+					bounds = append(bounds, pending{at: i, c: r, callback: c.ScopedCallback})
 				}
 			}
 		} else if c.Include || c.Why.Kind == WhyEffectEscapes {
@@ -130,6 +133,12 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	// In scoped groups, apply fixed-tail upper bounds before growing flexible tails. In particular,
 	// a pure outer scope must be closed before nested callback rows compose;
 	// otherwise an inner fresh label can be needlessly assigned to its tail.
+	// A scoped callback's own upper bound goes first too, even though the
+	// runner's ambient tail in it is flexible. A use of that ambient row in
+	// the callback body, such as a reader operation's `{s | e}`, is also an
+	// inclusion into the body's row; solved first, it would equate the two
+	// and hand the callback's explicit labels, which the runner handles, to
+	// the ambient tail and so to the caller.
 	for len(scopes) > 0 {
 		var rest []pending
 		progress := false
@@ -141,7 +150,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			}
 			right, ok := sub.Apply(p.c.Right).(types.Row)
 			tail, rigidTail := right.Tail.(*types.TVar)
-			if ok && (right.Tail == nil || rigidTail && tail.Rigid) {
+			if ok && (right.Tail == nil || rigidTail && tail.Rigid || p.callback && hasScopedPermission(right)) {
 				solve(p.at, p.c)
 				progress = true
 			} else {

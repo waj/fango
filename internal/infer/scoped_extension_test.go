@@ -73,3 +73,33 @@ func TestScopedClosedExtension(t *testing.T) {
 		t.Fatal("accepted closed extension with open ambient row")
 	}
 }
+
+// A runner that handles an effect its callback names explicitly keeps that
+// effect out of an unannotated caller's row, even when the callback also uses
+// the runner's ambient row through the scoped reader it receives.
+func TestScopedCallbackHandledLabelStaysOutOfAmbient(t *testing.T) {
+	const prelude = `effect Boom x
+  boom : x -> a
+attempt : (() ->{Boom x | e} a) ->{e} Int
+attempt act = 1
+type Reader e = { read : () ->{e} Int }
+`
+	for _, runner := range []string{
+		"guarded : (Reader {s | e} ->{Boom String, s | e} a) ->{e} Int",
+		"guarded : (Reader e ->{Boom String | e} a) ->{e} Int",
+	} {
+		for _, body := range []string{
+			`if r.read() == 1 then boom "x" else 0`,
+			`if 1 == 1 then boom "x" else r.read()`,
+		} {
+			src := prelude + runner + "\nguarded action = attempt { action { read = { 1 } } }\nrun() = guarded { r -> " + body + " }\n"
+			ck, infos, errs := check(t, src)
+			if len(errs) != 0 {
+				t.Fatalf("%s\n%v", src, errs)
+			}
+			if got := types.ShowScheme(checkedScheme(ck, infos[len(infos)-1])); got != "() -> Int" {
+				t.Errorf("%s\nrun : %s", src, got)
+			}
+		}
+	}
+}

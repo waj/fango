@@ -176,7 +176,10 @@ guarded text action = Reader.withBytes (Bytes.fromString text) { reader -> Fail.
 ```
 
 At each call the callback may perform `Fail String` besides its scope's
-permission and the residual row; the runner's caller never sees it. Granted
+permission and the residual row; the runner's caller never sees it. An
+unannotated caller whose callback both reads and fails infers no `Fail`:
+`run() = guarded "abc" { reader -> … Fail.fail "stop" … }` is
+`run : () -> Result String Int`. Granted
 effects' type arguments may not mention the binder. A callback
 may therefore return a value that uses a scoped reader or writer later in the
 same runner. The runner must consume that value before its scope ends. Within

@@ -101,6 +101,13 @@ the selected callback, are outside the fresh scope. Known record projections
 contribute their rows before closure, so a source effect cannot hide a later
 local-state or failure requirement.
 
+In a scoped group the solver applies each scoped callback's upper bound before
+the body's lower bounds, as it does fixed-tail bounds. A use of the residual
+row inside the callback, such as a reader operation's `{s | e}`, is also a
+lower bound of the body row. Solved first, row equality would hand the
+callback's granted labels to the flexible ambient tail, and so to an
+unannotated caller, although the runner handles them.
+
 A persistent `ScopeBoundary` rejects its label anywhere in the solved result,
 residual effects, or outer environment types. Its structural walk includes
 latent arrows, abstract and phantom type arguments, and effect arguments.

@@ -198,7 +198,9 @@ func (g *generator) scopedCall(e *ast.App, name string, sch types.Scheme) types.
 	for i, arg := range args {
 		fn := current.(*types.TFun)
 		at := g.exprWant(arg, fn.Arg)
-		g.cs = append(g.cs, g.argument(at, fn.Arg, arg))
+		c := g.argument(at, fn.Arg, arg)
+		c.ScopedCallback = i == sch.ScopedParam
+		g.cs = append(g.cs, c)
 		g.performs(fn.Eff, arg.Span(), false)
 		current = fn.Ret
 		g.ck.ExprTypes[spine[i]] = current

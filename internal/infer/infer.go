@@ -68,6 +68,10 @@ type Constraint struct {
 	ADTs      map[int]*types.ADTInfo
 	Invariant []types.Type
 	Bind      []*HandlerInfo
+
+	// ScopedCallback marks the Subsume constraint passing a scoped runner's
+	// selected callback; the solver orders its row bounds early.
+	ScopedCallback bool
 }
 
 // Env maps top-level names to schemes; block scopes and function parameters
