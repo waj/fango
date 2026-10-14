@@ -27,6 +27,8 @@ calculation() =
             stop () -> 9
     first + second + paired + scoped
 
-main =
+result =
     handle calculation() on
         tick () -> resume 2
+
+main() = print result

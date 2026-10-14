@@ -4,6 +4,7 @@ import Expect
 -- Recursive list equations: one group, three rows, source order.
 import List exposing (List, range)
 import Test
+import Process
 
 count : List Int -> Int
 count [] = 0
@@ -23,4 +24,4 @@ tests = Test.test "equations_list" {
     Expect.equal 15 (sumOf (range 1 5))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -8,6 +8,7 @@ import Result exposing (Result(..))
 import Runtime.Scope
 import State
 import Test
+import Process
 
 type Observation = ChannelOutcome (Async.Outcome (Maybe Int)) | ValueOutcome (Async.Outcome Int) | Trace String deriving (Eq, Show)
 
@@ -73,4 +74,4 @@ tests = Test.test "async_cancel_policy" {
                  ] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -5,6 +5,7 @@ import Result exposing (Result(..))
 import Runtime.Scope
 import State
 import Test
+import Process
 
 effect Fail error
     abort fail : error -> value
@@ -68,4 +69,4 @@ tests = Test.test "scope_lifecycle" {
     Expect.equal [Trace "open a", Trace "close a", Outcome (Ok "used a"), Trace "opening b", Outcome (Err "cannot open b"), Trace "open c", Outcome (Err "inner"), Trace "close c", Outcome (Ok "used c"), Trace "open outer", Trace "open inner", Trace "close inner", Trace "close outer", Outcome (Ok "outer/inner")] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

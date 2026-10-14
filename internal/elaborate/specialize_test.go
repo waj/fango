@@ -9,7 +9,7 @@ import (
 
 func TestScalarSpecialization(t *testing.T) {
 	p := elabPoly(t, `step n = if n == 0 then 0 else n + step (n - 1)
-main = print (step 5)
+main() = print (step 5)
 `)
 	variants := 0
 	for _, d := range p.Defs {
@@ -41,7 +41,7 @@ func TestScalarSpecializationLeavesHandlersGeneric(t *testing.T) {
 step n =
     handle (if choose () then n + 1 else n) on
         choose () -> resume True
-main = print (step 5)
+main() = print (step 5)
 `)
 	for _, d := range p.Defs {
 		if strings.HasPrefix(d.Name, "_scalar_") {

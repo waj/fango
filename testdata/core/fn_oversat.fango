@@ -1,2 +1,2 @@
 mk x = { y -> x + y }
-main = mk 40 2
+main() = print (mk 40 2)

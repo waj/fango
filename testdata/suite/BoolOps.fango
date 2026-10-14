@@ -2,6 +2,7 @@ module BoolOps exposing (tests)
 
 import Expect
 import Test
+import Process
 -- `&&` binds tighter than `||`, and both bind looser than comparisons.
 mixed : Int -> Bool
 mixed n = n > 0 && n < 10 || n == 100
@@ -24,4 +25,4 @@ tests = Test.test "bool_ops" {
     Expect.equal "both" (if isVowel 97 && mixed 5 then "both" else "not both")
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -8,6 +8,7 @@ import List
 import Result exposing (Result(..))
 import String
 import Test
+import Process
 
 tests : Test.Test {}
 tests = Test.test "text_encoding" {
@@ -38,4 +39,4 @@ tests = Test.test "text_encoding" {
     )
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

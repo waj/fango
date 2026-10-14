@@ -82,15 +82,15 @@ parseOptions args =
         [] -> Nothing
 
 main() =
-    case parseOptions Process.args() of
+    case parseOptions (Process.runSystem Process.args) of
         Nothing ->
             print "Usage: grep [-r] PATTERN PATH..."
-            Process.exit 2
+            Process.exit (Process.status 2)
         Just options ->
             outcome = foldl (searchPath options) { matched = False, failed = False } options.paths
             if outcome.failed then
-                Process.exit 2
+                Process.exit (Process.status 2)
             else if outcome.matched then
                 ()
             else
-                Process.exit 1
+                Process.exit Process.failure

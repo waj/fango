@@ -3,6 +3,7 @@ module TailLoopUnitarg exposing (tests)
 import Expect
 import State
 import Test
+import Process
 -- A non-atomic effectful argument to a Unit parameter: the Go ABI erases the
 -- parameter but must not erase the argument's evaluation, and the observation must
 -- observe the CURRENT n — before the loop reassigns it. Pins the jump's
@@ -24,4 +25,4 @@ tests = Test.test "tail_loop_unitarg" {
     Expect.equal [3, 2, 1] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

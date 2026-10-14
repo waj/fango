@@ -214,13 +214,6 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 			delete(l.captureVars, v)
 		}
 	}
-	if p.EntryDisplay != nil {
-		l.tyParams = map[int]bool{}
-		l.expr(p.EntryDisplay, "entry display")
-		if !EqualValueRepresentation(p.EntryDisplay.Type(), b.String) {
-			l.errorf("entry display must return String")
-		}
-	}
 	l.errs = append(l.errs, verifyCapturesIn(p, context, b)...)
 	l.errs = append(l.errs, CheckRowEvidence(p)...)
 	l.errs = append(l.errs, checkScopedCalls(p, context)...)

@@ -10,7 +10,7 @@ program _ =
     second = get ()
     first ++ second
 
-main =
+main() =
     print
         (handle program () on
             ask () -> resume "outer")

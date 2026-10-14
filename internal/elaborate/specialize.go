@@ -119,9 +119,6 @@ func specializeScalars(p *core.Prog, infos []infer.DeclInfo, ck *infer.Checker) 
 	for i := range p.Defs {
 		p.Defs[i].Body = core.Rewrite(p.Defs[i].Body, sameType, s.redirect)
 	}
-	if p.EntryDisplay != nil {
-		p.EntryDisplay = core.Rewrite(p.EntryDisplay, sameType, s.redirect)
-	}
 	for _, v := range ordered {
 		p.Defs = append(p.Defs, v.def)
 	}

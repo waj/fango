@@ -83,8 +83,8 @@ func TestClassDiagnostics(t *testing.T) {
 	for _, tc := range []struct{ name, src, title string }{
 		{"missing context", "same : a -> a -> Bool\nsame x y = x == y", "MISSING CONSTRAINT"},
 		{"number is ordinary", "twice : number -> number\ntwice x = x + x", "MISSING CONSTRAINT"},
-		{"no automatic equality", "type T = T\nmain = T == T", "MISSING INSTANCE"},
-		{"no function instance", "identity : Int -> Int\nidentity x = x\nmain = show identity", "MISSING INSTANCE"},
+		{"no automatic equality", "type T = T\nmain() = print (T == T)", "MISSING INSTANCE"},
+		{"no function instance", "identity : Int -> Int\nidentity x = x\nmain() = print (show identity)", "MISSING INSTANCE"},
 		{"extra method variable", "class C a\n    c : a -> b", "NAMING ERROR"},
 		{"method must mention parameter", "class C a\n    c : Int -> Int", "CLASS METHOD TYPE"},
 		{"open method effects", "class C a\n    c : a ->{e} a", "NAMING ERROR"},

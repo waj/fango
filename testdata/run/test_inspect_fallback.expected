@@ -1,24 +1,24 @@
 FAIL  inspect > opaque
 
-    test_inspect_fallback.fango:20
+    test_inspect_fallback.fango:21
     Expected: <value>
     Actual:   <value>
 
 FAIL  inspect > own instance
 
-    test_inspect_fallback.fango:21
+    test_inspect_fallback.fango:22
     Expected: Named a
     Actual:   Named b
 
 FAIL  inspect > shown
 
-    test_inspect_fallback.fango:22
+    test_inspect_fallback.fango:23
     Expected: Shown 1
     Actual:   Shown 2
 
 FAIL  inspect > quoted strings
 
-    test_inspect_fallback.fango:23
+    test_inspect_fallback.fango:24
     Expected: "1"
     Actual:   "2"
 

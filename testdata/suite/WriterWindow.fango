@@ -5,6 +5,7 @@ import Expect
 import State
 import Test
 import Writer exposing (Writer)
+import Process
 
 -- Each observed Bytes value is one underlying write, including flush boundaries.
 sink : Sink {State.State (List Bytes)}
@@ -42,4 +43,4 @@ tests = Test.test "writer_window" {
     Expect.equal [] (written 8 { _ -> () })
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

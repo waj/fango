@@ -31,7 +31,7 @@ func withoutLibrary() []string {
 func TestMissingLibraryReportsItself(t *testing.T) {
 	dir := t.TempDir()
 	entry := filepath.Join(dir, "Main.fango")
-	if err := os.WriteFile(entry, []byte("main = print 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("main() = print 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(cliBinary(t), "check", entry)
@@ -62,7 +62,7 @@ func TestMissingLibraryReportsItself(t *testing.T) {
 func TestConfiguredLibraryIsNotSecondGuessed(t *testing.T) {
 	dir := t.TempDir()
 	entry := filepath.Join(dir, "Main.fango")
-	if err := os.WriteFile(entry, []byte("main = print 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("main() = print 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	empty := t.TempDir()
@@ -139,7 +139,7 @@ func TestStdlibEditTakesEffectWithoutRebuildingTheCompiler(t *testing.T) {
 
 	dir := t.TempDir()
 	entry := filepath.Join(dir, "Main.fango")
-	if err := os.WriteFile(entry, []byte("main = print (List.length [1, 2, 3])\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("main() = print (List.length [1, 2, 3])\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	build := t.TempDir()
@@ -187,7 +187,7 @@ func TestRemovedRuntimeSourceLeavesTheBuildDirectory(t *testing.T) {
 
 	dir := t.TempDir()
 	entry := filepath.Join(dir, "Main.fango")
-	if err := os.WriteFile(entry, []byte("main = print 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("main() = print 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	build := t.TempDir()

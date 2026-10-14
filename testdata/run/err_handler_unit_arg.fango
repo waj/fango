@@ -1,6 +1,6 @@
 effect Log
     log : String -> ()
 
-main =
+main() =
     handle log "hi" on
         log () -> resume ()

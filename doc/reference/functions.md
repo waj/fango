@@ -10,7 +10,7 @@ Definitions and optional annotations are separate, adjacent declarations:
 square : Float -> Float
 square x = x * x
 
-main = square 3.0
+main() = print (square 3.0)
 ```
 
 Arrows associate to the right. Type application uses spaces, such as

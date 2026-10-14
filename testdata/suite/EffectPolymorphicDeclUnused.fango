@@ -2,6 +2,7 @@ module EffectPolymorphicDeclUnused exposing (tests)
 
 import Expect
 import Test
+import Process
 effect Fail error
     throw : error -> value
 
@@ -12,4 +13,4 @@ tests = Test.test "effect_polymorphic_decl_unused" {
     Expect.equal () fixtureBody()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

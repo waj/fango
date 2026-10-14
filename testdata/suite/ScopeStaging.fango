@@ -4,6 +4,7 @@ import Expect
 import Meta exposing (Code)
 import Runtime.Scope
 import Test
+import Process
 
 -- A cleanup scope whose constituents are pure is stage-safe: the compiler can
 -- run it while expanding a splice. Resources and entropy stay forbidden there
@@ -20,4 +21,4 @@ tests = Test.test "scope_staging" {
     Expect.equal 22 $(folded)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

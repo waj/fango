@@ -6,6 +6,7 @@ import Result exposing (Result(..))
 import State
 import Stream
 import Test
+import Process
 
 step n = if n > 5 then Nothing else Just (n, n + 1)
 type Observation = Values (List Int) | Pairs (List (Int, Int)) | Value Int deriving (Eq, Show)
@@ -49,4 +50,4 @@ tests = Test.test "stream_explicit_state" {
                  ] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

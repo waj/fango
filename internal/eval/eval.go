@@ -1061,6 +1061,12 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		inner := &Frame{parent: fr, vars: map[string]Value{e.Resource: acquired}}
 		body, bodyErr := in.eval(e.Body, inner)
+		var exit *fangort.ExitError
+		if errors.As(bodyErr, &exit) {
+			// Process.exit ends the program at once, as the compiled
+			// program's os.Exit does: no release runs.
+			return nil, bodyErr
+		}
 		release, releaseErr := in.eval(e.Release, inner)
 		if bodyErr != nil {
 			// An interpreter failure is not a language exit; release still ran,
@@ -1574,6 +1580,18 @@ func (in *interp) tree(t core.Tree, fr *Frame, leaf func(core.Expr, *Frame) (Val
 	}
 }
 
+// entryStatus applies a status the entry returned once it completed
+// normally, reporting a non-zero one as the program's exit like
+// Process.exit does.
+func entryStatus(v Value) error {
+	if status, ok := v.(*CtorVal); ok && status.Ctor.Name == "Process.Status" && len(status.Fields) == 1 {
+		if code, ok := status.Fields[0].(int64); ok && code != 0 {
+			return &fangort.ExitError{Code: int(code)}
+		}
+	}
+	return nil
+}
+
 func (in *interp) force(name string) (Value, error) {
 	cell, ok := in.env.cells[name]
 	if !ok {
@@ -1583,6 +1601,9 @@ func (in *interp) force(name string) (Value, error) {
 				v, err := in.eval(d.Body, &Frame{vars: map[string]Value{d.Params[0]: struct{}{}}})
 				err = in.traced(err)
 				in.popFrame()
+				if err == nil {
+					err = entryStatus(v)
+				}
 				return v, err
 			}
 			return nil, fmt.Errorf("eval: bare reference to worker `%s` — the linter should have caught this", name)

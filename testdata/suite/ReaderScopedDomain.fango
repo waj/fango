@@ -7,6 +7,7 @@ import IO
 import Reader
 import Runtime.Local
 import Test
+import Process
 
 effect Database
     lookup : () -> String
@@ -66,4 +67,4 @@ tests = Test.test "reader_scoped_domain" {
     Expect.equal "io" observed
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

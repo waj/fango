@@ -306,12 +306,12 @@ usage = "Usage: tests [--format console|progress|documentation|silent] [--json P
 -- fango run Tests.fango --format documentation
 -- fango run Tests.fango --format silent --json report.json
 -- ```
-run : (() ->{Reporter | e} Summary) ->{IO | e} ()
+run : (() ->{Reporter | e} Summary) ->{IO, Process.Arguments | e} ()
 run action =
     case parseOptions (Options { format = ConsoleFormat, json = Nothing }) (Process.args ()) of
         Err message ->
             write ("Test.run: " ++ message ++ "\n" ++ usage)
-            Process.exit 2
+            Process.exit (Process.status 2)
         Ok Help -> write usage
         Ok (Run options) ->
             summary =
@@ -332,7 +332,7 @@ run action =
                                     Err problem -> outputError ("JSON report: " ++ IO.describeError problem)
                                     Ok () -> ()
                         collected.value
-            if summary.verdict == RunPassed then () else Process.exit 1
+            if summary.verdict == RunPassed then () else Process.exit Process.failure
 
 type Options = { format : Format, json : Maybe String }
 type Command = Help | Run Options
@@ -367,7 +367,7 @@ parseFormat format =
 outputError : String ->{IO} ()
 outputError message =
     write ("Test.run: " ++ message ++ "\n")
-    Process.exit 2
+    Process.exit (Process.status 2)
 
 withReport : Format -> (() ->{Reporter | e} a) ->{IO | e} Collected a
 withReport format action =

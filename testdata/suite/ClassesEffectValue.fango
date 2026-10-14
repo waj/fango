@@ -3,6 +3,7 @@ module ClassesEffectValue exposing (tests)
 import Expect
 import State
 import Test
+import Process
 class Echo a
     echo : a ->{State.State (List String)} a
 instance Echo Int
@@ -22,4 +23,4 @@ tests = Test.test "classes_effect_value" {
     Expect.equal ["start", "called"] (List.reverse observed.state)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

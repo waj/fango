@@ -2,6 +2,7 @@ module AdtRecursive exposing (tests)
 
 import Expect
 import Test
+import Process
 type Nat = Zero | Succ Nat deriving (Eq, Show)
 
 depth n =
@@ -19,4 +20,4 @@ tests = Test.test "adt_recursive" {
     Expect.equal 4 (depth (double (Succ (Succ Zero))))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -1,4 +1,6 @@
-main =
+result =
     case 1 of
         ^missing -> True
         _ -> False
+
+main() = print result

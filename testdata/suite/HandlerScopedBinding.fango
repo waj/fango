@@ -2,6 +2,7 @@ module HandlerScopedBinding exposing (tests)
 
 import Expect
 import Test
+import Process
 effect Counter
     step : () -> Int
 
@@ -26,4 +27,4 @@ tests = Test.test "handler_scoped_binding" {
     Expect.equal (0, 1, 2) answer
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

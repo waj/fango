@@ -6,7 +6,7 @@ import Time.Date as Date
 import Time.DateTime as DT
 import Time.Zone as Zone
 
-main =
+main() =
     result = Fail.attempt {
         zone = Zone.fixedOffset (-10800)
         issued = DT.parse "2026-01-31T10:00:00-03:00" |> DT.inZone zone

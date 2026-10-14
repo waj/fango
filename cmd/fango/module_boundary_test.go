@@ -25,7 +25,7 @@ func TestModuleBoundaryMatchesMergedEmission(t *testing.T) {
 		}
 	}
 	write("Lib.fango", "{-# no-prelude #-}\nmodule Lib exposing (main, twice)\nmain x y = x\ntwice f x = f (f x)\n")
-	write("Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.main (Lib.twice ({ x -> x }) ()) ()\n")
+	write("Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.main (Lib.twice ({ x -> x }) ()) ()\nmain() = ()\n")
 
 	var stderr bytes.Buffer
 	modular, modularChecker, _, units, _, ok := compileFileGraphSession(entry, &stderr, nil)
@@ -58,11 +58,11 @@ func TestModuleBoundaryMatchesMergedEmission(t *testing.T) {
 	for i, unit := range units {
 		codeUnits[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source}
 	}
-	got, err := codegen.EmitProject(modular, modularChecker.B, codeUnits, true)
+	got, err := codegen.EmitProject(modular, modularChecker.B, codeUnits)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := codegen.EmitProject(merged, mergedChecker.B, codeUnits, true)
+	want, err := codegen.EmitProject(merged, mergedChecker.B, codeUnits)
 	if err != nil {
 		t.Fatal(err)
 	}

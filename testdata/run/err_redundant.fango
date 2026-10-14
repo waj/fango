@@ -6,4 +6,4 @@ f m =
         NothingI -> 0
         _ -> 9
 
-main = f NothingI
+main() = print (f NothingI)

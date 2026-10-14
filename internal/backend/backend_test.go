@@ -46,10 +46,10 @@ func unitsOf(result *check.Result) []codegen.Unit {
 
 // referenceFiles is the whole-program path: one lowering and one emission over
 // every definition, with dependency bodies available throughout.
-func referenceFiles(t *testing.T, result *check.Result, units []codegen.Unit, printMain bool) []codegen.File {
+func referenceFiles(t *testing.T, result *check.Result, units []codegen.Unit) []codegen.File {
 	t.Helper()
 	prog := result.Program
-	files, err := codegen.EmitProject(prog, result.Checker.B, units, printMain)
+	files, err := codegen.EmitProject(prog, result.Checker.B, units)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +121,8 @@ func TestModuleBackendMatchesWholeProgramEmission(t *testing.T) {
 				t.Skip("entry does not compile on its own")
 			}
 			units := unitsOf(result)
-			want := referenceFiles(t, result, units, false)
-			got, err := (&Session{DisableCache: true}).EmitProject(entry, result, units, false)
+			want := referenceFiles(t, result, units)
+			got, err := (&Session{DisableCache: true}).EmitProject(entry, result, units)
 			if err != nil {
 				t.Fatal(err)
 			}

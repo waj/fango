@@ -3,7 +3,7 @@ bad = `resume 1`
 effect Ask
     ask : () -> Int
 
-main =
+main() =
     print
         (handle ask () on
             ask () ->

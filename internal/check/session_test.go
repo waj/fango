@@ -108,7 +108,7 @@ func TestCheckedCacheKeepsRuntimeOnlyImporterHit(t *testing.T) {
 		}
 	}
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.value\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, main, cache)
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"two\"\n")
@@ -137,7 +137,7 @@ func TestCheckedCacheInvalidatesInlinedBodies(t *testing.T) {
 		return "module Lib exposing (bump)\n\nbump : Int -> Int\nbump n = n + " + step + "\n"
 	}
 	write(lib, library("1"))
-	write(main, "module Main exposing (main)\nimport Lib\n\nmain = print (Lib.bump 40)\n")
+	write(main, "module Main exposing (main)\nimport Lib\n\nmain() = print (Lib.bump 40)\n")
 	cache := newMemoryObjectCache()
 	first, _ := compileEvents(t, main, cache)
 	mainBody := func(result *Result) string {
@@ -177,10 +177,10 @@ func TestCheckedCacheInvalidatesTransitiveStageClosure(t *testing.T) {
 		"module Lib exposing (make)\n"+
 		"make = `1`\n")
 	write(relay, "{-# no-prelude #-}\nmodule Relay exposing (make)\nimport Lib\nmake = Lib.make\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Relay\nmain = $(Relay.make)\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Relay\nresult : Int\nresult = $(Relay.make)\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	first, _ := compileEvents(t, main, cache)
-	if got := intDefinition(t, first, "Main.main"); got != 1 {
+	if got := intDefinition(t, first, "Main.result"); got != 1 {
 		t.Fatalf("first splice = %d", got)
 	}
 	write(lib, "{-# no-prelude #-}\n"+
@@ -190,7 +190,7 @@ func TestCheckedCacheInvalidatesTransitiveStageClosure(t *testing.T) {
 	if events["checked-cache-hit"]["Relay"] != 1 || events["check"]["Main"] != 1 {
 		t.Fatalf("events after stage edit: %#v", events)
 	}
-	if got := intDefinition(t, second, "Main.main"); got != 2 {
+	if got := intDefinition(t, second, "Main.result"); got != 2 {
 		t.Fatalf("rebuilt splice = %d", got)
 	}
 	// A module keeps one artifact, so restoring its earlier source recompiles
@@ -202,7 +202,7 @@ func TestCheckedCacheInvalidatesTransitiveStageClosure(t *testing.T) {
 	if events["checked-cache-miss"]["Lib"] != 1 || events["check"]["Lib"] != 1 || events["check"]["Main"] != 1 {
 		t.Fatalf("a restored source was served from a superseded artifact: %#v", events)
 	}
-	if got := intDefinition(t, third, "Main.main"); got != 1 {
+	if got := intDefinition(t, third, "Main.result"); got != 1 {
 		t.Fatalf("recompiled splice = %d", got)
 	}
 }
@@ -246,9 +246,9 @@ func TestCachedBranchesStillRejectIncompatibleInstances(t *testing.T) {
 	write("Capability", "module Capability exposing (Mark(..))\nclass Mark a\n    mark : a -> String\n")
 	write("Left", "module Left exposing (left)\nimport Capability\ninstance Capability.Mark Int\n    mark x = \"left\"\nleft = \"left\"\n")
 	write("Right", "module Right exposing (right)\nimport Capability\ninstance Capability.Mark Int\n    mark x = \"right\"\nright = \"right\"\n")
-	leftEntry := write("UseLeft", "module UseLeft exposing (main)\nimport Left\nmain = Left.left\n")
-	rightEntry := write("UseRight", "module UseRight exposing (main)\nimport Right\nmain = Right.right\n")
-	combined := write("Combined", "module Combined exposing (main)\nimport Left\nimport Right\nmain = Left.left ++ Right.right\n")
+	leftEntry := write("UseLeft", "module UseLeft exposing (main)\nimport Left\nresult = Left.left\nmain() = ()\n")
+	rightEntry := write("UseRight", "module UseRight exposing (main)\nimport Right\nresult = Right.right\nmain() = ()\n")
+	combined := write("Combined", "module Combined exposing (main)\nimport Left\nimport Right\nresult = Left.left ++ Right.right\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, leftEntry, cache)
 	compileEvents(t, rightEntry, cache)
@@ -274,7 +274,7 @@ func TestCheckedCacheIgnoresDependencyCommentPositions(t *testing.T) {
 	write(lib, "{-# no-prelude #-}\n"+
 		"module Lib exposing (make)\n"+
 		"make = `\"same\"`\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = $(Lib.make)\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = $(Lib.make)\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, main, cache)
 	write(lib, "{-# no-prelude #-}\n"+
@@ -294,14 +294,14 @@ func TestCheckedCachePublishesDependenciesBeforeEntryFailure(t *testing.T) {
 	if err := os.WriteFile(lib, []byte("{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"ok\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(main, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = missing\n"), 0o644); err != nil {
+	if err := os.WriteFile(main, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = missing\nmain() = ()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cache := newMemoryObjectCache()
 	if result, diagnostics, internalErr := (&Session{Cache: cache}).Compile(main); internalErr != nil || result != nil || len(diagnostics) == 0 {
 		t.Fatalf("result=%v diagnostics=%v internal=%v", result, diagnostics, internalErr)
 	}
-	if err := os.WriteFile(main, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n"), 0o644); err != nil {
+	if err := os.WriteFile(main, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.value\nmain() = ()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, events := compileEvents(t, main, cache)
@@ -313,7 +313,7 @@ func TestCheckedCachePublishesDependenciesBeforeEntryFailure(t *testing.T) {
 func TestCorruptCheckedObjectFallsBackToChecking(t *testing.T) {
 	d := t.TempDir()
 	entry := filepath.Join(d, "Main.fango")
-	if err := os.WriteFile(entry, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nmain = \"ok\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nresult = \"ok\"\nmain() = ()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cache := newMemoryObjectCache()
@@ -338,8 +338,8 @@ func TestDependencyStateIsConsumerIndependent(t *testing.T) {
 		return path
 	}
 	write("Lib.fango", "{-# no-prelude #-}\nmodule Lib exposing (id, main)\nid x = x\nmain x y = x\n")
-	one := write("One.fango", "{-# no-prelude #-}\nmodule One exposing (main)\nimport Lib\nmain = Lib.main (Lib.id ()) ()\n")
-	two := write("Two.fango", "{-# no-prelude #-}\nmodule Two exposing (main)\nimport Lib\nmain = Lib.main () (Lib.id ())\n")
+	one := write("One.fango", "{-# no-prelude #-}\nmodule One exposing (main)\nimport Lib\nresult = Lib.main (Lib.id ()) ()\nmain() = ()\n")
+	two := write("Two.fango", "{-# no-prelude #-}\nmodule Two exposing (main)\nimport Lib\nresult = Lib.main () (Lib.id ())\nmain() = ()\n")
 	compile := func(entry string) *Result {
 		r, diagnostics, internalErr := (&Session{DisableObjectCache: true}).Compile(entry)
 		if internalErr != nil {
@@ -401,7 +401,8 @@ module Consumer exposing (main)
 import Basics exposing (Show(..))
 import Base
 type Next = Next deriving (Show)
-main = $(Base.make)
+result = $(Base.make)
+main() = ()
 `)
 	consumerPath := filepath.Join(d, "Consumer.fango")
 	if err := os.WriteFile(consumerPath, consumerContent, 0o644); err != nil {
@@ -475,7 +476,7 @@ func TestInstalledObjectSupportsSubsequentInference(t *testing.T) {
 	}
 	originalUnique := decoded.State.ADTs[0].Con.Unique
 
-	mainContent := []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.id (Lib.Box ())\n")
+	mainContent := []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.id (Lib.Box ())\nmain() = ()\n")
 	mainPath := filepath.Join(d, "Main.fango")
 	if err := os.WriteFile(mainPath, mainContent, 0o644); err != nil {
 		t.Fatal(err)
@@ -584,7 +585,7 @@ func TestModuleObjectRejectsCorruptEnvelope(t *testing.T) {
 func TestCachedObjectRejectsInconsistentOwnSummary(t *testing.T) {
 	d := t.TempDir()
 	entry := filepath.Join(d, "Main.fango")
-	if err := os.WriteFile(entry, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nmain = ()\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nresult = ()\nmain() = ()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cache := newMemoryObjectCache()
@@ -618,7 +619,7 @@ func TestCachedObjectRejectsInconsistentOwnSummary(t *testing.T) {
 func TestInstallObjectRollsBackAllPublishedState(t *testing.T) {
 	d := t.TempDir()
 	entry := filepath.Join(d, "Base.fango")
-	content := []byte("module Base exposing (main)\nmain = 1\n")
+	content := []byte("module Base exposing (main)\nresult = 1\nmain() = ()\n")
 	if err := os.WriteFile(entry, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +695,7 @@ func TestFixityChangeRechecksEveryOwner(t *testing.T) {
 		}
 	}
 	write(ops, "{-# no-prelude #-}\nmodule Ops exposing ((|+|))\n(|+|) : String -> String -> String\n(|+|) a b = a\ninfixl 6 (|+|)\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Ops exposing ((|+|))\nmain = \"a\" |+| \"b\" |+| \"c\"\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Ops exposing ((|+|))\nresult = \"a\" |+| \"b\" |+| \"c\"\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, main, cache)
 	// Only the operator table moves: the importer's own source is untouched,
@@ -720,8 +721,8 @@ func TestEntriesShareDependencyArtifactsAndKeepRolesApart(t *testing.T) {
 		return path
 	}
 	write("Shared", "{-# no-prelude #-}\nmodule Shared exposing (value)\nvalue = \"shared\"\n")
-	first := write("First", "{-# no-prelude #-}\nmodule First exposing (main)\nimport Shared\nmain = Shared.value\n")
-	second := write("Second", "{-# no-prelude #-}\nmodule Second exposing (main)\nimport Shared\nmain = Shared.value\n")
+	first := write("First", "{-# no-prelude #-}\nmodule First exposing (main)\nimport Shared\nresult = Shared.value\nmain() = ()\n")
+	second := write("Second", "{-# no-prelude #-}\nmodule Second exposing (main)\nimport Shared\nresult = Shared.value\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, first, cache)
 	_, events := compileEvents(t, second, cache)
@@ -737,7 +738,7 @@ func TestEntriesShareDependencyArtifactsAndKeepRolesApart(t *testing.T) {
 	if events["checked-cache-hit"]["First"] != 1 {
 		t.Fatalf("the first entry lost its artifact to the second: %#v", events)
 	}
-	asDependency := write("Uses", "{-# no-prelude #-}\nmodule Uses exposing (main)\nimport First\nmain = First.main\n")
+	asDependency := write("Uses", "{-# no-prelude #-}\nmodule Uses exposing (main)\nimport First\nresult = First.main\nmain() = ()\n")
 	_, events = compileEvents(t, asDependency, cache)
 	if events["check"]["First"] != 1 || events["checked-cache-hit"]["First"] != 0 {
 		t.Fatalf("an entry artifact was reused for the same module as a dependency: %#v", events)
@@ -755,7 +756,7 @@ func TestExportedSchemeChangeInvalidatesConsumers(t *testing.T) {
 		}
 	}
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (pick)\npick : String -> String -> String\npick a b = a\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.pick \"a\" \"b\"\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.pick \"a\" \"b\"\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, main, cache)
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (pick)\npick : a -> a -> a\npick a b = a\n")
@@ -778,12 +779,12 @@ func TestReusedArtifactsReportCurrentSourcePositions(t *testing.T) {
 		}
 	}
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue : String\nvalue = \"one\"\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.value\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, main, cache)
 	// Lib's declaration moves down; its meaning does not.
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\n-- a comment that shifts every span below it\n-- and another\nvalue : String\nvalue = \"one\"\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.missing\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.missing\nmain() = ()\n")
 	_, diagnostics, internalErr := (&Session{Cache: cache}).Compile(main)
 	if internalErr != nil {
 		t.Fatal(internalErr)
@@ -814,7 +815,7 @@ func TestAllHitCompileReadsNoStageSection(t *testing.T) {
 		}
 	}
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.value\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, main, cache)
 
@@ -828,7 +829,7 @@ func TestAllHitCompileReadsNoStageSection(t *testing.T) {
 
 	// One module checked from source elaborates against its dependency's
 	// installed stage definitions, so the deferred section is read then.
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n-- edited\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.value\nmain() = ()\n-- edited\n")
 	_, events = compileEvents(t, main, cache)
 	if events["check"]["Main"] != 1 || events["checked-cache-hit"]["Lib"] != 1 {
 		t.Fatalf("expected an edited entry over a cached dependency: %#v", events)
@@ -851,7 +852,7 @@ func TestAnEditReplacesTheModuleArtifact(t *testing.T) {
 		}
 	}
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.value\nmain() = ()\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, main, cache)
 	before := len(cache.objects)
@@ -883,7 +884,7 @@ func TestOnDiskArtifactsAreOnePerModule(t *testing.T) {
 		}
 	}
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
-	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.value\nmain() = ()\n")
 	compileEvents(t, main, compilecache.NewModuleStore(main))
 	first := artifactPaths(t, d)
 	if len(first) != 2 {

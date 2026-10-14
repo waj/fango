@@ -25,7 +25,7 @@ load() =
                 IO.NotFound -> Just []
                 _ ->
                     print (IO.describeError error)
-                    Process.exit 1
+                    Process.exit Process.failure
                     Nothing
         Ok text ->
             parsed : Result Json.Error (List Todo)
@@ -42,8 +42,8 @@ save todos =
                 Ok () -> ()
                 Err error ->
                     print (IO.describeError error)
-                    Process.exit 1
-        Err _ -> Process.exit 1
+                    Process.exit Process.failure
+        Err _ -> Process.exit Process.failure
 
 append : List Todo -> Todo -> List Todo
 append todos todo =
@@ -81,12 +81,12 @@ printTodos index todos =
 storageFailure : () ->{IO} ()
 storageFailure() =
     print "Invalid todo.json."
-    Process.exit 1
+    Process.exit Process.failure
 
 usage : () ->{IO} ()
 usage() =
     print "Usage: todo add TEXT | todo list | todo done NUMBER"
-    Process.exit 2
+    Process.exit (Process.status 2)
 
 addTodo : String ->{IO} ()
 addTodo text =
@@ -118,13 +118,13 @@ completeTodo raw =
                         case completeAt wanted 1 todos of
                             Nothing ->
                                 print ("No todo at index " ++ show wanted ++ ".")
-                                Process.exit 2
+                                Process.exit (Process.status 2)
                             Just updated ->
                                 save updated
                                 print ("Completed " ++ show wanted ++ ".")
 
 main() =
-    case Process.args() of
+    case Process.runSystem Process.args of
         ["add", text] -> addTodo text
         ["list"] -> listTodos()
         ["done", raw] -> completeTodo raw

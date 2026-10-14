@@ -5,6 +5,7 @@ import Expect
 import IO
 import Result exposing (Result(..))
 import Test
+import Process
 
 effect Read a
     read : () -> a
@@ -26,4 +27,4 @@ fixtureBody() = handle apply 42 { _ -> read() } on
 tests : Test.Test IO.IO
 tests = Test.test "poly_effect_callback_async" { Expect.equal 42 fixtureBody() }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

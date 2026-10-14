@@ -24,7 +24,6 @@ import (
 	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/testutil"
-	"github.com/waj/fango/internal/types"
 )
 
 // The differential end-to-end suite (doc/design.md, "Testing and performance"): every
@@ -32,10 +31,6 @@ import (
 // in-process and generated Go compiled and executed in differential mode.
 // stdout is diffed byte-exact against .expected and between the backends. Programs
 // with a .error file instead assert a compile-error substring.
-//
-// Pure value programs produce no output, so the compiled leg is emitted with
-// printMain and the eval leg shows main's value through the same shared
-// fangort formatter.
 //
 // The run fixtures' compiled legs share one Go project (fixtureBatch): each
 // entry module becomes its own package under entries/, the bundled packages
@@ -116,7 +111,6 @@ func buildCLIBinary(t *testing.T, source, absSource string, b *cliBuild) string 
 		b.binary = filepath.Join(dir, "program")
 		cmd := exec.Command(cliBinary(t), "build", "-o", b.binary, absSource)
 		cmd.Env = append(os.Environ(),
-			"FANGO_INTERNAL_PRINT_MAIN=1",
 			"FANGO_INTERNAL_STRICT_DIRECTIVES=1",
 			"FANGO_BUILD_DIR="+filepath.Join(dir, "build"))
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -158,7 +152,7 @@ func TestMain(m *testing.M) {
 }
 
 // fixtureEmissions holds every runnable testdata/run fixture's emitted Go
-// project (with printMain), keyed by fixture path. Emission is pure and
+// project, keyed by fixture path. Emission is pure and
 // CPU-bound, so it runs across a worker pool; the structural tests inspect
 // these files and fixtureBatch compiles them.
 type fixtureEmissions struct {
@@ -209,7 +203,7 @@ func emitRunFixtures() fixtureEmissions {
 		wg.Go(func() {
 			for path := range work {
 				var stderr bytes.Buffer
-				files, _, _, ok := emitProjectManifest(path, true, &stderr)
+				files, _, _, ok := emitProjectManifest(path, &stderr)
 				if !ok {
 					results <- result{path: path, err: fmt.Errorf("%s: emit failed:\n%s", path, stderr.String())}
 					continue
@@ -556,12 +550,11 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 		return
 	}
 
-	// Backend 1: the Core interpreter. A Unit-typed main is observed through
-	// its print output; any other main through its value and shared formatter.
-	// A fixture with a sibling sidecar gets its own worker, exactly as a user
+	// Backend 1: the Core interpreter, observed through its output and exit
+	// status. A fixture with a sibling sidecar gets its own worker, exactly as a user
 	// module would in an interpreter session.
 	var stderr bytes.Buffer
-	prog, ck, _, _, sources, ok := compileFileGraph(path, &stderr)
+	prog, _, _, _, sources, ok := compileFileGraph(path, &stderr)
 	if !ok {
 		t.Fatalf("compile failed:\n%s", stderr.String())
 	}
@@ -602,21 +595,7 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 		case in.status != 0:
 			t.Fatalf("eval: completed normally, want exit status %d", in.status)
 		}
-		mainTy := prog.Defs[len(prog.Defs)-1].Type
-		for _, d := range prog.Defs {
-			if d.Name == prog.Entry {
-				mainTy = d.Type
-			}
-		}
-		_, functionMain := mainTy.(*types.TFun)
-		if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain {
-			return printed.String()
-		}
-		shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, ioctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return shown.(string) + "\n"
+		return printed.String()
 	}()
 	if evalOut != expected {
 		t.Errorf("interpreter output:\n%q\nwant:\n%q", evalOut, expected)
@@ -661,7 +640,7 @@ func runErrorCase(t *testing.T, path, wantSubstr string) {
 func emittedProject(t *testing.T, path string) []codegen.File {
 	t.Helper()
 	var stderr bytes.Buffer
-	files, _, _, ok := emitProjectManifestSession(path, "", false, &stderr, &compilationSession{noCache: true})
+	files, _, _, ok := emitProjectManifestSession(path, "", &stderr, &compilationSession{noCache: true})
 	if !ok {
 		t.Fatalf("emit failed:\n%s", stderr.String())
 	}
@@ -747,11 +726,11 @@ func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
 	for _, path := range paths {
 		t.Run(filepath.Base(filepath.Dir(path))+"/"+filepath.Base(path), func(t *testing.T) {
 			var stderr bytes.Buffer
-			a, _, _, ok := emitProjectManifest(path, false, &stderr)
+			a, _, _, ok := emitProjectManifest(path, &stderr)
 			if !ok {
 				t.Fatalf("first emit failed:\n%s", stderr.String())
 			}
-			b, _, _, ok := emitProjectManifest(path, false, &stderr)
+			b, _, _, ok := emitProjectManifest(path, &stderr)
 			if !ok || len(a) != len(b) {
 				t.Fatalf("second emit failed or changed file count: %s", stderr.String())
 			}

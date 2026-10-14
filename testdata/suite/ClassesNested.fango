@@ -3,6 +3,7 @@ module ClassesNested exposing (tests)
 import Expect
 import Test
 import Text.Builder
+import Process
 
 type Wrap a = Wrap a
 type Box a = Box a
@@ -16,4 +17,4 @@ tests = Test.test "classes_nested" {
     Expect.equal "box of wrapped ints" (show (Box (Wrap 1)))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

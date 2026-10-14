@@ -223,7 +223,8 @@ type Checker struct {
 	PromptEffects func(row types.Row, at source.Span) []diag.Error
 
 	// EntryName is the canonical symbol selected by the batch graph loader.
-	// It remains "main" for the REPL and headerless single-file programs.
+	// It remains "main" for headerless single-file programs and is empty at
+	// the REPL, which has no entry point.
 	EntryName string
 
 	// Templates numbers this compilation's quotes; QuoteTemplates and
@@ -1178,9 +1179,13 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, mode DeclEffects) *declInferenc
 	var errs []diag.Error
 	var given []types.Pred
 	isMain := d.Name == ck.EntryName
+	if isMain && len(d.Params) == 0 {
+		errs = append(errs, diag.Errorf(d.NameSpan, "BAD MAIN",
+			"`main` must be a function with no arguments, like `main() = print \"hello\"`.\nA program that wants output calls `print`; `main`'s value is never shown."))
+	}
 	if isMain && len(d.Params) > 1 {
 		errs = append(errs, diag.Errorf(d.NameSpan, "MAIN TAKES NO PARAMETERS",
-			"`main` may be a value or a one-argument Unit function."))
+			"`main` takes no arguments: write `main() = ...`."))
 	}
 	if isMain && len(d.Params) == 1 {
 		switch d.Params[0].(type) {
@@ -1226,15 +1231,13 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, mode DeclEffects) *declInferenc
 		}
 	} else if annTy != nil {
 		ty = g.functionEquations(d.Name, d.NameSpan, declEquations(d), annTy)
-		if isMain && len(d.Params) == 1 && ck.IO != nil {
-			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
-			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
+		if isMain && len(d.Params) == 1 {
+			g.cs = append(g.cs, ck.mainShape(ty, d.Body.Span()))
 		}
 	} else {
 		ty = g.functionEquations(d.Name, d.NameSpan, declEquations(d), nil)
-		if isMain && len(d.Params) == 1 && ck.IO != nil {
-			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
-			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
+		if isMain && len(d.Params) == 1 {
+			g.cs = append(g.cs, ck.mainShape(ty, d.Body.Span()))
 		}
 	}
 	return &declInference{originalAnn: originalAnn, d: d, g: g, ty: ty, annTy: annTy, given: given, errs: errs, mode: mode, isMain: isMain}
@@ -1274,14 +1277,6 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	if row, ok := ck.Sub.Apply(g.ambient).(types.Row); ok && len(row.Labels) > 0 && mode == DeclPromptEffects && ck.PromptEffects != nil {
 		errs = append(errs, ck.PromptEffects(row, d.Body.Span())...)
 	}
-	if isMain && len(d.Params) == 0 && ck.IO != nil {
-		row := ck.Sub.Apply(g.ambient).(types.Row)
-		for _, l := range row.Labels {
-			if l.Unique != ck.IO.Unique {
-				errs = append(errs, diag.Errorf(d.Body.Span(), "UNHANDLED EFFECT", "Legacy `main` may perform IO, but `%s` is not handled.", l.Name))
-			}
-		}
-	}
 
 	if d.Ann != nil && annTy != nil {
 		// Skolemize-and-unify (doc/design.md, "Type inference"): the annotation's variables resolve to
@@ -1314,10 +1309,10 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	_, isLambda := d.Body.(*ast.Lambda)
 	switch {
 	case isMain:
-		// main is the program's ground entry point (doc/design.md, "Go backend and runtime": a function form is
-		// invoked inside func main()) — it never generalizes. Unconstrained
-		// variables in its type default like interior ones (Number → Int,
-		// General → Unit), so `main = 1 + 2` stays an Int program.
+		// main is the program's ground entry point (doc/design.md, "Go backend
+		// and runtime": it is invoked inside func main()) — it never
+		// generalizes. Unconstrained variables in its type default like
+		// interior ones.
 		info.Scheme = types.Scheme{Body: ty}
 	case ck.MonoValues && len(d.Params) == 0 && !isLambda:
 		info.Scheme = types.Scheme{Body: ty}
@@ -1327,12 +1322,56 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	var predErrs []diag.Error
 	info.Scheme, predErrs = ck.qualify(info.Scheme, g.preds, given, d.Ann != nil, d.NameSpan)
 	errs = append(errs, predErrs...)
+	if isMain {
+		// After defaulting, so `main() = 1` reports its Int result.
+		errs = append(errs, ck.checkMainResult(ty, d)...)
+	}
 	if d.ScopedRow != "" {
 		info.Scheme = markScopedScheme(info.Scheme, len(d.Params), g.scopedIndex)
 	}
 	errs = append(errs, g.checkScopeBoundaries()...)
 	return info, errs
 }
+
+// mainShape constrains the entry to a nullary function over the closed IO
+// row. Its result stays open here; checkMainResult settles it once the body
+// is solved and defaulted.
+func (ck *Checker) mainShape(ty types.Type, sp source.Span) Constraint {
+	row := types.Row{}
+	if ck.IO != nil {
+		row.Labels = []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}
+	}
+	want := &types.TFun{Arg: ck.B.Unit, Eff: row, Ret: ck.Sup.FreshVar(types.General)}
+	return Constraint{Left: ty, Right: want, Span: sp, Why: Why{Kind: WhyAnnotation, Name: "main"}}
+}
+
+// checkMainResult enforces the entry's result: `()` or `Process.Status`. An
+// unconstrained result is `()`.
+func (ck *Checker) checkMainResult(ty types.Type, d *ast.ValueDecl) []diag.Error {
+	fn, ok := ck.Sub.Apply(ty).(*types.TFun)
+	if !ok {
+		return nil
+	}
+	var errs []diag.Error
+	result := fn.Ret
+	if v, open := result.(*types.TVar); open && !v.Rigid {
+		ck.Sub[v.ID] = ck.B.Unit
+		return errs
+	}
+	if con, isCon := result.(*types.TCon); isCon {
+		if con.Unique == ck.B.Unit.Unique {
+			return errs
+		}
+		if status, known := ck.TypeNames[StatusTypeName].(*types.TCon); known && con.Unique == status.Unique {
+			return errs
+		}
+	}
+	return append(errs, diag.Errorf(d.NameSpan, "BAD MAIN",
+		"`main` must return `()` or `Process.Status`, but it returns `%s`.\nA program that wants output calls `print`.", types.Show(result)))
+}
+
+// StatusTypeName is the canonical exit-status type an entry may return.
+const StatusTypeName = "Process.Status"
 
 func sameKnownEffects(a, b types.Type) bool {
 	af, aok := a.(*types.TFun)
@@ -1663,7 +1702,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			g.ck.ExprCaptures[e] = g.instantiateCaptures(scheme)
 			// An operation in value position is not yet being performed. Its
 			// predicates are checked when a saturated operation spine is formed;
-			// this also lets main's ordinary shape check diagnose `main = print`.
+			// this also lets main's ordinary shape check diagnose `main() = print`.
 			if op := g.ck.Operations[e.Name]; op != nil {
 				ty = g.instantiate(scheme)
 			} else {

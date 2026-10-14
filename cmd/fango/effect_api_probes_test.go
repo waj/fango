@@ -13,7 +13,7 @@ import Reader
 parse : Bytes.Bytes -> Bytes.Bytes
 parse bytes = Reader.overBytes bytes ({ reader -> Reader.readUpTo reader 1 })
 
-main = parse Bytes.empty
+main() = print (parse Bytes.empty)
 `)
 	var out, errs bytes.Buffer
 	if code := run([]string{"check", path}, &out, &errs); code != 0 {

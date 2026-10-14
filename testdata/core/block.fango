@@ -2,4 +2,4 @@ area =
     r = 2.0
     tau = r + r
     3.14159 * tau
-main = area
+main() = print (area)

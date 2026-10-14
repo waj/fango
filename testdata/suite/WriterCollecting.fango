@@ -7,6 +7,7 @@ import Result exposing (Result(..))
 import State
 import Test
 import Writer exposing (Writer)
+import Process
 
 -- Collecting uses scoped local state and publishes the buffer only after success.
 
@@ -49,4 +50,4 @@ tests = Test.test "writer_collecting" {
     Expect.equal (Err "stopped") (attempt { Writer.collecting (partial False) })
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

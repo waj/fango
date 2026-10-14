@@ -359,6 +359,15 @@ package `main` cannot carry it and its initializer lambdas are named by
 module alone; task goroutines defer the same recovery with the stack
 captured at spawn. `FANGO_TRACEBACK=go` leaves Go's own traceback in place.
 
+The entry is always a nullary function. Generated `main` calls its worker;
+when the result is `Process.Status`, it passes the status's product field to
+`fangort.ExitStatus` after the call returns, so the status applies only after
+normal completion. The interpreter reports a non-zero returned status as the
+same `ExitError` that `Process.exit` raises, in-process and in native workers
+alike. `Process.exit` is `os.Exit` in a compiled program; in the interpreter
+its `ExitError` propagates without running `Bracket` releases, so neither
+backend runs Fango cleanup after an exit.
+
 ## Self tail-call loops
 
 Elaboration lifts named local functions, including monomorphic ones, into

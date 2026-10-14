@@ -1,0 +1,15 @@
+import Async
+import Process
+import Runtime.Scope
+
+-- A returned status applies only after main completes normally: the scope
+-- releases and the spawned task finishes before the program ends with it.
+main : () ->{IO} Process.Status
+main() =
+    Runtime.Scope.finally { _ ->
+        Async.run {
+            ignore (Async.spawn { print "task finished" })
+        }
+        print "body done"
+    } { _ -> print "released" }
+    Process.status 3

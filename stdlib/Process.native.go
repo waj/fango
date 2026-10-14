@@ -12,4 +12,13 @@ func ArgAt(index int64) string {
 	return args[index]
 }
 
-func Exit(code int64) { FangoHost.Exit(int(code)) }
+func ExitWith(code int64) { FangoHost.Exit(int(code)) }
+
+// CheckedStatus faults on a status a process cannot report, rather than
+// letting the host truncate it.
+func CheckedStatus(code int64) int64 {
+	if code < 0 || code > 255 {
+		panic(fmt.Sprintf("exit status %d is out of range 0 through 255", code))
+	}
+	return code
+}

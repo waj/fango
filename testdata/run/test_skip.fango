@@ -1,5 +1,6 @@
 import Expect
 import Test exposing (Test, describe, skip, test, todo)
+import Process
 
 -- Skipped tests and groups count every test they hold, a todo under a skip
 -- included, and make the run incomplete.
@@ -15,4 +16,4 @@ suite =
             ])
         ]
 
-main() = Test.run suite
+main() = Process.runSystem { Test.run suite }

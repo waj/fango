@@ -30,7 +30,7 @@ func TestPayloadKeepsDebugSourceAndScope(t *testing.T) {
 // Call origins survive the trip to the worker as file and line, which is
 // what the interpreter's stack needs, while every other span is dropped.
 func TestPayloadKeepsOriginLines(t *testing.T) {
-	file := source.NewFile("Main.fango", []byte("module Main exposing (main)\n\nmain = f 1\n"))
+	file := source.NewFile("Main.fango", []byte("module Main exposing (main)\n\nmain() = print (f 1)\n"))
 	at := func(start, end int) source.Span { return source.Span{File: file, Start: start, End: end} }
 	call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: "Main.f", Origin: at(36, 37)},
 		Args: []core.Expr{&core.IntLit{Val: 1}}, Origin: at(36, 39)}

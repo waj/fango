@@ -15,7 +15,7 @@ respond _ = Http.Server.Response
     }
 
 main() =
-    case Process.args() of
+    case Process.runSystem Process.args of
         [raw] ->
             case String.toInt raw of
                 Just port ->
@@ -23,5 +23,5 @@ main() =
                             stop = Async.channel 1
                             Http.Server.serve (Http.Server.defaultConfig port) stop respond
                     } })
-                Nothing -> Process.exit 2
-        _ -> Process.exit 2
+                Nothing -> Process.exit (Process.status 2)
+        _ -> Process.exit (Process.status 2)

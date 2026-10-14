@@ -18,4 +18,4 @@ answer =
     handle asked() on
         Shapes.ask () -> resume (Shapes.area (Rect 2 3))
 
-main = Shapes.describe (Square 2) ++ " " ++ show (Shapes.area (Square 2)) ++ " " ++ show answer ++ " " ++ show corner.y
+main() = print (Shapes.describe (Square 2) ++ " " ++ show (Shapes.area (Square 2)) ++ " " ++ show answer ++ " " ++ show corner.y)

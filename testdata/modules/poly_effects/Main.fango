@@ -2,4 +2,4 @@ module Main exposing (main)
 
 import Poly exposing (Key(..), run)
 
-main = run (Key 42)
+main() = print (run (Key 42))

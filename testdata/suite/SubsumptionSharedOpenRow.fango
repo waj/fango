@@ -3,6 +3,7 @@ module SubsumptionSharedOpenRow exposing (tests)
 import Expect
 import State
 import Test
+import Process
 type Source a e = Source (() ->{e} a)
 
 read : Source a e ->{e} a
@@ -39,4 +40,4 @@ tests = Test.test "subsumption_shared_open_row" {
     Expect.equal [Text "read", Integer 42] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

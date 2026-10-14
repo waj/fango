@@ -20,7 +20,7 @@ FAIL  groups > names
 
 FAIL  groups > names > once
 
-    test_group_errors.fango:20
+    test_group_errors.fango:21
     Expected: 1
     Actual:   2
 

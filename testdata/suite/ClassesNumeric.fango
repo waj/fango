@@ -2,6 +2,7 @@ module ClassesNumeric exposing (tests)
 
 import Expect
 import Test
+import Process
 type Count = Count Int deriving (Eq, Show)
 
 unwrap x = case x of
@@ -29,4 +30,4 @@ tests = Test.test "classes_numeric" {
     Expect.equal "zero" (describe (Count 0))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

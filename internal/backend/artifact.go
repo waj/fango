@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	emissionSchema = 14
+	emissionSchema = 15
 	emissionKind   = "emitted-unit"
 )
 
@@ -34,7 +34,6 @@ type unitRecord struct {
 	Unit           string         `json:"unit"`
 	Path           string         `json:"path"`
 	Entry          bool           `json:"entry"`
-	PrintMain      bool           `json:"print_main"`
 	Implementation string         `json:"implementation"`
 	Semantic       string         `json:"semantic"`
 	ABI            string         `json:"abi"`

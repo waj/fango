@@ -80,7 +80,7 @@ repack : Box a -> Box a
 repack (Box { state = value, observe = f }) = Box { state = value, observe = f }
 `)
 	path := writeModuleFile(t, dir, "Main.fango", `import Package
-main = Package.read (Package.repack (Package.make 13))
+main() = print (Package.read (Package.repack (Package.make 13)))
 `)
 	buildVerbose(t, path, "-v")
 	_, warm := buildVerbose(t, path, "-v")
@@ -89,8 +89,9 @@ main = Package.read (Package.repack (Package.make 13))
 	}
 	runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{}, "13\n")
 	writeModuleFile(t, dir, "Main.fango", `import Package
-main = case Package.make "cached" of
+result = case Package.make "cached" of
     Package.Box { state = value, observe = f } -> f value
+main() = print result
 `)
 	runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{}, "cached\n")
 }
@@ -98,9 +99,10 @@ main = case Package.make "cached" of
 func TestHiddenSchemaIsOpaque(t *testing.T) {
 	path := writeModuleFile(t, t.TempDir(), "Main.fango", `import Meta
 type Box a = Box state (state -> a)
-main = $(Meta.lift (case Meta.info (typeOf (Box Int)) of
+result = $(Meta.lift (case Meta.info (typeOf (Box Int)) of
      Meta.Opaque -> True
      Meta.Visible _ -> False))
+main() = print result
 `)
 	runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{}, "True\n")
 }
@@ -165,7 +167,7 @@ consume n source =
 `
 	writeModuleFile(t, dir, "PackageUse.fango", helper)
 	path := writeModuleFile(t, dir, "Main.fango", `import PackageUse
-main = PackageUse.consume 1000 (PackageUse.make 7)
+main() = print (PackageUse.consume 1000 (PackageUse.make 7))
 `)
 	runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{}, "7000\n")
 	// Only the interpreter backend checks in this process; warm the cache here

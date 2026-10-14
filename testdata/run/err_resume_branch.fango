@@ -1,6 +1,8 @@
 effect Ask
     ask : () -> Int
 
-main =
+result =
     handle ask () on
         ask () -> if True then resume 1 else 2
+
+main() = print result

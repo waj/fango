@@ -1,2 +1,1 @@
-main : ()
-main = print (2 * 21)
+main() = print (2 * 21)

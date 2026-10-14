@@ -11,4 +11,4 @@ dropBools : (() ->{Put Bool | e} a) ->{e} a
 dropBools action = handle action() on
     put _ -> resume ()
 
-main = if dropBools { dropStrings { both() } } then 42 else 0
+main() = print (if dropBools { dropStrings { both() } } then 42 else 0)

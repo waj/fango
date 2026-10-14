@@ -537,8 +537,8 @@ The host supplies a filesystem holding a [library root](#the-library-root)
 (only `stdlib/` is read) named by `FANGO_ROOT`, and passes the entry file as
 the only argument (default `/src/main.fango`). Standard input is the
 program's, output goes to stdout and diagnostics to stderr. The exit status is
-the program's own, `1` for a compile error, and `2` for an internal error. A
-non-Unit `main` value is printed as `print` would, through `Display`.
+the program's own, `1` for a compile error, and `2` for a runtime fault or an
+internal error.
 
 The interpreter runs without a native worker, so natives that need one (File,
 Net, and Async) and user sidecars fail with an error rather than building one. The
@@ -546,31 +546,38 @@ website's playground runs programs this way in the browser.
 
 ## Entry points
 
-A file passed to `build` or `run` must define `main`. A pure value is valid:
-
-```fango
-main = 42
-```
-
-A value-style `main` may perform ambient IO:
-
-```fango
-main : ()
-main = print 42
-```
-
-The recommended effectful form is a nullary function:
+A file passed to `build` or `run` must define `main` as a function with no
+arguments. It returns `()` or a [`Process.Status`](../../stdlib/Process.fango):
 
 ```fango
 main : () ->{IO} ()
 main() = print "hello"
 ```
 
-A value-style `main` may perform ambient IO but no unhandled custom effect. A
-function-style effectful `main` must have exactly the shown IO/Unit shape and
-one discarded Unit parameter; `main _ = ...` remains compatible. Non-Unit pure
-`main` values are primarily observable in the REPL and test harness; an
-ordinary built executable exits without printing them.
+`main _ = ...` is the same shape. Its row is `IO` and nothing else; an
+unhandled effect is `EFFECT MISMATCH`, so a program installs the runners it
+needs inside `main`, such as `Process.runSystem` for command-line arguments.
+Without an annotation an unconstrained result is `()`.
+
+A `()` result ends the program with status 0. A returned status takes effect
+only after `main` completes normally, so every cleanup scope has released and
+every task has finished first:
+
+```fango
+import Process
+
+main() =
+    print "checked"
+    Process.failure
+```
+
+`main` is never a value, and its result is never printed: a program that wants
+output calls `print`. A value-style declaration such as `main = 42`, or a
+function returning any other type, is `BAD MAIN`; parameters other than `()`
+or `_` are `MAIN TAKES NO PARAMETERS`. An uncaught failure keeps its own
+report and status. `Process.exit` ends the program at once instead, skipping
+cleanup; its source comment describes the contract. At the REPL, `main` is an
+ordinary name.
 
 ## Runtime failures
 

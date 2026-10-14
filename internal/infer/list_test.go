@@ -28,7 +28,7 @@ func adtNamed(t *testing.T, ck *infer.Checker, name string) *types.ADTInfo {
 // test-only stand-in: the whole mechanism is a canonical-symbol match, so a
 // test that hand-declared the type would prove nothing.
 func TestBundledListIsMarkedForRuntimeRepresentation(t *testing.T) {
-	ck, _, errs := checkPoly(t, "main = 1\n")
+	ck, _, errs := checkPoly(t, "main() = print (1)\n")
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -53,7 +53,7 @@ func TestBundledListIsMarkedForRuntimeRepresentation(t *testing.T) {
 // bundled type, so a module declaring its own is an UNQUALIFIED COLLISION —
 // but the canonical-symbol match is what this guards either way.
 func TestUserDeclaredListKeepsConsRepresentation(t *testing.T) {
-	ck, _, errs := checkPoly(t, "type Chain a = Empty | Link a (Chain a)\nmain = 1\n")
+	ck, _, errs := checkPoly(t, "type Chain a = Empty | Link a (Chain a)\nmain() = print (1)\n")
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}

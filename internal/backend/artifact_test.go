@@ -76,8 +76,6 @@ func TestEmittedUnitBuiltFromSomethingElseIsAMiss(t *testing.T) {
 	extraLinked.Linked = append(append([]linkedModule(nil), extraLinked.Linked...), linkedModule{Module: "List", Semantic: "s", ABI: "a"})
 	entryInputs := testRecord(file.Path)
 	entryInputs.Entry, entryInputs.EntrySymbol = true, "Main.main"
-	printMain := testRecord(file.Path)
-	printMain.PrintMain = true
 	for _, c := range []struct {
 		name string
 		want unitRecord
@@ -87,7 +85,6 @@ func TestEmittedUnitBuiltFromSomethingElseIsAMiss(t *testing.T) {
 		{"a moved dependency contract", otherLinked},
 		{"a widened closure", extraLinked},
 		{"entry-only inputs", entryInputs},
-		{"another main form", printMain},
 	} {
 		if _, ok := decodeUnit(data, c.want); ok {
 			t.Errorf("%s was accepted", c.name)

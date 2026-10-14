@@ -5,6 +5,7 @@ import Result exposing (Result(..))
 import State
 import Stream
 import Test
+import Process
 
 produce label values = Stream.unfold (False, values) { (started, pending) ->
     if started then () else recordTrace label
@@ -76,4 +77,4 @@ tests = Test.test "stream_demand" {
                  ] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -94,7 +94,7 @@ len xs =
         Empty -> 0
         Link _ rest -> 1 + len rest
 
-main = print (len (Link 1 Empty))
+main() = print (len (Link 1 Empty))
 `)
 	dump := core.Dump(prog)
 	for _, want := range []string{
@@ -125,7 +125,7 @@ check m =
         None -> 0
         Some n -> n
 
-main = print (check none)
+main() = print (check none)
 `)
 	dump := core.Dump(prog)
 	for _, want := range []string{
@@ -183,7 +183,7 @@ v =
 func TestPolyNumberGeneric(t *testing.T) {
 	prog := elabPoly(t, `double x = x + x
 
-main =
+main() =
     a = double 2
     b = double 1.5
     print b
@@ -212,7 +212,7 @@ len xs =
         Empty -> 0
         Link _ rest -> 1 + len rest
 
-main = print (len Empty)
+main() = print (len Empty)
 `)
 	dump := core.Dump(prog)
 	if !strings.Contains(dump, "(app/worker @[() Int] (var len _dictionary_Num Int -> Chain () -> Int)") {
@@ -224,34 +224,32 @@ main = print (len Empty)
 // see doc/design.md, "Type inference".
 func TestPolyEqEvidence(t *testing.T) {
 	prog := elabPoly(t, `member x y = x == y
-main = print (member 1 2)
+main() = print (member 1 2)
 `)
 	if !strings.Contains(core.Dump(prog), "_dictionary_Eq a -> a -> a -> Bool") {
 		t.Errorf("generic equality lacks dictionary evidence: %s", core.Dump(prog))
 	}
 }
 
-// TestPolyBadMain: main never generalizes — a function-valued main is
-// rejected (its underdetermined variables default, so `main = id` lands at
-// () -> () and hits the function-typed-main error).
+// TestPolyBadMain: main must return () or a status, so returning a function
+// is rejected.
 func TestPolyBadMain(t *testing.T) {
 	title := elabPolyErr(t, `id x = x
-main = id
+main() = id
 `)
 	if title != "BAD MAIN" {
 		t.Errorf("got %q", title)
 	}
 }
 
-// TestPolyMainDefaults: main's unconstrained type variables default like
-// interior ones (`main = None` is an Opt () program), keeping
-// `main = 1 + 2` an Int program.
+// TestPolyMainDefaults: main never generalizes; an unconstrained result is
+// (), so a main that never returns is still a Unit program.
 func TestPolyMainDefaults(t *testing.T) {
-	prog := elabPoly(t, `type Opt a = None | Some a
-main = None
+	prog := elabPoly(t, `forever() = forever()
+main() = forever()
 `)
 	dump := core.Dump(prog)
-	if !strings.Contains(dump, "(def main Opt ()") {
-		t.Errorf("main should default to Opt ():\n%s", dump)
+	if !strings.Contains(dump, "(def main (params _) () ->{IO} ()") {
+		t.Errorf("main should default to () ->{IO} ():\n%s", dump)
 	}
 }

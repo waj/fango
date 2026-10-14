@@ -2,10 +2,11 @@ module PolyEq exposing (tests)
 
 import Expect
 import Test
+import Process
 type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
 tests : Test.Test {}
 tests = Test.test "poly_eq" {
     Expect.equal (Link 1 (Link 2 Empty)) (Link 1 (Link 2 Empty))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

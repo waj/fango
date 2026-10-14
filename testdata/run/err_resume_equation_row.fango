@@ -3,7 +3,7 @@ type Choice = Yes | No
 effect Ask
     ask : Choice -> Int
 
-main =
+main() =
     print
         (handle ask Yes on
             ask Yes -> resume 1

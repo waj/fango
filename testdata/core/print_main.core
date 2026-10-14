@@ -1,2 +1,2 @@
 (core
-  (def main () (app/worker @[Float] (var Console.print _dictionary_Display Float -> Float ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_466c6f6174 _dictionary_Display Float) (float 12.56636 Float) ())))
+  (def main (params _) () ->{IO} () (app/worker @[Float] (var Console.print _dictionary_Display Float -> Float ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_466c6f6174 _dictionary_Display Float) (float 12.56636 Float) ())))

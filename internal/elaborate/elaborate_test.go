@@ -85,7 +85,7 @@ saved =
     handle identity { _ -> read() } on
         read () -> resume 1
 
-main = 0
+main() = print (0)
 `
 	f := source.NewFile("<capture>", []byte(src))
 	toks, lexErrs := lexer.Lex(f)

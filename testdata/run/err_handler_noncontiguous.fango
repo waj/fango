@@ -4,8 +4,10 @@ effect Ask
     ask : Choice -> Int
     note : Choice -> ()
 
-main =
+result =
     handle ask Yes on
         ask Yes -> resume 1
         note _ -> resume ()
         ask No -> resume 0
+
+main() = print result

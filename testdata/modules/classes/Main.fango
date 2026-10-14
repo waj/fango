@@ -3,4 +3,4 @@ module Main exposing (main)
 import Capability
 import Instances exposing (Box(..), render)
 
-main = render (Box Capability.token) ++ " / " ++ render (Box (Box Capability.token))
+main() = print (render (Box Capability.token) ++ " / " ++ render (Box (Box Capability.token)))

@@ -54,20 +54,20 @@ type File struct {
 // differential reference the module backend is compared against, and no
 // command uses it: internal/backend emits each owner from its own Core and the
 // declarations it links against, and must stay byte-identical to this.
-func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
+func EmitProject(p *core.Prog, b *types.Builtins, units []Unit) ([]File, error) {
 	if errs := core.Lint(p, b); len(errs) != 0 {
 		return nil, fmt.Errorf("codegen: malformed Core: %v", errs[0])
 	}
-	return emitProject(p, b, units, printMain)
+	return emitProject(p, b, units)
 }
 
-func emitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
+func emitProject(p *core.Prog, b *types.Builtins, units []Unit) ([]File, error) {
 	if err := ValidateUnits(p, units); err != nil {
 		return nil, err
 	}
 	files := make([]File, 0, len(units))
 	for _, unit := range units {
-		file, err := EmitUnit(UnitProgram(p, unit), b, unit, printMain)
+		file, err := EmitUnit(UnitProgram(p, unit), b, unit)
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +118,7 @@ func ValidateUnits(p *core.Prog, units []Unit) error {
 // EmitUnit emits one owner's Go package. p carries that owner's Core together
 // with the installed dependency headers its calls link against. It reads no dependency
 // body, so an owner can be emitted from its checked object alone.
-func EmitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) (File, error) {
+func EmitUnit(p *core.Prog, b *types.Builtins, unit Unit) (File, error) {
 	owned := *p
 	owned.Defs = nil
 	var context []core.Def
@@ -132,7 +132,7 @@ func EmitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) (File,
 	if errs := core.LintIn(&owned, context, b); len(errs) != 0 {
 		return File{}, fmt.Errorf("core lint: %v", errs)
 	}
-	data, err := emitUnit(p, b, unit, printMain)
+	data, err := emitUnit(p, b, unit)
 	if err != nil {
 		return File{}, err
 	}
@@ -167,7 +167,7 @@ func UnitProgram(p *core.Prog, unit Unit) *core.Prog {
 	return &out
 }
 
-func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
+func emitUnit(p *core.Prog, b *types.Builtins, unit Unit) ([]byte, error) {
 	lowered, err := lower.Module(p, unit.Name)
 	if err != nil {
 		return nil, err
@@ -233,8 +233,15 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	if unit.Entry && mainDef == nil {
 		return nil, fmt.Errorf("codegen: entry definition %q is not owned by entry module %q", entry, unit.Name)
 	}
-	mainIsUnit := mainDef != nil && g.unique(mainDef.Type) == b.Unit.Unique
-	mainIsFn := mainDef != nil && len(mainDef.Params) == 1
+	// The checker admits only a nullary function returning () or a status.
+	mainStatus := false
+	if mainDef != nil {
+		if fn, ok := mainDef.Type.(*types.TFun); ok {
+			if con, ok := fn.Ret.(*types.TCon); ok && con.Name == "Process.Status" {
+				mainStatus = true
+			}
+		}
+	}
 
 	adts, effects := g.ownedADTs(p.ADTs), g.ownedEffects(p.Effects)
 	decls := append(g.effectDecls(effects), g.adtDecls(adts)...)
@@ -242,9 +249,6 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		d := &p.Defs[i]
 		if d.Owner != unit.Name {
 			continue
-		}
-		if d == mainDef && mainIsUnit {
-			continue // no package var: the effect runs inside func main()
 		}
 		if d.IsWorker() {
 			// Includes nullary generic workers — polymorphic values emit as
@@ -286,18 +290,13 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		return funcDecl("main", append(prologue, body...)...)
 	}
 	switch {
-
-	case mainIsUnit:
-		decls = append(decls, mainDecl(g.stmts(mainDef.Body)...))
-	case mainIsFn:
+	case mainStatus:
+		// A returned status applies once main has completed normally, after
+		// its scopes released and its tasks drained.
+		call := g.workerCallStmts(entry, nil)[0].(*goast.ExprStmt).X
+		decls = append(decls, mainDecl(exprStmt(callExpr(selector("fangort", "ExitStatus"), &goast.SelectorExpr{X: call, Sel: ident(fieldName(0))}))))
+	case mainDef != nil:
 		decls = append(decls, mainDecl(g.workerCallStmts(entry, nil)...))
-	case printMain && unit.Entry:
-		decls = append(decls, mainDecl(
-			exprStmt(callExpr(selector("fangort", "PrintString"), g.expr(p.EntryDisplay, 0)))))
-	default:
-		if mainDef != nil {
-			decls = append(decls, mainDecl(assignBlank(g.topValueRef(entry))))
-		}
 	}
 
 	decls = append(decls, g.regexDecls...)

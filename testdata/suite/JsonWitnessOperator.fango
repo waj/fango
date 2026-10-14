@@ -4,6 +4,7 @@ import Expect
 import Json
 import Result exposing (Result(..))
 import Test
+import Process
 
 (@) : Int -> Int -> Int
 (@) left right = left + right
@@ -15,4 +16,4 @@ tests = Test.test "json_witness_operator" {
     Expect.equal 4 (Expect.ok (Json.parse @Int "4"))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

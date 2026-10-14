@@ -2,6 +2,7 @@ module ControlledWorkerArgument exposing (tests)
 
 import Expect
 import Test
+import Process
 effect Stop
     abort stop : String -> value
 
@@ -21,4 +22,4 @@ tests = Test.test "controlled_worker_argument" {
     Expect.equal () fixtureBody()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

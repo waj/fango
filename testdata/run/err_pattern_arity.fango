@@ -5,4 +5,4 @@ f m =
         JustI -> 1
         NothingI -> 0
 
-main = f NothingI
+main() = f NothingI

@@ -4,6 +4,7 @@ import Bytes
 import Expect
 import Reader exposing (Reader)
 import Test
+import Process
 
 parsePair : Reader e -> Reader e ->{e} String
 parsePair first second =
@@ -23,4 +24,4 @@ tests = Test.test "reader_scoped_memory" {
     Expect.equal "aXbcYZ" parsed
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

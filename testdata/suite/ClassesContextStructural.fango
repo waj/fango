@@ -3,6 +3,7 @@ module ClassesContextStructural exposing (tests)
 import Expect
 import Test
 import Text.Builder
+import Process
 
 type Box a = Box a
 instance Show (Box a)
@@ -32,4 +33,4 @@ tests = Test.test "classes_context_structural" {
     Expect.equal "Wrapper box fallback" (show (Wrapper (Box Foo)))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

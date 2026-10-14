@@ -10,6 +10,7 @@ import Expect
 import Result exposing (Result(..))
 import State
 import Test
+import Process
 
 type Source e = { pull : () ->{e} String }
 
@@ -55,4 +56,4 @@ tests = Test.test "row_argument_closed" {
     Expect.equal (("pure", ("noisy", Err "empty"), "open"), ["pulling", "failing", "open"]) observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

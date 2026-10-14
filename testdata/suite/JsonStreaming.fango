@@ -9,6 +9,7 @@ import State
 import Stream
 import Test
 import Writer
+import Process
 
 effect Rows
     nextRow : Int -> Maybe Int
@@ -43,4 +44,4 @@ tests = Test.test "json_streaming" {
     Expect.equal [0, 1, 2, 3] (List.reverse observed.state)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

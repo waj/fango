@@ -175,7 +175,7 @@ run outside all applications handled by their own activation.
 ## Entry assembly
 
 `main` is a nullary function returning `()` or `Process.Status` (see
-[exit status](roadmap-io-interception-api.md#exit-status)). Its row may
+[entry points](reference/commands.md#entry-points)). Its row may
 contain `IO` and any effect that declares a default handler. The program entry
 installs those defaults; a default never applies anywhere else, so a missing
 handler in ordinary code remains a compile error.
@@ -348,10 +348,9 @@ committed separately.
 1. **Effect reflection** in `Meta`. DONE: see
    [effect reflection](reference/metaprogramming.md#effect-reflection) and
    [attributes](reference/metaprogramming.md#attributes).
-2. **IOI5.** `Process.Status`, the hard `Process.exit`, the `Arguments`
-   effect, and the function-only `main`. Stop printing `main`'s value and
-   rewrite value-style fixtures. Until phase 3, programs install the Arguments
-   runner explicitly.
+2. **IOI5.** DONE: see [Process](../stdlib/Process.fango) and
+   [entry points](reference/commands.md#entry-points). Until phase 3, programs
+   install the Arguments runner explicitly.
 3. **IOI9.** Entry assembly, with defaults declared for `Arguments`, `Random`,
    `Clock`, and `Http`. Remove the explicit runner installs that defaults now
    cover.
@@ -429,10 +428,13 @@ implicit fallback.
 
 ### IOI5 Process arguments and exit
 
+Status: DONE. The contract lives in [Process](../stdlib/Process.fango) and
+[entry points](reference/commands.md#entry-points).
+
 Add independently replaceable arguments. Add `Process.Status`, let a
 function-only `main` return `()` or a status, and stop printing `main`'s value,
 as described in the
-[API catalogue](roadmap-io-interception-api.md#exit-status). Change
+[entry points reference](reference/commands.md#entry-points). Change
 `Process.exit` to `Status ->{IO} a` with the documented no-cleanup contract.
 Update the entry-point reference and its diagnostics for rejected value-style
 and wrongly typed `main` declarations.

@@ -84,21 +84,6 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 		}
 		errs = append(errs, declErrs...)
 		p.Defs = append(p.Defs, defs...)
-		def := &defs[0]
-		if def.Name == ck.EntryName && len(def.Params) == 0 {
-			if _, isFn := def.Type.(*types.TFun); isFn {
-				errs = append(errs, diag.Errorf(info.NameSpan, "BAD MAIN",
-					"`main` must be a value, or use the supported function form `main _ : () ->{IO} ()`."))
-			} else if len(def.TyParams) > 0 {
-				errs = append(errs, diag.Errorf(info.NameSpan, "BAD MAIN",
-					"`main` must be a concrete value, but its type `%s` still has\ntype variables in it.", types.Show(def.Type)))
-			}
-		}
-	}
-	for _, d := range p.Defs {
-		if d.Name == p.Entry && len(d.Params) == 0 {
-			p.EntryDisplay = Display(&core.VarRef{Name: d.Name, Ty: d.Type}, ck, d.Owner)
-		}
 	}
 	if len(errs) == 0 {
 		specializeScalars(p, infos, ck)
@@ -197,22 +182,7 @@ func AssembleModuleProgram(defs []core.Def, infos []infer.DeclInfo, entry string
 	for _, info := range infos {
 		spans[info.Name] = info.NameSpan
 	}
-	var errs []diag.Error
-	for i := range p.Defs {
-		d := &p.Defs[i]
-		if d.Name != entry {
-			continue
-		}
-		if len(d.Params) == 0 {
-			if _, isFn := d.Type.(*types.TFun); isFn {
-				errs = append(errs, diag.Errorf(spans[d.Name], "BAD MAIN", "`main` must be a value, or use the supported function form `main _ : () ->{IO} ()`."))
-			} else if len(d.TyParams) > 0 {
-				errs = append(errs, diag.Errorf(spans[d.Name], "BAD MAIN", "`main` must be a concrete value, but its type `%s` still has\ntype variables in it.", types.Show(d.Type)))
-			}
-			p.EntryDisplay = Display(&core.VarRef{Name: d.Name, Ty: d.Type}, ck, d.Owner)
-		}
-	}
-	return p, errs
+	return p, nil
 }
 
 // Decl elaborates one declaration — also the REPL's per-input entry point.

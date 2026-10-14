@@ -5,6 +5,7 @@ import Fail exposing (attempt, fail)
 import Random exposing (int)
 import Result exposing (Result(..))
 import Test
+import Process
 
 -- A partial operation accepts fresh evidence at its next application.
 -- It does not retain the runner used for the preceding draw.
@@ -24,4 +25,4 @@ tests = Test.test "state_independent_result" {
     Expect.equal (Err "fresh handler") result
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

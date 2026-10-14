@@ -5,6 +5,7 @@ import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Test
 import Tuple exposing (first, second, swap)
+import Process
 
 pair : (Int, String)
 pair = (1, "one")
@@ -56,4 +57,4 @@ tests = Test.test "tuples" {
     Expect.equal True ((1, 2, 3) < (1, 2, 4))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

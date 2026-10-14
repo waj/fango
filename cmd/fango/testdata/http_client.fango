@@ -45,7 +45,7 @@ attemptClient : (() ->{Fail Client.Error | e} a) ->{e} Result Client.Error a
 attemptClient action = Fail.attempt action
 
 main() =
-    case Process.args() of
+    case Process.runSystem Process.args of
         [base, file] ->
             print (attemptIO { attemptClient { Client.run { Client.configure { c -> { c | baseUrl = Url.parse base } } { requests file } } } })
-        _ -> Process.exit 2
+        _ -> Process.exit (Process.status 2)

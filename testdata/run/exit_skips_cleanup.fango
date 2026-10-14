@@ -1,0 +1,11 @@
+import Process
+import Runtime.Scope
+
+-- `exit` ends the program at once: the release never runs, and output
+-- written before it is kept.
+main() =
+    Runtime.Scope.finally { _ ->
+        print "before exit"
+        Process.exit (Process.status 4)
+    } { _ -> print "released" }
+    print "unreachable"

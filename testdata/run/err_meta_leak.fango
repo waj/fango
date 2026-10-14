@@ -6,4 +6,4 @@ one = `1`
 size : Code -> Int
 size _ = 1
 
-main = print (size one)
+main() = print (size one)

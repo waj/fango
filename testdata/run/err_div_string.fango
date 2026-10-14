@@ -1,1 +1,1 @@
-main = print ("a" / "b")
+main() = print ("a" / "b")

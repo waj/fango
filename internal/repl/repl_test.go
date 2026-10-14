@@ -556,3 +556,11 @@ func TestImportAfterPromptDeclaration(t *testing.T) {
 		}
 	}
 }
+
+func TestMainIsAnOrdinaryPromptName(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader("main = 42\nmain + 1\n:quit\n"), &out)
+	if got := out.String(); strings.Contains(got, "BAD MAIN") || !strings.Contains(got, "43 : Int") {
+		t.Fatalf("prompt main:\n%s", got)
+	}
+}

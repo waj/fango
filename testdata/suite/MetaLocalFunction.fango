@@ -4,6 +4,7 @@ import Expect
 import Meta exposing (Code, Items(..))
 import State
 import Test
+import Process
 
 counter : Code
 counter = Meta.lambda "_offset" { offset ->
@@ -39,4 +40,4 @@ tests = Test.test "meta_local_function" {
     Expect.equal (42, "generic") (identity 42, identity "generic")
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

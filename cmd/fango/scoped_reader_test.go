@@ -143,11 +143,12 @@ withTextAndAction text callback action =
 	path := writeModuleFile(t, dir, "Main.fango", `import Cursor
 import Reader
 import Bytes
-main =
+result =
     first = Cursor.withTextFirst { reader -> Reader.readUpTo reader 1 } "abc"
     middle = Cursor.withTextAndAction "abc" { reader -> Bytes.length (Reader.readUpTo reader 2) } { 7 }
     last = Cursor.withText "abc" { reader -> Reader.readUpTo reader 1 }
     (first, middle, last)
+main() = print result
 `)
 	buildVerbose(t, path, "-v")
 	_, warm := buildVerbose(t, path, "-v")
@@ -160,7 +161,7 @@ main =
 import Reader
 import Bytes
 import Meta
-main = $(Meta.lift (Cursor.withNumber ({ number -> number + 2 })))
+main() = print ($(Meta.lift (Cursor.withNumber ({ number -> number + 2 }))))
 `)
 	_, staged := buildVerbose(t, path, "-v")
 	if !strings.Contains(staged, "Checking  Cursor (from cache)") {
@@ -172,7 +173,7 @@ main = $(Meta.lift (Cursor.withNumber ({ number -> number + 2 })))
 import Reader
 import Bytes
 import Meta
-main = $(Meta.lift (Cursor.withTextFirst { reader -> Bytes.length (Reader.readUpTo reader 1) } "abc"))
+main() = print ($(Meta.lift (Cursor.withTextFirst { reader -> Bytes.length (Reader.readUpTo reader 1) } "abc")))
 `)
 	var stageOut, stageErr bytes.Buffer
 	if code := run([]string{"check", "-v", path}, &stageOut, &stageErr); code != 0 || !strings.Contains(stageErr.String(), "Checking  Cursor (from cache)") {

@@ -5,6 +5,7 @@ import Expect
 import IO
 import Reader exposing (Reader)
 import Test
+import Process
 
 -- Two buffered readers driven at once, which is what binding the record's
 -- fields to their own activation buys. Each `refill` reaches its own source
@@ -54,4 +55,4 @@ tests = Test.test "reader_alternating" {
     Expect.equal ([Just (Bytes.fromString "abc"), Just (Bytes.fromString "wxy"), Just (Bytes.fromString "d"), Just (Bytes.fromString "z"), Just (Bytes.fromString "zz")], False) fixtureBody()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

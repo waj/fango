@@ -13,7 +13,7 @@ func TestOrdinaryEmitterDoesNotAcquireMachineRuntime(t *testing.T) {
 	b := types.NewBuiltins(sup)
 	p := &core.Prog{Entry: "Main.main", Defs: []core.Def{{Name: "Main.main", Owner: "Main", Type: b.Int,
 		Body: &core.IntLit{Val: 1, Ty: b.Int}}}}
-	files, err := EmitProject(p, b, []Unit{{Name: "Main", Program: "Main", Entry: true}}, false)
+	files, err := EmitProject(p, b, []Unit{{Name: "Main", Program: "Main", Entry: true}})
 	if err != nil {
 		t.Fatal(err)
 	}

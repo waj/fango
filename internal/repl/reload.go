@@ -123,6 +123,7 @@ func (s *Session) reload() {
 	}
 	reconciled := infer.NewChecker(s.ck.Sup, s.ck.B, infer.NewEnv())
 	reconciled.RuntimeDebug = s.options.Debug
+	reconciled.EntryName = ""
 	reconciled.IO = s.ck.IO
 	objects := make([]*check.ModuleObject, len(installer.Objects()))
 	for i, object := range installer.Objects() {

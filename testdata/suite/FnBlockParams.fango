@@ -2,6 +2,7 @@ module FnBlockParams exposing (tests)
 
 import Expect
 import Test
+import Process
 norm x y =
     sx = x * x
     sy = y * y
@@ -11,4 +12,4 @@ tests = Test.test "fn_block_params" {
     Expect.equal 25 (norm 3 4)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

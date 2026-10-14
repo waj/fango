@@ -98,7 +98,7 @@ func (p *project) check(t *testing.T) *check.Result {
 func (p *project) build(t *testing.T) []codegen.File {
 	t.Helper()
 	result := p.check(t)
-	files, err := (&Session{Cache: p.emitted, Emitted: p.tree, Observe: p.record}).EmitProject(p.entry, result, unitsOf(result), false)
+	files, err := (&Session{Cache: p.emitted, Emitted: p.tree, Observe: p.record}).EmitProject(p.entry, result, unitsOf(result))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func (p *project) compilerWork() int {
 func libraryProject(t *testing.T) *project {
 	p := newProject(t)
 	p.write(t, "Lib.fango", "{-# no-prelude #-}\nmodule Lib exposing (value, twice)\nvalue = \"one\"\ntwice x = x\n")
-	p.entry = p.write(t, "Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.twice Lib.value\n")
+	p.entry = p.write(t, "Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.twice Lib.value\nmain() = ()\n")
 	return p
 }
 
@@ -201,7 +201,7 @@ func TestNativeSidecarEditRebuildsOwnerOnly(t *testing.T) {
 	p := newProject(t)
 	p.write(t, "Lib.fango", "{-# no-prelude #-}\nmodule Lib exposing (tag)\ntag : String -> String\ntag = native\n")
 	p.write(t, "Lib.native.go", "package native\n\nfunc Tag(s string) string { return s }\n")
-	p.entry = p.write(t, "Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.tag \"x\"\n")
+	p.entry = p.write(t, "Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.tag \"x\"\nmain() = ()\n")
 	p.build(t)
 	p.write(t, "Lib.native.go", "package native\n\nfunc Tag(s string) string { return s + \"!\" }\n")
 	p.build(t)
@@ -294,8 +294,8 @@ func TestUnrelatedModulesDoNotInvalidateEmittedUnits(t *testing.T) {
 	p := newProject(t)
 	p.write(t, "Shared.fango", "{-# no-prelude #-}\nmodule Shared exposing (value)\nvalue = \"shared\"\n")
 	p.write(t, "Aside.fango", "{-# no-prelude #-}\nmodule Aside exposing (pick)\npick x = x\n")
-	first := p.write(t, "First.fango", "{-# no-prelude #-}\nmodule First exposing (main)\nimport Shared\nmain = Shared.value\n")
-	second := p.write(t, "Second.fango", "{-# no-prelude #-}\nmodule Second exposing (main)\nimport Shared\nimport Aside\nmain = Aside.pick Shared.value\n")
+	first := p.write(t, "First.fango", "{-# no-prelude #-}\nmodule First exposing (main)\nimport Shared\nresult = Shared.value\nmain() = ()\n")
+	second := p.write(t, "Second.fango", "{-# no-prelude #-}\nmodule Second exposing (main)\nimport Shared\nimport Aside\nresult = Aside.pick Shared.value\nmain() = ()\n")
 
 	p.entry = first
 	p.build(t)
@@ -345,8 +345,8 @@ filler() =
         note n -> resume n
         return total -> total
 `)
-	first := p.write(t, "First.fango", "module First exposing (main)\nimport Filler\nimport Handlers\nmain = Filler.filler() + Handlers.run()\n")
-	second := p.write(t, "Second.fango", "module Second exposing (main)\nimport Handlers\nmain = Handlers.run()\n")
+	first := p.write(t, "First.fango", "module First exposing (main)\nimport Filler\nimport Handlers\nresult = Filler.filler() + Handlers.run()\nmain() = ()\n")
+	second := p.write(t, "Second.fango", "module Second exposing (main)\nimport Handlers\nresult = Handlers.run()\nmain() = ()\n")
 
 	p.entry = first
 	p.build(t)
@@ -381,7 +381,7 @@ func TestLoweringReportsAStaleContractItWasToldWasProven(t *testing.T) {
 						count++
 					}
 				}
-				_, err = (&Session{DisableCache: true, Observe: observe}).EmitProject(p.entry, result, unitsOf(result), false)
+				_, err = (&Session{DisableCache: true, Observe: observe}).EmitProject(p.entry, result, unitsOf(result))
 				return count, err
 			}
 			if count, err := flows(); err != nil || count != 0 {

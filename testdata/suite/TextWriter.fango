@@ -10,6 +10,7 @@ import Runtime.Local
 import Test
 import Text.Writer as TextWriter
 import Writer
+import Process
 
 stop : () ->{Fail.Fail String} ()
 stop() = Fail.fail "stopped"
@@ -53,4 +54,4 @@ fixtureBody() =
 tests : Test.Test IO.IO
 tests = Test.test "text_writer" { Expect.equal [True, True, True, True, True] fixtureBody() }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

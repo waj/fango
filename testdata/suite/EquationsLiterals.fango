@@ -2,6 +2,7 @@ module EquationsLiterals exposing (tests)
 
 import Expect
 import Test
+import Process
 -- Overlapping rows are selected in source order, pins included.
 limit = 3
 
@@ -30,4 +31,4 @@ tests = Test.test "equations_literals" {
     Expect.equal "later" (initial 'z')
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

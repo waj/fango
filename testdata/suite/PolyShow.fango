@@ -2,10 +2,11 @@ module PolyShow exposing (tests)
 
 import Expect
 import Test
+import Process
 type Opt a = None | Some a deriving (Eq, Show)
 tests : Test.Test {}
 tests = Test.test "poly_show" {
     Expect.equal "Some (Some 1)" (show (Some (Some 1)))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

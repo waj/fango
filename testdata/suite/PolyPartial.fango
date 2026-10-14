@@ -2,6 +2,7 @@ module PolyPartial exposing (tests)
 
 import Expect
 import Test
+import Process
 type Opt a = None | Some a deriving (Eq, Show)
 
 wrap : a -> Opt a
@@ -14,4 +15,4 @@ tests = Test.test "poly_partial" {
     Expect.equal (Some 3) (apply wrap 3)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

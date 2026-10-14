@@ -14,6 +14,7 @@ import Runtime.Scope
 import Stream
 import Test
 import Text.Reader as TextReader
+import Process
 
 type Row = { text : String, count : Int, amount : Float, tags : List String } deriving (Decode, Eq)
 
@@ -133,4 +134,4 @@ tests = Test.test "json_buffered" {
         Ok _ -> False)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

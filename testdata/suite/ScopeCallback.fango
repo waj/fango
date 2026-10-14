@@ -6,6 +6,7 @@ import Result exposing (Result(..))
 import Runtime.Scope
 import State
 import Test
+import Process
 
 -- A scope inside a higher-order callback, with a direct callback and an
 -- aborting one in the same program, so both calling conventions are adapted
@@ -55,4 +56,4 @@ tests = Test.test "scope_callback" {
     Expect.equal (("<a><b>", Err "stopped"), ["open a", "close a", "open b", "close b", "open c", "close c", "open stop", "close stop"]) observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

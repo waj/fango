@@ -4,6 +4,7 @@ import Expect
 import State
 import Test
 import Text.Builder
+import Process
 
 type Count = Count Int deriving (Show)
 unwrap count = case count of
@@ -45,4 +46,4 @@ tests = Test.test "classes_scalar_safety" {
     Expect.equal "generic 3.5" (render 2.5)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

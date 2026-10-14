@@ -3,4 +3,4 @@ type Opt a = None | Some a
 x : Opt
 x = None
 
-main = 1
+main() = 1

@@ -2,9 +2,10 @@ module Precedence exposing (tests)
 
 import Expect
 import Test
+import Process
 fixtureBody() = 1 + 2 * 3 - (4 - 2) * 5
 
 tests : Test.Test {}
 tests = Test.test "precedence" { Expect.equal (-3) fixtureBody() }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -7,6 +7,7 @@ import IO
 import List
 import State
 import Test
+import Process
 
 type Payload = Payload (List Int) Bytes.Bytes
 shared = [10, 11, 21]
@@ -33,4 +34,4 @@ fixtureBody() = Async.runOutcome { _ ->
 tests : Test.Test IO.IO
 tests = Test.test "async_payloads" { Expect.equal (Async.Completed [(42, 3), (42, 3), (42, 3), (42, 3)]) fixtureBody() }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -1,3 +1,3 @@
 import Text.Writer as TextWriter
 
-main = TextWriter.collecting { text -> text }
+main() = print (TextWriter.collecting { text -> text })

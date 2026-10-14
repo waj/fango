@@ -2,6 +2,7 @@ module PolyLiftedLocal exposing (tests)
 
 import Expect
 import Test
+import Process
 tests : Test.Test {}
 tests = Test.test "poly_lifted_local" {
     k = 30
@@ -11,4 +12,4 @@ tests = Test.test "poly_lifted_local" {
     Expect.equal 42 (keep a)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

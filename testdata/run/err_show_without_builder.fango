@@ -1,4 +1,4 @@
 type Label = Label
 instance Show Label
     show value = "label"
-main = show Label
+main() = show Label

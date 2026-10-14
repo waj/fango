@@ -60,7 +60,9 @@ runnerRows runner =
                 NotArrow -> "expected a callback"
         NotArrow -> "expected a runner"
 
-main = $(Meta.lift (serviceEffect (typeOf (() ->{Lib.Service} ())) ++ ", " ++ runnerRows ` + "`Lib.runService`" + `))
+result = $(Meta.lift (serviceEffect (typeOf (() ->{Lib.Service} ())) ++ ", " ++ runnerRows ` + "`Lib.runService`" + `))
+
+main() = print result
 `
 
 func TestEffectReflectionThroughCache(t *testing.T) {
@@ -71,8 +73,8 @@ func TestEffectReflectionThroughCache(t *testing.T) {
 	cache := newMemoryObjectCache()
 	want := "Lib.Service service, Service linked"
 	first, _ := compileEvents(t, entry, cache)
-	if got := stringDefinition(t, first, "Main.main"); got != want {
-		t.Fatalf("main = %q, want %q", got, want)
+	if got := stringDefinition(t, first, "Main.result"); got != want {
+		t.Fatalf("result = %q, want %q", got, want)
 	}
 	// Recheck only the consumer, reflecting the producer's cached effect.
 	attributeSource(t, root, "Main", strings.Replace(effectConsumer, `", " ++ runnerRows`, `"," ++ " " ++ runnerRows`, 1))
@@ -80,14 +82,14 @@ func TestEffectReflectionThroughCache(t *testing.T) {
 	if events["checked-cache-hit"]["Lib"] != 1 || events["check"]["Main"] != 1 {
 		t.Fatalf("expected a cached producer and a checked consumer: %v", events)
 	}
-	if got := stringDefinition(t, second, "Main.main"); got != want {
-		t.Fatalf("cached main = %q, want %q", got, want)
+	if got := stringDefinition(t, second, "Main.result"); got != want {
+		t.Fatalf("cached result = %q, want %q", got, want)
 	}
 	// Editing the effect's attribute invalidates its reflection.
 	attributeSource(t, root, "Lib", strings.Replace(effectLibrary("Service(..)"), `"service"`, `"edited"`, 1))
 	third, _ := compileEvents(t, entry, cache)
-	if got := stringDefinition(t, third, "Main.main"); !strings.HasPrefix(got, "Lib.Service edited") {
-		t.Fatalf("edited main = %q", got)
+	if got := stringDefinition(t, third, "Main.result"); !strings.HasPrefix(got, "Lib.Service edited") {
+		t.Fatalf("edited result = %q", got)
 	}
 	_ = lib
 }
@@ -96,20 +98,20 @@ func TestEffectReflectionDiagnostics(t *testing.T) {
 	for _, tc := range []struct{ name, lib, main, title, message string }{
 		{"hidden attributes", effectLibrary("Service"), effectConsumer, "COMPILE-TIME FAILURE", "import it with `Service(..)`"},
 		{"function payload", "module Lib exposing (Service(..))\n#[{ x -> x }]\neffect Service\n    ask : () -> Int\n",
-			"module Main exposing (main)\nimport Lib\nmain = \"ok\"\n", "ATTRIBUTE TYPE", ""},
+			"module Main exposing (main)\nimport Lib\nmain() = print \"ok\"\n", "ATTRIBUTE TYPE", ""},
 		{"not a reference", effectLibrary("Service(..)"),
-			"module Main exposing (main)\nimport Meta\nmain = $(Meta.lift (Meta.typeName (Meta.declaredType `1 + 2`)))\n",
+			"module Main exposing (main)\nimport Meta\nmain() = print $(Meta.lift (Meta.typeName (Meta.declaredType `1 + 2`)))\n",
 			"COMPILE-TIME FAILURE", "needs a quote of one top-level name"},
 		{"incomplete declaration", effectLibrary("Service(..)"),
-			"module Main exposing (main)\nimport Meta\nmain = $(Meta.lift (Meta.typeName (Meta.declaredType `later`)))\nlater = 1\n",
+			"module Main exposing (main)\nimport Meta\nmain() = print $(Meta.lift (Meta.typeName (Meta.declaredType `later`)))\nlater = 1\n",
 			"COMPILE-TIME FAILURE", "before its declaration is complete"},
 		{"failure at code site", effectLibrary("Service(..)"),
-			"module Main exposing (main)\nimport Meta\nmain = $(Meta.failAt (Meta.siteOf `main`) \"rejected\")\n",
+			"module Main exposing (main)\nimport Meta\nmain() = print $(Meta.failAt (Meta.siteOf `main`) \"rejected\")\n",
 			"COMPILE-TIME FAILURE", "rejected"},
 		{"own pending attributes", "module Lib exposing (Service(..), probe)\nimport Meta\n" +
 			"probe : Meta.Attributes -> ()\nprobe found = Meta.foldItems { _ _ -> () } () (Meta.attributes @Int found)\n" +
 			"#[case Meta.arrow (typeOf (() ->{Service} ())) of\n    Meta.Arrow parts ->\n        case parts.effects of\n            Meta.Item found _ -> probe found.attributes\n            Meta.NoItems -> ()\n    Meta.NotArrow -> ()\n]\neffect Service\n    ask : () -> Int\n",
-			"module Main exposing (main)\nimport Lib\nmain = \"ok\"\n", "COMPILE-TIME FAILURE", "before their declaration is complete"},
+			"module Main exposing (main)\nimport Lib\nmain() = print \"ok\"\n", "COMPILE-TIME FAILURE", "before their declaration is complete"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()

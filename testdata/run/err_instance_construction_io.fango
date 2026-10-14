@@ -4,4 +4,4 @@ instance C Int
     c =
         print "dictionary effect"
         { x -> x }
-main = print "main"
+main() = print "main"

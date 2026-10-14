@@ -13,7 +13,7 @@ outer step =
     loop : Int -> Int -> Int
     loop n acc = if n < 1 then acc else loop (n - 1) (acc + step)
     loop 10 0
-main = print (outer 3)
+main() = print (outer 3)
 `)
 	for i := range prog.Defs {
 		d := &prog.Defs[i]
@@ -44,7 +44,7 @@ outer step =
             saved () = n + step
             loop (n - 1) (Push saved fs)
     loop 3 Done
-main = 0
+main() = print (0)
 `)
 	for i := range prog.Defs {
 		d := &prog.Defs[i]
@@ -66,7 +66,7 @@ outer value =
         print value
         42
     saved ()
-main = outer 3
+main() = print (outer 3)
 `)
 	for i := range prog.Defs {
 		d := &prog.Defs[i]
@@ -86,7 +86,7 @@ outer step =
     loop : Int -> (() -> Int)
     loop n = if n < 1 then { n + step } else loop (n - 1)
     loop 10000
-main = print ((outer 3)())
+main() = print ((outer 3)())
 `)
 	for i := range prog.Defs {
 		d := &prog.Defs[i]

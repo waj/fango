@@ -1,5 +1,6 @@
 import Expect
 import Test exposing (Test, describe, test)
+import Process
 
 -- Failures are printed in full under the path of group names, the run goes
 -- on after one, and the program exits with status 1. Each comparison names
@@ -24,4 +25,4 @@ suite =
         , test "fail with" { Expect.failWith "one line\nand another" }
         ]
 
-main() = Test.run suite
+main() = Process.runSystem { Test.run suite }

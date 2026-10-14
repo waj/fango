@@ -2,4 +2,4 @@ module Main exposing (main)
 
 import Data
 
-main = Data.make.value
+main() = Data.make.value

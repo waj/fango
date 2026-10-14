@@ -34,7 +34,7 @@ func writeEntry(t *testing.T, body string) string {
 // A cold build compiles its entry; a second one reuses it. Progress is stderr
 // only, so a program's own output is never mixed with the compiler's.
 func TestVerboseReportsReuse(t *testing.T) {
-	entry := writeEntry(t, "main = 1\n")
+	entry := writeEntry(t, "main() = print (1)\n")
 
 	stdout, cold := buildVerbose(t, entry, "-v")
 	if stdout != "" {
@@ -64,7 +64,7 @@ func TestVerboseReportsReuse(t *testing.T) {
 
 // -no-cache compiles from source however warm the cache is.
 func TestNoCacheCompilesEverything(t *testing.T) {
-	entry := writeEntry(t, "main = 1\n")
+	entry := writeEntry(t, "main() = print (1)\n")
 	buildVerbose(t, entry, "-v")
 
 	_, out := buildVerbose(t, entry, "-vv", "-no-cache")
@@ -79,7 +79,7 @@ func TestNoCacheCompilesEverything(t *testing.T) {
 // The stage table accounts for the whole build: every row it prints, plus the
 // unattributed remainder, adds up to the total it reports.
 func TestStageTableReconciles(t *testing.T) {
-	entry := writeEntry(t, "main = 1\n")
+	entry := writeEntry(t, "main() = print (1)\n")
 	_, out := buildVerbose(t, entry, "-vv")
 
 	rows, total, seenTotal := 0, 0.0, false
@@ -120,7 +120,7 @@ func TestStageTableReconciles(t *testing.T) {
 
 // A warm build reports reading artifacts it did not write.
 func TestCacheBlockCountsBytes(t *testing.T) {
-	entry := writeEntry(t, "main = 1\n")
+	entry := writeEntry(t, "main() = print (1)\n")
 	buildVerbose(t, entry, "-v")
 
 	_, out := buildVerbose(t, entry, "-vv")
@@ -144,7 +144,7 @@ func TestCacheBlockCountsBytes(t *testing.T) {
 // -timings json is the same measurements in machine-readable form, and
 // replaces the prose rather than adding to it.
 func TestTimingsJSON(t *testing.T) {
-	entry := writeEntry(t, "main = 1\n")
+	entry := writeEntry(t, "main() = print (1)\n")
 	_, out := buildVerbose(t, entry, "-timings", "json")
 	if strings.Contains(out, "Checking") {
 		t.Errorf("-timings json also printed progress:\n%s", out)
@@ -171,7 +171,7 @@ func TestTimingsJSON(t *testing.T) {
 // Without a verbosity flag the compiler stays silent on success, which is what
 // every fixture comparison depends on.
 func TestQuietByDefault(t *testing.T) {
-	entry := writeEntry(t, "main = 1\n")
+	entry := writeEntry(t, "main() = print (1)\n")
 	stdout, stderr := buildVerbose(t, entry)
 	if stdout != "" || stderr != "" {
 		t.Errorf("default build was not quiet: stdout=%q stderr=%q", stdout, stderr)

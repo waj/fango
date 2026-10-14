@@ -103,7 +103,7 @@ func TestParserOnlyNominalRecords(t *testing.T) {
 unbox : Box a -> a
 unbox box = box.value
 
-main = unbox (Box { value = 42 })
+main() = print (unbox (Box { value = 42 }))
 `)
 	if len(errs) > 0 {
 		t.Fatalf("record errors: %v", errs)
@@ -153,10 +153,11 @@ func TestInferredRecordSurvivesLocalBinding(t *testing.T) {
 describe : Point -> Int
 describe p = p.x
 
-main =
+result =
     p = { x = 1, y = 2 }
     label v = v
     describe p + label 0
+main() = print result
 `)
 	if len(errs) > 0 {
 		t.Fatalf("errors: %v", errs)
@@ -173,7 +174,7 @@ func TestPositive(t *testing.T) {
 		// Generalization at each binding: later declarations instantiate
 		// fresh number vars, which the shared test printer numbers.
 		{"x = 40\ny = x + 2", "x : Num a => a, y : Num b => b"},
-		{"x = 1\ny = x\nmain = y - x", "x : Num a => a, y : Num b => b, main : Int"},
+		{"x = 1\ny = x\nmain() = print (y - x)", "x : Num a => a, y : Num b => b, main : () ->{IO} ()"},
 		{"x = 1.5", "x : Float"},
 		{"x = 1 + 0.5", "x : Float"},
 		{"f = 1 / 2", "f : Float"}, // number literals unify with Float (Elm)
@@ -183,26 +184,26 @@ func TestPositive(t *testing.T) {
 		{"x = if True then 1 else 2", "x : Num a => a"},
 		{"x = -5", "x : Num a => a"},
 		{"x = -2.5", "x : Float"},
-		{"main = print (1 + 2)", "main : ()"},
+		{"main() = print (1 + 2)", "main : () ->{IO} ()"},
 		{"x =\n  a = 1\n  b = a + 2\n  a * b", "x : Num a => a"},
 		{"x =\n  r = 2.0\n  r * r", "x : Float"},
 		{"x : Int\nx = 1", "x : Int"},
 		{"x : Float\nx = 1", "x : Float"}, // annotation forces the literal
 		{"add x y = x + y", "add : Num a => a -> a -> a"},
-		{"inc n = n + 1\nmain = inc 41", "inc : Num a => a -> a, main : Int"},
+		{"inc n = n + 1\nmain() = print (inc 41)", "inc : Num a => a -> a, main : () ->{IO} ()"},
 		{"fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)", "fib : (Num a, Ord a) => a -> a"},
 		{"f = { x -> x + 1 }", "f : Num a => a -> a"},
 		{"deferred = { 41 }", "deferred : Num a => () -> a"},
 		{"add : Int -> Int -> Int\nadd x y = x + y", "add : Int -> Int -> Int"},
 		{"pure() = 1", "pure : Num a => () -> a"},
 		{"saved = readLine", "saved : () ->{IO} Maybe Line"},
-		{"main = print (readLine())", "main : ()"},
+		{"main() = print (readLine())", "main : () ->{IO} ()"},
 		{"make : () ->{IO} (() -> ())\nmake() =\n  print \"now\"\n  { _ -> () }", "make : () ->{IO} () -> ()"},
 		{"later : () -> (() ->{IO} ())\nlater() = { _ -> print \"later\" }", "later : () -> () ->{IO} ()"},
 		{"add x y = x + y\ninc = add 1", "add : Num a => a -> a -> a, inc : Num b => b -> b"},
 		{"values = [1, 2]\nfirstOf xs = case xs of\n  [] -> 0\n  [first | _] -> first", "values : Num a => List a, firstOf : Num b => List b -> b"},
 		// Generalization: uses no longer pin the definition.
-		{"id x = x\nmain = id 1 + 1", "id : a -> a, main : Int"},
+		{"id x = x\nmain() = print (id 1 + 1)", "id : a -> a, main : () ->{IO} ()"},
 		{"v =\n  go n = if n < 1 then 0 else go (n - 1)\n  go 3", "v : Num a => a"},
 	}
 	for _, c := range cases {
@@ -237,11 +238,11 @@ func TestNegative(t *testing.T) {
 	}{
 		{"x = y", "NAMING ERROR", 1},
 		{"x = 1\nx = 2", "MULTIPLE DEFINITIONS", 2},
-		{"x = z + 1\nmain = x", "NAMING ERROR", 1},
+		{"x = z + 1\nmain() = print (x)", "NAMING ERROR", 1},
 		// Use-before-define is a naming error: source-order scoping.
-		{"main = x\nx = 1", "NAMING ERROR", 1},
+		{"main() = print (x)\nx = 1", "NAMING ERROR", 1},
 		{"x = 1 + \"a\"", "MISSING INSTANCE", 1},                 // WhyOperand
-		{"main = 1 2", "AMBIGUOUS CONSTRAINT", 1},                // A function-shaped numeric obligation cannot default.
+		{"main() = print (1 2)", "AMBIGUOUS CONSTRAINT", 1},      // A function-shaped numeric obligation cannot default.
 		{"x = if 1 then 2 else 3", "MISSING INSTANCE", 1},        // WhyIfCondition
 		{"x = if True then 1 else \"a\"", "MISSING INSTANCE", 1}, // WhyIfBranches
 		{"x = 1 == \"a\"", "MISSING INSTANCE", 1},                // WhyCompare
@@ -251,7 +252,7 @@ func TestNegative(t *testing.T) {
 		{"x = [1, True]", "MISSING INSTANCE", 1},                 // every list element has one type
 		{"x = [1 | True]", "TYPE MISMATCH", 1},                   // tail must be a List
 		{"x = Absent", "NAMING ERROR", 1},                        // unknown constructor
-		{"x = print 1\nmain = x", "UNHANDLED EFFECT", 1},
+		{"x = print 1\nmain() = print (x)", "UNHANDLED EFFECT", 1},
 		{"x = 1\ny =\n  x = 2\n  x + 1", "SHADOWING", 3},
 		{"y =\n  a = 1\n  a = 2\n  a", "SHADOWING", 3},
 		{"y =\n  a = b + 1\n  b = 2\n  a", "NAMING ERROR", 2},    // use-before-define in block

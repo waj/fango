@@ -12,7 +12,7 @@ import (
 // shapes. These assert the invariants that are easiest to state directly.
 
 func TestSingleIdentifierEquationKeepsSourceParameters(t *testing.T) {
-	prog := elabPoly(t, "double : Int -> Int\ndouble n = n + n\nmain = double 2\n")
+	prog := elabPoly(t, "double : Int -> Int\ndouble n = n + n\nmain() = print (double 2)\n")
 	def := findDef(t, prog, "double")
 	if len(def.Params) != 1 || def.Params[0] != "n" {
 		t.Fatalf("params = %v, want the source name [n]", def.Params)
@@ -28,7 +28,7 @@ both : Choice -> Choice -> Int
 both Yes Yes = 3
 both Yes No = 2
 both No other = 0
-main = both Yes No
+main() = print (both Yes No)
 `)
 	def := findDef(t, prog, "both")
 	for _, p := range def.Params {
@@ -59,7 +59,7 @@ func TestFirstMatchOrderIsSourceOrder(t *testing.T) {
 grade 0 = "zero"
 grade 1 = "one"
 grade _ = "many"
-main = grade 1
+main() = print (grade 1)
 `)
 	def := findDef(t, prog, "grade")
 	c, ok := def.Body.(*core.Case)
@@ -84,7 +84,7 @@ main = grade 1
 func TestTopLevelPatternBindingSharesOneSubject(t *testing.T) {
 	prog := elabPoly(t, `type Pair = Pair Int Int
 Pair leftCount rightCount = Pair 1 2
-main = leftCount + rightCount
+main() = print (leftCount + rightCount)
 `)
 	var subject string
 	for _, d := range prog.Defs {
@@ -112,14 +112,15 @@ func TestHandlerGroupsKeepCoreClauseCardinality(t *testing.T) {
 	prog := elabPoly(t, `type Choice = Yes | No
 effect Ask
     ask : Choice -> Int
-main =
+result =
     handle ask Yes on
         ask Yes -> resume 1
         ask No -> resume 0
         return 1 -> Yes
         return _ -> No
+main() = ignore result
 `)
-	def := findDef(t, prog, "main")
+	def := findDef(t, prog, "result")
 	var handles []*core.Handle
 	var walk func(core.Expr)
 	walk = func(e core.Expr) {

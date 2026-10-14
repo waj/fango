@@ -2,4 +2,4 @@ effect Mixed
     abort stop : String -> value
     ask : () -> Int
 
-main = 0
+main() = print (0)

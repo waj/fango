@@ -3,6 +3,7 @@ module EffectRowApplications exposing (tests)
 import Expect
 import State
 import Test
+import Process
 effect Put a
     put : a -> ()
 
@@ -39,4 +40,4 @@ tests = Test.test "effect_row_applications" {
     Expect.equal [Flag True, Text "answer"] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

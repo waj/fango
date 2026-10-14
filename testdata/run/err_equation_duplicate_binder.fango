@@ -2,4 +2,4 @@ type Pair = Pair Int Int
 
 sum (Pair x x) = x
 
-main = sum (Pair 1 2)
+main() = sum (Pair 1 2)

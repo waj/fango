@@ -27,4 +27,4 @@ loop : Int -> Int -> Int
 loop i acc =
     if i < 1 then acc else loop (i - 1) (acc + branches (path 200) 200 0)
 
-main = print (loop 60 0)
+main() = print (loop 60 0)

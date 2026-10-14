@@ -5,6 +5,7 @@ import Expect
 import List
 import Maybe exposing (Maybe(..))
 import Test
+import Process
 
 -- Give the empty dictionary a concrete type for the rendering and lookup checks.
 noEntries : Dict.Dict String Int
@@ -47,4 +48,4 @@ tests = Test.test "stdlib_dict" {
     Expect.equal "Dict [1 = [10], 2 = [20, 21]]" (show (Dict.fromList [(2, [20, 21]), (1, [10])]))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

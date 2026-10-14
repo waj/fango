@@ -436,92 +436,11 @@ hand-written test handlers, not extra work for scripts alone.
 
 ## Process arguments and exit
 
-Current source: [Process](../stdlib/Process.fango). Arguments become a
-replaceable effect. Exit status and termination are not effects: a program
-finishes normally by returning a status from `main`, and `exit` stays a hard
-native termination.
-
-```text
-effect Arguments
-    args : () -> List String
-
-withArgs : List String
-         -> (() ->{Arguments | e} a) ->{e} a
-
-runSystem : (() ->{Arguments | e} a) ->{IO | e} a
-
-type Status
-
-success : Status
-failure : Status
-status : Int -> Status
-
-exit : Status ->{IO} a
-```
-
-The whole-argument operation can be interpreted by the current count/index
-native helpers without making those helpers public. Arguments retain the
-existing rule that the executable name is excluded.
-
-```text
-choose() =
-    case Process.args() of
-        [] -> 2
-        _ -> 0
-
-Process.withArgs [] { choose() } == 2
-```
-
-### Exit status
-
-`success` is status 0 and `failure` is status 1. `status` accepts 0 through
-255; any other value is a runtime fault, reported like an integer division by
-zero with status 2 and a Fango trace at the call. A requested failure can
-therefore never wrap around to success, as POSIX truncation of 256 would.
-
-The entry point is always a nullary function, annotated or not:
-
-```text
-main : () ->{IO} ()
-main : () ->{IO} Process.Status
-```
-
-A Unit result is status 0. A returned status takes effect after `main`
-completes normally, so `Async.run` scopes have drained and resource scopes have
-released first. An uncaught failure keeps its existing status and report. The
-row may contain `IO` and effects with default handlers; see
-[entry assembly](roadmap-io-interception.md#entry-assembly).
-
-`main` must be a function. Value-style declarations such as `main = 42` or
-`main : (); main = print 42` are rejected, and no backend prints `main`'s value.
-The current printing of a non-Unit value exists only in the WASI build and in
-the differential harness's hidden compiled mode. Programs that want output call
-`print`.
-
-### Exit
-
-`exit` ends the process at once with the given status, from any task. It is
-deliberately drastic: it runs no Fango cleanup (`bracket` and `finally`
-releases, buffered `Writer` data, task cancellation, or draining), and the OS
-closes descriptors. Console output written earlier is not lost, because the
-system host writes standard streams without Fango-side buffering. The
-interpreter and REPL report it as a program exit without ending the session,
-as they do today, and must likewise skip Fango cleanup so both backends agree.
-
-`exit` requires `IO`, so no runner absorbs it and a function that can exit
-says so in its row. Code meant to be tested computes a status and leaves the
-call to the edge of the program:
-
-```text
-run : List String ->{Console} Process.Status
-
-main : () ->{Console, Arguments} Process.Status
-main() = run Process.args()
-```
-
-`exit`'s result type means code after it needs no placeholder value. If the
-native ABI cannot return a bare type variable, a Fango wrapper can call a
-Unit-returning native and then recurse unreachably to supply the result type.
+Implemented: see [Process](../stdlib/Process.fango) for the `Arguments`
+effect, its runners, `Status`, and `exit`, and the
+[entry points reference](reference/commands.md#entry-points) for `main`'s
+shape and status. Entry assembly will declare `Process.runSystem` as the
+`Arguments` default; until then programs install it explicitly.
 
 ## Clock and randomness
 

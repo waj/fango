@@ -2,4 +2,4 @@ type Opaque = Opaque (Int -> Int)
 
 type Holder = Holder Opaque deriving (Eq)
 
-main = 0
+main() = 0

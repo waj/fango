@@ -9,4 +9,4 @@ leak start =
     handle Cell ({ _ -> tick() }) with n = start on
         tick () -> resume n with n + 1
 
-main = 0
+main() = 0

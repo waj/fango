@@ -6,4 +6,4 @@ f value = case value of
     Triple _ True _ -> "true"
     Triple _ True 1 -> "unreachable"
     Triple _ False _ -> "false"
-main = print (f (Triple End True 1))
+main() = print (f (Triple End True 1))

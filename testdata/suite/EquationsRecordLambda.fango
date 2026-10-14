@@ -2,6 +2,7 @@ module EquationsRecordLambda exposing (tests)
 
 import Expect
 import Test
+import Process
 -- A lambda has one pattern row, so an irrefutable record pattern is enough.
 type Point = { x : Int, y : Int } deriving (Show)
 
@@ -15,4 +16,4 @@ tests = Test.test "equations_record_lambda" {
     Expect.equal "Point { x = 4, y = 5 }" (show (shift 1 (Point { x = 3, y = 4 })))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

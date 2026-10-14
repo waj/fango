@@ -4,7 +4,7 @@
 -- A suite is a tree: `describe` groups tests, `test` names a body that
 -- states [`Expect`](Expect.fango) expectations, and `skip`, `only`, and
 -- `todo` mark work that is not run. A program tests itself with
--- `main() = Test.run suite`:
+-- `main() = Process.runSystem { Test.run suite }`:
 --
 -- ```fango
 -- import Expect
@@ -29,8 +29,9 @@
 -- `execute` runs without IO and reports structured progress through the
 -- `Reporter` effect. Handle it with `silent` to get only the summary,
 -- `console` for the default output, or a custom handler for other formats.
--- `run` selects a format from command-line arguments and applies the
--- process exit policy; without options it uses `console`.
+-- `run` selects a format from command-line arguments, so it performs
+-- `Process.Arguments`, and applies the process exit policy; without options
+-- it uses `console`.
 --
 -- By default, `run` prints its report to standard output. Each failure is
 -- printed in full, the heading naming the path through the groups, and a
@@ -71,6 +72,7 @@ import Basics exposing (..)
 import Expect exposing (Error, Expect)
 import IO exposing (IO)
 import List exposing (List(..), foldl, reverse)
+import Process
 import Result exposing (Result(..))
 import Test.Reporter as Reporter exposing (CaseOutcome(..), Event(..), Reporter(..), Summary(..), Verdict(..), console, documentation, progress, silent)
 
@@ -166,7 +168,7 @@ execute suite =
 -- the run. Use `execute` with a reporter handler to choose output and exit
 -- policy yourself. Command-line options select progress or documentation
 -- output and an optional JSON file; see [`Test.Reporter.run`](Test/Reporter.fango).
-run : Test e ->{IO | e} ()
+run : Test e ->{IO, Process.Arguments | e} ()
 run suite = Reporter.run { execute suite }
 
 -- Whether the tree focuses some tests. An `only` inside a `skip` does not

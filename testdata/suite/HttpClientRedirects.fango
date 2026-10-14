@@ -11,6 +11,7 @@ import String
 import Test
 import Url
 import Writer
+import Process
 
 -- The request line and the headers that matter here.
 summary : String -> (String, List String)
@@ -124,4 +125,4 @@ tests = Test.test "http_client_redirects" {
     Expect.equal [("GET /old HTTP/1.1", ["Host: example.com"])] (List.reverse noRedirectsResult.state)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

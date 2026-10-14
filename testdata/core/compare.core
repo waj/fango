@@ -3,4 +3,4 @@
   (def b Bool (native Basics.stringEq (string "x" String) (string "y" String) Bool))
   (def c Bool (native Basics.floatGe (float 1.5 Float) (float 0.5 Float) Bool))
   (def d Bool (native Basics.boolEq (bool true Bool) (bool false Bool) Bool))
-  (def main Int (if Int (var a Bool) (int 1 Int) (int 2 Int))))
+  (def main (params _) () ->{IO} () (let _h0 () (if Int (var a Bool) (int 1 Int) (int 2 Int)) (app/worker @[Int] (var Console.print _dictionary_Display Int -> Int ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_496e74 _dictionary_Display Int) (var _h0 Int) ()))))

@@ -5,4 +5,4 @@ f n =
         Succ (Succ rest) -> 2
         Zero -> 0
 
-main = f Zero
+main() = print (f Zero)

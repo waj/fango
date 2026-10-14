@@ -2,4 +2,4 @@ type Named = { value : Int }
 
 get value = value.value
 
-main = get (Named { value = 1 })
+main() = get (Named { value = 1 })

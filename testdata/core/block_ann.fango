@@ -2,4 +2,4 @@ x =
   a : Float
   a = 1
   a
-main = x
+main() = print (x)

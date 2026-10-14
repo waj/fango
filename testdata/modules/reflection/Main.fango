@@ -20,9 +20,11 @@ describe repr =
         Visible schema ->
             Meta.lift (schema.moduleName ++ "." ++ schema.name ++ " " ++ fields schema)
 
-main : String
-main =
+result : String
+result =
     $(describe (typeOf Hidden))
         ++ " | " ++ $(describe (typeOf Open))
         ++ " | " ++ $(describe (typeOf Sealed))
         ++ " | " ++ $(describe (typeOf Public))
+
+main() = print result

@@ -22,4 +22,4 @@ counted action =
         emit _ -> resume () with count + 1
         return value -> count
 
-main = counted { either { emit "x"; if True then fail A else 0 } }
+main() = print (counted { either { emit "x"; if True then fail A else 0 } })

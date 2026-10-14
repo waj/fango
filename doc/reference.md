@@ -97,7 +97,7 @@ and patterns.
 
 ## Entry points
 
-[Entry points](reference/commands.md#entry-points) — Accepted main definitions and ambient IO.
+[Entry points](reference/commands.md#entry-points) — The nullary `main` function, its IO row, and its exit status.
 
 ## REPL
 

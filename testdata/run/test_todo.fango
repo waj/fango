@@ -1,5 +1,6 @@
 import Expect
 import Test exposing (Test, describe, test, todo)
+import Process
 
 -- A todo is counted without running anything and makes the run incomplete.
 
@@ -11,4 +12,4 @@ suite =
         , todo "unicode separators"
         ]
 
-main() = Test.run suite
+main() = Process.runSystem { Test.run suite }

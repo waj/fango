@@ -5,6 +5,7 @@ import Dict
 import Expect
 import List exposing (List(..))
 import Test
+import Process
 
 -- Ascending and descending insertion are the two worst cases for an
 -- unbalanced search tree and drive the single rotations; a stride coprime to
@@ -63,4 +64,4 @@ tests = Test.test "stdlib_dict_balance" {
     Expect.equal 0 (Dict.size (removeFrom 1 n 1 a))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

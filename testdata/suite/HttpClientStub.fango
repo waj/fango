@@ -12,6 +12,7 @@ import State
 import Test
 import Url
 import Writer
+import Process
 
 -- Records request bytes as values and answers with `wire`.
 answer : String -> Bytes ->{State.State (List Bytes)} Result Client.Error Bytes
@@ -233,4 +234,4 @@ tests = Test.test "http_client_stub" {
     Expect.equal [] (List.reverse managedLengthHeaderResult.state)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

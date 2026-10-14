@@ -2,6 +2,7 @@ module ClassesContextStaging exposing (tests)
 
 import Expect
 import Test
+import Process
 class Inspect a
     inspect : a -> String
 
@@ -29,4 +30,4 @@ tests = Test.test "classes_context_staging" {
     Expect.equal "show" (inspect True)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

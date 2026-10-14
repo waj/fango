@@ -1,5 +1,7 @@
 type Choice = Yes Int | No
 
-main =
+result =
     Yes n = Yes 1
     n
+
+main() = print result

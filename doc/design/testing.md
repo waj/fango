@@ -89,7 +89,7 @@ nominal identity across both modules.
 and the summary to standard output without exiting. `progress` prints dots,
 and `documentation` prints group headings and indented case outcomes; both
 retain failures until suite completion to print their full details afterward.
-`run : Test e ->{IO | e} ()` delegates command-line handling to
+`run : Test e ->{IO, Process.Arguments | e} ()` delegates command-line handling to
 `Test.Reporter.run` around `execute`. No arguments select the existing console
 report. An optional JSON report collects completed case outcomes and group
 failures and writes them after execution, before setting the exit status.
@@ -97,7 +97,7 @@ JSON collection is enabled only when requested; argument parsing happens before
 execution. The module's source comments own the options, diagnostics, and
 versioned JSON schema.
 
-The status is set with `Process.exit 1` unless the run passed and was complete,
+The status is set with `Process.exit Process.failure` unless the run passed and was complete,
 because the [differential harness](verification.md#differential-fixtures-and-examples)
 compares standard output and the exit status and never standard error. A
 suite containing `only`, skipped leaves, or `todo` is incomplete and exits 1,

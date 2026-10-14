@@ -37,7 +37,7 @@ shift p = { p | x = p.x + 1 }
 total : Point -> Int
 total p = (shift p).x + p.y
 
-main = print (total (Point { x = 1, y = 2 }))
+main() = print (total (Point { x = 1, y = 2 }))
 `)
 	body := defDump(t, dump, "total")
 	if strings.Contains(body, "var shift") {
@@ -59,7 +59,7 @@ count n = if n == 0 then 0 else count (n - 1)
 shout : String ->{IO} ()
 shout text = print text
 
-main =
+main() =
     shout "hi"
     print (count 3)
 `)
@@ -77,7 +77,7 @@ func TestInlineSkipsHigherOrderWorkers(t *testing.T) {
 	dump := elabInlined(t, `apply : (Int -> Int) -> Int -> Int
 apply f x = f x
 
-main = print (apply { n -> n + 1 } 2)
+main() = print (apply { n -> n + 1 } 2)
 `)
 	if !strings.Contains(defDump(t, dump, "main"), "var apply") {
 		t.Errorf("apply was inlined:\n%s", dump)

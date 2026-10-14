@@ -7,4 +7,4 @@ sum point =
     case point of
         P.Point x y -> x + y
 
-main = sum origin
+main() = print (sum origin)

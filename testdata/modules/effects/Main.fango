@@ -6,4 +6,4 @@ chosen =
     handle P.pick() on
         P.pick () -> resume True
 
-main = if chosen then 42 else 0
+main() = print (if chosen then 42 else 0)

@@ -109,24 +109,23 @@ func hasMain(p *core.Prog) bool {
 }
 
 // emitProjectManifest emits the complete multi-package Go project used by
-// build, run, --emit-go, and backend structural tests. printMain makes a
-// value-typed entry print its value through the shared formatter. The program
+// build, run, --emit-go, and backend structural tests. The program
 // it returns is the entry's stem, which names both its generated package and
 // its cached artifacts. The tree is where the generated Go a cached emission
 // describes already lives; emitting without one, as the structural tests do,
 // generates every unit.
-func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, string, bool) {
-	return emitProjectManifestSession(entry, "", printMain, stderr, nil)
+func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, string, bool) {
+	return emitProjectManifestSession(entry, "", stderr, nil)
 }
 
-func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Writer, session *compilationSession) ([]codegen.File, []modules.ManifestEntry, string, bool) {
+func emitProjectManifestSession(entry, tree string, stderr io.Writer, session *compilationSession) ([]codegen.File, []modules.ManifestEntry, string, bool) {
 	result, ok := checkGraph(entry, stderr, session)
 	if !ok {
 		return nil, nil, "", false
 	}
 	manifest, loadedUnits, nativeSources := result.Graph.Manifest, result.Graph.Units, result.Graph.Natives
 	if !hasMain(result.Program) {
-		fmt.Fprintf(stderr, "fango: %s has no `main` — a program needs `main = ...`\n", entry)
+		fmt.Fprintf(stderr, "fango: %s has no `main` — a program needs `main() = ...`\n", entry)
 		return nil, nil, "", false
 	}
 	units := make([]codegen.Unit, len(loadedUnits))
@@ -149,7 +148,7 @@ func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Wr
 		}
 	}
 	emitting := &backend.Session{Debug: session.debugEnabled(), Observe: session.observer(), DisableCache: session.disableCache(), Emitted: build.Generated(tree)}
-	files, err := emitting.EmitProject(entry, result, units, printMain)
+	files, err := emitting.EmitProject(entry, result, units)
 	if err != nil {
 		reportInternal(stderr, err)
 		return nil, nil, "", false

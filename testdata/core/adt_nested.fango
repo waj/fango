@@ -17,4 +17,4 @@ firstOr d m =
 
 mk = JustI
 
-main = sum (Pair (mk 20) (JustI 22)) + firstOr 5 NothingI
+main() = print (sum (Pair (mk 20) (JustI 22)) + firstOr 5 NothingI)

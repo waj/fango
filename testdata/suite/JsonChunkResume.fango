@@ -9,6 +9,7 @@ import Result exposing (Result(..))
 import Runtime.Local
 import String
 import Test
+import Process
 
 type Row = { amount : Float, other : Float, name : String } deriving (Decode)
 
@@ -37,4 +38,4 @@ tests = Test.test "json_chunk_resume" {
     )
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

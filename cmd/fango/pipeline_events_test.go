@@ -10,7 +10,7 @@ import (
 func TestCompilationSessionStageEvents(t *testing.T) {
 	d := t.TempDir()
 	entry := filepath.Join(d, "Main.fango")
-	if err := os.WriteFile(entry, []byte("main = 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("main() = print (1)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tree := t.TempDir()

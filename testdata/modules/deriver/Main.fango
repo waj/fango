@@ -13,5 +13,4 @@ type Colour = Red | Blue deriving (Encode)
 
 type Point = { x : Int, y : Colour } deriving (Encode)
 
-main : String
-main = encode (Point { x = 3, y = Blue }) ++ " " ++ encode Red
+main() = print (encode (Point { x = 3, y = Blue }) ++ " " ++ encode Red)

@@ -2,6 +2,7 @@ module ClassesUnitName exposing (tests)
 
 import Expect
 import Test
+import Process
 type Unit = Unit
 type Box a = Box a
 class Label a
@@ -22,4 +23,4 @@ tests = Test.test "classes_unit_name" {
     Expect.equal "boxed custom" (label (Box Unit))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

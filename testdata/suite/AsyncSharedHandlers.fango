@@ -7,6 +7,7 @@ import IO
 import Result exposing (Result(..))
 import State
 import Test
+import Process
 
 effect Counter
     next : () -> Int
@@ -85,4 +86,4 @@ tests = Test.test "async_shared_handlers" {
                  ] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

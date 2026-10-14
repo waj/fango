@@ -3,6 +3,7 @@ module ClassesDefaults exposing (tests)
 import Expect
 import Meta
 import Test
+import Process
 
 -- A class may give a method a default; instances that omit it receive it.
 class Describe a
@@ -63,4 +64,4 @@ tests = Test.test "classes_defaults" {
     Expect.equal "<Green>" (tagged Green)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

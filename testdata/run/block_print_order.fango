@@ -1,4 +1,4 @@
-main =
+main() =
     x = print 1
     y = print 2
     print 3

@@ -1,3 +1,6 @@
 type Opt a = None | Some a deriving (Eq, Show)
 
-main = None
+none : Opt ()
+none = None
+
+main() = print none

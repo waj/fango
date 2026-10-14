@@ -2,6 +2,7 @@ module AdtBoolCase exposing (tests)
 
 import Expect
 import Test
+import Process
 label b = case b of
     True -> "yes"
     False -> "no"
@@ -19,4 +20,4 @@ tests = Test.test "adt_bool_case" {
     Expect.equal "zerosomeno" (pick True 0 ++ pick True 3 ++ pick False 9)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

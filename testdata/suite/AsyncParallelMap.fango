@@ -4,6 +4,7 @@ import Async
 import Expect
 import List
 import Test
+import Process
 
 tests : Test.Test {}
 tests = Test.test "async_parallel_map" {
@@ -14,4 +15,4 @@ tests = Test.test "async_parallel_map" {
     Expect.equal [[11, 12], [21, 22]] (Async.parMap { n -> Async.parMap { m -> n + m } [1, 2] } [10, 20])
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

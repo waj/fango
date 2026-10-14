@@ -1,5 +1,7 @@
 type Item = { count : Int }
 
-main =
+result =
     case Item { count = 1 } of
         Item { missing = _ } -> 1
+
+main() = print result

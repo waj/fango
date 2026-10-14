@@ -5,6 +5,7 @@ import Result exposing (Result(..))
 import State
 import Stream
 import Test
+import Process
 
 type Box e = Box (Int ->{e} Int)
 
@@ -78,4 +79,4 @@ tests = Test.test "stream_stored_callbacks" {
                  ] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

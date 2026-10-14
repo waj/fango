@@ -1,4 +1,4 @@
 effect Console
     emit : String -> ()
 
-main = emit "hello"
+main() = emit "hello"

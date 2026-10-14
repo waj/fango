@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/waj/fango/internal/eval"
+	"github.com/waj/fango/internal/natives"
 )
 
 // A compiled program that panics reports the Fango stack on stderr and exits
@@ -251,5 +255,48 @@ main() =
 		"  at List.each (<stdlib>/List.fango:"
 	if !strings.HasPrefix(stdout, want) || !strings.Contains(stdout, "\ntop\n  at Main.log (Main.fango:9)\n  at Main.main (Main.fango:17)\n") {
 		t.Fatalf("unexpected trace output:\n%s", stdout)
+	}
+}
+
+// A status outside 0 through 255 faults where it is built, like a division by
+// zero, rather than wrapping around to success.
+func TestOutOfRangeStatusFaults(t *testing.T) {
+	t.Parallel()
+	source := `module Main exposing (main)
+import Process
+
+main() =
+    print "before"
+    Process.status 256
+`
+	path := filepath.Join(t.TempDir(), "Main.fango")
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const message = "exit status 256 is out of range 0 through 255"
+	if interpreterTestsEnabled() {
+		var diagnostics bytes.Buffer
+		prog, _, ok := compileFile(path, &diagnostics)
+		if !ok {
+			t.Fatal(diagnostics.String())
+		}
+		var out bytes.Buffer
+		err := withInterpreter(func() error {
+			env := eval.NewEnv()
+			env.DefineProg(prog)
+			_, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &out))
+			return err
+		})
+		var exit *natives.ExitError
+		if err == nil || errors.As(err, &exit) || !strings.Contains(err.Error(), message) || out.String() != "before\n" {
+			t.Fatalf("interpreter: err %v, output %q", err, out.String())
+		}
+	}
+	if testing.Short() {
+		return
+	}
+	stdout, stderr, status := runCrashing(t, cliCompiledBinary(t, path), nil)
+	if status != 2 || stdout != "before\n" || !strings.Contains(stderr, message) || !strings.Contains(stderr, "Main.main (Main.fango:6)") {
+		t.Fatalf("exit %d, stdout %q, stderr:\n%s", status, stdout, stderr)
 	}
 }

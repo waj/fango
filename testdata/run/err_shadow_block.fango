@@ -2,4 +2,4 @@ y =
   a = 1
   a = 2
   a
-main = y
+main() = y

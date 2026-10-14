@@ -5,6 +5,7 @@ import Fail exposing (Fail, attempt, fail)
 import Result exposing (Result(..))
 import State exposing (State(..))
 import Test exposing (Test, describe, test)
+import Process
 
 -- Test bodies perform effects besides Expect. A body handles Fail itself to
 -- assert on the outcome, and the suite's row carries State, which the caller
@@ -37,4 +38,4 @@ tests = Test.test "test_effectful_body" {
     Expect.equal 2 result.state
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

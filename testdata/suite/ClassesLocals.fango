@@ -2,6 +2,7 @@ module ClassesLocals exposing (tests)
 
 import Expect
 import Test
+import Process
 type Box a = Box a deriving (Eq, Show)
 type Phantom a = Phantom deriving (Eq, Show)
 
@@ -25,4 +26,4 @@ tests = Test.test "classes_locals" {
     Expect.equal "Phantom" (show phantom)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

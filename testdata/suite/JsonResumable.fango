@@ -10,6 +10,7 @@ import Result exposing (Result(..))
 import Runtime.Local
 import String
 import Test
+import Process
 
 type Peeked = Peeked Int deriving (Eq)
 
@@ -93,4 +94,4 @@ tests = Test.test "json_resumable" {
         && decoded Nothing (peekedDecode @(Maybe Int) "null"))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

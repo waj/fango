@@ -9,6 +9,7 @@ import Result exposing (Result(..))
 import Runtime.Local
 import Test
 import Text.Reader as TextReader
+import Process
 
 declined value = case value of
     Nothing -> True
@@ -109,4 +110,4 @@ tests = Test.test "text_reader_windows" {
     })
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

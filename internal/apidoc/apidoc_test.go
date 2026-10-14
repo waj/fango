@@ -101,7 +101,7 @@ import Shapes exposing (Measure(..), Shape(..), area)
 func extract(t *testing.T) (*Document, []Missing) {
 	t.Helper()
 	root := t.TempDir()
-	for name, text := range map[string]string{"Shapes.fango": shapes, "Facade.fango": facade, "Main.fango": "import Facade\nimport Shapes\n\nmain = 1\n"} {
+	for name, text := range map[string]string{"Shapes.fango": shapes, "Facade.fango": facade, "Main.fango": "import Facade\nimport Shapes\n\nmain() = print (1)\n"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}

@@ -10,6 +10,7 @@ import IO
 import Net
 import Result exposing (Result(..))
 import Test
+import Process
 
 hello : Http.Server.Request e ->{e} Http.Server.Response e
 hello request = Http.Server.Response
@@ -31,4 +32,4 @@ fixtureBody() = Fail.attempt {
 tests : Test.Test IO.IO
 tests = Test.test "http_server_api" { Expect.equal (Ok (Async.Completed ())) fixtureBody() }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

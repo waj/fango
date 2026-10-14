@@ -12,6 +12,7 @@ import Expect
 import List
 import Result exposing (Result(..))
 import Test
+import Process
 
 effect Fail error
     abort fail : error -> value
@@ -48,4 +49,4 @@ tests = Test.test "list_of_functions" {
     Expect.equal (Ok 7) (attempt { _ -> applyAll [] 7 })
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

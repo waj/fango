@@ -2,9 +2,10 @@ module FloatInf exposing (tests)
 
 import Expect
 import Test
+import Process
 tests : Test.Test {}
 tests = Test.test "float_inf" {
     Expect.equal "Infinity" (show (1.0 / 0.0))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

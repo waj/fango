@@ -1,0 +1,15 @@
+import Process
+import String
+
+-- Arguments are an effect: the same code reads the real command line under
+-- `runSystem` and a fixed list under `withArgs`.
+describe : () ->{Process.Arguments} String
+describe() =
+    case Process.args() of
+        [] -> "no arguments"
+        args -> String.concat args
+
+main() =
+    print (Process.runSystem describe)
+    print (Process.withArgs [] describe)
+    print (Process.withArgs ["x", "y"] describe)

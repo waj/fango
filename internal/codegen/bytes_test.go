@@ -58,7 +58,7 @@ func TestBytesUsesTheRuntimeRepresentationEverywhere(t *testing.T) {
 
 	emit := func(u Unit) string {
 		t.Helper()
-		data, err := emitUnit(p, b, u, false)
+		data, err := emitUnit(p, b, u)
 		if err != nil {
 			t.Fatal(err)
 		}

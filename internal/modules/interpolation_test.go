@@ -7,7 +7,7 @@ import (
 
 func TestInterpolationWithoutPrelude(t *testing.T) {
 	d := t.TempDir()
-	entry := write(t, d, "Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nmain = \"#{True}\"\n")
+	entry := write(t, d, "Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nmain() = print (\"#{True}\")\n")
 	r, errs := Load(entry)
 	if len(errs) > 0 {
 		t.Fatal(errs)

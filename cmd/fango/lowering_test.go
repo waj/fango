@@ -237,7 +237,7 @@ func testLoweringAgreement(t *testing.T, stem string) {
 	}
 	for _, disabled := range []bool{false, true} {
 		result.Program.DisableOptimizations = disabled
-		files, err := codegen.EmitProject(result.Program, result.Checker.B, units, false)
+		files, err := codegen.EmitProject(result.Program, result.Checker.B, units)
 		if err != nil {
 			t.Fatal(err)
 		}

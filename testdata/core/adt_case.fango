@@ -6,4 +6,4 @@ area shape =
         Circle r -> r * r * 3.14159
         Rect w h -> w * h
 
-main = area (Circle 2.0)
+main() = print (area (Circle 2.0))

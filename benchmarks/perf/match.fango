@@ -20,4 +20,4 @@ crunch op n =
     else
         apply op (crunch (tick op) (n - 1)) (crunch (tick (tick op)) (n - 2))
 
-main = print (crunch Add 37)
+main() = print (crunch Add 37)

@@ -2,6 +2,7 @@ module RecordsNominal exposing (tests)
 
 import Expect
 import Test
+import Process
 type Counts = { lines : Int, words : Int, bytes : Int } deriving (Eq, Show)
 type Box a = { value : a } deriving (Eq, Show)
 
@@ -20,4 +21,4 @@ tests = Test.test "records_nominal" {
     Expect.equal "generic" (unbox (Box { value = "generic" }))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

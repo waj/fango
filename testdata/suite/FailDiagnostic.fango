@@ -10,6 +10,7 @@ import Result exposing (Result(..))
 import Runtime.Scope
 import Test
 import Trace
+import Process
 
 -- Recursion prevents inlining, retaining a frame at the actual abort site.
 raise : Int -> String ->{Fail String} Int
@@ -52,7 +53,7 @@ tests = Test.describe "fail_diagnostic"
         frame = Expect.just (first diagnostic.trace)
         Expect.equal "FailDiagnostic.raise" frame.function
         Expect.equal "FailDiagnostic.fango" frame.file
-        Expect.equal 17 frame.line
+        Expect.equal 18 frame.line
         Expect.equal 0 (List.length diagnostic.suppressed)
         Expect.notEqual "" (Trace.render diagnostic.trace)
     }
@@ -169,4 +170,4 @@ tests = Test.describe "fail_diagnostic"
     }
     ]
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

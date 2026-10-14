@@ -155,16 +155,16 @@ run path =
     case File.read path of
         Err error ->
             print (IO.describeError error)
-            Process.exit 1
+            Process.exit Process.failure
         Ok contents ->
             printReport (addRows 2 (dropHeader (String.split "\n" contents)) emptyReport)
 
 usage : () ->{IO} ()
 usage() =
     print "usage: csv FILE"
-    Process.exit 1
+    Process.exit Process.failure
 
 main() =
-    case Process.args() of
+    case Process.runSystem Process.args of
         [path] -> run path
         _ -> usage()

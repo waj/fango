@@ -1,5 +1,6 @@
 import Expect
 import Test exposing (Test, describe, skip, test, todo)
+import Process
 
 -- A group's own problems are failures of that group, reported before its
 -- tests, which still run: an empty group, an empty group name, a test with
@@ -21,4 +22,4 @@ suite =
             ]
         ]
 
-main() = Test.run suite
+main() = Process.runSystem { Test.run suite }

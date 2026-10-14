@@ -1,1 +1,1 @@
-main = resume True
+main() = resume True

@@ -3,6 +3,7 @@ module HandlerTwoStateApplications exposing (tests)
 import Expect
 import State exposing (State, get, put)
 import Test
+import Process
 
 type Pair = { number : Int, label : String } deriving (Show)
 
@@ -39,4 +40,4 @@ tests = Test.test "handler_two_state_applications" {
     Expect.equal "ab" cell.label
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

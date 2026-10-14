@@ -1,1 +1,1 @@
-main = "quo\"te"
+main() = print ("quo\"te")

@@ -108,8 +108,8 @@ func TestNavigationInOpenedBundledModule(t *testing.T) {
 func TestProtocolUnsavedNavigationAndDiagnostics(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "Main.fango")
-	good := "module Main exposing (main)\n\n-- A documented value.\nvalue : Int\nvalue = 3\n\nmain = value\n"
-	if err := os.WriteFile(path, []byte("module Main exposing (main)\nmain = 0\n"), 0o644); err != nil {
+	good := "module Main exposing (main)\n\n-- A documented value.\nvalue : Int\nvalue = 3\n\nitem = value\nmain() = ()\n"
+	if err := os.WriteFile(path, []byte("module Main exposing (main)\nitem = 0\nmain() = ()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	clientSide, serverSide := net.Pipe()
@@ -207,7 +207,7 @@ func TestProtocolReferencesAcrossOpenGraphs(t *testing.T) {
 	root := t.TempDir()
 	mainPath := filepath.Join(root, "Main.fango")
 	libPath := filepath.Join(root, "Lib.fango")
-	main := "module Main exposing (main)\nimport Lib exposing (value)\nmain = value\n"
+	main := "module Main exposing (main)\nimport Lib exposing (value)\nitem = value\nmain() = ()\n"
 	lib := "module Lib exposing (value)\nvalue = 1\nother = value\n"
 	for path, data := range map[string]string{mainPath: main, libPath: lib} {
 		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
@@ -282,7 +282,7 @@ func TestProtocolReferencesAcrossOpenGraphs(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitDiagnostics(t, ctx, updates, pathURI(mainPath), 0)
-	mainAnother := location{URI: pathURI(mainPath), Range: rng{Start: position{Line: 3, Character: 10}, End: position{Line: 3, Character: 15}}}
+	mainAnother := location{URI: pathURI(mainPath), Range: rng{Start: position{Line: 4, Character: 10}, End: position{Line: 4, Character: 15}}}
 	check(false, libExposing, libUse, mainExposing, mainUse, mainAnother)
 	change.ContentChanges[0].Text = main + "another = value +\n"
 	if err := conn.Notify(ctx, "textDocument/didChange", change); err != nil {

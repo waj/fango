@@ -23,8 +23,10 @@ instance Twice Int
 applyTwice : Twice a => a -> a
 applyTwice x = twice x
 
-main : Int
-main = applyTwice 21
+answer : Int
+answer = applyTwice 21
+
+main() = print answer
 `
 	f := source.NewFile("classes.fango", []byte(src))
 	ts, errs := lexer.Lex(f)
@@ -62,7 +64,7 @@ main = applyTwice 21
 	}
 	// A dictionary is typed evidence, not an unchecked runtime tag.
 	for i := range p.Defs {
-		if p.Defs[i].Name == "main" {
+		if p.Defs[i].Name == "answer" {
 			app := p.Defs[i].Body.(*core.App)
 			app.Args[0] = &core.IntLit{Val: 0, Ty: b.Int}
 		}

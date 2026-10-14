@@ -1,7 +1,7 @@
 effect Ask
     ask : () -> Int
 
-main =
+main() =
     print
         (handle ask () on
             ask () -> resume (resume 1))

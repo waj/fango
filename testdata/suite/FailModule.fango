@@ -5,6 +5,7 @@ import Fail exposing (Fail, attempt, fail, fromResult)
 import Result exposing (Result(..))
 import String
 import Test
+import Process
 
 -- The bundled Fail module: attempt captures a failure as a Result, fromResult
 -- raises an Err, and a nested attempt handles the innermost failure only.
@@ -37,4 +38,4 @@ tests = Test.test "fail_module" {
     Expect.equal True (String.contains "lo" "hello")
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

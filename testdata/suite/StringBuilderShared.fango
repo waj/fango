@@ -6,6 +6,7 @@ import List
 import String
 import Test
 import Text.Builder
+import Process
 
 extend built count =
     if count == 0 then built
@@ -26,4 +27,4 @@ fixtureBody() =
 tests : Test.Test {}
 tests = Test.test "string_builder_shared" { Expect.equal True fixtureBody() }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -9,6 +9,7 @@ import Dict
 import Expect
 import Meta exposing (Code)
 import Test
+import Process
 
 type Tri = Low | High
 
@@ -50,4 +51,4 @@ tests = Test.test "classes_compose" {
     Expect.equal "staged same" $(chosen)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

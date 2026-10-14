@@ -8,4 +8,4 @@ instance Greet Person
     name person = case person of
         Person who -> who
 
-main = greet (Person "Ada")
+main() = print (greet (Person "Ada"))

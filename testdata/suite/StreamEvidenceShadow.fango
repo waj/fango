@@ -3,6 +3,7 @@ module StreamEvidenceShadow exposing (tests)
 import Expect
 import Stream
 import Test
+import Process
 
 effect Reader
     ask : () -> Int
@@ -21,4 +22,4 @@ tests = Test.test "stream_evidence_shadow" {
     Expect.equal [7] (Stream.toList description())
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

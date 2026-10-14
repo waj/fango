@@ -5,6 +5,7 @@ import List
 import Expect
 import Result exposing (Result(..))
 import Test
+import Process
 
 first value = later value
 later value = value
@@ -68,4 +69,4 @@ tests = Test.test "module_function_groups" {
     Expect.equal (Err "returned") (Fail.attempt ({ _ -> returnedCallback 3 }))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

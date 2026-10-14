@@ -12,7 +12,7 @@ import (
 func TestDebugCacheProfileAndPositions(t *testing.T) {
 	dir := t.TempDir()
 	entry := filepath.Join(dir, "Main.fango")
-	source := "{-# no-prelude #-}\nmodule Main exposing (main)\nmain = \"hello\"\n"
+	source := "{-# no-prelude #-}\nmodule Main exposing (main)\nresult = \"hello\"\nmain() = ()\n"
 	write := func(s string) {
 		t.Helper()
 		if err := os.WriteFile(entry, []byte(s), 0644); err != nil {
@@ -29,7 +29,7 @@ func TestDebugCacheProfileAndPositions(t *testing.T) {
 		}
 		found := false
 		for _, d := range result.Program.Defs {
-			if d.Name != "Main.main" {
+			if d.Name != "Main.result" {
 				continue
 			}
 			found = true
@@ -42,7 +42,7 @@ func TestDebugCacheProfileAndPositions(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Fatal("main missing")
+			t.Fatal("result missing")
 		}
 	}
 	compile(false, 3)

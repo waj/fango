@@ -3,6 +3,7 @@ module PolyEffectCallback exposing (tests)
 import Expect
 import State
 import Test
+import Process
 effect Apply
     apply : (a ->{State.State (List String)} a) -> a -> a
 
@@ -24,4 +25,4 @@ tests = Test.test "poly_effect_callback" {
     Expect.equal (42, ["called"]) observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

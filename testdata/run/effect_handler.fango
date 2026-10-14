@@ -3,7 +3,7 @@ effect Choose
 
 pick _ = choose ()
 
-main =
+main() =
     print
         (handle pick () on
             choose () -> resume True)

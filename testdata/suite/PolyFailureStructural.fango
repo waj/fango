@@ -6,6 +6,7 @@ import Failure
 import Result exposing (Result(..))
 import Runtime.Scope
 import Test
+import Process
 
 type Box a = Box a deriving (Show)
 
@@ -38,4 +39,4 @@ tests = Test.test "poly_failure_structural" {
     } failure.suppressed
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

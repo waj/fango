@@ -55,7 +55,7 @@ func TestNativeTemplateValidation(t *testing.T) {
 
 func TestDependencyOrderAndManifest(t *testing.T) {
 	d := t.TempDir()
-	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Z\nimport A\nmain = A.a + Z.z\n")
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Z\nimport A\nmain() = print (A.a + Z.z)\n")
 	write(t, d, "A.fango", "module A exposing (a)\nimport B\na = B.b\n")
 	write(t, d, "B.fango", "module B exposing (b)\nb = 20\n")
 	write(t, d, "Z.fango", "module Z exposing (z)\nz = 22\n")
@@ -141,7 +141,7 @@ func TestListSyntaxAddsDependency(t *testing.T) {
 func TestGraphDiagnostics(t *testing.T) {
 	t.Run("cycle", func(t *testing.T) {
 		d := t.TempDir()
-		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport A\nmain = 0\n")
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport A\nmain() = print (0)\n")
 		write(t, d, "A.fango", "module A exposing (a)\nimport B\na = 1\n")
 		write(t, d, "B.fango", "module B exposing (b)\nimport A\nb = 2\n")
 		_, errs := Load(entry)
@@ -151,7 +151,7 @@ func TestGraphDiagnostics(t *testing.T) {
 	})
 	t.Run("missing", func(t *testing.T) {
 		d := t.TempDir()
-		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Missing.Module\nmain = 0\n")
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Missing.Module\nmain() = print (0)\n")
 		_, errs := Load(entry)
 		if len(errs) == 0 || errs[0].Title != "MISSING MODULE" {
 			t.Fatalf("errors: %#v", errs)
@@ -159,7 +159,7 @@ func TestGraphDiagnostics(t *testing.T) {
 	})
 	t.Run("private", func(t *testing.T) {
 		d := t.TempDir()
-		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Secret\nmain = Secret.hidden\n")
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Secret\nmain() = print (Secret.hidden)\n")
 		write(t, d, "Secret.fango", "module Secret exposing (visible)\nvisible = 1\nhidden = 2\n")
 		_, errs := Load(entry)
 		if len(errs) == 0 || errs[0].Title != "PRIVATE OR UNKNOWN NAME" {
@@ -170,7 +170,7 @@ func TestGraphDiagnostics(t *testing.T) {
 
 func TestBundledModules(t *testing.T) {
 	d := t.TempDir()
-	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport IO\nimport List\nimport Range\nmain = 0\n")
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport IO\nimport List\nimport Range\nmain() = print (0)\n")
 	r, errs := Load(entry)
 	if len(errs) > 0 {
 		t.Fatalf("Load: %v", errs)
@@ -190,7 +190,7 @@ func TestBundledModules(t *testing.T) {
 
 func TestBundledPureNativeSidecars(t *testing.T) {
 	d := t.TempDir()
-	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Json\nimport Random\nimport String\nmain = 0\n")
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Json\nimport Random\nimport String\nmain() = print (0)\n")
 	r, errs := Load(entry)
 	if len(errs) > 0 {
 		t.Fatalf("Load: %v", errs)
@@ -217,7 +217,7 @@ func TestBundledPureNativeSidecars(t *testing.T) {
 func TestBundledModuleNamesAreReserved(t *testing.T) {
 	t.Run("import", func(t *testing.T) {
 		d := t.TempDir()
-		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport List\nmain = 0\n")
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport List\nmain() = print (0)\n")
 		write(t, d, "List.fango", "module List exposing (answer)\nanswer = 42\n")
 		_, errs := Load(entry)
 		if len(errs) == 0 || errs[0].Title != "RESERVED MODULE" {
@@ -226,7 +226,7 @@ func TestBundledModuleNamesAreReserved(t *testing.T) {
 	})
 	t.Run("entry", func(t *testing.T) {
 		d := t.TempDir()
-		entry := write(t, d, "List.fango", "module List exposing (main)\nmain = 0\n")
+		entry := write(t, d, "List.fango", "module List exposing (main)\nmain() = print (0)\n")
 		_, errs := Load(entry)
 		if len(errs) == 0 || errs[0].Title != "RESERVED MODULE" {
 			t.Fatalf("errors: %#v", errs)
@@ -239,7 +239,7 @@ func TestBundledImportWithUnrelatedCaseFoldedDirectory(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(d, "runtime"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Async\nmain = 0\n")
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Async\nmain() = print (0)\n")
 	if _, errs := Load(entry); len(errs) > 0 {
 		t.Fatalf("unrelated runtime directory blocked Async: %v", errs)
 	}
@@ -252,7 +252,7 @@ func TestBundledImportWithUnrelatedCaseFoldedDirectory(t *testing.T) {
 func TestNativeSidecarValidation(t *testing.T) {
 	t.Run("effectful value", func(t *testing.T) {
 		d := t.TempDir()
-		entry := write(t, d, "Main.fango", "module Main exposing (main)\neffect Clock\n    tick : () -> Int\nvalue : () ->{Clock} Int\nvalue = native\nmain = 0\n")
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\neffect Clock\n    tick : () -> Int\nvalue : () ->{Clock} Int\nvalue = native\nmain() = print (0)\n")
 		write(t, d, "Main.native.go", "package native\nfunc Value() int64 { return 42 }\n")
 		if _, errs := Load(entry); len(errs) > 0 {
 			t.Fatalf("effectful native: %v", errs)
@@ -261,7 +261,7 @@ func TestNativeSidecarValidation(t *testing.T) {
 
 	t.Run("valid scalar ABI", func(t *testing.T) {
 		d := t.TempDir()
-		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Hash\nmain = Hash.twice 21\n")
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Hash\nmain() = print (Hash.twice 21)\n")
 		write(t, d, "Hash.fango", "module Hash exposing (twice)\ntwice : Int -> Int\ntwice = native\n")
 		write(t, d, "Hash.native.go", "package native\nfunc Twice(x int64) int64 { return x * 2 }\n")
 		r, errs := Load(entry)
@@ -290,7 +290,7 @@ func TestNativeSidecarValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := t.TempDir()
-			entry := write(t, d, "Main.fango", "module Main exposing (main)\n"+tt.source+"main = 0\n")
+			entry := write(t, d, "Main.fango", "module Main exposing (main)\n"+tt.source+"main() = print (0)\n")
 			if tt.sidecar != "" {
 				write(t, d, "Main.native.go", tt.sidecar)
 			}
@@ -304,7 +304,7 @@ func TestNativeSidecarValidation(t *testing.T) {
 
 func TestNativeEffectAndReservedHostValidation(t *testing.T) {
 	d := t.TempDir()
-	entry := write(t, d, "Main.fango", "module Main exposing (main)\neffect Clock\n    tick : () -> Int = native\nmain = tick()\n")
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\neffect Clock\n    tick : () -> Int = native\nmain() = print (tick())\n")
 	write(t, d, "Main.native.go", "package native\nfunc Tick() int64 { return 42 }\n")
 	if _, errs := Load(entry); len(errs) > 0 {
 		t.Fatalf("native effect: %v", errs)
@@ -340,7 +340,7 @@ func TestCrossModuleOperators(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			d := t.TempDir()
-			entry := write(t, d, "Main.fango", "module Main exposing (main)\n"+tt.main+"main = 0\n")
+			entry := write(t, d, "Main.fango", "module Main exposing (main)\n"+tt.main+"main() = print (0)\n")
 			write(t, d, "A.fango", tt.a)
 			write(t, d, "B.fango", tt.b)
 			_, errs := Load(entry)
@@ -370,7 +370,7 @@ func TestResourceExportsAreOpaque(t *testing.T) {
 	} {
 		t.Run(tc.exports+tc.decl, func(t *testing.T) {
 			dir := t.TempDir()
-			entry := write(t, dir, "Main.fango", "module Main exposing (main)\nimport Resource\nmain = 0\n")
+			entry := write(t, dir, "Main.fango", "module Main exposing (main)\nimport Resource\nmain() = print (0)\n")
 			write(t, dir, "Resource.fango", "module Resource exposing ("+tc.exports+")\n{-# resource #-}\n"+tc.decl+"\n")
 			_, errs := Load(entry)
 			found := false
@@ -391,7 +391,7 @@ func TestResourceExportsAreOpaque(t *testing.T) {
 func TestLocalBytesTypeKeepsItsOwnBoundary(t *testing.T) {
 	t.Run("local wrapper", func(t *testing.T) {
 		d := t.TempDir()
-		entry := write(t, d, "Main.fango", "module Main exposing (main)\ntype Bytes = Bytes Int\nvalue : Bytes -> Int\nvalue = native\nmain = 0\n")
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\ntype Bytes = Bytes Int\nvalue : Bytes -> Int\nvalue = native\nmain() = print (0)\n")
 		write(t, d, "Main.native.go", "package native\nfunc Value(id int64) int64 { return id }\n")
 		if _, errs := Load(entry); len(errs) > 0 {
 			t.Fatalf("local Bytes wrapper: %v", errs)
@@ -400,7 +400,7 @@ func TestLocalBytesTypeKeepsItsOwnBoundary(t *testing.T) {
 
 	t.Run("local wrapper against a byte slice", func(t *testing.T) {
 		d := t.TempDir()
-		entry := write(t, d, "Main.fango", "module Main exposing (main)\ntype Bytes = Bytes Int\nvalue : Bytes -> Int\nvalue = native\nmain = 0\n")
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\ntype Bytes = Bytes Int\nvalue : Bytes -> Int\nvalue = native\nmain() = print (0)\n")
 		write(t, d, "Main.native.go", "package native\nfunc Value(data []byte) int64 { return int64(len(data)) }\n")
 		_, errs := Load(entry)
 		if len(errs) == 0 || errs[0].Title != "NATIVE ABI" {
@@ -420,7 +420,7 @@ func TestReexportDiagnostics(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			d := t.TempDir()
-			entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Facade\nmain = 0\n")
+			entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Facade\nmain() = print (0)\n")
 			write(t, d, "Base.fango", "module Base exposing (T(..), b)\ntype T = A | B\nb = 1\n")
 			write(t, d, "Facade.fango", tt.facade)
 			_, errs := Load(entry)

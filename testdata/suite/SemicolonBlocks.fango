@@ -3,6 +3,7 @@ module SemicolonBlocks exposing (tests)
 import Expect
 import State
 import Test
+import Process
 increment = { a b -> recordInt a; b + 1 }
 
 recordInt : Int ->{State.State (List Int)} ()
@@ -19,4 +20,4 @@ tests = Test.test "semicolon_blocks" {
     Expect.equal [10, 42] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -41,7 +41,9 @@ run start =
     handle read total on
         read amount -> resume (amount + 1)
 
-main = run 4
+result = run 4
+
+main() = print result
 `
 
 func TestDebugScopesHandlersAndTailIterations(t *testing.T) {
@@ -105,7 +107,7 @@ func TestDebugScopesHandlersAndTailIterations(t *testing.T) {
 				}
 				return debugger.Command{Kind: "continue"}
 			})
-			value, err := eval.EvalIO(context.Background(), &core.VarRef{Name: "Main.main", Ty: result.Checker.B.Int}, env, ioctx)
+			value, err := eval.EvalIO(context.Background(), &core.VarRef{Name: "Main.result", Ty: result.Checker.B.Int}, env, ioctx)
 			if err != nil || value != int64(22) {
 				t.Fatalf("result: %v %v", value, err)
 			}
@@ -178,7 +180,7 @@ func TestDebugNextFinishAndSelectedCaller(t *testing.T) {
 				}
 				return debugger.Command{Kind: "continue"}
 			})
-			value, err := eval.EvalIO(context.Background(), &core.VarRef{Name: "Main.main", Ty: result.Checker.B.Int}, env, ioctx)
+			value, err := eval.EvalIO(context.Background(), &core.VarRef{Name: "Main.result", Ty: result.Checker.B.Int}, env, ioctx)
 			if err != nil || value != int64(22) || phase != 2 {
 				t.Fatalf("%v %v phase %d", value, err, phase)
 			}

@@ -1,2 +1,2 @@
-main : () ->{IO} Int
+main : () -> Int
 main() = 1

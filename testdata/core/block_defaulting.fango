@@ -1,4 +1,4 @@
 x =
   a = 40
   a + 2
-main = x
+main() = print (x)

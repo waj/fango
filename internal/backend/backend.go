@@ -85,7 +85,7 @@ func (s *Session) artifact(stage, owner string, start time.Time, bytes int) {
 // whole program is never lowered or emitted at once, and no dependency body is
 // read. codegen.EmitProject remains the whole-program reference path the
 // equivalence tests compare against.
-func (s *Session) EmitProject(entry string, result *check.Result, units []codegen.Unit, printMain bool) ([]codegen.File, error) {
+func (s *Session) EmitProject(entry string, result *check.Result, units []codegen.Unit) ([]codegen.File, error) {
 	if err := codegen.ValidateUnits(result.Program, units); err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 	var work []emission
 	for _, unit := range units {
 		owner := ownerLabel(unit.Name)
-		record, recorded := emissionRecord(result, unit, summaries, closure, links, printMain)
+		record, recorded := emissionRecord(result, unit, summaries, closure, links)
 		slot := unitSlot(unit)
 		if cache != nil {
 			if !recorded {
@@ -128,7 +128,7 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 		}
 		work = append(work, emission{unit: unit, owner: owner, record: record, recorded: recorded, slot: slot})
 	}
-	if err := s.emit(result, cache, work, printMain); err != nil {
+	if err := s.emit(result, cache, work); err != nil {
 		return nil, err
 	}
 	for _, w := range work {
@@ -159,7 +159,7 @@ type emission struct {
 // so no two owners share mutable state. Events stay on the caller's goroutine
 // and in owner order; each owner's emission and store times are their share
 // of the phase's elapsed time, so the stages still add up to the build.
-func (s *Session) emit(result *check.Result, cache Cache, work []emission, printMain bool) error {
+func (s *Session) emit(result *check.Result, cache Cache, work []emission) error {
 	if len(work) == 0 {
 		return nil
 	}
@@ -180,7 +180,7 @@ func (s *Session) emit(result *check.Result, cache Cache, work []emission, print
 			for i := range next {
 				w := &work[i]
 				start := time.Now()
-				w.file, w.err = codegen.EmitUnit(codegen.UnitProgram(result.Program, w.unit), result.Checker.B, w.unit, printMain)
+				w.file, w.err = codegen.EmitUnit(codegen.UnitProgram(result.Program, w.unit), result.Checker.B, w.unit)
 				w.elapsed = time.Since(start)
 				if w.err == nil && w.recorded && cache != nil {
 					start = time.Now()
@@ -312,7 +312,7 @@ func linkClosure(graph *modules.Result) map[string][]string {
 // module it links against, the generated path and role, and the entry-only
 // inputs. An owner whose closure is not fully summarized is emitted without
 // being cached.
-func emissionRecord(result *check.Result, unit codegen.Unit, summaries map[string]linkSummary, closure map[string][]string, links []string, printMain bool) (unitRecord, bool) {
+func emissionRecord(result *check.Result, unit codegen.Unit, summaries map[string]linkSummary, closure map[string][]string, links []string) (unitRecord, bool) {
 	own, ok := summaries[unit.Name]
 	if !ok || own.implementation == "" {
 		return unitRecord{}, false
@@ -329,7 +329,7 @@ func emissionRecord(result *check.Result, unit codegen.Unit, summaries map[strin
 		}
 		linked = append(linked, linkedModule{Module: name, Semantic: summary.semantic, ABI: summary.abi})
 	}
-	record := unitRecord{Debug: unit.Debug, Schema: emissionSchema, Unit: unit.Name, Path: codegen.UnitPath(unit), Entry: unit.Entry, PrintMain: printMain,
+	record := unitRecord{Debug: unit.Debug, Schema: emissionSchema, Unit: unit.Name, Path: codegen.UnitPath(unit), Entry: unit.Entry,
 		Implementation: own.implementation, Semantic: own.semantic, ABI: own.abi, Linked: linked}
 	if unit.Debug {
 		for _, module := range result.Graph.Modules {

@@ -6,6 +6,7 @@ import Maybe exposing (Maybe(..))
 import State
 import Stream
 import Test
+import Process
 
 retain cursor = 42
 save cursor = State.put (Just { _ -> retain cursor })
@@ -20,4 +21,4 @@ tests = Test.test "iterator_stored" {
     Expect.equal "unreachable" "unreachable"
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

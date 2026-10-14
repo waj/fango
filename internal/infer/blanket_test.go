@@ -23,7 +23,7 @@ type Box a = Box a deriving (Show)
 		{"local", "f x =\n    local y = inspect y\n    local x", "Inspect a => a -> String"},
 		{"captured structural", "f x =\n    local y = show (Box x) ++ y\n    local \"!\"", "Show a => a -> String"},
 		{"local structural", "f x =\n    local y = show (Box y)\n    local x", "Show a => a -> String"},
-		{"numeric default", "main = inspect 42", "String"},
+		{"numeric default", "result() = inspect 42", "() -> String"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ck, infos, errs := check(t, prelude+tc.src)
@@ -57,12 +57,12 @@ type Wrap a = Wrap a
 		{"structured blanket context", "instance Show (Box a) => A a\n    aa x = \"a\"", "INSTANCE CONTEXT"},
 		{"unknown context variable", "instance Show b => A (Box a)\n    aa x = \"a\"", "NAMING ERROR"},
 		{"open context", "instance Show (a ->{e} a) => A (Box a)\n    aa x = \"a\"", "NAMING ERROR"},
-		{"missing blanket evidence", "instance Show a => A a\n    aa x = show x\nmain = aa (Box True)", "MISSING INSTANCE"},
-		{"no fallback", "instance A a\n    aa x = \"fallback\"\ninstance B a => A (Box a)\n    aa x = \"specific\"\nmain = aa (Box True)", "MISSING INSTANCE"},
-		{"structured cycle", "instance B (Wrap a) => A (Box a)\n    aa x = \"a\"\ninstance A (Box a) => B (Wrap a)\n    bb x = \"b\"\nmain = aa (Box True)", "INSTANCE RESOLUTION"},
-		{"growing context", "instance A (Box (Box a)) => A (Box a)\n    aa x = \"a\"\nmain = aa (Box True)", "INSTANCE RESOLUTION"},
-		{"custom numeric ambiguity", "instance A Int\n    aa x = \"int\"\nmain = aa 42", "AMBIGUOUS CONSTRAINT"},
-		{"phantom ambiguity", "instance A (Box a)\n    aa x = \"a\"\ntype Phantom a = Phantom\ninstance A (Phantom a)\n    aa x = \"phantom\"\nmain = aa Phantom", "AMBIGUOUS CONSTRAINT"},
+		{"missing blanket evidence", "instance Show a => A a\n    aa x = show x\nmain() = print (aa (Box True))", "MISSING INSTANCE"},
+		{"no fallback", "instance A a\n    aa x = \"fallback\"\ninstance B a => A (Box a)\n    aa x = \"specific\"\nmain() = print (aa (Box True))", "MISSING INSTANCE"},
+		{"structured cycle", "instance B (Wrap a) => A (Box a)\n    aa x = \"a\"\ninstance A (Box a) => B (Wrap a)\n    bb x = \"b\"\nmain() = print (aa (Box True))", "INSTANCE RESOLUTION"},
+		{"growing context", "instance A (Box (Box a)) => A (Box a)\n    aa x = \"a\"\nmain() = print (aa (Box True))", "INSTANCE RESOLUTION"},
+		{"custom numeric ambiguity", "instance A Int\n    aa x = \"int\"\nmain() = print (aa 42)", "AMBIGUOUS CONSTRAINT"},
+		{"phantom ambiguity", "instance A (Box a)\n    aa x = \"a\"\ntype Phantom a = Phantom\ninstance A (Phantom a)\n    aa x = \"phantom\"\nmain() = print (aa Phantom)", "AMBIGUOUS CONSTRAINT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, errs := check(t, classes+tc.src)

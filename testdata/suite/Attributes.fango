@@ -3,6 +3,7 @@ module Attributes exposing (tests)
 import Expect
 import Meta exposing (Code, Items(..))
 import Test
+import Process
 
 type Label = Label String
 type Detail a = Detail a
@@ -60,4 +61,4 @@ tests = Test.test "attributes" {
     Expect.equal "ignored" $(reflectedDetails)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

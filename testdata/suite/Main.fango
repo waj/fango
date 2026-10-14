@@ -264,6 +264,7 @@ import StringInterpolationNoPrelude
 import SubsumptionSharedOpenRow
 import TailLoopSwap
 import TailLoopUnitarg
+import Process
 import Test
 import ParserCombinators
 import TestEffectfulBody
@@ -289,7 +290,8 @@ import WriterScopedPure
 import WriterWindow
 
 main() =
-    Test.run (Test.describe "Fango"
+    Process.runSystem {
+        Test.run (Test.describe "Fango"
             [ TestEffectfulBody.tests
             , TestReporter.checks
             , StdlibRandomSystem.tests
@@ -577,4 +579,5 @@ main() =
             , WriterWindow.tests
             , ParserCombinators.tests
             ]
-    )
+        )
+    }

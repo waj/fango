@@ -17,7 +17,7 @@ import (
 func TestIndexAcrossModulesAndRecordFields(t *testing.T) {
 	root := t.TempDir()
 	shapes := "module Shapes exposing (Box(..), mk)\n\ntype Box = { value : Int }\n\n-- Returns a box.\nmk : Box\nmk = Box { value = 1 }\n"
-	main := "module Main exposing (main)\n\nimport Shapes exposing (Box(..), mk)\n\nmain = mk.value\n"
+	main := "module Main exposing (main)\n\nimport Shapes exposing (Box(..), mk)\n\nitem = mk.value\nmain() = ()\n"
 	for name, data := range map[string]string{"Shapes.fango": shapes, "Main.fango": main} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
 			t.Fatal(err)
@@ -67,7 +67,7 @@ func TestReexportNavigation(t *testing.T) {
 	root := t.TempDir()
 	base := "module Base exposing (Box(..), mk)\n\ntype Box = Box Int\n\nmk : Box\nmk = Box 1\n"
 	facade := "module Facade exposing (Box(..), mk)\n\nimport Base exposing (Box(..), mk)\n"
-	main := "module Main exposing (main)\n\nimport Facade\n\nmain = case Facade.mk of\n    Facade.Box n -> n\n"
+	main := "module Main exposing (main)\n\nimport Facade\n\nitem = case Facade.mk of\n    Facade.Box n -> n\nmain() = ()\n"
 	for name, data := range map[string]string{"Base.fango": base, "Facade.fango": facade, "Main.fango": main} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
 			t.Fatal(err)
@@ -104,7 +104,7 @@ func TestReexportNavigation(t *testing.T) {
 }
 
 func TestUTF16PositionConversion(t *testing.T) {
-	f := source.NewFile("u.fango", []byte("-- 😀x\r\nmain = 1\n"))
+	f := source.NewFile("u.fango", []byte("-- 😀x\r\nitem = 1\nmain() = ()\n"))
 	offset := strings.Index(string(f.Content), "x")
 	if p := positionAt(f, offset); p.Line != 0 || p.Character != 5 {
 		t.Fatalf("position = %#v", p)
@@ -127,7 +127,8 @@ local = @Local
 imported = @Box
 qualified = @S.Box
 nested = @(List S.Box)
-main = "ok"
+item = "ok"
+main() = ()
 `
 	for name, data := range map[string]string{
 		"Main.fango":   main,
@@ -179,7 +180,7 @@ func TestNestedUnsavedModuleOverlay(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "Main.fango")
 	dep := filepath.Join(root, "Foo", "Bar.fango")
-	main := "module Main exposing (main)\nimport Foo.Bar exposing (value)\nmain = value\n"
+	main := "module Main exposing (main)\nimport Foo.Bar exposing (value)\nitem = value\nmain() = ()\n"
 	if err := os.WriteFile(entry, []byte(main), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +201,7 @@ func TestNestedUnsavedModuleOverlay(t *testing.T) {
 func TestOverlayPreservesPathCasing(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "Main.fango")
-	if err := os.WriteFile(entry, []byte("module Main exposing (main)\nimport Foo.Bar exposing (value)\nmain = value\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("module Main exposing (main)\nimport Foo.Bar exposing (value)\nitem = value\nmain() = ()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(root, "Foo"), 0o755); err != nil {
@@ -219,7 +220,7 @@ func TestOverlayPreservesPathCasing(t *testing.T) {
 func TestIndependentModuleDiagnostics(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"Main.fango": "module Main exposing (main)\nimport A exposing (a)\nimport B exposing (b)\nmain = a\n",
+		"Main.fango": "module Main exposing (main)\nimport A exposing (a)\nimport B exposing (b)\nitem = a\nmain() = ()\n",
 		"A.fango":    "module A exposing (a)\na = 1 + True\n",
 		"B.fango":    "module B exposing (b)\nb = 1 + False\n",
 	}
@@ -246,7 +247,7 @@ func TestIndependentModuleDiagnostics(t *testing.T) {
 func TestLocalBinderNavigation(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "Main.fango")
-	data := "module Main exposing (main)\nhelper x =\n    y = x\n    y\nmain = helper 1\n"
+	data := "module Main exposing (main)\nhelper x =\n    y = x\n    y\nitem = helper 1\nmain() = ()\n"
 	if err := os.WriteFile(entry, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +289,7 @@ func TestReferencesKeepProjectIdentity(t *testing.T) {
 	for range 2 {
 		root := t.TempDir()
 		entry := filepath.Join(root, "Main.fango")
-		data := "module Main exposing (main)\nvalue = 1\nmain = value\n"
+		data := "module Main exposing (main)\nvalue = 1\nitem = value\nmain() = ()\n"
 		if err := os.WriteFile(entry, []byte(data), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -353,7 +354,7 @@ fallback = 7
 		"    , y : Int #[O.tag ({ text -> text } \"lambda\")]\n" +
 		"    , z : Int #[typeOf O.Label]\n" +
 		"    }\n" +
-		"main = \"ok\"\n"
+		"item = \"ok\"\nmain() = ()\n"
 	for name, data := range map[string]string{"Options.fango": options, "Main.fango": main} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
 			t.Fatal(err)
@@ -472,7 +473,8 @@ type Handle = Handle
 #[Label "detached"]
 
 type Detached = Detached
-main = "ok"
+item = "ok"
+main() = ()
 `
 	if err := os.WriteFile(entry, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
@@ -503,7 +505,7 @@ main = "ok"
 func TestHoverLibraryDocumentation(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "Main.fango")
-	if err := os.WriteFile(entry, []byte("import Result exposing (Result(..))\n\nmain = Result.withDefault 0 (Ok (Maybe.withDefault 1 Nothing))\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("import Result exposing (Result(..))\n\nitem = Result.withDefault 0 (Ok (Maybe.withDefault 1 Nothing))\nmain() = ()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	result, errs, internal := (&check.Session{DisableObjectCache: true}).Compile(entry)

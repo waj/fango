@@ -5,4 +5,4 @@ f m =
         Some n -> n
         _ -> 0
 
-main = f NothingI
+main() = f NothingI

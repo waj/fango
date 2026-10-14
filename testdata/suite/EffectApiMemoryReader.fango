@@ -7,6 +7,7 @@ import Bytes
 import Expect
 import Reader exposing (Reader)
 import Test
+import Process
 
 clamp count size = if count < 0 then 0 else if count > size then size else count
 
@@ -54,4 +55,4 @@ fixtureBody() = parsed
 tests : Test.Test {}
 tests = Test.test "effect_api_memory_reader" { Expect.equal "aXbcYZ" fixtureBody() }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

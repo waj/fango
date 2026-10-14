@@ -1,1 +1,1 @@
-main = if True then 1 else "x"
+main() = print (if True then 1 else "x")

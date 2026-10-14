@@ -8,6 +8,7 @@ import Result exposing (Result(..))
 import Runtime.Scope
 import State
 import Test
+import Process
 
 blocked ready gate label () = Runtime.Scope.finally {
     ignore (Async.send ready ())
@@ -126,4 +127,4 @@ tests = Test.test "async_scope_exit" {
                  ] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

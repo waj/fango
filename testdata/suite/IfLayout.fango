@@ -3,6 +3,7 @@ module IfLayout exposing (tests)
 import Expect
 import State
 import Test
+import Process
 -- Aligned `else if` chains, keyword-led branches, and block branches all run
 -- the same in both backends.
 describe : Int ->{State.State (List Observation)} String
@@ -47,4 +48,4 @@ tests = Test.test "if_layout" {
     Expect.equal [Text "classified", Text "big", Text "medium", Text "small", Integer 10] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

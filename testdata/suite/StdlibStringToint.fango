@@ -3,6 +3,7 @@ module StdlibStringToint exposing (tests)
 import Expect
 import String
 import Test
+import Process
 
 tests : Test.Test {}
 tests = Test.test "stdlib_string_toint" {
@@ -26,4 +27,4 @@ tests = Test.test "stdlib_string_toint" {
     Expect.equal 3 (String.byteLength "二")
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

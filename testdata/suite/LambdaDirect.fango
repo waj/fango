@@ -2,9 +2,10 @@ module LambdaDirect exposing (tests)
 
 import Expect
 import Test
+import Process
 tests : Test.Test {}
 tests = Test.test "lambda_direct" {
     Expect.equal 42 ({ x y -> x * y } 6 7)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

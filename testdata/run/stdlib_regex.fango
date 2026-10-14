@@ -7,7 +7,7 @@ literal () = /(?P<word>é二)(x)?()/
 mapMaybe transform Nothing = Nothing
 mapMaybe transform (Just value) = Just (transform value)
 
-main =
+main() =
     print (Regex.matches /\d+/ "abc123")
     print (Regex.matches /^\d+$/ "abc123")
     print (Regex.matches /(?i)abc/ "ABC")

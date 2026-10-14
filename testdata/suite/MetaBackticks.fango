@@ -3,6 +3,7 @@ module MetaBackticks exposing (tests)
 import Expect
 import Meta exposing (Code)
 import Test
+import Process
 
 quote x = x
 
@@ -52,4 +53,4 @@ tests = Test.test "meta_backticks" {
     Expect.equal '`' $(`'`'`)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

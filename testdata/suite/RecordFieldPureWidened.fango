@@ -2,6 +2,7 @@ module RecordFieldPureWidened exposing (tests)
 
 import Expect
 import Test
+import Process
 -- The same covariant widening as `record_field_widened_row`, at a field whose
 -- arrow is closed and pure. The row a use site allows is an upper bound, so a
 -- stored `() -> Int` is usable in a body that performs `Extra`; the projection
@@ -23,4 +24,4 @@ tests = Test.test "record_field_pure_widened" {
     Expect.equal 7 answer
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

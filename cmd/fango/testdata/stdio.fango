@@ -38,5 +38,5 @@ main() =
     case attempt { IO.write stdin "bad" } of
         Ok () -> print "unexpected writable stdin"
         Err error -> print (error.path ++ ":" ++ show error.kind)
-    print (Process.args())
-    Process.exit 0
+    print (Process.runSystem Process.args)
+    Process.exit Process.success

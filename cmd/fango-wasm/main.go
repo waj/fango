@@ -27,7 +27,6 @@ import (
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/libroot"
 	"github.com/waj/fango/internal/natives"
-	"github.com/waj/fango/internal/types"
 )
 
 func main() {
@@ -52,39 +51,23 @@ func run(entry string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		return 2
 	}
-	prog, ck := result.Program, result.Checker
+	prog := result.Program
 
 	env := eval.NewEnv()
 	env.DefineProg(prog)
 	ioctx := eval.NewIOContext(stdin, stdout)
 	ioctx.ErrorWriter = stderr
 	ctx := context.Background()
-	_, err := eval.ForceIO(ctx, "main", env, ioctx)
+	_, err := eval.ForceIO(ctx, prog.Entry, env, ioctx)
 	var exitErr *natives.ExitError
 	switch {
 	case errors.As(err, &exitErr):
+		// Process.exit, or a non-zero status main returned.
 		return exitErr.Code
 	case err != nil:
+		// A runtime fault ends the program as a compiled one's panic does.
 		fmt.Fprintf(stderr, "%v\n", err)
-		return 1
+		return 2
 	}
-
-	// A main that isn't Unit (or a function) is observed through its value.
-	mainTy := prog.Defs[len(prog.Defs)-1].Type
-	for _, d := range prog.Defs {
-		if d.Name == "main" {
-			mainTy = d.Type
-		}
-	}
-	_, functionMain := mainTy.(*types.TFun)
-	if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain || prog.EntryDisplay == nil {
-		return 0
-	}
-	shown, err := eval.EvalIO(ctx, prog.EntryDisplay, env, ioctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
-		return 1
-	}
-	fmt.Fprintln(stdout, shown)
 	return 0
 }

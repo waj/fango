@@ -4,6 +4,7 @@ import Expect
 import Json
 import Result exposing (Result(..))
 import Test
+import Process
 
 tests : Test.Test {}
 tests = Test.test "json_value" {
@@ -11,4 +12,4 @@ tests = Test.test "json_value" {
     Expect.equal "{\"x\":[1,true,null]}" (Expect.ok (Json.stringify value))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -7,6 +7,7 @@ import IO
 import Result exposing (Result(..))
 import State
 import Test
+import Process
 
 effect Stop
     abort stop : Async.Task Int -> ()
@@ -53,4 +54,4 @@ tests = Test.test "async_task_cancellation" {
                  ] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

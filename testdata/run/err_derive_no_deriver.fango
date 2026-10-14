@@ -3,4 +3,4 @@ class Countable a
 
 type Box = Box Int deriving (Countable)
 
-main = 0
+main() = 0

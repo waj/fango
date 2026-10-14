@@ -9,7 +9,7 @@ import String
 import Writer
 
 main() =
-    case Process.args() of
+    case Process.runSystem Process.args of
         [raw] ->
             case String.toInt raw of
                 Just port ->
@@ -40,5 +40,5 @@ main() =
                                         }
                             }
                     } })
-                Nothing -> Process.exit 2
-        _ -> Process.exit 2
+                Nothing -> Process.exit (Process.status 2)
+        _ -> Process.exit (Process.status 2)

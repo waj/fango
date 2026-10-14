@@ -2,6 +2,7 @@ module ClassesRecordFields exposing (tests)
 
 import Expect
 import Test
+import Process
 class Inspect a
     inspect : a -> String
 
@@ -34,4 +35,4 @@ tests = Test.test "classes_record_fields" {
     Expect.equal "Named { label = \"a\", point = Point { x = 2, y = 2 } }" (show (shift (Named { label = "a", point = Point { x = 1.0, y = 2.0 } })))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

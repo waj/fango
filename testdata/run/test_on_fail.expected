@@ -1,20 +1,20 @@
 FAIL  onFail > adds context
 
-    test_on_fail.fango:15
+    test_on_fail.fango:16
     after splitting
     Expected: ["a"]
     Actual:   ["a", "b"]
 
 FAIL  onFail > nests
 
-    test_on_fail.fango:18
+    test_on_fail.fango:19
     outer
     inner
     the message
 
 FAIL  onFail > as a use item
 
-    test_on_fail.fango:24
+    test_on_fail.fango:25
     checking the pieces
     Expected: ["a", "c"]
     Actual:   ["a", "b"]

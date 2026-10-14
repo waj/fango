@@ -78,13 +78,13 @@ run : Int ->{IO, Fail Net.Error} ()
 run port = Net.withListener port (runListener port)
 
 main() =
-    case portFrom Process.args() of
+    case portFrom (Process.runSystem Process.args) of
         Nothing ->
             print "Usage: echo [PORT]"
-            Process.exit 2
+            Process.exit (Process.status 2)
         Just port ->
             case attempt { run port } of
                 Ok _ -> ()
                 Err error ->
                     print ("echo: " ++ error.message)
-                    Process.exit 1
+                    Process.exit Process.failure

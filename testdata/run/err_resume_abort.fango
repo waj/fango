@@ -1,6 +1,6 @@
 effect Fail error
     abort fail : error -> value
 
-main =
+main() =
     handle fail "no" on
         fail error -> resume error

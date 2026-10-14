@@ -7,6 +7,7 @@ import Http.Server
 import Reader
 import Test
 import Writer
+import Process
 
 inspect : String -> String
 inspect wire =
@@ -32,4 +33,4 @@ tests = Test.test "http_framing" {
     Expect.equal "Malformed \"HTTP/1.1 requires one Host header\"" (inspect "GET /bad HTTP/1.1\r\nHost: x\r\nHost: y\r\n\r\n")
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

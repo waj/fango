@@ -7,6 +7,7 @@ import Expect
 -- array-backed, so nothing else in the suite covers it.
 import List
 import Test
+import Process
 
 drop values =
     case values of
@@ -32,4 +33,4 @@ tests = Test.test "list_share" {
     Expect.notEqual b a
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

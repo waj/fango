@@ -6,6 +6,7 @@ import Expect
 -- it is the same list; Float equality says otherwise.
 import List
 import Test
+import Process
 
 nan = 0.0 / 0.0
 
@@ -23,4 +24,4 @@ tests = Test.test "list_nan_eq" {
     Expect.notEqual [nan] [nan]
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

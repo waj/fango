@@ -3,6 +3,7 @@ module DiscardBinding exposing (tests)
 import Expect
 import State
 import Test
+import Process
 type Pair = Pair Int Int
 
 loud : Int ->{State.State (List Observation)} Int
@@ -36,4 +37,4 @@ tests = Test.test "discard_binding" {
     Expect.equal [Integer 1, Integer 2, Text "done", Integer 3, Text "inline"] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

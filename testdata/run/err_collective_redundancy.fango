@@ -5,4 +5,4 @@ f pair = case pair of
     Pair True _ -> "true"
     Pair False _ -> "false"
     _ -> "unreachable"
-main = print (f (Pair True 1))
+main() = print (f (Pair True 1))

@@ -42,8 +42,15 @@ func installHost(t map[string]Spec) {
 		}
 		return rt.Args[index], nil
 	}}
-	t["Process.exit"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+	t["Process.exitWith"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return nil, &ExitError{Code: int(args[0].(int64))}
+	}}
+	t["Process.checkedStatus"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		code := args[0].(int64)
+		if code < 0 || code > 255 {
+			panic(fmt.Sprintf("exit status %d is out of range 0 through 255", code))
+		}
+		return code, nil
 	}}
 	t["Random.entropySeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
 		return stdlib.EntropySeed(), nil

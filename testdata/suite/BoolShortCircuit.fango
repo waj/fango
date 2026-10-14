@@ -3,6 +3,7 @@ module BoolShortCircuit exposing (tests)
 import Expect
 import State
 import Test
+import Process
 -- The right operand of `&&`/`||` is not evaluated when the left operand
 -- already decides the result, so its effects do not happen either.
 loud : Bool ->{State.State Int} Bool
@@ -23,4 +24,4 @@ tests = Test.test "bool_short_circuit" {
     Expect.equal (True, 1) (check { False || loud True })
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

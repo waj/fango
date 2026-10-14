@@ -12,7 +12,7 @@ import (
 func TestInterpolationNavigation(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "Main.fango")
-	data := "module Main exposing (main)\nmain =\n    name = \"Ada\"\n    \"Hello, #{name}\"\n"
+	data := "module Main exposing (main)\nitem =\n    name = \"Ada\"\n    \"Hello, #{name}\"\nmain() = ()\n"
 	if err := os.WriteFile(entry, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}

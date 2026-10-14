@@ -154,6 +154,9 @@ func (b *moduleCheck) inferGroup(group []int) {
 				obs[j].pred.Ty = types.SubstRigid(ck.Sub.Apply(o.pred.Ty), q.info.BodySubst)
 			}
 			q.info.Scheme, es = ck.qualify(q.info.Scheme, obs, q.given, q.d.Ann != nil, q.d.NameSpan)
+			if q.isMain {
+				es = append(es, ck.checkMainResult(q.info.Type, q.d)...)
+			}
 			for id, t := range q.info.BodySubst {
 				t = ck.Sub.Apply(t)
 				if v, ok := t.(*types.TVar); ok && !v.Rigid {

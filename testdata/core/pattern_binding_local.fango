@@ -1,5 +1,7 @@
 type Pair = Pair Int Int
 
-main =
+result =
     Pair left right = Pair 1 2
     left + right
+
+main() = print result

@@ -3,4 +3,4 @@
 loop : Int -> Int -> Int
 loop i acc = if i < 1 then acc else loop (i - 1) (acc + i)
 
-main = print (loop 2000000 0)
+main() = print (loop 2000000 0)

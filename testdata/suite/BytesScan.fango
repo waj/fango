@@ -3,6 +3,7 @@ module BytesScan exposing (tests)
 import Bytes exposing (Bytes)
 import Expect
 import Test
+import Process
 
 at : Maybe Int -> String
 at value =
@@ -32,4 +33,4 @@ tests = Test.test "bytes_scan" {
     Expect.equal "-" (at (Bytes.indexOfFrom 3 (Bytes.fromString "aa") aaa))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

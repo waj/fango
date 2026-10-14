@@ -30,7 +30,7 @@ func TestAttributeDiagnostics(t *testing.T) {
 		{"forward", "#[later()]\ntype T = T\nlater() = Label \"late\"", "STAGE ERROR"},
 		{"cycle", "#[case Meta.info (typeOf T) of\n    Meta.Visible info -> Label \"x\"\n    Meta.Opaque -> Label \"opaque\"\n]\ntype T = T", "COMPILE-TIME FAILURE"},
 		{"limit", "spin : () -> Label\nspin() = spin()\n#[spin()]\ntype T = T", "COMPILE-TIME LIMIT"},
-		{"stage leak", "main = case Meta.info (typeOf T) of\n    Meta.Visible info -> \"visible\"\n    Meta.Opaque -> \"opaque\"\ntype T = T", "STAGE ERROR"},
+		{"stage leak", "main() = print (case Meta.info (typeOf T) of\n    Meta.Visible info -> \"visible\"\n    Meta.Opaque -> \"opaque\")\ntype T = T", "STAGE ERROR"},
 		{"json duplicates", "type T = { #[Json.Key \"x\", Json.Key \"y\"] x : Int } deriving (Json.Encode)", "COMPILE-TIME FAILURE"},
 		{"json trailing duplicates", "type T = { x : Int #[Json.Key \"x\", Json.Key \"y\"] } deriving (Json.Encode)", "COMPILE-TIME FAILURE"},
 		{"json mixed duplicates", "type T = { #[Json.Key \"x\"] x : Int #[Json.Key \"y\"] } deriving (Json.Encode)", "COMPILE-TIME FAILURE"},
@@ -42,8 +42,8 @@ func TestAttributeDiagnostics(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			text := "import Meta\nimport Json\ntype Label = Label String\n" + tc.body + "\n"
-			if !strings.Contains(tc.body, "main =") {
-				text += "main = \"ok\"\n"
+			if !strings.Contains(tc.body, "main() =") {
+				text += "main() = print \"ok\"\n"
 			}
 			entry := attributeSource(t, t.TempDir(), "Main", text)
 			_, diagnostics, err := (&Session{}).Compile(entry)
@@ -77,7 +77,7 @@ func TestAttributeDataAndUnconsumedOptions(t *testing.T) {
 import Json
 #[[1, 2], 3, 2.5, 'a', True, (), typeOf Int]
 type T = { #[Json.Skip, Json.Key "ignored"] x : Int }
-main = "ok"
+main() = print "ok"
 `
 	compileEvents(t, attributeSource(t, t.TempDir(), "Main", body), nil)
 }
@@ -107,7 +107,8 @@ readLabel =
                         Options.Label text -> Meta.lift text
                 Meta.NoItems -> Meta.fail "missing label"
         Meta.Opaque -> Meta.fail "hidden"
-main = $(readLabel)
+result = $(readLabel)
+main() = print result
 `)
 	cache := newMemoryObjectCache()
 	first, _ := compileEvents(t, entry, cache)
@@ -135,7 +136,7 @@ main = $(readLabel)
 	}
 
 	second, events := compileEvents(t, entry, cache)
-	if stringDefinition(t, first, "Main.main") != "first" || stringDefinition(t, second, "Main.main") != "first" || len(events["check"]) != 0 {
+	if stringDefinition(t, first, "Main.result") != "first" || stringDefinition(t, second, "Main.result") != "first" || len(events["check"]) != 0 {
 		t.Fatalf("cached metadata changed: %v", events)
 	}
 	// Recheck the consumer while installing the producer's cached frozen data.
@@ -143,7 +144,7 @@ main = $(readLabel)
 	if err != nil {
 		t.Fatal(err)
 	}
-	attributeSource(t, root, "Main", strings.Replace(string(bytes), "main = $(readLabel)", "main = $(readLabel) ++ \"!\"", 1))
+	attributeSource(t, root, "Main", strings.Replace(string(bytes), "result = $(readLabel)", "result = $(readLabel) ++ \"!\"", 1))
 	_, events = compileEvents(t, entry, cache)
 	if events["checked-cache-hit"]["Lib"] != 1 {
 		t.Fatalf("producer was not installed from cache: %v", events)

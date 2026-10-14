@@ -3,7 +3,7 @@ effect Ask
 
 query _ = if ask () == "yes" then 40 else 0
 
-main =
+main() =
     print
         (handle query () on
             ask () -> resume "yes"

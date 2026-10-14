@@ -8,7 +8,7 @@ import (
 )
 
 func TestInterpolationDisplayEvidence(t *testing.T) {
-	ck, _, errs := check(t, "render x = \"value=#{x}\"\nmain = render 42\n")
+	ck, _, errs := check(t, "render x = \"value=#{x}\"\nmain() = print (render 42)\n")
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
@@ -17,8 +17,8 @@ func TestInterpolationDisplayEvidence(t *testing.T) {
 		t.Fatalf("%+v", scheme)
 	}
 	for _, input := range []string{
-		"type Secret = Secret\nmain = \"#{Secret}\"\n",
-		"render : Show a => a -> String\nrender x = \"#{x}\"\nmain = render 1\n",
+		"type Secret = Secret\nmain() = print (\"#{Secret}\")\n",
+		"render : Show a => a -> String\nrender x = \"#{x}\"\nmain() = print (render 1)\n",
 	} {
 		_, _, errs := check(t, input)
 		if len(errs) == 0 {

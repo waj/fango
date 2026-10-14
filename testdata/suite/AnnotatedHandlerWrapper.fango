@@ -3,6 +3,7 @@ module AnnotatedHandlerWrapper exposing (tests)
 import Expect
 import State
 import Test
+import Process
 -- An explicitly annotated handler wrapper with an open effect-row tail: the
 -- handled body's residual observation effect flows through the annotation's row variable.
 effect Ask
@@ -37,4 +38,4 @@ tests = Test.test "annotated_handler_wrapper" {
     Expect.equal [Text "yes", Integer 42] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

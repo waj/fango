@@ -2,6 +2,7 @@ module ClassesContextOrder exposing (tests)
 
 import Expect
 import Test
+import Process
 class Inspect a
     inspect : a -> String
 instance Show a => Inspect a
@@ -30,4 +31,4 @@ tests = Test.test "classes_context_order" {
     Expect.equal "both" (forward True)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

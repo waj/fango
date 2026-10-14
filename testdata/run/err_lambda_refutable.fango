@@ -1,5 +1,7 @@
 type Choice = Yes | No
 
-main =
+result =
     only = { Yes -> 1 }
     only Yes
+
+main() = print result

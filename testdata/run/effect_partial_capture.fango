@@ -4,7 +4,7 @@ effect Console
 send f = f "hello"
 program _ = send emit
 
-main =
+main() =
     handle program () on
         emit text ->
             print text

@@ -161,3 +161,12 @@ func panicMessage(recovered any) string {
 		return fmt.Sprint(v)
 	}
 }
+
+// ExitStatus applies the status a generated main returned. It runs after the
+// entry function completed normally, so every Fango scope has already
+// released; status 0 simply returns.
+func ExitStatus(code int64) {
+	if code != 0 {
+		os.Exit(int(code))
+	}
+}

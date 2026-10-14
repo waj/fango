@@ -4,6 +4,7 @@ import Bytes exposing (Bytes)
 import Expect
 import Reader exposing (Reader)
 import Test
+import Process
 
 -- Parsing propagates exactly the reader's effects.
 parse : Reader e ->{e} (Maybe Bytes, Bytes, Bool)
@@ -34,4 +35,4 @@ tests = Test.test "reader_memory" {
         })
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

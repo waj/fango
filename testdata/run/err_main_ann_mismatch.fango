@@ -1,2 +1,4 @@
-main : Int
-main = print 1
+main : () ->{IO} ()
+main() =
+    print "x"
+    "text"

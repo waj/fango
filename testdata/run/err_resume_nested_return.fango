@@ -4,7 +4,7 @@ effect Ask
 effect Pick
     pick : () -> Bool
 
-main =
+main() =
     print
         (handle ask () on
             ask () ->

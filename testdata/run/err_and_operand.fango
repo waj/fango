@@ -1,1 +1,1 @@
-main = print ("a" && True)
+main() = print ("a" && True)

@@ -2,9 +2,10 @@ module PrintString exposing (tests)
 
 import Expect
 import Test
+import Process
 tests : Test.Test {}
 tests = Test.test "print_string" {
     Expect.equal "foobar" ("foo" ++ "bar")
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

@@ -2,6 +2,7 @@ module PolyEffectNested exposing (tests)
 
 import Expect
 import Test
+import Process
 type Key a = Key a
 
 effect Echo
@@ -15,4 +16,4 @@ tests = Test.test "poly_effect_nested" {
         Key n -> Expect.equal 42 n
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

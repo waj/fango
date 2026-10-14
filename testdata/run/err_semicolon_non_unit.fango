@@ -1,1 +1,3 @@
-main = "not Unit"; 2
+value = "not Unit"; 2
+
+main() = print value

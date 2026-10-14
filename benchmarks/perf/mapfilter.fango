@@ -11,4 +11,4 @@ chain n =
 loop : Int -> Int -> Int
 loop i acc = if i < 1 then acc else loop (i - 1) (acc + chain 30000)
 
-main = print (loop 20 0)
+main() = print (loop 20 0)

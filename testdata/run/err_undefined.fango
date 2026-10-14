@@ -1,1 +1,1 @@
-main = missing + 1
+main() = print (missing + 1)

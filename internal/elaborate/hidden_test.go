@@ -21,8 +21,9 @@ func TestHiddenConstructorCore(t *testing.T) {
 
 func TestKnownHiddenPackageIsEliminated(t *testing.T) {
 	dump := elabInlined(t, `type Box a = Box state (state -> a)
-main = case Box 41 { n -> n + 1 } of
+result = case Box 41 { n -> n + 1 } of
     Box value observe -> observe value
+main() = print result
 `)
 	body := defDump(t, dump, "main")
 	if strings.Contains(body, "pack@") || strings.Contains(body, "open@") {
@@ -36,7 +37,7 @@ make n = Box n { value -> value + 1 }
 choose flag n = if flag then make n else Box (n, 1) { (value, increment) -> value + increment }
 read (Box value observe) = observe value
 run flag n = read (choose flag n)
-main = run True 41
+main() = print (run True 41)
 `)
 	body := defDump(t, dump, "run")
 	for _, marker := range []string{"pack@", "open@", "var choose", "var make", "var read"} {
@@ -64,7 +65,7 @@ run : Int -> (Int ->{e} Progress (Int, Int)) ->{e} Int
 run n step = fold (unfold n step)
 choose flag = if flag then unfold 0 { _ -> Done } else unfold () { _ -> Done }
 pureChoice flag = fold (choose flag)
-main = run 0 { _ -> Done }
+main() = print (run 0 { _ -> Done })
 `)
 	for _, name := range []string{"run", "pureChoice"} {
 		body := defDump(t, dump, name)
@@ -82,7 +83,7 @@ make : state -> (state ->{e} a) -> Source a e
 make initial step = { initial = initial, step = step }
 read : Source a e ->{e} a
 read (Source { initial = state, step = step }) = step state
-main = read (make 42 { n -> n })
+main() = print (read (make 42 { n -> n }))
 `)
 	for _, name := range []string{"_storage_make", "_storage_read"} {
 		body := defDump(t, dump, name)
@@ -96,8 +97,9 @@ func TestHiddenStorageDoesNotDuplicateGlobalValues(t *testing.T) {
 	dump := elabInlined(t, `type Box a = Box state (state -> a)
 stored : Box Int
 stored = Box 7 { value -> value }
-main = case stored of
+result = case stored of
     Box value observe -> observe value
+main() = print result
 `)
 	if strings.Contains(dump, "(def _storage_stored ") {
 		t.Fatal("duplicated global initializer")

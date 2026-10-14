@@ -2,6 +2,7 @@ module RecordsInferredAcrossLocal exposing (tests)
 
 import Expect
 import Test
+import Process
 -- A block-local function binding solves its own constraints early. That must
 -- not declare an enclosing obligation ambiguous: the code that decides `p` is
 -- the call below, which the checker has not reached when `label` is generalized.
@@ -18,4 +19,4 @@ tests = Test.test "records_inferred_across_local" {
     Expect.equal 7 (label 7)
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

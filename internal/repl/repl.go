@@ -179,6 +179,8 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	}
 	ck.InstanceImports[""] = prelude.PromptVisible
 	ck.CurrentOwner = ""
+	// A prompt has no entry point, so `main` is an ordinary name there.
+	ck.EntryName = ""
 	// Prompt values are lazy memo cells (doc/design.md, "Interpreter and REPL") — evaluated once, so their
 	// types stay monotypes (the block-binding monomorphism restriction).
 	// Functions and lambdas still generalize.

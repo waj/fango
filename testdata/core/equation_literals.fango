@@ -4,4 +4,4 @@ grade 0 = "zero"
 grade 1 = "one"
 grade _ = "many"
 
-main = grade 1
+main() = print (grade 1)

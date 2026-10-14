@@ -5,6 +5,7 @@ import Expect
 import List
 import State exposing (State(..))
 import Test exposing (Test, describe, test)
+import Process
 
 base : Dict.Dict String Int
 base = Dict.fromList [("c", 3), ("a", 1), ("b", 2)]
@@ -52,4 +53,4 @@ suite =
             ]
         , test "toList round-trips through fromList" { Expect.equal base (Dict.fromList (Dict.toList base)) }
         ]
-main() = Test.run suite
+main() = Process.runSystem { Test.run suite }

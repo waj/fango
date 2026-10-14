@@ -4,4 +4,4 @@ taken = 1
 
 Pair taken other = Pair 1 2
 
-main = taken + other
+main() = taken + other

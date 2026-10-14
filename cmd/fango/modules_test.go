@@ -62,19 +62,15 @@ func testMultiModuleEntry(t *testing.T, entry, want string) {
 		env := eval.NewEnv()
 		env.DefineProg(prog)
 		_ = ck
-		var shown any
+		var printed bytes.Buffer
 		err := withInterpreter(func() error {
-			if _, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{})); err != nil {
-				return err
-			}
-			var err error
-			shown, err = eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
+			_, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &printed))
 			return err
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := strings.TrimSpace(shown.(string)); got != strings.TrimSpace(string(want)) {
+		if got := strings.TrimSpace(printed.String()); got != strings.TrimSpace(string(want)) {
 			t.Fatalf("interpreter got %q, want %q", got, want)
 		}
 
@@ -86,9 +82,7 @@ func testMultiModuleEntry(t *testing.T, entry, want string) {
 	// The compiled leg goes through the real CLI, so multi-module fixtures
 	// cover `fango run` end to end while each case owns its build directory.
 	cmd := exec.Command(cliBinary(t), "run", entry)
-	cmd.Env = append(os.Environ(),
-		"FANGO_INTERNAL_PRINT_MAIN=1",
-		"FANGO_BUILD_DIR="+t.TempDir())
+	cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+t.TempDir())
 	var stdout, runErr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &runErr
 	if err := cmd.Run(); err != nil {
@@ -133,7 +127,7 @@ import Base
 instance Num a => Base.Inspect a
     inspect _ = "num"
 `)
-			entry := writeModuleFile(t, root, "Main.fango", "module Main exposing (main)\nimport Base\nimport Display\nimport Number\n"+tc.extra+"main = Base.inspect "+tc.value+" ++ \"/\" ++ Base.forward "+tc.value+" ++ \"/\" ++ Display.early()\n")
+			entry := writeModuleFile(t, root, "Main.fango", "module Main exposing (main)\nimport Base\nimport Display\nimport Number\n"+tc.extra+"main() = print (Base.inspect "+tc.value+" ++ \"/\" ++ Base.forward "+tc.value+" ++ \"/\" ++ Display.early())\n")
 			if tc.diagnostic != "" {
 				var stderr bytes.Buffer
 				if _, _, ok := compileFile(entry, &stderr); ok || !strings.Contains(stderr.String(), tc.diagnostic) {
@@ -158,7 +152,7 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 	src := t.TempDir()
 	entry := filepath.Join(src, "Main.fango")
 	dep := filepath.Join(src, "Dep.fango")
-	if err := os.WriteFile(entry, []byte("module Main exposing (main)\nimport Dep\nmain = Dep.answer\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("module Main exposing (main)\nimport Dep\nmain() = print (Dep.answer)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(dep, []byte("module Dep exposing (answer)\nanswer = 42\n"), 0o644); err != nil {
@@ -230,7 +224,7 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 		t.Fatal("unchanged entry package was rewritten logically")
 	}
 
-	if err := os.WriteFile(entry, []byte("module Main exposing (main)\nmain = 0\n"), 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("module Main exposing (main)\nmain() = print (0)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
@@ -253,7 +247,7 @@ func TestSiblingBuildInvalidatesTheOtherProgramsBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"First", "Second"} {
-		body := "module " + name + " exposing (main)\nimport Shared\nmain = Shared.answer\n"
+		body := "module " + name + " exposing (main)\nimport Shared\nmain() = print (Shared.answer)\n"
 		if err := os.WriteFile(filepath.Join(src, name+".fango"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -489,7 +483,6 @@ main() = print (Hash.twice (Hash.constant (print "before")))
 
 	buildDir := filepath.Join(root, "build")
 	t.Setenv("FANGO_BUILD_DIR", buildDir)
-	t.Setenv("FANGO_INTERNAL_PRINT_MAIN", "1")
 	dir, program, ok := ensureBuilt(entry, &stderr, nil, nil)
 	if !ok {
 		t.Fatalf("build: %s", stderr.String())
@@ -554,7 +547,7 @@ double value = value + value
 `)
 	entry := writeModuleFile(t, root, "Main.fango", `module Main exposing (main)
 import Dep
-main = print (Dep.double 2)
+main() = print (Dep.double 2)
 `)
 	before := generatedFile(t, emittedProject(t, entry), "modules/Dep/module.go")
 	for _, scalar := range []string{"scalar_Int", "scalar_Float"} {
@@ -570,7 +563,7 @@ type Box a = Box a
 	writeModuleFile(t, root, "Main.fango", `module Main exposing (main)
 import Added
 import Dep
-main = print (Dep.double 2.5)
+main() = print (Dep.double 2.5)
 `)
 	after := generatedFile(t, emittedProject(t, entry), "modules/Dep/module.go")
 	if !bytes.Equal(before, after) {
@@ -587,7 +580,7 @@ func TestModuleWideFunctions(t *testing.T) {
 			"    tag _ _ = later()\n" +
 			"type T = T deriving (Tag)\n" +
 			"later() = `\"ok\"`\n" +
-			"main = tag T", diagnostic: "STAGE ERROR"},
+			"main() = print (tag T)", diagnostic: "STAGE ERROR"},
 		{name: "deriver completed dependency", src: "import Meta\n" +
 			"class Tag a\n" +
 			"    tag : a -> String\n" +
@@ -595,74 +588,74 @@ func TestModuleWideFunctions(t *testing.T) {
 			"    tag _ _ = later()\n" +
 			"later() = `\"ok\"`\n" +
 			"type T = T deriving (Tag)\n" +
-			"main = tag T", want: "ok"},
+			"main() = print (tag T)", want: "ok"},
 		{name: "class function collision", src: `class C a
     same : a -> a
 same x = x
-main = 0`, diagnostic: "UNQUALIFIED COLLISION"},
+main() = print (0)`, diagnostic: "UNQUALIFIED COLLISION"},
 		{name: "noncontiguous equations", src: `same True = 1
 other() = 2
 same False = 0
-main = same True`, diagnostic: "UNQUALIFIED COLLISION"},
+main() = print (same True)`, diagnostic: "UNQUALIFIED COLLISION"},
 		{name: "internal component variable", src: `first unused stop = if stop then () else second()
 second() = first ({ x -> x }) True
-main = if second() == () then "ok" else "bad"`, want: "ok"},
+main() = print (if second() == () then "ok" else "bad")`, want: "ok"},
 		{name: "internal numeric default", src: `first() = second 1
 second n = if n == 0 then True else first()
-main = second 0`, want: "True"},
+main() = print (second 0)`, want: "True"},
 		{name: "annotated unused context", src: `left : Show a => a -> Bool -> a
 left x stop = if stop then x else right x True
 right x stop = if stop then x else left x True
-main = right 42 False`, want: "42"},
+main() = print (right 42 False)`, want: "42"},
 		{name: "local record context", src: `type Point = { x : Int }
 left p stop =
     get() = p.x
     if stop then get() else right p True
 right : Point -> Bool -> Int
 right p stop = left p stop
-main = left (Point { x = 42 }) True`, want: "42"},
+main() = print (left (Point { x = 42 }) True)`, want: "42"},
 		{name: "destructuring cycle", src: `(a, b) = later()
 later() = (a, b)
-main = a`, diagnostic: "CYCLIC VALUE DEFINITION"},
+main() = print (a)`, diagnostic: "CYCLIC VALUE DEFINITION"},
 		{name: "stage through instance", src: "import Meta\n" +
 			"class CodeFor a\n" +
 			"    codeFor : a -> Meta.Code\n" +
 			"instance CodeFor ()\n" +
 			"    codeFor _ = later()\n" +
-			"main = $(codeFor ())\n" +
+			"main() = print ($(codeFor ()))\n" +
 			"later() = `42`", diagnostic: "STAGE ERROR"},
 		{name: "annotated recursion", src: `left : a -> Bool -> a
 left x stop = if stop then x else right x True
 right : a -> Bool -> a
 right x stop = if stop then x else left x True
-main = show (left 42 False) ++ right "yes" False`, want: "42yes"},
+main() = print (show (left 42 False) ++ right "yes" False)`, want: "42yes"},
 		{name: "earlier stage group", src: "import Meta\n" +
 			"left n = if n == 0 then `42` else right (n - 1)\n" +
 			"right n = left n\n" +
-			"main = $(left 2)", want: "42"},
+			"main() = print ($(left 2))", want: "42"},
 		{name: "generated forward reference", src: "import Meta\n" +
 			"code() = `later 21`\n" +
 			"first() = $(code())\n" +
 			"later x = x * 2\n" +
-			"main = first()", want: "42"},
-		{name: "direct later stage", src: "import Meta\nmain = $(later())\nlater() = `42`", diagnostic: "STAGE ERROR"},
+			"main() = print (first())", want: "42"},
+		{name: "direct later stage", src: "import Meta\nmain() = print ($(later()))\nlater() = `42`", diagnostic: "STAGE ERROR"},
 		{name: "transitive later stage", src: "import Meta\n" +
 			"early() = later()\n" +
-			"main = $(early())\n" +
+			"main() = print ($(early()))\n" +
 			"later() = `42`", diagnostic: "STAGE ERROR"},
 		{name: "cycle through value", src: `value = function()
 function() = value
-main = value`, diagnostic: "CYCLIC VALUE DEFINITION"},
+main() = print (value)`, diagnostic: "CYCLIC VALUE DEFINITION"},
 		{name: "lambda remains sequential", src: `early x = later x
 later = { x -> x }
-main = early 42`, diagnostic: "NAMING ERROR"},
+main() = print (early 42)`, diagnostic: "NAMING ERROR"},
 		{name: "future function shadow", src: `early later = later
 later x = x
-main = early 42`, diagnostic: "SHADOWING"},
+main() = print (early 42)`, diagnostic: "SHADOWING"},
 		{name: "ordinary value dependency", src: `first() = later()
 value = 42
 later() = value
-main = first()`, want: "42"},
+main() = print (first())`, want: "42"},
 		{name: "source evidence", src: `class Label a
     label : a -> String
 instance Label a
@@ -671,7 +664,7 @@ first() = later (label True)
 instance Label Bool
     label _ = "late"
 later text = text ++ label True
-main = first()`, want: "earlylate"},
+main() = print (first())`, want: "earlylate"},
 		{name: "recursive source evidence", src: `class Label a
     label : a -> String
 instance Label a
@@ -680,11 +673,11 @@ first stop = if stop then label True else later True
 instance Label Bool
     label _ = "late"
 later stop = if stop then label True else first True
-main = first True ++ later True`, want: "earlylate"},
+main() = print (first True ++ later True)`, want: "earlylate"},
 		{name: "annotation rejects overclaim", src: `left : a -> Bool -> a
 left x stop = if stop then x + 1 else right x True
 right x stop = left x stop
-main = left 1 True`, diagnostic: "MISSING CONSTRAINT"},
+main() = print (left 1 True)`, diagnostic: "MISSING CONSTRAINT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			entry := writeModuleFile(t, t.TempDir(), "Main.fango", tc.src+"\n")

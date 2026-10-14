@@ -20,10 +20,10 @@ type Box a = Box a
 		{"same context reordered", "instance (Show a, Eq a) => Inspect a\n    inspect x = \"first\"\ninstance (Eq b, Show b, Eq b) => Inspect b\n    inspect x = \"second\"", "OVERLAPPING INSTANCE"},
 		{"default does not imply context", "instance Inspect a\n    inspect x = \"fallback\"\ninstance Show a => Inspect a\n    inspect x = show x\nf : Show a => a -> String\nf x = inspect x", "MISSING CONSTRAINT"},
 		{"fallback cannot hide earlier blanket edge", "instance Other a => Inspect a\n    inspect x = other x\ninstance Inspect a\n    inspect x = \"fallback\"\ninstance Inspect a => Other a\n    other x = inspect x", "INSTANCE CONTEXT"},
-		{"cyclic guard is an error", "instance Inspect (Box a)\n    inspect x = \"fallback\"\ninstance Other (Box a) => Inspect (Box a)\n    inspect x = \"conditional\"\ninstance Inspect (Box a) => Other (Box a)\n    other x = \"cycle\"\nmain = inspect (Box True)", "INSTANCE RESOLUTION"},
-		{"growing guard is an error", "instance Inspect (Box a)\n    inspect x = \"fallback\"\ninstance Inspect (Box (Box a)) => Inspect (Box a)\n    inspect x = \"conditional\"\nmain = inspect (Box True)", "INSTANCE RESOLUTION"},
-		{"no fallback to less specific head", "instance Inspect a\n    inspect x = \"fallback\"\ninstance Other a => Inspect (Box a)\n    inspect x = \"conditional\"\nmain = inspect (Box True)", "MISSING INSTANCE"},
-		{"no numeric seed", "instance Inspect a\n    inspect x = \"fallback\"\nmain = inspect { x -> x }", "AMBIGUOUS CONSTRAINT"},
+		{"cyclic guard is an error", "instance Inspect (Box a)\n    inspect x = \"fallback\"\ninstance Other (Box a) => Inspect (Box a)\n    inspect x = \"conditional\"\ninstance Inspect (Box a) => Other (Box a)\n    other x = \"cycle\"\nmain() = print (inspect (Box True))", "INSTANCE RESOLUTION"},
+		{"growing guard is an error", "instance Inspect (Box a)\n    inspect x = \"fallback\"\ninstance Inspect (Box (Box a)) => Inspect (Box a)\n    inspect x = \"conditional\"\nmain() = print (inspect (Box True))", "INSTANCE RESOLUTION"},
+		{"no fallback to less specific head", "instance Inspect a\n    inspect x = \"fallback\"\ninstance Other a => Inspect (Box a)\n    inspect x = \"conditional\"\nmain() = print (inspect (Box True))", "MISSING INSTANCE"},
+		{"no numeric seed", "instance Inspect a\n    inspect x = \"fallback\"\nmain() = print (inspect { x -> x })", "AMBIGUOUS CONSTRAINT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, errs := check(t, prefix+tc.src)

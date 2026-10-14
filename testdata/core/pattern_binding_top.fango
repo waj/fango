@@ -4,4 +4,4 @@ type Pair = Pair Int Int
 
 Pair leftCount rightCount = Pair 1 2
 
-main = leftCount + rightCount
+main() = print (leftCount + rightCount)

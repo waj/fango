@@ -2,9 +2,10 @@ module Minint exposing (tests)
 
 import Expect
 import Test
+import Process
 fixtureBody() = (0 - 9223372036854775807) - 1
 
 tests : Test.Test {}
 tests = Test.test "minint" { Expect.equal (-9223372036854775807 - 1) fixtureBody() }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

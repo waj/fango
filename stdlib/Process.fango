@@ -1,22 +1,32 @@
 {-# no-prelude #-}
 -- The running program's arguments and exit status. The prelude does not
 -- expose it; import `Process`.
-module Process exposing (args, exit)
+--
+-- Arguments are the `Arguments` effect: code that reads them performs it, and
+-- the program chooses where they come from by running that code under
+-- `runSystem`, for the real command line, or `withArgs`, for a fixed list.
+--
+-- A program ends normally by returning from `main`: `()` is status 0, and a
+-- `Status` is that status, applied after every scope has been released and
+-- every task has finished. `exit` is the drastic alternative that ends the
+-- process at once.
+module Process exposing (Arguments(..), Status, exit, failure, runSystem, status, success, withArgs)
 
 import Basics exposing (..)
 import IO exposing (IO)
 import List exposing (List)
+
+-- Reading the program's command-line arguments.
+effect Arguments
+    -- The arguments, without the program name. `fango run` passes every
+    -- argument after the source file.
+    args : () -> List String
 
 argCount : () ->{IO} Int
 argCount = native
 
 argAt : Int ->{IO} String
 argAt = native
-
--- Ends the program at once with the given status. In the interpreter or the
--- REPL it ends the program without ending the session.
-exit : Int ->{IO} ()
-exit = native
 
 argsFrom : Int -> Int ->{IO} List String
 argsFrom index count =
@@ -25,7 +35,69 @@ argsFrom index count =
     else
         [argAt index | argsFrom (index + 1) count]
 
--- The program's command-line arguments, without the program name. `fango
--- run` passes every argument after the source file.
-args : () ->{IO} List String
-args() = argsFrom 0 argCount()
+-- Answers `args` with the real command line.
+runSystem : (() ->{Arguments | e} a) ->{IO | e} a
+runSystem action =
+    handle action() on
+        args () -> resume (argsFrom 0 argCount())
+
+-- Answers `args` with a fixed list, so code that reads arguments can run
+-- without a command line.
+--
+-- ```fango
+-- import List
+-- import Process
+--
+-- count = Process.withArgs ["a", "b"] { List.length (Process.args ()) }
+--
+-- count == 2
+-- ```
+withArgs : List String -> (() ->{Arguments | e} a) ->{e} a
+withArgs given action =
+    handle action() on
+        args () -> resume given
+
+-- A process exit status, from 0 through 255.
+type Status = Status Int
+
+checkedStatus : Int -> Int
+checkedStatus = native
+
+-- Status 0, which a `main` returning `()` also ends with.
+success : Status
+success = Status 0
+
+-- Status 1.
+failure : Status
+failure = Status 1
+
+-- The status with this number. A number outside 0 through 255 is a runtime
+-- fault, like a division by zero, so a requested failure can never wrap
+-- around to success.
+--
+-- ```fango
+-- import Process
+--
+-- Process.status 0 == Process.success
+-- Process.status 1 == Process.failure
+-- ```
+status : Int -> Status
+status code = Status (checkedStatus code)
+
+-- Statuses are equal when their numbers are.
+instance Eq Status
+    (==) (Status x) (Status y) = x == y
+
+exitWith : Int ->{IO} ()
+exitWith = native
+
+-- Ends the process at once with the status, from any task. It runs no Fango
+-- cleanup: no `bracket` or `finally` release, no buffered `Writer` flush, no
+-- task cancellation or draining. Earlier console output is kept. In the
+-- interpreter or the REPL it ends the program without ending the session.
+-- To finish normally, return the status from `main` instead.
+exit : Status ->{IO} a
+exit code =
+    case code of
+        Status number -> exitWith number
+    exit code

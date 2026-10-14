@@ -1,4 +1,4 @@
 (core
   (def x Bool (if Bool (bool true Bool) (bool false Bool) (bool false Bool)))
   (def y Bool (if Bool (bool false Bool) (bool true Bool) (bool true Bool)))
-  (def main Bool (if Bool (var x Bool) (bool true Bool) (if Bool (var y Bool) (bool true Bool) (bool false Bool)))))
+  (def main (params _) () ->{IO} () (let _h0 () (if Bool (var x Bool) (bool true Bool) (if Bool (var y Bool) (bool true Bool) (bool false Bool))) (app/worker @[Bool] (var Console.print _dictionary_Display Bool -> Bool ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_426f6f6c _dictionary_Display Bool) (var _h0 Bool) ()))))

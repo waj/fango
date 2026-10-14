@@ -14,4 +14,4 @@ applyAll fs x =
         Done -> x
         Push f rest -> applyAll rest (f x)
 
-main = print (applyAll (build 3 Done) 0)
+main() = print (applyAll (build 3 Done) 0)

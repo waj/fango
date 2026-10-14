@@ -5,4 +5,4 @@ flip Yes = No
 flip No = Yes
 flip _ = Yes
 
-main = flip Yes
+main() = ignore (flip Yes)

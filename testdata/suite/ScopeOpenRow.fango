@@ -5,6 +5,7 @@ import Fail exposing (Fail)
 import Result exposing (Result(..))
 import Runtime.Scope
 import Test
+import Process
 
 -- A cleanup scope whose callbacks use a lexical effect and the open row of
 -- the enclosing function, and one whose release is a callback value: both
@@ -42,4 +43,4 @@ tests = Test.test "scope_open_row" {
     Expect.equal ["leave again", "release bad", "acquire bad", "enter again", "leave outer", "leave inner", "release ok", "acquire ok", "enter inner", "enter outer"] lines
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

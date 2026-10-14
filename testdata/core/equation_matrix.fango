@@ -8,4 +8,4 @@ both Yes No = 2
 both No Yes = 1
 both No No = 0
 
-main = both Yes No
+main() = print (both Yes No)

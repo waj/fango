@@ -3,6 +3,7 @@ module PerArrowEffects exposing (tests)
 import Expect
 import State
 import Test
+import Process
 make : () ->{State.State (List String)} () ->{State.State (List String)} ()
 make() =
     recordText "create"
@@ -25,4 +26,4 @@ tests = Test.test "per_arrow_effects" {
     Expect.equal ["create", "between", "apply"] observations()
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

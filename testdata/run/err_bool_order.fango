@@ -1,1 +1,1 @@
-main = print (True < False)
+main() = print (True < False)

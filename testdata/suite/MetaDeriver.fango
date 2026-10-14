@@ -6,6 +6,7 @@ import Expect
 -- way, in the bundled `Derive` module.
 import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..), TypeInfo(..))
 import Test
+import Process
 
 class Tag a
     tag : a -> String
@@ -61,4 +62,4 @@ tests = Test.test "meta_deriver" {
     Expect.equal True (empty == Pair { left = 0, right = "-" })
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

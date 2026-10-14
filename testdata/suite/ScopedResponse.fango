@@ -4,6 +4,7 @@ import Bytes
 import Expect
 import Reader
 import Test
+import Process
 
 type Reply e = { render : () ->{e} Bytes.Bytes }
 
@@ -23,4 +24,4 @@ tests = Test.test "scoped_response" {
     Expect.equal (Just "abc") (Bytes.toString (run make))
 }
 
-main() = Test.run tests
+main() = Process.runSystem { Test.run tests }

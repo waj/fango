@@ -1,2 +1,2 @@
 add x y = x + y
-main = print add
+main() = print add
