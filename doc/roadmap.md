@@ -107,6 +107,14 @@ for otherwise unavailable semantics or measured performance needs.
   localized formatting, custom-pattern parsing, automatic JSON codecs, and
   public monotonic timing APIs remain deferred until concrete consumers need them.
 
+## IO interception
+
+[IO interception through domain effects](roadmap-io-interception.md) proposes
+explicit real and simulated runners for console, files, handles, networking,
+and process services. Its API catalogue, resource alternatives, and delivery
+gates are proposals for review; existing Clock, Random, and HTTP domain
+handlers remain their implemented foundations.
+
 ## HTTP and a concurrent server
 
 [HTTP/1.1 framing and the concurrent server](../stdlib/Http.fango) are

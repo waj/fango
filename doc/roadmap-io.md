@@ -6,6 +6,10 @@ and [socket layer](../stdlib/Net.fango). Memory fixtures and loopback
 checks cover malformed framing, truncated bodies, oversized headers, chunked
 requests, keep-alive, simultaneous clients, and GZip.
 
+The [IO interception proposal](roadmap-io-interception.md) owns replacement
+of the Net transport with checked real or simulated interpretations; protocol
+variants and HTTP server policy remain on this page.
+
 Server-side TLS and HTTP/2 are deferred; the
 [client](../stdlib/Http/Client.fango) supports TLS. A policy for request bodies that an application
 leaves unread is also deferred: the current server closes a connection when

@@ -76,6 +76,10 @@ and [server GZip](../stdlib/Http/GZip.fango).
 
 ## Open questions
 
+- [IO interception](roadmap-io-interception-api.md#http-client-and-server)
+  proposes an explicit client runner over an interpreted Net transport.
+  That proposal owns its API and integration gates; the transport policies
+  below remain independent questions.
 - Should sockets close when an `Async` task is cancelled (using
   `Async.contextToken`), or should synchronous `Net` calls with deadlines be
   enough? `Net` already has `…Async` variants that take a context token, so

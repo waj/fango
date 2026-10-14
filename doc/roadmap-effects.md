@@ -164,9 +164,11 @@ These are not automatically prerequisites for the first coroutine milestone:
   Invalid use of an effect parameter as both an ordinary type and a row
   reports a kind mismatch; declaration acceptance alone does not establish
   support for row-kinded effect parameters.
-- **Complete builtin IO interception.** It still depends on actual native
-  declarations and evidence fitting a checked operation ABI. Fixed-signature
-  domain effects and suspending interpretations remain useful independently.
+- **Complete builtin IO interception.** The
+  [IO interception proposal](roadmap-io-interception.md) owns domain effects,
+  real and simulated runners, resource choices, and the coverage boundary.
+  Native-default interception still requires declared operations and a
+  checked operation ABI; arbitrary private sidecar actions are not covered.
 - **Escaping coroutine owners and raw resumptions.** The chosen owner stays
   scoped. Dynamic allocation means allocation into a live owner, not detachment
   from every owner. Raw resume escape and continuation cloning are not included.
