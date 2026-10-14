@@ -6,7 +6,7 @@ type Step = Emit Int | Stop
 next : Int -> Step
 next n = if n > 0 then Emit n else Stop
 
-countdown : Int ->{IO} ()
+countdown : Int ->{Console} ()
 countdown n =
     case next n of
         Emit k ->

@@ -69,12 +69,12 @@ portFrom arguments =
                 Nothing -> Nothing
         _ -> Nothing
 
-runListener : Int -> Net.Listener ->{IO, Fail Net.Error} ()
+runListener : Int -> Net.Listener ->{IO, Console, Fail Net.Error} ()
 runListener port listener =
     print ("Echo server listening on port " ++ show port)
     serve listener
 
-run : Int ->{IO, Fail Net.Error} ()
+run : Int ->{IO, Console, Fail Net.Error} ()
 run port = Net.withListener port (runListener port)
 
 main() =

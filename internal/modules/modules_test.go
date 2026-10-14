@@ -67,7 +67,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module)
 	}
-	if strings.Join(got, ",") != "Runtime.Native,Text.Builder,Text.Builder,Basics,Meta,Derive,List,Maybe,Bytes,Result,Tuple,String,String,Trace,Trace,Failure,Fail,IO,IO,Console,Console,Prelude,B,A,Z,Main" {
+	if strings.Join(got, ",") != "Runtime.Native,Text.Builder,Text.Builder,Basics,Meta,Derive,List,Maybe,Bytes,Result,Tuple,String,String,Trace,Trace,Failure,Fail,IO,IO,Runtime.Entry,Console,Console,Prelude,B,A,Z,Main" {
 		t.Fatalf("order %v", got)
 	}
 	if r.Entry != "Main.main" {
@@ -80,7 +80,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, unit := range r.Units {
 		units = append(units, unit.Name+":"+strings.Join(unit.Imports, "+"))
 	}
-	if strings.Join(units, ",") != "Runtime.Native:,Text.Builder:Runtime.Native,Basics:Text.Builder,Meta:Basics,Derive:Basics+Meta+Text.Builder,List:Basics+Text.Builder,Maybe:Basics,Bytes:Basics+List+Maybe+Text.Builder,Result:Basics,Tuple:Basics+Text.Builder,String:Basics+List+Maybe,Trace:Basics+List+Runtime.Native+String,Failure:Basics+List+Maybe+Text.Builder+Trace,Fail:Basics+Failure+List+Result+Trace,IO:Basics+Bytes+Fail+Maybe+Result+Runtime.Native,Console:Basics+Fail+IO+Maybe,B:,A:B,Z:,Main:Z+A" {
+	if strings.Join(units, ",") != "Runtime.Native:,Text.Builder:Runtime.Native,Basics:Text.Builder,Meta:Basics,Derive:Basics+Meta+Text.Builder,List:Basics+Text.Builder,Maybe:Basics,Bytes:Basics+List+Maybe+Text.Builder,Result:Basics,Tuple:Basics+Text.Builder,String:Basics+List+Maybe,Trace:Basics+List+Runtime.Native+String,Failure:Basics+List+Maybe+Text.Builder+Trace,Fail:Basics+Failure+List+Result+Trace,IO:Basics+Bytes+Fail+Maybe+Result+Runtime.Native,Runtime.Entry:Basics+IO+Meta,Console:Basics+Bytes+Fail+IO+List+Maybe+Runtime.Entry,B:,A:B,Z:,Main:Z+A" {
 		t.Fatalf("units %v", units)
 	}
 	if !r.Units[len(r.Units)-1].Entry {
@@ -104,7 +104,7 @@ func TestPreludeFollowsBundledImports(t *testing.T) {
 	if len(errs) > 0 {
 		t.Fatalf("Prelude: %v", errs)
 	}
-	wantOwners := []string{"Basics", "Bytes", "Console", "Derive", "Fail", "Failure", "IO", "List", "Maybe", "Meta", "Prelude", "Regex", "Result", "Runtime.Native", "String", "Text.Builder", "Trace", "Tuple"}
+	wantOwners := []string{"Basics", "Bytes", "Console", "Derive", "Fail", "Failure", "IO", "List", "Maybe", "Meta", "Prelude", "Regex", "Result", "Runtime.Entry", "Runtime.Native", "String", "Text.Builder", "Trace", "Tuple"}
 	var gotOwners []string
 	for owner := range p.Owners {
 		gotOwners = append(gotOwners, owner)
@@ -179,7 +179,7 @@ func TestBundledModules(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module+":"+m.Path)
 	}
-	want := "Runtime.Native:<stdlib>/Runtime/Native.fango,Text.Builder:<stdlib>/Text/Builder.fango,Text.Builder:<stdlib>/Text/Builder.native.go,Basics:<stdlib>/Basics.fango,Meta:<stdlib>/Meta.fango,Derive:<stdlib>/Derive.fango,List:<stdlib>/List.fango,Maybe:<stdlib>/Maybe.fango,Bytes:<stdlib>/Bytes.fango,Range:<stdlib>/Range.fango,Result:<stdlib>/Result.fango,Tuple:<stdlib>/Tuple.fango,String:<stdlib>/String.fango,String:<stdlib>/String.native.go,Trace:<stdlib>/Trace.fango,Trace:<stdlib>/Trace.native.go,Failure:<stdlib>/Failure.fango,Fail:<stdlib>/Fail.fango,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,Console:<stdlib>/Console.fango,Console:<stdlib>/Console.native.go,Prelude:<stdlib>/Prelude.fango,Main:Main.fango"
+	want := "Runtime.Native:<stdlib>/Runtime/Native.fango,Text.Builder:<stdlib>/Text/Builder.fango,Text.Builder:<stdlib>/Text/Builder.native.go,Basics:<stdlib>/Basics.fango,Meta:<stdlib>/Meta.fango,Derive:<stdlib>/Derive.fango,List:<stdlib>/List.fango,Maybe:<stdlib>/Maybe.fango,Bytes:<stdlib>/Bytes.fango,Range:<stdlib>/Range.fango,Result:<stdlib>/Result.fango,Tuple:<stdlib>/Tuple.fango,String:<stdlib>/String.fango,String:<stdlib>/String.native.go,Trace:<stdlib>/Trace.fango,Trace:<stdlib>/Trace.native.go,Failure:<stdlib>/Failure.fango,Fail:<stdlib>/Fail.fango,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,Runtime.Entry:<stdlib>/Runtime/Entry.fango,Console:<stdlib>/Console.fango,Console:<stdlib>/Console.native.go,Prelude:<stdlib>/Prelude.fango,Main:Main.fango"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("manifest = %v, want %s", got, want)
 	}

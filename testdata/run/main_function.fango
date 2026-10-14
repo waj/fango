@@ -1,2 +1,2 @@
-main : () ->{IO} ()
+main : () ->{Console} ()
 main _ = print "ok"

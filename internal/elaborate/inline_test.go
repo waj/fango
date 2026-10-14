@@ -56,7 +56,7 @@ func TestInlineKeepsRecursiveAndEffectfulCalls(t *testing.T) {
 	dump := elabInlined(t, `count : Int -> Int
 count n = if n == 0 then 0 else count (n - 1)
 
-shout : String ->{IO} ()
+shout : String ->{Console} ()
 shout text = print text
 
 main() =

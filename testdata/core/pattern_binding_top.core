@@ -3,4 +3,5 @@
   (def _pattern_1 Pair (app/ctor (var Pair Int -> Int -> Pair) (int 1 Int) (int 2 Int) Pair))
   (def leftCount Int (case Int (var _pattern_1 Pair) _s0 (switchctor _s0 (Pair _c3 _c4 (leaf (let _pattern1 Int (var _c3 Int) (let _pattern2 Int (var _c4 Int) (var _pattern1 Int))))))))
   (def rightCount Int (case Int (var _pattern_1 Pair) _s0 (switchctor _s0 (Pair _c3 _c4 (leaf (let _pattern1 Int (var _c3 Int) (let _pattern2 Int (var _c4 Int) (var _pattern2 Int))))))))
-  (def main (params _) () ->{IO} () (app/worker @[Int] (var Console.print _dictionary_Display Int -> Int ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_496e74 _dictionary_Display Int) (native Basics.intAdd (var leftCount Int) (var rightCount Int) Int) ())))
+  (def main (params _) (effects Console.Console@poly) (control poly) () ->{Console} () (app/worker/poly @[Int] evidence[Console.Console@poly] (var Console.print _dictionary_Display Int -> Int ->{Console} ()) (var Basics._instance_4261736963732e446973706c6179_496e74 _dictionary_Display Int) (native Basics.intAdd (var leftCount Int) (var rightCount Int) Int) ()))
+  (def main#entry (params _) () ->{IO} () (app/worker @[()] (var Console.runSystem (() ->{Console} ()) ->{IO} ()) (lam/poly _ () ->{Console} () (app/worker/poly evidence[Console.Console@poly] (var main () ->{Console} ()) (unit ()) ())) ())))

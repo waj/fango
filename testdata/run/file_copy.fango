@@ -23,7 +23,7 @@ copy from to =
         File.withFile from ({ input ->
             File.withOutput to ({ output -> copyLines input output 0 }) }) })
 
-report : String -> Result Error Int ->{IO} ()
+report : String -> Result Error Int ->{Console} ()
 report label outcome =
     case outcome of
         Ok count -> print (label ++ ": copied " ++ show count ++ " lines")

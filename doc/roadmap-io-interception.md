@@ -177,8 +177,8 @@ run outside all applications handled by their own activation.
 Implemented: see [default handlers](reference/commands.md#default-handlers),
 [Runtime.Entry](../stdlib/Runtime/Entry.fango), and the
 [design](design/pipeline.md#entry-assembly). `Arguments`, `Random`, `Clock`,
-and `Http` declare defaults; Console, File, and Net declare theirs as their
-milestones land. `Test.run` is unchanged by it: a test program's `main` row
+`Http`, and `Console` declare defaults; File and Net declare theirs as
+their milestones land. `Test.run` is unchanged by it: a test program's `main` row
 decides which real services its tests may reach, and services a test mocks
 itself never reach `main`.
 
@@ -191,10 +191,10 @@ pass another onward, call the outer operation explicitly:
 ```text
 quiet action =
     handle action() on
-        Console.Driver.writeBytes _ _ -> resume ()
-        Console.Driver.readLine () -> resume Console.Driver.readLine()
-        Console.Driver.readBytes count ->
-            resume (Console.Driver.readBytes count)
+        Console.writeBytes _ _ -> resume ()
+        Console.readLine () -> resume Console.readLine()
+        Console.readBytes count ->
+            resume (Console.readBytes count)
 ```
 
 The forwarded calls select the enclosing handler, not `quiet` again. Their
@@ -207,11 +207,10 @@ instances, exhaustiveness, and diagnostics. Do not smuggle it into this library
 proposal. Complete handlers mean that adding a public operation requires updating every
 handler of the effect; prefer ordinary derived helpers when they suffice.
 
-Driver modules are candidate public authoring APIs, not merely private
-implementation names. If users are expected to write custom handlers, the
-effect's operation names and all argument/result types they need must be
-accessible. Internal native functions and raw runtime tokens need not become
-public to accomplish that.
+Settled with IOI2: an effect is declared in its domain module, such as
+`Console.Console`, and its operations and the types they need are public, so
+custom handlers name them directly. There are no separate driver modules.
+Internal native functions and raw runtime tokens stay private.
 
 ## Design choices requiring review
 
@@ -301,9 +300,8 @@ committed separately.
 2. **IOI5.** DONE: see [Process](../stdlib/Process.fango) and
    [entry points](reference/commands.md#entry-points).
 3. **IOI9.** DONE: see [default handlers](reference/commands.md#default-handlers).
-4. **IOI2.** The `Console` effect and its runners, with its default declared.
-   Settle public driver visibility here, the first published driver, and apply
-   the same rule to later ones.
+4. **IOI2.** DONE: see [Console](../stdlib/Console.fango). Effects are
+   declared in their domain module with public operations.
 5. **IOI4, whole-file part.** Whole-file and directory operations behind
    `FileSystem`, with `runSystem`, `runMemory`, the `Image` fixture API, and
    its default. These need no handles, so they precede IOI3.
@@ -328,6 +326,9 @@ chosen runner signatures preserve residual rows and distinguish pure mocks
 from real IO. The other effects-roadmap items remain independently scoped.
 
 ### IOI2 Console interpretation
+
+Status: DONE. The contract lives in [Console](../stdlib/Console.fango) and
+the [standard streams design](design/effects.md#standard-streams).
 
 Implement the three-operation `Console` effect covering the Prelude helpers
 and all standard-stream access, preserving public printing and line semantics,
@@ -438,8 +439,8 @@ inside a mock; the interpreter and compiler agree on each supported behavior.
 
 Status: DONE. The contract lives in
 [default handlers](reference/commands.md#default-handlers) and
-[Runtime.Entry](../stdlib/Runtime/Entry.fango); Console, File, and Net add
-their defaults with IOI2, IOI4, and IOI6.
+[Runtime.Entry](../stdlib/Runtime/Entry.fango); Console added its default
+with IOI2, and File and Net add theirs with IOI4 and IOI6.
 
 Implement [entry assembly](#entry-assembly): the `Runtime.Entry` module with
 its `DefaultHandler` attribute type and `assemble` metaprogram, and the

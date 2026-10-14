@@ -59,9 +59,9 @@ main() = print (0)
 }
 
 func TestLocalWorkerCapturesUnitStatement(t *testing.T) {
-	prog := elabPoly(t, `outer : Int ->{IO} Int
+	prog := elabPoly(t, `outer : Int ->{Console} Int
 outer value =
-    saved : () ->{IO} Int
+    saved : () ->{Console} Int
     saved () =
         print value
         42

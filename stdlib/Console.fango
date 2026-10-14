@@ -1,38 +1,202 @@
 {-# no-prelude #-}
--- Line-oriented console output and input.
+-- The program's standard streams as the `Console` effect.
 --
--- These are the prelude's `print`, `write`, and `readLine`. They treat a
--- failure of standard input or output as fatal; `IO` offers the same
--- operations on handles with recoverable errors.
-module Console exposing (print, readLine, write)
+-- `print`, `write`, and `readLine` are the prelude's; `writeTo` reaches
+-- standard error, and `source` and `sink` adapt the streams for `Reader` and
+-- `Writer`. None of them raises an error: the runner owns failure. A program's
+-- `main` runs under `runSystem` unless it installs another runner, and
+-- `runTest` answers from bytes and captures the output exactly.
+--
+-- ```fango
+-- import Bytes
+-- import Console
+--
+-- captured = Console.runTest (Bytes.fromString "Ana\n") {
+--     print "Your name?"
+--     case readLine() of
+--         Nothing -> print "No input"
+--         Just line -> print ("Hello, " ++ line.text)
+--     }
+--
+-- captured.stdout == Bytes.fromString "Your name?\nHello, Ana\n"
+-- captured.remaining == Bytes.empty
+-- ```
+module Console exposing (Console(..), Output(..), Transcript(..), print, runSystem, runTest, sink, source, write, writeTo)
 
 import Basics exposing (..)
+import Bytes exposing (Bytes, Sink(..), Source(..))
 import Fail
-import IO exposing (IO, Line)
+import IO exposing (IO, Line(..))
+import List exposing (List(..))
 import Maybe exposing (Maybe(..))
+import Runtime.Entry
+
+-- A standard output stream.
+type Output
+    -- Standard output.
+    = Stdout
+    -- Standard error.
+    | Stderr
+    deriving (Eq, Show)
+
+-- The standard streams. Handlers answer every operation; none reports an
+-- error.
+#[Runtime.Entry.DefaultHandler `runSystem`]
+effect Console
+    -- The next line of standard input with its ending, or `Nothing` at the
+    -- end of input.
+    readLine : () -> Maybe Line
+    -- Up to `count` bytes of standard input, which may be fewer, or `Nothing`
+    -- at the end of input. A count of zero or less answers empty bytes while
+    -- input remains.
+    readBytes : Int -> Maybe Bytes
+    -- Writes all the bytes to the stream.
+    writeBytes : Output -> Bytes -> ()
+
+-- Writes the text to the stream as it is, without a newline.
+writeTo : Output -> String ->{Console} ()
+writeTo output text = writeBytes output (Bytes.fromString text)
+
+-- Writes the text to standard output as it is, without a newline.
+write : String ->{Console} ()
+write text = writeTo Stdout text
+
+-- Writes the value's `display` text and a newline to standard output.
+print : Display a => a ->{Console} ()
+print value = write (display value ++ "\n")
+
+chunk : Int
+chunk = 65536
+
+-- Standard input as a byte source for `Reader`.
+source : Source {Console}
+source = Source { pull = { readBytes chunk } }
+
+-- An output stream as a byte sink for `Writer`.
+sink : Output -> Sink {Console}
+sink output = Sink { write = { data -> writeBytes output data } }
+
+-- The runners own stream failures; this one ends the program with the
+-- host's diagnostic, which never becomes program output.
 
 panic : String ->{IO} ()
 panic = native
 
--- Writes the text to standard output as it is, without a newline. A write
--- error ends the program.
-write : String ->{IO} ()
-write text =
-    handle IO.write IO.stdout text on
-        Fail.fail error -> panic (IO.describeError error)
+failed : IO.Error ->{IO} a
+failed error =
+    panic (IO.describeError error)
+    failed error
+
+handleFor : Output -> IO.Handle
+handleFor output =
+    case output of
+        Stdout -> IO.stdout
+        Stderr -> IO.stderr
+
+systemReadLine : () ->{IO} Maybe Line
+systemReadLine() =
+    handle IO.readLine IO.stdin on
+        Fail.fail error -> failed error
+        return line -> line
+
+systemReadBytes : Int ->{IO} Maybe Bytes
+systemReadBytes count =
+    handle IO.readBytes IO.stdin count on
+        Fail.fail error -> failed error
+        return data -> data
+
+systemWriteBytes : Output -> Bytes ->{IO} ()
+systemWriteBytes output data =
+    handle IO.writeBytes (handleFor output) data on
+        Fail.fail error -> failed error
         return value -> value
 
--- Writes the value's `display` text and a newline to standard output. A
--- write error ends the program.
-print : Display a => a ->{IO} ()
-print value = write (display value ++ "\n")
+-- Answers `Console` with the process's standard streams, or the REPL
+-- session's. A stream error ends the program with the error's description
+-- on the host's diagnostic channel.
+runSystem : (() ->{Console | e} a) ->{IO | e} a
+runSystem action =
+    handle action() on
+        readLine () -> resume systemReadLine()
+        readBytes count -> resume (systemReadBytes count)
+        writeBytes output data -> resume (systemWriteBytes output data)
 
--- The next line of standard input with its ending, or `Nothing` at the end
--- of input. A read error ends the program.
-readLine : () ->{IO} Maybe Line
-readLine() =
-    handle IO.readLine IO.stdin on
-        Fail.fail error ->
-            panic (IO.describeError error)
-            Nothing
-        return line -> line
+-- What `runTest` observed: the action's result, each output stream exactly
+-- as written, and the input it did not consume.
+type Transcript a =
+    {
+      -- The action's result.
+      value : a
+      -- Everything written to standard output.
+    , stdout : Bytes
+      -- Everything written to standard error.
+    , stderr : Bytes
+      -- The input left unread.
+    , remaining : Bytes
+    }
+
+type Capture = { input : Bytes, out : List Bytes, err : List Bytes }
+
+newline : Bytes
+newline = Bytes.fromString "\n"
+
+carriageReturn : Bytes
+carriageReturn = Bytes.fromString "\r"
+
+type LineRead = { line : Line, rest : Bytes }
+
+-- A line of `input` as `IO.readLine` would read it, and what follows it.
+lineOf : Bytes -> LineRead
+lineOf input =
+    length = Bytes.length input
+    case Bytes.indexOf newline input of
+        Nothing ->
+            LineRead { line = Line { text = Bytes.toStringLossy input, ending = "" }, rest = Bytes.empty }
+        Just at ->
+            rest = Bytes.slice (at + 1) length input
+            crlf = at > 0 && Bytes.slice (at - 1) at input == carriageReturn
+            if crlf then
+                LineRead { line = Line { text = Bytes.toStringLossy (Bytes.slice 0 (at - 1) input), ending = "\r\n" }, rest = rest }
+            else
+                LineRead { line = Line { text = Bytes.toStringLossy (Bytes.slice 0 at input), ending = "\n" }, rest = rest }
+
+joined : List Bytes -> Bytes
+joined chunks = Bytes.concat (List.reverse chunks)
+
+-- Answers reads from `input`, at its end as at the end of a stream, and
+-- captures each output stream exactly, without adding or normalizing
+-- newlines. Writes always succeed.
+--
+-- ```fango
+-- import Bytes
+-- import Console exposing (Output(..))
+--
+-- warned = Console.runTest Bytes.empty { Console.writeTo Stderr "warning\n" }
+--
+-- warned.stderr == Bytes.fromString "warning\n"
+-- warned.stdout == Bytes.empty
+-- ```
+runTest : Bytes -> (() ->{Console | e} a) ->{e} Transcript a
+runTest input action =
+    handle action() with state = Capture { input = input, out = [], err = [] } on
+        readLine () ->
+            if Bytes.length state.input == 0 then
+                resume Nothing with state
+            else
+                read = lineOf state.input
+                resume (Just read.line) with { state | input = read.rest }
+        readBytes count ->
+            length = Bytes.length state.input
+            if length == 0 then
+                resume Nothing with state
+            else if count <= 0 then
+                resume (Just Bytes.empty) with state
+            else
+                taken = if count < length then count else length
+                resume (Just (Bytes.slice 0 taken state.input)) with { state | input = Bytes.slice taken length state.input }
+        writeBytes output data ->
+            case output of
+                Stdout -> resume () with { state | out = [data | state.out] }
+                Stderr -> resume () with { state | err = [data | state.err] }
+        return value ->
+            Transcript { value = value, stdout = joined state.out, stderr = joined state.err, remaining = state.input }

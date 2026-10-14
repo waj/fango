@@ -243,7 +243,7 @@ func TestDebugWorkerStopRunsCleanupOnce(t *testing.T) {
 	root := t.TempDir()
 	text := `module Probe exposing (run)
 import Runtime.Scope
-run : () ->{IO} Int
+run : () ->{Console} Int
 run() =
     Runtime.Scope.finally {
         print "once"

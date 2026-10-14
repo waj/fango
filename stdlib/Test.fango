@@ -69,6 +69,7 @@ module Test exposing
     )
 
 import Basics exposing (..)
+import Console exposing (Console)
 import Expect exposing (Error, Expect)
 import IO exposing (IO)
 import List exposing (List(..), foldl, reverse)
@@ -168,7 +169,7 @@ execute suite =
 -- the run. Use `execute` with a reporter handler to choose output and exit
 -- policy yourself. Command-line options select progress or documentation
 -- output and an optional JSON file; see [`Test.Reporter.run`](Test/Reporter.fango).
-run : Test e ->{IO, Process.Arguments | e} ()
+run : Test e ->{IO, Console, Process.Arguments | e} ()
 run suite = Reporter.run { execute suite }
 
 -- Whether the tree focuses some tests. An `only` inside a `skip` does not

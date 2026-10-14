@@ -1,4 +1,5 @@
 (core
   (type Pair (ctor Pair Int Int))
   (def result Int (case Int (app/ctor (var Pair Int -> Int -> Pair) (int 1 Int) (int 2 Int) Pair) _bind0 (switchctor _bind0 (Pair _c3 _c4 (leaf (let _pattern1 Int (var _c3 Int) (let _pattern2 Int (var _c4 Int) (native Basics.intAdd (var _pattern1 Int) (var _pattern2 Int) Int))))))))
-  (def main (params _) () ->{IO} () (app/worker @[Int] (var Console.print _dictionary_Display Int -> Int ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_496e74 _dictionary_Display Int) (var result Int) ())))
+  (def main (params _) (effects Console.Console@poly) (control poly) () ->{Console} () (app/worker/poly @[Int] evidence[Console.Console@poly] (var Console.print _dictionary_Display Int -> Int ->{Console} ()) (var Basics._instance_4261736963732e446973706c6179_496e74 _dictionary_Display Int) (var result Int) ()))
+  (def main#entry (params _) () ->{IO} () (app/worker @[()] (var Console.runSystem (() ->{Console} ()) ->{IO} ()) (lam/poly _ () ->{Console} () (app/worker/poly evidence[Console.Console@poly] (var main () ->{Console} ()) (unit ()) ())) ())))

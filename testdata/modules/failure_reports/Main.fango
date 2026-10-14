@@ -12,7 +12,7 @@ type Opaque = Opaque (() -> ())
 effect OpaqueCleanup
     abort opaqueError : Opaque -> ()
 
-inspect : Fail.Report String ->{IO} ()
+inspect : Fail.Report String ->{Console} ()
 inspect report =
     values : List Failure.Failure
     values = report.suppressed

@@ -13,7 +13,7 @@ flip No = Yes
 swap (Pair a b) = Pair b a
 
 -- The effect row is shared even though only one row performs the effect.
-announce : Choice ->{IO} ()
+announce : Choice ->{Console} ()
 announce Yes = print "yes"
 announce No = ()
 
@@ -25,7 +25,7 @@ classify _ = "other"
 -- A patterned lambda has one row, so the row must be exhaustive.
 unwrap = { (Pair a _) -> a }
 
-main : () ->{IO} ()
+main : () ->{Console} ()
 main() =
     announce (flip Yes)
     print (classify limit)

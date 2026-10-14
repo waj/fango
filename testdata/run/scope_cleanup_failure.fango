@@ -13,7 +13,7 @@ attempt action =
         fail error -> Err error
         return value -> Ok value
 
-report : String -> Result String String ->{IO} ()
+report : String -> Result String String ->{Console} ()
 report label outcome =
     case outcome of
         Ok value -> print (label ++ ": ok " ++ value)

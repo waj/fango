@@ -7,9 +7,9 @@ APIs are linked to their authoritative source comments. Examples use `text`
 because the proposed API is not available today.
 
 The catalogue preserves current public call names where practical. It does not
-promise that preserving a name preserves its type or behavior. Driver modules
-are candidate declaration locations; effects reexported through facade modules
-retain their original nominal identity. `Bytes.Source` and `Bytes.Sink` below
+promise that preserving a name preserves its type or behavior. Effects are
+declared in their domain module with public operations, as `Console` is;
+the "Driver" module names below predate that rule. `Bytes.Source` and `Bytes.Sink` below
 mean the existing row-indexed records from [Bytes](../stdlib/Bytes.fango).
 
 ## Common runner conventions
@@ -35,111 +35,11 @@ universal untyped exception bucket.
 
 ## Console
 
-Current source: [Console](../stdlib/Console.fango). The `Console` effect owns
-all of the program's standard streams. It replaces both the Prelude helpers'
-`IO` requirement and the standard handles currently reached through
-`IO.stdin`, `IO.stdout`, and `IO.stderr`:
-
-```text
-type Output = Stdout | Stderr
-
-write : String ->{Console} ()
-print : Display a => a ->{Console} ()
-readLine : () ->{Console} Maybe IO.Line
-writeTo : Output -> String ->{Console} ()
-source : Bytes.Source {Console}
-sink : Output -> Bytes.Sink {Console}
-
-print value = write (display value ++ "\n")
-write text = writeTo Stdout text
-```
-
-Names other than the three Prelude helpers are candidates. Writing to standard
-input is no longer expressible.
-
-The driver has three operations, none of which reports an error:
-
-```text
--- Candidate module Console.Driver, reexported by Console.
-#[DefaultHandler `runSystem`]
-effect Console
-    readLine : () -> Maybe IO.Line
-    readBytes : Int -> Maybe Bytes
-    writeBytes : Output -> Bytes -> ()
-```
-
-Keep `print`'s formatting and text encoding in Fango. No operation-local
-`Display` dictionary or polymorphic native operation is needed. `write` adds
-no newline. Input retains the line ending as the current `IO.Line` contract
-specifies; `Nothing` means EOF. A count of zero or less answers empty bytes
-while input remains, as `IO.readBytes` does today. Add a separate text-write
-operation only if measurement shows that encoding hot output costs too much.
-
-Line input stays an operation rather than being derived from `readBytes`.
-Standard input belongs to the session host (the REPL or interpreter worker
-may share it), and a buffered reader over bytes would consume input beyond
-the line it returns.
-
-### Failure policy
-
-Console calls never raise errors; the runner owns failure. Today a standard
-stream failure already ends the program, and no bundled code recovers from
-one. The only current uses of the recoverable standard handles in the test
-suite write an empty string to obtain an `IO` requirement.
-
-```text
-runSystem : (() ->{Console | e} a) ->{IO | e} a
-
-runTest : Bytes
-       -> (() ->{Console | e} a)
-       ->{e} Transcript a
-
-type Transcript a =
-    { value : a
-    , stdout : Bytes
-    , stderr : Bytes
-    , remaining : Bytes
-    }
-```
-
-- `runSystem` ends the program with today's diagnostic when the host reports a
-  stream error. Its clauses run with `IO`, so they call the existing private
-  panic native; the public helpers never require `IO`. The diagnostic must
-  not become program output. A different response to a particular failure,
-  such as ending quietly when standard output is a closed pipe, is a policy of
-  this runner, not error handling at every call.
-- `runTest` never fails: writes always succeed and exhausted input is EOF.
-- A custom handler can simulate a failure by aborting through a handler that
-  encloses it, such as a `Fail` installed around the test. That abort is part
-  of the test's row, not the application's.
-
-`runSystem` clauses use private system helpers rather than recursively calling
-the new public facade. A Fango handler around public Console operations does
-not catch Go panics merely by existing.
-
-`runTest` answers reads from its input bytes, captures each output stream
-exactly, and reports unconsumed input. It neither inserts nor normalizes
-newlines. The input and the returned observations are immutable values.
-Repeated runs start independently. A text-input convenience may wrap it.
-
-```text
-greet() =
-    print "Your name?"
-    case readLine() of
-        Nothing -> print "No input"
-        Just line -> print ("Hello, " ++ line.text)
-
-captured = Console.runTest (Bytes.fromString "Ana\n") { greet() }
-captured.stdout == Bytes.fromString "Your name?\nHello, Ana\n"
-
-warned = Console.runTest Bytes.empty { Console.writeTo Stderr "warning\n" }
-warned.stderr == Bytes.fromString "warning\n"
-```
-
-This one boundary covers the Prelude helpers and all standard-stream access.
-It does not cover output performed directly in a native sidecar, or a file
-path naming a device such as `/dev/stdout`: that is filesystem access, a
-separate and stronger permission.
+Implemented: see [Console](../stdlib/Console.fango) and the
+[standard streams design](design/effects.md#standard-streams). The effect is
+declared in the `Console` module itself, with its operations public, rather
+than in a separate driver module; later drivers follow the same rule. The
+standard-stream `IO` declarations remain until IOI4 retires them.
 
 ## Files and directories
 

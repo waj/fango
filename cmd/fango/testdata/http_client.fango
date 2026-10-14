@@ -17,7 +17,7 @@ numbers = Stream.unfold 0 { n -> if n < 200000 then Just (n, n + 1) else Nothing
 
 -- Requests against the server named by the first argument, a base URL.
 -- The second argument names a file to upload.
-requests : String ->{Client.Http, Fail Client.Error, IO, Fail IO.Error} ()
+requests : String ->{Client.Http, Fail Client.Error, IO, Console, Fail IO.Error} ()
 requests file =
     print (attemptClient { Client.getText "/text" })
     print (attemptClient { Client.getJson @(List Int) "/json" })

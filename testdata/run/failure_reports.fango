@@ -7,7 +7,7 @@ import Result exposing (Result(..))
 effect Close
     abort close : Int -> ()
 
-showHeterogeneous : Result (Fail.Report String) value ->{IO} ()
+showHeterogeneous : Result (Fail.Report String) value ->{Console} ()
 showHeterogeneous result =
     case result of
         Err report ->
@@ -37,7 +37,7 @@ showFailure failure =
     print negative
     List.each showFailure (Failure.suppressed failure)
 
-showReport : Display value => Result (Fail.Report String) value ->{IO} ()
+showReport : Display value => Result (Fail.Report String) value ->{Console} ()
 showReport result =
     case result of
         Err report ->

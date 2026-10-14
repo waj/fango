@@ -4,4 +4,5 @@ rightCount : Int
 _pattern_2 : Point
 originX : Int
 originY : Int
-main : () ->{IO} ()
+main : () ->{Console} ()
+main#entry : () ->{IO} ()

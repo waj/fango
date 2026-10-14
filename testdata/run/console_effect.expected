@@ -1,0 +1,14 @@
+Your name?
+Hello, Bea
+Your name?
+Hello, Ana
+
+rest
+["a|\"\\r\\n\"", "b|\"\\n\"", "c|\"\"", "<eof>"]
+[Just "xy", Just "", Just "z", Nothing]
+("fine\n", "careful\n")
+
+("inner\n", "outer\n")
+buffered
+
+one

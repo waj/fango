@@ -76,9 +76,9 @@ func TestPolyPositive(t *testing.T) {
 		// argument prints that tail: it is what the value's index makes the
 		// arrow perform, not a row the caller is free to choose.
 		{"type Foo eff = Foo (() ->{IO | eff} ())\nwrap action = Foo action", "wrap : (() ->{IO | e} ()) -> Foo e"},
-		{"type Test eff = TestCase (() ->{eff} ())\nsuite : Test IO\nsuite = TestCase { _ -> print () }", "suite : Test {IO}"},
+		{"type Test eff = TestCase (() ->{eff} ())\nsuite : Test Console\nsuite = TestCase { _ -> print () }", "suite : Test {Console}"},
 		{"type Test eff = Wrap (Test eff) | Bar (() ->{eff} ())\nmake action = Bar action", "make : (() ->{e} ()) -> Test e"},
-		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{IO | eff} ()\nrunHelper (TestCase action) =\n    handle action() on\n        fail msg -> print msg", "runHelper : Test e ->{IO | e} ()"},
+		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{Console | eff} ()\nrunHelper (TestCase action) =\n    handle action() on\n        fail msg -> print msg", "runHelper : Test e ->{Console | e} ()"},
 		// Applied types in annotations.
 		{"type Opt a = None | Some a\nx : Opt Int\nx = Some 1", "x : Opt Int"},
 		{"type Opt a = None | Some a\nf : Opt a -> Opt a\nf m = m", "f : Opt a -> Opt a"},

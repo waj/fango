@@ -1,1 +1,1 @@
-() ->{IO, Async} ()
+() ->{Async, Console} ()

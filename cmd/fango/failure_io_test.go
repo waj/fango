@@ -84,7 +84,7 @@ main() =
 		var interpreted bytes.Buffer
 		ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
 		ioctx.Dir, ioctx.Natives = t.TempDir(), executor
-		if _, err := eval.ForceIO(context.Background(), "main", env, ioctx); err != nil {
+		if _, err := eval.ForceIO(context.Background(), p.Entry, env, ioctx); err != nil {
 			t.Fatal(err)
 		}
 		if interpreted.String() != want {

@@ -1,21 +1,21 @@
 import IO
 import Maybe exposing (Maybe(..))
 
-doSomething : () ->{IO} ()
+doSomething : () ->{Console} ()
 doSomething() = print "do"
 
 doNothing : () -> ()
 doNothing() = ()
 
-register : (() ->{IO} ()) ->{IO} ()
+register : (() ->{Console} ()) ->{Console} ()
 register action = action()
 
 identity x = x
 
-collect : (() ->{IO} ()) ->{IO} ()
+collect : (() ->{Console} ()) ->{Console} ()
 collect program = program()
 
-main : () ->{IO} ()
+main : () ->{Console} ()
 main() =
     register doSomething
     saved = identity doSomething

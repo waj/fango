@@ -141,7 +141,7 @@ instance LogValue Credentials
     logValue credentials = case credentials of
         Credentials username _ -> username ++ " [password omitted]"
 
-log : LogValue a => a ->{IO} ()
+log : LogValue a => a ->{Console} ()
 log x = print (logValue x)
 
 main() =

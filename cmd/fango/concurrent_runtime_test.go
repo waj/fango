@@ -190,7 +190,7 @@ import "testing"
 
 func TestConcurrentSharedHandlerState(t *testing.T) {
     for range 4 {
-        V_main()
+        main()
     }
 }
 `

@@ -550,7 +550,7 @@ A file passed to `build` or `run` must define `main` as a function with no
 arguments. It returns `()` or a [`Process.Status`](../../stdlib/Process.fango):
 
 ```fango
-main : () ->{IO} ()
+main : () ->{Console} ()
 main() = print "hello"
 ```
 
@@ -561,8 +561,8 @@ result is `()`.
 
 `main`'s row may contain `IO` and any effect that declares a default handler
 with a [`Runtime.Entry.DefaultHandler`](../../stdlib/Runtime/Entry.fango)
-attribute, such as `Process.Arguments`, `Random`, `Time.Clock.Clock`, and
-`Http.Client.Http`. The program then starts at an entry the compiler
+attribute, such as `Console`, `Process.Arguments`, `Random`,
+`Time.Clock.Clock`, and `Http.Client.Http`. The program then starts at an entry the compiler
 assembles by splicing `Runtime.Entry.assemble`: `main` runs inside each of
 those defaults, and inside the defaults of the effects those runners perform
 in turn, each runner nested inside the runners it relies on. A default applies
@@ -572,7 +572,7 @@ runner installed inside `main` takes precedence for the code it wraps.
 ```fango
 import Process
 
-main : () ->{IO, Process.Arguments} ()
+main : () ->{Console, Process.Arguments} ()
 main() = print (Process.args())
 ```
 

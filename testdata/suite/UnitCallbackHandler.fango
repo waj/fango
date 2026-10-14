@@ -3,13 +3,13 @@ module UnitCallbackHandler exposing (tests)
 import Expect
 import State
 import Test
-effect Console
+effect Terminal
     emit : String -> ()
 
-program : () ->{Console} ()
+program : () ->{Terminal} ()
 program() = emit "handled"
 
-collect : (() ->{Console} ()) ->{State.State (List String)} ()
+collect : (() ->{Terminal} ()) ->{State.State (List String)} ()
 collect action =
     handle action() on
         emit text ->

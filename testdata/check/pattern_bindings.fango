@@ -7,7 +7,7 @@ Pair leftCount rightCount = Pair 1 2
 
 Point { x = originX, y = originY } = Point { x = 0, y = 1 }
 
-main : () ->{IO} ()
+main : () ->{Console} ()
 main() =
     Pair localLeft localRight = Pair leftCount rightCount
     print (localLeft + localRight + originX + originY)

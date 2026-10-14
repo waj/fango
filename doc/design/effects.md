@@ -223,3 +223,21 @@ instantiated at Unit. Runtime helpers and native adapters retain `Outcome[T]`,
 with explicit conversions at those boundaries. A polymorphic Exit
 lower-bound call can target a polymorphic Direct contract because mode selection
 chooses the available Exit member.
+
+## Standard streams
+
+The program's standard streams are the `Console` effect, so printing is an
+ordinary resumptive operation rather than a native call: a function that
+prints receives Console evidence and, like any code over a resumptive effect,
+has Direct and Exit members. The operations carry bytes; `print`'s display
+and encoding stay in Fango above them. `Console.runSystem` answers them with
+the IO handle natives on the host's standard handles, and turns a stream
+error into the host panic that ends the program, so no Console call raises
+and the diagnostic never becomes program output. Programs get that runner as
+`main`'s [default handler](pipeline.md#entry-assembly); the REPL applies it
+to inputs that use the console.
+
+A callee row that lists a label and also has a tail, such as a runner's
+`{Out | e}`, forwards that label's evidence in the residual row too. Rows
+hold distinct applications, so where `e` also holds the label the call site
+sees it once, and a callback typed with `e` finds it only through that row.

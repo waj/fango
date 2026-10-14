@@ -1,6 +1,7 @@
-doSomething : () ->{IO} ()
+doSomething : () ->{Console} ()
 doNothing : () -> ()
-register : (() ->{IO} ()) ->{IO} ()
+register : (() ->{Console} ()) ->{Console} ()
 identity : a -> a
-collect : (() ->{IO} ()) ->{IO} ()
-main : () ->{IO} ()
+collect : (() ->{Console} ()) ->{Console} ()
+main : () ->{Console} ()
+main#entry : () ->{IO} ()

@@ -1,4 +1,4 @@
-main : () ->{IO} ()
+main : () ->{Console} ()
 main() =
     print "x"
     "text"

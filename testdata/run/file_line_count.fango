@@ -16,7 +16,7 @@ countLines file count =
         Nothing -> count
         Just _ -> countLines file (count + 1)
 
-countFile : String -> Bool ->{IO} Bool
+countFile : String -> Bool ->{IO, Console} Bool
 countFile path ok =
     case attempt ({ _ -> File.withFile path ({ file -> countLines file 0 }) }) of
         Ok count ->

@@ -28,7 +28,7 @@ withDatabase body =
 withStop body =
     handle body() on
         stop () -> ()
-job : () ->{IO, Database} Int
+job : () ->{Console, Database} Int
 job() =
     print "CHILD_STARTED"
     lookup()
@@ -104,7 +104,7 @@ effect Stop
     abort stop : () -> value
 submit : (() ->{e} a) ->{Async.Async | e} Async.Task a
 submit body = Async.spawn body
-job : () ->{IO, Stop} Int
+job : () ->{Console, Stop} Int
 job() =
     print "CHILD_STARTED"
     stop()
@@ -139,7 +139,7 @@ func TestAsyncGenericFailBoundary(t *testing.T) {
 import Fail exposing (Fail)
 submit : (() ->{e} a) ->{Async.Async | e} Async.Task a
 submit body = Async.spawn body
-job : () ->{IO, Fail String} Int
+job : () ->{Console, Fail String} Int
 job() =
     print "CHILD_STARTED"
     Fail.fail "unsupported"
@@ -154,7 +154,7 @@ func TestAsyncCombinatorsRejectOtherAbortEffects(t *testing.T) {
 import Fail exposing (Fail)
 effect Stop
     abort stop : () -> value
-job : () ->{IO, Fail String, Stop} Int
+job : () ->{Console, Fail String, Stop} Int
 job() =
     print "CHILD_STARTED"
     if stop() then Fail.fail "handled" else 7
@@ -176,7 +176,7 @@ effect Database
     lookup : () -> Int
 effect Audit
     check : () -> Int
-job : () ->{IO, Database} Result String Int
+job : () ->{Console, Database} Result String Int
 job() =
     print "CHILD_STARTED"
     Fail.attempt { if lookup() > 0 then Fail.fail "local" else 42 }

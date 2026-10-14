@@ -1,0 +1,78 @@
+import Bytes
+import Console exposing (Output(..))
+import Reader
+import Writer
+
+-- The Console effect: real streams through the default runner, captured
+-- streams through runTest, and handlers written against its operations.
+
+greet : () ->{Console} ()
+greet() =
+    print "Your name?"
+    case readLine() of
+        Nothing -> print "No input"
+        Just line -> print ("Hello, " ++ line.text)
+
+-- Silences output and forwards input to the enclosing Console.
+quiet : (() ->{Console | e} a) ->{Console | e} a
+quiet action =
+    handle action() on
+        Console.writeBytes _ _ -> resume ()
+        Console.readLine () -> resume Console.readLine()
+        Console.readBytes count -> resume (Console.readBytes count)
+
+lineTexts : Int ->{Console} List String
+lineTexts n =
+    if n == 0 then
+        []
+    else
+        case readLine() of
+            Nothing -> ["<eof>"]
+            Just line -> [line.text ++ "|" ++ show line.ending | lineTexts (n - 1)]
+
+main() =
+    -- Real standard input and output.
+    greet()
+    -- Scripted input, exact output, and unread input.
+    captured = Console.runTest (Bytes.fromString "Ana\nrest") { greet() }
+    print (Bytes.toStringLossy captured.stdout)
+    print (Bytes.toStringLossy captured.remaining)
+    -- Line endings and the end of input.
+    endings = Console.runTest (Bytes.fromString "a\r\nb\nc") { lineTexts 4 }
+    print endings.value
+    -- Byte reads, including a zero count while input remains.
+    bytes = Console.runTest (Bytes.fromString "xyz") {
+        first = Console.readBytes 2
+        empty = Console.readBytes 0
+        last = Console.readBytes 5
+        done = Console.readBytes 1
+        [first, empty, last, done]
+        }
+    print bytes.value
+    -- Standard error is a separate stream, and a partial application is an
+    -- ordinary function.
+    warn = Console.writeTo Stderr
+    streams = Console.runTest Bytes.empty {
+        warn "careful\n"
+        write "fine\n"
+        }
+    print (Bytes.toStringLossy streams.stdout, Bytes.toStringLossy streams.stderr)
+    -- Forwarding: the quiet handler drops output but still reads input.
+    forwarded = Console.runTest (Bytes.fromString "kept\n") { quiet { greet() } }
+    print (Bytes.toStringLossy forwarded.stdout)
+    -- Nested test runners capture independently.
+    nested = Console.runTest Bytes.empty {
+        inner = Console.runTest Bytes.empty { print "inner" }
+        print "outer"
+        inner.stdout
+        }
+    print (Bytes.toStringLossy nested.value, Bytes.toStringLossy nested.stdout)
+    -- The streams as a byte sink and source.
+    written = Console.runTest Bytes.empty {
+        Writer.over (Console.sink Stdout) 4 { writer -> Writer.writeString writer "buffered\n" }
+        }
+    print (Bytes.toStringLossy written.stdout)
+    read = Console.runTest (Bytes.fromString "one\ntwo\n") {
+        Reader.over Console.source { reader -> Reader.readUpTo reader 3 }
+        }
+    print (Bytes.toStringLossy read.value)

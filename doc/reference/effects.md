@@ -21,7 +21,7 @@ bindings, conditionals, and higher-order arguments never apply a function.
 Unit functions must be called explicitly:
 
 ```fango
-say : () ->{IO} ()
+say : () ->{Console} ()
 say() = print "hello"
 
 main() =

@@ -13,7 +13,7 @@ module Test.Reporter exposing
     )
 
 import Basics exposing (..)
-import Console exposing (write)
+import Console exposing (Console, write)
 import Expect exposing (Error)
 import File
 import IO exposing (IO)
@@ -92,21 +92,21 @@ type Event
 -- output, preserving `run`'s report format. Start events and non-failing
 -- outcomes are silent. Returns the action's result without exiting;
 -- effects besides `Reporter` pass through.
-console : (() ->{Reporter | e} a) ->{IO | e} a
+console : (() ->{Reporter | e} a) ->{Console | e} a
 console action = withFormat ConsoleFormat action
 
 -- Prints one progress character for each completed leaf: `.` for a pass,
 -- `F` for a failure, and `*` for a skipped leaf or todo. Group validation
 -- failures also print `F`. Full failure messages and the summary follow
 -- the progress line. Returns the action's result without exiting.
-progress : (() ->{Reporter | e} a) ->{IO | e} a
+progress : (() ->{Reporter | e} a) ->{Console | e} a
 progress action = withFormat ProgressFormat action
 
 -- Prints group headings and indented case names with their outcomes as
 -- leaves complete. Full failure messages and the summary follow. Group
 -- names shared by consecutive paths are printed once. Returns the action's
 -- result without exiting.
-documentation : (() ->{Reporter | e} a) ->{IO | e} a
+documentation : (() ->{Reporter | e} a) ->{Console | e} a
 documentation action = withFormat DocumentationFormat action
 
 -- Discards progress events and returns the action's result. Effects besides
@@ -120,14 +120,14 @@ type Format = ConsoleFormat | ProgressFormat | DocumentationFormat | SilentForma
 
 type OutputState = { failures : List Event, groups : List String }
 
-withFormat : Format -> (() ->{Reporter | e} a) ->{IO | e} a
+withFormat : Format -> (() ->{Reporter | e} a) ->{Console | e} a
 withFormat format action =
     handle action() with state = OutputState { failures = [], groups = [] } on
         report event ->
             next = render format state event
             resume () with next
 
-render : Format -> OutputState -> Event ->{IO} OutputState
+render : Format -> OutputState -> Event ->{Console} OutputState
 render format state event =
     case format of
         SilentFormat -> state
@@ -199,7 +199,7 @@ displayName name = if name == "" then "\"\"" else name
 indent : Int -> String
 indent depth = if depth <= 0 then "" else "  " ++ indent (depth - 1)
 
-printGroups : Int -> List String -> List String ->{IO} ()
+printGroups : Int -> List String -> List String ->{Console} ()
 printGroups depth previous next =
     case next of
         [] -> ()
@@ -210,7 +210,7 @@ printGroups depth previous next =
                     else printNewGroups depth next
                 [] -> printNewGroups depth next
 
-printNewGroups : Int -> List String ->{IO} ()
+printNewGroups : Int -> List String ->{Console} ()
 printNewGroups depth groups =
     case groups of
         [] -> ()
@@ -218,14 +218,14 @@ printNewGroups depth groups =
             write (indent depth ++ displayName name ++ "\n")
             printNewGroups (depth + 1) rest
 
-printFailureEvent : Event ->{IO} ()
+printFailureEvent : Event ->{Console} ()
 printFailureEvent event =
     case event of
         GroupFailed path message -> printFailure path Nothing message
         CaseFinished path (CaseFailed error) -> printFailure path error.location error.message
         _ -> ()
 
-printSummary : Summary ->{IO} ()
+printSummary : Summary ->{Console} ()
 printSummary summary =
     verdict =
         case summary.verdict of
@@ -241,7 +241,7 @@ printSummary summary =
 -- Prints one failure: the heading with the path, then, indented, the
 -- expectation's `file:line` when it is known and the message's lines, each
 -- part followed by a blank line.
-printFailure : List String -> Maybe Trace.Frame -> String ->{IO} ()
+printFailure : List String -> Maybe Trace.Frame -> String ->{Console} ()
 printFailure path location message =
     write ("FAIL  " ++ heading path ++ "\n\n")
     case location of
@@ -306,7 +306,7 @@ usage = "Usage: tests [--format console|progress|documentation|silent] [--json P
 -- fango run Tests.fango --format documentation
 -- fango run Tests.fango --format silent --json report.json
 -- ```
-run : (() ->{Reporter | e} Summary) ->{IO, Process.Arguments | e} ()
+run : (() ->{Reporter | e} Summary) ->{IO, Console, Process.Arguments | e} ()
 run action =
     case parseOptions (Options { format = ConsoleFormat, json = Nothing }) (Process.args ()) of
         Err message ->
@@ -364,12 +364,12 @@ parseFormat format =
         "silent" -> Just SilentFormat
         _ -> Nothing
 
-outputError : String ->{IO} ()
+outputError : String ->{IO, Console} ()
 outputError message =
     write ("Test.run: " ++ message ++ "\n")
     Process.exit (Process.status 2)
 
-withReport : Format -> (() ->{Reporter | e} a) ->{IO | e} Collected a
+withReport : Format -> (() ->{Reporter | e} a) ->{Console | e} Collected a
 withReport format action =
     handle action() with state = CollectionState { output = OutputState { failures = [], groups = [] }, cases = [], groupFailures = [] } on
         report event ->

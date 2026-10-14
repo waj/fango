@@ -14,7 +14,9 @@ scope. Names resolve exactly as they do in a module: an unqualified name must
 be exposed by the prelude, an import, or a prompt declaration, and a qualifier
 must be an imported module's name or alias, so `Dict.empty` is an
 `UNKNOWN QUALIFIER` until `import Dict`, while `IO.write` works because the
-prelude imports `IO`. Definitions echo
+prelude imports `IO`. The prompt owns the session's standard streams as a
+program's entry does: an input that uses the `Console` effect runs under
+[`Console.runSystem`](../../stdlib/Console.fango). Definitions echo
 their inferred types; expressions print a value and type. Errors do not end the
 session. Redefinition is allowed at the prompt, while existing memoized values
 and closures retain earlier bindings.

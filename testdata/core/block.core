@@ -1,3 +1,4 @@
 (core
   (def area Float (let r Float (float 2 Float) (let tau Float (native Basics.floatAdd (var r Float) (var r Float) Float) (native Basics.floatMul (float 3.14159 Float) (var tau Float) Float))))
-  (def main (params _) () ->{IO} () (app/worker @[Float] (var Console.print _dictionary_Display Float -> Float ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_466c6f6174 _dictionary_Display Float) (var area Float) ())))
+  (def main (params _) (effects Console.Console@poly) (control poly) () ->{Console} () (app/worker/poly @[Float] evidence[Console.Console@poly] (var Console.print _dictionary_Display Float -> Float ->{Console} ()) (var Basics._instance_4261736963732e446973706c6179_466c6f6174 _dictionary_Display Float) (var area Float) ()))
+  (def main#entry (params _) () ->{IO} () (app/worker @[()] (var Console.runSystem (() ->{Console} ()) ->{IO} ()) (lam/poly _ () ->{Console} () (app/worker/poly evidence[Console.Console@poly] (var main () ->{Console} ()) (unit ()) ())) ())))

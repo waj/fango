@@ -8,7 +8,7 @@ import Result exposing (Result(..))
 -- plain `[]byte`, so a file holding something that is not text has a value to
 -- live in; a `String` would have rewritten those bytes as U+FFFD.
 
-report : Show a => String -> Result Error a ->{IO} ()
+report : Show a => String -> Result Error a ->{Console} ()
 report label outcome =
     case outcome of
         Ok value -> print (label ++ ": " ++ show value)

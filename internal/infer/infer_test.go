@@ -174,7 +174,7 @@ func TestPositive(t *testing.T) {
 		// Generalization at each binding: later declarations instantiate
 		// fresh number vars, which the shared test printer numbers.
 		{"x = 40\ny = x + 2", "x : Num a => a, y : Num b => b"},
-		{"x = 1\ny = x\nmain() = print (y - x)", "x : Num a => a, y : Num b => b, main : () ->{IO} ()"},
+		{"x = 1\ny = x\nmain() = print (y - x)", "x : Num a => a, y : Num b => b, main : () ->{Console} (), main#entry : () ->{IO} ()"},
 		{"x = 1.5", "x : Float"},
 		{"x = 1 + 0.5", "x : Float"},
 		{"f = 1 / 2", "f : Float"}, // number literals unify with Float (Elm)
@@ -184,26 +184,26 @@ func TestPositive(t *testing.T) {
 		{"x = if True then 1 else 2", "x : Num a => a"},
 		{"x = -5", "x : Num a => a"},
 		{"x = -2.5", "x : Float"},
-		{"main() = print (1 + 2)", "main : () ->{IO} ()"},
+		{"main() = print (1 + 2)", "main : () ->{Console} (), main#entry : () ->{IO} ()"},
 		{"x =\n  a = 1\n  b = a + 2\n  a * b", "x : Num a => a"},
 		{"x =\n  r = 2.0\n  r * r", "x : Float"},
 		{"x : Int\nx = 1", "x : Int"},
 		{"x : Float\nx = 1", "x : Float"}, // annotation forces the literal
 		{"add x y = x + y", "add : Num a => a -> a -> a"},
-		{"inc n = n + 1\nmain() = print (inc 41)", "inc : Num a => a -> a, main : () ->{IO} ()"},
+		{"inc n = n + 1\nmain() = print (inc 41)", "inc : Num a => a -> a, main : () ->{Console} (), main#entry : () ->{IO} ()"},
 		{"fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)", "fib : (Num a, Ord a) => a -> a"},
 		{"f = { x -> x + 1 }", "f : Num a => a -> a"},
 		{"deferred = { 41 }", "deferred : Num a => () -> a"},
 		{"add : Int -> Int -> Int\nadd x y = x + y", "add : Int -> Int -> Int"},
 		{"pure() = 1", "pure : Num a => () -> a"},
-		{"saved = readLine", "saved : () ->{IO} Maybe Line"},
-		{"main() = print (readLine())", "main : () ->{IO} ()"},
-		{"make : () ->{IO} (() -> ())\nmake() =\n  print \"now\"\n  { _ -> () }", "make : () ->{IO} () -> ()"},
-		{"later : () -> (() ->{IO} ())\nlater() = { _ -> print \"later\" }", "later : () -> () ->{IO} ()"},
+		{"saved = readLine", "saved : () ->{Console} Maybe Line"},
+		{"main() = print (readLine())", "main : () ->{Console} (), main#entry : () ->{IO} ()"},
+		{"make : () ->{Console} (() -> ())\nmake() =\n  print \"now\"\n  { _ -> () }", "make : () ->{Console} () -> ()"},
+		{"later : () -> (() ->{Console} ())\nlater() = { _ -> print \"later\" }", "later : () -> () ->{Console} ()"},
 		{"add x y = x + y\ninc = add 1", "add : Num a => a -> a -> a, inc : Num b => b -> b"},
 		{"values = [1, 2]\nfirstOf xs = case xs of\n  [] -> 0\n  [first | _] -> first", "values : Num a => List a, firstOf : Num b => List b -> b"},
 		// Generalization: uses no longer pin the definition.
-		{"id x = x\nmain() = print (id 1 + 1)", "id : a -> a, main : () ->{IO} ()"},
+		{"id x = x\nmain() = print (id 1 + 1)", "id : a -> a, main : () ->{Console} (), main#entry : () ->{IO} ()"},
 		{"v =\n  go n = if n < 1 then 0 else go (n - 1)\n  go 3", "v : Num a => a"},
 	}
 	for _, c := range cases {
@@ -299,7 +299,7 @@ func TestNegative(t *testing.T) {
 }
 
 func TestEffectRows(t *testing.T) {
-	src := "effect Console\n    emit : String -> ()\n\nsay text = emit text"
+	src := "effect Terminal\n    emit : String -> ()\n\nsay text = emit text"
 	ck, infos, errs := check(t, src)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -307,24 +307,24 @@ func TestEffectRows(t *testing.T) {
 	if len(infos) != 1 {
 		t.Fatalf("want one value declaration, got %d", len(infos))
 	}
-	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "String ->{Console} ()" {
-		t.Fatalf("say type = %s, want String ->{Console} ()", got)
+	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "String ->{Terminal} ()" {
+		t.Fatalf("say type = %s, want String ->{Terminal} ()", got)
 	}
-	_, _, errs = check(t, "effect Console\n    emit : String -> ()\n\nsay : String ->{Console | e} ()\nsay text = emit text")
+	_, _, errs = check(t, "effect Terminal\n    emit : String -> ()\n\nsay : String ->{Terminal | e} ()\nsay text = emit text")
 	if len(errs) > 0 {
 		t.Fatalf("open effect annotation: %v", errs)
 	}
 
-	_, _, errs = check(t, "effect Console\n    emit : String -> ()\n\nx = emit \"hello\"")
+	_, _, errs = check(t, "effect Terminal\n    emit : String -> ()\n\nx = emit \"hello\"")
 	if len(errs) == 0 || errs[0].(checkErr).title != "UNHANDLED EFFECT" {
 		t.Fatalf("top-level operation call: want UNHANDLED EFFECT, got %v", errs)
 	}
 
-	_, _, errs = check(t, "effect Console\n    emit : String -> ()\n\nsay : String -> ()\nsay text = emit text")
+	_, _, errs = check(t, "effect Terminal\n    emit : String -> ()\n\nsay : String -> ()\nsay text = emit text")
 	if len(errs) == 0 || errs[0].(checkErr).title != "EFFECT MISMATCH" {
 		t.Fatalf("pure annotation: want EFFECT MISMATCH, got %v", errs)
 	}
-	_, _, errs = check(t, "effect Console\n    emit : String -> ()\n\nsay : String ->{Console} String\nsay text = text")
+	_, _, errs = check(t, "effect Terminal\n    emit : String -> ()\n\nsay : String ->{Terminal} String\nsay text = text")
 	if len(errs) == 0 || errs[0].(checkErr).title != "EFFECT MISMATCH" {
 		t.Fatalf("overstated annotation: want EFFECT MISMATCH, got %v", errs)
 	}
@@ -350,7 +350,7 @@ func TestSingleRowInTypeArgumentStaysPolymorphic(t *testing.T) {
 		"sizeBox : Box e -> Int\nsizeBox b = 1\n\n" +
 		"useBox b = sizeBox b\n\n" +
 		"useBoth b1 b2 = sizeBox b1 + sizeBox b2\n\n" +
-		"ioBox : Box {IO}\nioBox = Box { print \"x\" }\n\n" +
+		"ioBox : Box {Console}\nioBox = Box { print \"x\" }\n\n" +
 		"n = useBox ioBox + useBoth ioBox (Box { () })"
 	ck, infos, errs := check(t, src)
 	if len(errs) > 0 {

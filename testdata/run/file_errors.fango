@@ -6,7 +6,7 @@ import Result exposing (Result(..))
 -- Structured IO failures without any seeded files: every path here is either
 -- missing or the working directory itself, which exists under both backends.
 
-report : Result Error String ->{IO} ()
+report : Result Error String ->{Console} ()
 report outcome =
     case outcome of
         Ok value -> print ("ok " ++ value)

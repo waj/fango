@@ -86,7 +86,7 @@ addExpense category cents report =
     } report.totals
     { report | totals = totals, count = report.count + 1, cents = report.cents + cents }
 
-addRow : Int -> String -> Report ->{IO} Report
+addRow : Int -> String -> Report ->{Console} Report
 addRow lineNumber line report =
     case String.split "," line of
         [_, category, _, amount] ->
@@ -99,7 +99,7 @@ addRow lineNumber line report =
             print ("warning: line " ++ show lineNumber ++ ": expected four fields")
             report
 
-addRows : Int -> List String -> Report ->{IO} Report
+addRows : Int -> List String -> Report ->{Console} Report
 addRows lineNumber lines report =
     case lines of
         [] -> report
@@ -127,12 +127,12 @@ row category count amount =
 rule : String
 rule = String.padLeft (categoryWidth + countWidth + amountWidth) '-' ""
 
-printCategory : (String, Summary) ->{IO} ()
+printCategory : (String, Summary) ->{Console} ()
 printCategory entry =
     case entry of
         (category, summary) -> print (row category (show summary.count) (formatCents summary.cents))
 
-printReport : Report ->{IO} ()
+printReport : Report ->{Console} ()
 printReport report =
     print (row "Category" "Count" "Amount")
     print rule
@@ -150,7 +150,7 @@ dropHeader lines =
         [] -> []
         [_ | rest] -> rest
 
-run : String ->{IO} ()
+run : String ->{IO, Console} ()
 run path =
     case File.read path of
         Err error ->
@@ -159,7 +159,7 @@ run path =
         Ok contents ->
             printReport (addRows 2 (dropHeader (String.split "\n" contents)) emptyReport)
 
-usage : () ->{IO} ()
+usage : () ->{IO, Console} ()
 usage() =
     print "usage: csv FILE"
     Process.exit Process.failure

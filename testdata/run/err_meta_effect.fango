@@ -3,7 +3,7 @@ import Meta exposing (Code)
 message : Code
 message = `"hi"`
 
-noisy : () ->{IO} Code
+noisy : () ->{Console} Code
 noisy() =
     print "compiling"
     message

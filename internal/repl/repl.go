@@ -89,12 +89,16 @@ type Session struct {
 
 	// levels are the handler levels installed with `use`, outermost first;
 	// undo records what their names replaced.
-	levels      []*level
-	levelIO     *eval.ChannelLevels
-	undo        []savedName
-	levelsReady bool
-	cancelMu    sync.Mutex
-	cancelInput context.CancelFunc
+	levels  []*level
+	levelIO *eval.ChannelLevels
+	// consoleDeferred lets a value definition's first check accept the
+	// console, recording it in consoleUsed so the definition is checked
+	// again under the console runner.
+	consoleDeferred, consoleUsed bool
+	undo                         []savedName
+	levelsReady                  bool
+	cancelMu                     sync.Mutex
+	cancelInput                  context.CancelFunc
 
 	// graph holds every module the session has resolved, the bundled prelude
 	// closure included; prompt is the resolver scope prompts and imports
@@ -729,7 +733,17 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	redefining := s.ck.Env.Has(vd.Name)
+	s.consoleUsed = false
+	s.consoleDeferred = len(vd.Params) == 0
 	info, defs, errs := s.checkValue(vd, infer.DeclPromptEffects)
+	s.consoleDeferred = false
+	if len(errs) == 0 && s.consoleUsed {
+		// A value that uses the console runs under it, as an expression does.
+		// Wrapping only such values keeps a pure value lazy.
+		restore()
+		vd.Body = s.withConsole(vd.Body)
+		info, defs, errs = s.checkValue(vd, infer.DeclPromptEffects)
+	}
 	if len(errs) > 0 {
 		restore()
 		diag.Render(s.out, errs)
@@ -1033,13 +1047,25 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		diag.Render(s.out, errs)
 		return inputDone
 	}
+	// An input that uses the console is checked again under its runner, so
+	// one that does not keeps its plain shape and stack.
+	restore := s.checkpoint()
+	s.consoleUsed, s.consoleDeferred = false, true
 	ty, effects, inferErrs := s.ck.ExprEffects(e)
+	if len(inferErrs) == 0 {
+		_, inferErrs = s.promptEffects(effects, e.Span())
+	}
+	s.consoleDeferred = false
+	if len(inferErrs) == 0 && s.consoleUsed {
+		restore()
+		e = s.withConsole(e)
+		ty, effects, inferErrs = s.ck.ExprEffects(e)
+		if len(inferErrs) == 0 {
+			_, inferErrs = s.promptEffects(effects, e.Span())
+		}
+	}
 	if len(inferErrs) > 0 {
 		diag.Render(s.out, inferErrs)
-		return inputDone
-	}
-	if _, errs := s.promptEffects(effects, e.Span()); len(errs) > 0 {
-		diag.Render(s.out, errs)
 		return inputDone
 	}
 	// The displayed type is the pre-defaulting one — free variables print
@@ -1088,6 +1114,8 @@ func (s *Session) grantLevels(effects types.Type, at source.Span, granted func(s
 	for _, label := range row.Labels {
 		switch {
 		case label.Scoped, types.SurfaceName(label.Name) == "IO":
+		case label.Name == consoleEffect && s.consoleDeferred:
+			s.consoleUsed = true
 		case label.Name == "Fail.Fail" && len(label.Args) == 1:
 			fails = append(fails, s.ck.Sub.Apply(label.Args[0]))
 		default:
@@ -1123,6 +1151,24 @@ func (s *Session) grantLevels(effects types.Type, at source.Span, granted func(s
 		}
 	}
 	return fails, errs
+}
+
+// The prompt owns the session's standard streams the way a program's entry
+// does: an input that uses the console runs under consoleRunner.
+const (
+	consoleEffect = "Console.Console"
+	consoleRunner = "Console.runSystem"
+)
+
+// withConsole runs e under the console's system runner. An input that does
+// not use the console is unaffected, apart from the runner's IO, which the
+// prompt grants anyway.
+func (s *Session) withConsole(e ast.Expr) ast.Expr {
+	if !s.ck.Env.Has(consoleRunner) {
+		return e
+	}
+	sp := e.Span()
+	return &ast.App{Fn: &ast.Var{Name: consoleRunner, Sp: sp}, Arg: &ast.Lambda{Params: []ast.Pattern{&ast.PUnit{Sp: sp}}, Body: e, Sp: sp}}
 }
 
 // unhandled reports a failure no handler caught, in red on a terminal.

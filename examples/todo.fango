@@ -17,7 +17,7 @@ type Todo = { text : String, done : Bool } deriving (Encode, Decode)
 storagePath : String
 storagePath = "todo.json"
 
-load : () ->{IO} Maybe (List Todo)
+load : () ->{IO, Console} Maybe (List Todo)
 load() =
     case File.read storagePath of
         Err error ->
@@ -34,7 +34,7 @@ load() =
                 Ok todos -> Just todos
                 Err _ -> Nothing
 
-save : List Todo ->{IO} ()
+save : List Todo ->{IO, Console} ()
 save todos =
     case Json.stringify todos of
         Ok text ->
@@ -69,7 +69,7 @@ completeAt wanted index todos =
                     Nothing -> Nothing
                     Just changed -> Just [todo | changed]
 
-printTodos : Int -> List Todo ->{IO} ()
+printTodos : Int -> List Todo ->{Console} ()
 printTodos index todos =
     case todos of
         [] -> ()
@@ -78,17 +78,17 @@ printTodos index todos =
             print (show index ++ " " ++ marker ++ " " ++ todo.text)
             printTodos (index + 1) rest
 
-storageFailure : () ->{IO} ()
+storageFailure : () ->{IO, Console} ()
 storageFailure() =
     print "Invalid todo.json."
     Process.exit Process.failure
 
-usage : () ->{IO} ()
+usage : () ->{IO, Console} ()
 usage() =
     print "Usage: todo add TEXT | todo list | todo done NUMBER"
     Process.exit (Process.status 2)
 
-addTodo : String ->{IO} ()
+addTodo : String ->{IO, Console} ()
 addTodo text =
     case load() of
         Nothing -> storageFailure()
@@ -97,14 +97,14 @@ addTodo text =
             save updated
             print ("Added " ++ show (count updated) ++ ": " ++ text)
 
-listTodos : () ->{IO} ()
+listTodos : () ->{IO, Console} ()
 listTodos() =
     case load() of
         Nothing -> storageFailure()
         Just [] -> print "No todos."
         Just todos -> printTodos 1 todos
 
-completeTodo : String ->{IO} ()
+completeTodo : String ->{IO, Console} ()
 completeTodo raw =
     case String.toInt raw of
         Nothing -> usage()

@@ -25,7 +25,7 @@ make() = Consumer twice
 run : Consumer e -> Iterator Int e ->{e} Int
 run (Consumer action) cursor = action cursor
 
-prefix : Int ->{IO} (Iterator Int e ->{e} Int)
+prefix : Int ->{Console} (Iterator Int e ->{e} Int)
 prefix extra =
     print "prefix"
     { cursor -> sum cursor + extra }

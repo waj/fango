@@ -39,13 +39,15 @@ memoizes only on success, so a failure, a runtime error, or an interruption
 leaves nothing to undo but the installation, which the session restores from
 the names' prior bindings before any level it may have ended is popped.
 
-Print is ordinary Display-constrained Console code over display and
-IO.write stdout, catching typed IO failures at the convenience boundary. Tooling
-evaluates an observed expression once. The REPL echoes a result through available
-Show evidence, the representation, so a String result is quoted; a program whose
-entry is a value prints it through Display evidence, as `print` would. Without
-evidence either one shows an opaque typed placeholder or `<function>`, and
-observation never adds a constraint to the observed expression.
+Print is ordinary Display-constrained Console code over `display` and the
+`Console` effect's byte write; the session's console runner answers it with
+the session's standard streams. An input or an effectful value definition
+that uses the console is checked a second time under `Console.runSystem`, so
+one that does not keeps its own shape, laziness, and stack. Tooling evaluates
+an observed expression once. The REPL echoes a result through available Show
+evidence, the representation, so a String result is quoted. Without evidence
+it shows an opaque typed placeholder or `<function>`, and observation never
+adds a constraint to the observed expression.
 
 ## Call stack
 

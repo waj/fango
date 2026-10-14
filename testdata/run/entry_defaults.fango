@@ -20,7 +20,7 @@ runGreeter action =
             log ("greeting " ++ name)
             resume ("Hello, " ++ name)
 
-runLog : (() ->{Log | e} a) ->{IO | e} a
+runLog : (() ->{Log | e} a) ->{IO, Console | e} a
 runLog action =
     print "log installed"
     handle action() on

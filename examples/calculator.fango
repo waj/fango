@@ -123,7 +123,7 @@ evaluate env (Subtract a b) = evaluate env a - evaluate env b
 evaluate env (Multiply a b) = evaluate env a * evaluate env b
 evaluate env (Divide a b) = evaluate env a / evaluate env b
 
-execute : Dict String Float -> Statement ->{Fail String, IO} Dict String Float
+execute : Dict String Float -> Statement ->{Fail String, Console} Dict String Float
 execute env (Assign name expr) =
     value = evaluate env expr
     print (name ++ " = " ++ show value)

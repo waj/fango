@@ -1,3 +1,4 @@
 (core
   (def grade (params _arg0) Int -> String (case String (var _arg0 Int) _match1 (switchlit _match1 ((int 0 Int) (leaf (string "zero" String))) ((int 1 Int) (leaf (string "one" String))) (default (leaf (string "many" String))))))
-  (def main (params _) () ->{IO} () (app/worker @[String] (var Console.print _dictionary_Display String -> String ->{IO} ()) (var Basics._instance_4261736963732e446973706c6179_537472696e67 _dictionary_Display String) (app/worker (var grade Int -> String) (int 1 Int) String) ())))
+  (def main (params _) (effects Console.Console@poly) (control poly) () ->{Console} () (app/worker/poly @[String] evidence[Console.Console@poly] (var Console.print _dictionary_Display String -> String ->{Console} ()) (var Basics._instance_4261736963732e446973706c6179_537472696e67 _dictionary_Display String) (app/worker (var grade Int -> String) (int 1 Int) String) ()))
+  (def main#entry (params _) () ->{IO} () (app/worker @[()] (var Console.runSystem (() ->{Console} ()) ->{IO} ()) (lam/poly _ () ->{Console} () (app/worker/poly evidence[Console.Console@poly] (var main () ->{Console} ()) (unit ()) ())) ())))

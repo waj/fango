@@ -1,7 +1,7 @@
 Fango 0.1 — :help for commands
 > > | | one : () -> Int
 > | | pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
-> | | | emit : Num a => () ->{IO} a
+> | | | emit : Num a => () ->{Console} a
 > Int
 > Int
 > 3 : Int
@@ -23,7 +23,7 @@ The annotation says:
 
 but the body requires:
 
-    () ->{IO} Int
+    () ->{Console} Int
 
 2| bad() = pair one emit
            ^^^^^^^^^^^^^

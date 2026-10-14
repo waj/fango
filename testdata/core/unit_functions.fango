@@ -1,11 +1,11 @@
-doSomething : () ->{IO} ()
+doSomething : () ->{Console} ()
 doSomething() = print "do"
 
-register : (() ->{IO} ()) ->{IO} ()
+register : (() ->{Console} ()) ->{Console} ()
 register action = action()
 
-main : () ->{IO} ()
+main : () ->{Console} ()
 main() =
-    saved : () ->{IO} ()
+    saved : () ->{Console} ()
     saved() = doSomething()
     register saved

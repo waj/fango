@@ -19,7 +19,7 @@ parse input found =
             if Bytes.length rest == 0 then List.reverse found else List.reverse [rest | found]
         Overflowed -> List.reverse found
 
-report : Show a => String -> Result Error a ->{IO} ()
+report : Show a => String -> Result Error a ->{Console} ()
 report label outcome =
     case outcome of
         Ok value -> print (label ++ ": " ++ show value)

@@ -1,7 +1,7 @@
 import IO
 import Range
 
-printDensity : Int ->{IO} ()
+printDensity : Int ->{Console} ()
 printDensity density =
     if density > 8 then
         Console.write " "
@@ -28,7 +28,7 @@ mandelConverge : Float -> Float -> Int
 mandelConverge real imaginary =
     mandelConverger real imaginary 0 real imaginary
 
-mandel : Float -> Float -> Float -> Float ->{IO} ()
+mandel : Float -> Float -> Float -> Float ->{Console} ()
 mandel realStart imaginaryStart realMagnitude imaginaryMagnitude =
     drawRow row =
         drawPoint column =

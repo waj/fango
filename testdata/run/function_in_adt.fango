@@ -3,10 +3,10 @@ import Maybe exposing (Maybe(..))
 
 type Box a = Box a deriving (Eq, Show)
 
-boxed : Box (() ->{IO} Maybe IO.Line)
+boxed : Box (() ->{Console} Maybe IO.Line)
 boxed = Box readLine
 
-run : Box (() ->{IO} Maybe IO.Line) ->{IO} ()
+run : Box (() ->{Console} Maybe IO.Line) ->{Console} ()
 run box =
     case box of
         Box callback ->

@@ -15,7 +15,7 @@ bytes value =
         Nothing -> []
         Just found -> Bytes.toList found
 
-exercise : () ->{IO, Fail IO.Error} ()
+exercise : () ->{IO, Console, Fail IO.Error} ()
 exercise() =
     print (bytes (IO.readBytes stdin 1))
     print (line (IO.readLine stdin))

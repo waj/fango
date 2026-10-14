@@ -40,7 +40,7 @@ divide : Int -> Int -> Int
 divide a b =
     Basics.quotientBy b a
 
-report : Int ->{IO} ()
+report : Int ->{Console} ()
 report n =
     Console.write (show (divide n 0))
     Console.write (show (divide n 1))
@@ -59,7 +59,7 @@ import IO exposing (IO)
 import List
 
 main() =
-    scale : Int ->{IO} Int
+    scale : Int ->{Console} Int
     scale n =
         Console.write ""
         Basics.quotientBy (n - 2) 100
@@ -77,7 +77,7 @@ import IO exposing (IO)
 type Ratio = Ratio Int Int
 
 class Describe a
-    describe : a ->{IO} String
+    describe : a ->{Console} String
 
 instance Describe Ratio
     describe (Ratio a b) =
@@ -97,7 +97,7 @@ import Basics
 import Console
 import IO exposing (IO)
 
-crash : Int ->{IO} Int
+crash : Int ->{Console} Int
 crash n =
     Console.write ""
     Basics.quotientBy n 1
@@ -228,11 +228,11 @@ import IO exposing (IO)
 import List
 import Trace
 
-log : String ->{IO} ()
+log : String ->{Console} ()
 log message =
     Console.write (message ++ "\n" ++ Trace.render (Trace.capture ()))
 
-step : Int ->{IO} ()
+step : Int ->{Console} ()
 step n =
     if n == 0 then log "bottom" else step (n - 1)
 

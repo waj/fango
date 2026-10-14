@@ -176,7 +176,7 @@ run()
 :quit
 `), &out)
 	got := out.String()
-	if !strings.Contains(got, "run : () ->{IO} ()") || !strings.Contains(got, "1\n") {
+	if !strings.Contains(got, "run : () ->{Console} ()") || !strings.Contains(got, "1\n") {
 		t.Fatalf("cleanup contract or following traversal failed:\n%s", got)
 	}
 	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "CAPTURE CHECK ERROR") {
@@ -410,7 +410,7 @@ answer
 
 func TestPromptNullaryFunctionRunsOnlyWhenCalled(t *testing.T) {
 	var out strings.Builder
-	Run(strings.NewReader("say : () ->{IO} ()\nsay() = print \"ok\"\n:type say\nsay()\nsay()\n:quit\n"), &out)
+	Run(strings.NewReader("say : () ->{Console} ()\nsay() = print \"ok\"\n:type say\nsay()\nsay()\n:quit\n"), &out)
 	if strings.Count(out.String(), "ok\n") != 2 {
 		t.Fatalf("nullary function should run only on its two explicit calls:\n%s", out.String())
 	}

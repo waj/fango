@@ -11,5 +11,5 @@ total : List Int -> Int -> Int
 total [] acc = acc
 total [n | rest] acc = total rest (acc + n)
 
-main : () ->{IO} ()
+main : () ->{Console} ()
 main() = print (total (build 200000 []) 0)

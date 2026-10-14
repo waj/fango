@@ -5,7 +5,7 @@
 -- no import, while `map` alone does. The module itself exports nothing.
 --
 -- Unqualified, the prelude provides the standard classes and operators,
--- `show`, `display`, `ignore`, `Type`, `print`, `readLine`, `write`, `IO`,
+-- `show`, `display`, `ignore`, `Type`, `print`, `readLine`, `write`, `Console`, `IO`,
 -- `stdin`, `stdout`, `stderr`, `List`, and `Maybe` with its constructors.
 module Prelude exposing ()
 
@@ -16,7 +16,7 @@ import Basics exposing
     , display, ignore, show
     , (*), (+), (++), (-), (/), (/=), (<), (<=), (<|), (==), (>), (>=), (|>)
     )
-import Console exposing (print, readLine, write)
+import Console exposing (Console, print, readLine, write)
 import IO exposing (IO, stderr, stdin, stdout)
 import List exposing (List)
 import Maybe exposing (Maybe(..))

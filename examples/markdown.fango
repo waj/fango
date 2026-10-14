@@ -118,7 +118,7 @@ step input state =
                     cleared = flush state
                     { cleared | block = Paragraph (inline body) }
 
-writePending : List Builder ->{IO} ()
+writePending : List Builder ->{Console} ()
 writePending pending =
     case pending of
         [] -> ()
@@ -130,7 +130,7 @@ writePending pending =
                     writePending remaining
                 Join left right -> writePending [left, right | remaining]
 
-convert : State ->{IO} ()
+convert : State ->{Console} ()
 convert state =
     case readLine() of
         Nothing ->

@@ -15,7 +15,7 @@ lineCount : IO.Line -> Int
 lineCount { ending = "" } = 0
 lineCount _ = 1
 
-count : Counts ->{IO} Counts
+count : Counts ->{Console} Counts
 count counts =
     case readLine() of
         Nothing -> counts

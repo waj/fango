@@ -937,7 +937,7 @@ func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
 		})
 		if name == "explicit_unit_calls.fango" {
 			text := string(src)
-			if !strings.Contains(text, "func V_doSomething()") || strings.Contains(text, "V_doSomething(fangort.UnitValue)") {
+			if !strings.Contains(text, "func V_doSomething(ev_Console_dot_Console *m_Console.Eff_Console_dot_Console)") || strings.Contains(text, "V_doSomething(ev_Console_dot_Console, fangort.UnitValue)") {
 				t.Errorf("%s: concrete Unit worker ABI was not erased:\n%s", name, text)
 			}
 		} else if name == "effect_handler.fango" && !strings.Contains(string(src), "Op_choose func() bool") {
@@ -950,10 +950,10 @@ func TestGeneratedGoMaterializesNativeUnitOnlyInValueContext(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "mandelbrot.fango")
 	src := string(entryFile(t, emittedProject(t, path)))
-	if strings.Contains(src, "m_Console.V_Console_dot_write(\" \")\n\t\t\treturn fangort.UnitValue") {
+	if strings.Contains(src, "m_Console.V_Console_dot_write(ev_Console_dot_Console, \" \")\n\t\t\treturn fangort.UnitValue") {
 		t.Fatalf("statement-position Console.write unnecessarily materialized Unit:\n%s", src)
 	}
-	if !strings.Contains(src, "m_Console.V_Console_dot_write(\" \")") {
+	if !strings.Contains(src, "m_Console.V_Console_dot_write(ev_Console_dot_Console, \" \")") {
 		t.Fatalf("statement-position Console.write was not emitted directly:\n%s", src)
 	}
 }
