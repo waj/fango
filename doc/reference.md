@@ -89,6 +89,7 @@ and patterns.
 ## Compile-time metaprogramming
 
 [Compile-time metaprogramming](reference/metaprogramming.md) — Meta API, typed attributes, reflection, quotes, splices, and derivers.
+[Effect reflection](reference/metaprogramming.md#effect-reflection) — arrows, rows, effect attributes, and declared types of quoted names.
 
 ### Derivers
 

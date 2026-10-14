@@ -1,0 +1,72 @@
+import Meta exposing (Arrow(..), Items(..), Tail(..))
+
+-- An attribute type naming a runner, as an effect's default handler would.
+type Runner = Runner Meta.Code
+
+#[Runner `runGreeter`]
+effect Greeter
+    greet : String -> String
+
+runGreeter : (() ->{Greeter | e} a) ->{e} a
+runGreeter action =
+    handle action() on
+        greet name -> resume ("Hello, " ++ name)
+
+effectNames : Items Meta.Effect -> String
+effectNames items =
+    case items of
+        NoItems -> ""
+        Item found rest -> found.name ++ " " ++ effectNames rest
+
+-- Effects on an arrow's row are ordered by module and name, and an open row
+-- ends in its row variable.
+describe : Meta.TypeRepr -> String
+describe repr =
+    case Meta.arrow repr of
+        NotArrow -> "not an arrow"
+        Arrow parts ->
+            ending =
+                case parts.tail of
+                    Closed -> "closed"
+                    Open _ -> "open"
+            effectNames parts.effects ++ ending
+
+-- The runner the attribute names, read back through its declared type: the
+-- callback's row and the runner's own row share one row variable.
+runnerOf : Meta.TypeRepr -> Meta.Code
+runnerOf repr =
+    case Meta.arrow repr of
+        NotArrow -> Meta.fail "not an arrow"
+        Arrow parts ->
+            case parts.effects of
+                NoItems -> Meta.fail "no effect"
+                Item found _ ->
+                    case Meta.attributes @Runner found.attributes of
+                        NoItems -> Meta.fail "no runner"
+                        Item attached _ ->
+                            case attached.value of
+                                Runner code -> shapeOf code
+
+shapeOf : Meta.Code -> Meta.Code
+shapeOf code =
+    if Meta.isReference code then
+        runner = Meta.declaredType code
+        case Meta.arrow runner of
+            NotArrow -> Meta.failAt (Meta.siteOf code) "a runner is a function"
+            Arrow outer ->
+                case Meta.arrow outer.param of
+                    NotArrow -> Meta.failAt (Meta.siteOf code) "a runner takes a callback"
+                    Arrow inner ->
+                        linked =
+                            case (inner.tail, outer.tail) of
+                                (Open a, Open b) -> Meta.sameType a b
+                                _ -> False
+                        Meta.lift (describe outer.param ++ " -> " ++ describe runner ++ (if linked then ", linked" else ", unlinked"))
+    else
+        Meta.failAt (Meta.siteOf code) "a runner is a top-level name"
+
+main() =
+    print $(Meta.lift (describe (typeOf (Int ->{IO, Greeter} ()))))
+    print $(Meta.lift (describe (typeOf (Int -> String))))
+    print $(runnerOf (typeOf (() ->{Greeter} ())))
+    print (runGreeter { greet "fixture" })

@@ -266,6 +266,9 @@ type Checker struct {
 // declaration without the compile-time evaluator carrying the checker around.
 func (ck *Checker) ADT(unique int) *types.ADTInfo { return ck.ADTs[unique] }
 
+// Effect implements meta.Schema for reflected effect applications.
+func (ck *Checker) Effect(unique int) *types.EffectInfo { return ck.EffectsByUnique[unique] }
+
 // MarkEffectScoped applies compiler-owned lifetime policy to an effect. The
 // surface language deliberately has no annotation for this: State and resource
 // APIs opt in when installed by the compiler/standard library.
@@ -818,7 +821,7 @@ func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Er
 		seen[p.Name] = true
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
-	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params}
+	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params, AttributesPending: len(ed.Attributes) > 0}
 	ck.Effects[ed.Name], ck.EffectsByUnique[info.Unique] = info, info
 	if ed.Name == "IO.IO" || ed.Name == "IO" {
 		ck.IO = info
@@ -979,6 +982,9 @@ func (ck *Checker) TypeDecl(td *ast.TypeDecl) []diag.Error {
 func (ck *Checker) EffectDecl(ed *ast.EffectDecl) []diag.Error {
 	errs := ck.declareEffectHeader(ed, false)
 	errs = append(errs, ck.declareEffectOps(ed, false)...)
+	if len(errs) == 0 {
+		errs = append(errs, ck.checkEffectAttributes(ed)...)
+	}
 	return append(errs, ck.resolveNativeBoundaries(&ast.Module{Decls: []ast.Decl{ed}})...)
 }
 

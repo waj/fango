@@ -221,8 +221,8 @@ attribute type, and an `assemble` metaprogram that
   rejecting cycles;
 - reports failures at the attribute or at `main`.
 
-This depends on the [effect reflection](roadmap-meta.md#effect-reflection)
-additions to `Meta`. They are part of this work, not a later follow-up.
+This uses the implemented [effect reflection](reference/metaprogramming.md#effect-reflection)
+in `Meta` and attribute tags on `effect` declarations.
 
 `main`'s row, annotated or shown by `fango doc` when inferred, states every
 service the program can reach. An annotated function deeper in the program
@@ -337,7 +337,7 @@ decision.
 | IOI6 Network interpretation | IOI3 | Public Net driver with a checked cancellation boundary; no stdlib scripted fixtures |
 | IOI7 HTTP and task integration | IOI6, [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency) | HTTP transport path and inherited mock behavior under real tasks |
 | IOI8 Migration and completeness audit | IOI2, IOI4, IOI5, IOI7, IOI9 | Bundled caller migration, documentation, and verified coverage boundary |
-| IOI9 Entry assembly | IOI5, [effect reflection](roadmap-meta.md#effect-reflection) | `DefaultHandler` attribute, `Runtime.Entry.assemble`, compiler entry splice |
+| IOI9 Entry assembly | IOI5, [effect reflection](reference/metaprogramming.md#effect-reflection) (done) | `DefaultHandler` attribute, `Runtime.Entry.assemble`, compiler entry splice |
 
 ### Implementation order
 
@@ -345,10 +345,9 @@ Land the work in these phases. Each phase leaves every verification gate green,
 updates design, reference, and source documentation for what it lands, and is
 committed separately.
 
-1. **Effect reflection** in `Meta`, as listed in the
-   [metaprogramming roadmap](roadmap-meta.md#effect-reflection), including
-   attribute tags before `effect` declarations with their parser, formatter,
-   and TextMate grammar changes.
+1. **Effect reflection** in `Meta`. DONE: see
+   [effect reflection](reference/metaprogramming.md#effect-reflection) and
+   [attributes](reference/metaprogramming.md#attributes).
 2. **IOI5.** `Process.Status`, the hard `Process.exit`, the `Arguments`
    effect, and the function-only `main`. Stop printing `main`'s value and
    rewrite value-style fixtures. Until phase 3, programs install the Arguments
@@ -509,9 +508,8 @@ For implementation, preserve the [verification contracts](design/verification.md
 independent Core lint, malformed-IR rejection, interpreter/compiler differential
 coverage, functional tests, intentional goldens, deterministic emission, and
 `go vet`. Keep `fango doc --stdlib --strict` clean and make source API examples
-true under both backends. Allowing attribute tags before `effect` declarations
-is the one syntax change: update the parser, formatter, and TextMate grammar
-together, with a tokenizer case.
+true under both backends. Attribute tags before `effect` declarations were the
+one syntax change, and have landed with the effect reflection phase.
 
 Tests must distinguish mock correctness from handler wiring. A memory fixture
 alone cannot establish real socket cancellation or TLS behavior; retain real

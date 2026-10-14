@@ -56,9 +56,16 @@ type SnapshotObject struct {
 	Groups []Group
 }
 
+// stageEnv is a fresh compile-time environment connected to the checker's
+// quote table and declared types.
+func stageEnv(ck *infer.Checker) *eval.Env {
+	env := eval.NewEnv()
+	env.Templates, env.Declared = ck.Templates, ck.DeclaredType
+	return env
+}
+
 func Install(ck *infer.Checker) *Session {
-	ev := &evaluator{ck: ck, env: eval.NewEnv()}
-	ev.env.Templates = ck.Templates
+	ev := &evaluator{ck: ck, env: stageEnv(ck)}
 	ck.CompileTime = ev.run
 	// A failed expansion rolls the checker back past declarations this
 	// environment already holds, so the environment is rebuilt from the
@@ -261,8 +268,7 @@ func (s *Session) Checkpoint() func() {
 	saved.installedIntrinsics = maps.Clone(saved.installedIntrinsics)
 	return func() {
 		*s.ev = saved
-		s.ev.env = eval.NewEnv()
-		s.ev.env.Templates = s.ev.ck.Templates
+		s.ev.env = stageEnv(s.ev.ck)
 		s.ev.env.DefineProg(&core.Prog{ADTs: s.ev.ck.ADTOrder, Defs: s.ev.defs, Natives: s.ev.ck.Natives})
 	}
 }
@@ -325,8 +331,7 @@ type evaluator struct {
 }
 
 func (ev *evaluator) resetToBase() {
-	ev.env = eval.NewEnv()
-	ev.env.Templates = ev.ck.Templates
+	ev.env = stageEnv(ev.ck)
 	ev.defs = append([]core.Def(nil), ev.baseDefs...)
 	ev.groups = append([]Group(nil), ev.baseGroups...)
 	if len(ev.baseDefs) != 0 {

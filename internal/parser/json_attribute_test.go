@@ -45,6 +45,7 @@ func TestFieldAttributes(t *testing.T) {
 		"type T = { #[Foo,, Bar] x : Int }\n",
 		"type T = { #[Foo x : Int }\n",
 		"#[Foo]\nx = 1\n",
+		"#[Foo]\nclass C a\n    m : a -> a\n",
 		"type T = { {-# json skip #-} x : Int }\n",
 	} {
 		if _, count := parse(src); count == 0 {
@@ -82,5 +83,25 @@ func TestTrailingFieldAttributeBoundaries(t *testing.T) {
 		if len(f.Attributes) != 1 || f.Attributes[0].Exprs[0].(*ast.Ctor).Name != []string{"A", "B", "C"}[i] {
 			t.Fatalf("attribute attached to the wrong field: %+v", f)
 		}
+	}
+}
+
+func TestEffectAttributes(t *testing.T) {
+	src := "#[Default `runConsole`]\n#[Label \"io\", Other 2]\neffect Console\n    write : String -> ()\n"
+	file := source.NewFile("effect.fango", []byte(src))
+	tokens, lexErrs := lexer.Lex(file)
+	if len(lexErrs) != 0 {
+		t.Fatal(lexErrs)
+	}
+	module, errs := Parse(tokens, file)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	effect, ok := module.Decls[0].(*ast.EffectDecl)
+	if !ok || len(effect.Attributes) != 2 || len(effect.Attributes[1].Exprs) != 2 || len(effect.Ops) != 1 {
+		t.Fatalf("effect attributes lost: %s", ast.Dump(module))
+	}
+	if !module.UsesStaging || effect.Sp.Start != 0 {
+		t.Fatalf("attributed effect must use staging and span its tags: %+v", effect.Sp)
 	}
 }

@@ -482,6 +482,10 @@ type EffectInfo struct {
 	Name   string
 	Params []*TVar
 	Ops    []*EffectOp
+	// Attributes are the checked tags written before `effect`, with the same
+	// storage and pending discipline as ADTInfo's.
+	Attributes        []AttributeInfo
+	AttributesPending bool
 	// Scoped is compiler-owned policy. Source effect declarations are durable
 	// by default; State/resource milestones mark the capabilities whose
 	// handler activation must not escape.

@@ -393,9 +393,12 @@ type Resume struct {
 // resolved in the quoting module's scope but never checked where it is
 // written — its holes have no type yet (doc/design.md, "Compile-time
 // metaprogramming").
+// Visible is filled by module resolution, as for TypeOf: it bounds what
+// reflecting the declared type of a quoted name may read.
 type Quote struct {
-	Body Expr
-	Sp   source.Span // opening through closing backtick
+	Body    Expr
+	Visible map[string]bool
+	Sp      source.Span // opening through closing backtick
 }
 
 // Splice goes down a stage. At quote depth 0 it evaluates Operand during
@@ -690,12 +693,14 @@ func (*TypeDecl) isDecl() {}
 // Params are the effect's type parameters (`effect Fail e`), mirroring
 // TypeDecl.Params. Operation signatures are ordinary type expressions; the
 // checker attaches the effect's own label to the operation's arrow.
+// Attributes are the tags written before `effect`.
 type EffectDecl struct {
-	Name     string
-	NameSpan source.Span
-	Params   []Param
-	Ops      []OpSig
-	Sp       source.Span
+	Attributes []AttributeGroup
+	Name       string
+	NameSpan   source.Span
+	Params     []Param
+	Ops        []OpSig
+	Sp         source.Span
 }
 
 // OpSig is one operation signature line inside an `effect` declaration.
@@ -873,6 +878,13 @@ func SetDeclSpan(d Decl, sp source.Span) {
 		d.Sp = sp
 	case *FixityDecl:
 		d.Sp = sp
+	}
+}
+
+// VisitAttributes visits attachments in source order, preserving writable groups.
+func (d *EffectDecl) VisitAttributes(f func(*AttributeGroup)) {
+	for i := range d.Attributes {
+		f(&d.Attributes[i])
 	}
 }
 

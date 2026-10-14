@@ -151,6 +151,7 @@ func dumpDecl(d Decl) string {
 	case *EffectDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(effect %s", d.Name)
+		b.WriteString(dumpAttributes(d.Attributes))
 
 		if p := dumpParams(d.Params); p != "" {
 			fmt.Fprintf(&b, " %s", p)

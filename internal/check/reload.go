@@ -192,6 +192,8 @@ func RemapNominal(v reflect.Value, ids, effects map[int]int) {
 			for id, yes := range r.Visible {
 				if reused, ok := ids[id]; ok {
 					id = reused
+				} else if reused, ok := effects[id]; ok {
+					id = reused
 				}
 				visible[id] = yes
 			}

@@ -38,6 +38,23 @@ schema visibility at the typeOf site and carries it into arguments/fields;
 opaque imports remain opaque. A narrow checker-table interface supplies schema
 facts; there is no ambient name reification or instance-existence query.
 
+Arrow reflection derives every child, including row variables and effect
+arguments, with the parent's visibility. Effect applications are opaque
+`meta.EffectRepr` handles over the checker's labels; their attributes resolve
+through the same schema interface and visibility set, which holds effect
+uniques beside type uniques (both come from one supply, and installation
+remaps either kind). Reflected rows are sorted by canonical name and displayed
+arguments rather than by unique, because uniques differ between a module
+checked from source and one installed from cache, and generated code must not.
+A hidden effect collection carries its reason, and attribute lookup reports it.
+
+A quote records its module's reflection visibility in its template. The
+compile-time environment receives the checker's declared-type lookup next to
+the quote table: a template whose body is a single name reads that name's
+scheme body from the type environment, with quantified variables left rigid;
+remaining metavariables mean the declaration is not complete. Lookups happen
+when the generator runs, so a quote may name a declaration that follows it.
+
 Pure reflection/code-building natives return scalars and opaque handles. Meta's
 Fango code assembles schema records and its own Items list, keeping natives below
 eval in the package graph and avoiding Meta -> List -> Derive -> Meta cycles.
@@ -47,6 +64,8 @@ only on Basics; Derive supplies ordinary Fango Eq/Ord/Show generators.
 ## Attribute storage and lookup
 
 Attribute groups preserve expression spans and source grouping in the AST.
+Type and effect declarations carry them; an effect's tags are checked at its
+source position like a type's, with the same pending flag guarding reads.
 Record fields store leading and trailing groups in one source-ordered collection;
 spans retain their placement for formatting. Resolution and fixity traverse their ordinary expressions. Source-ordered type
 registration checks and evaluates attachments through the staging seam before

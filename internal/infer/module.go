@@ -136,6 +136,8 @@ func (b *moduleCheck) registerThrough(end int) {
 				b.context(i, d.Owner, func() { b.errs = append(b.errs, b.ck.DeriverDecl(d)...) })
 			}
 			delete(b.deriverBusy, d.Class)
+		case *ast.EffectDecl:
+			b.context(i, symbolModule(d.Name), func() { b.errs = append(b.errs, b.ck.checkEffectAttributes(d)...) })
 		case *ast.TypeDecl:
 			b.context(i, symbolModule(d.Name), func() { b.errs = append(b.errs, b.ck.checkAttributes(d)...) })
 			if len(b.errs) > 0 {

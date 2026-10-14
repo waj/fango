@@ -130,8 +130,14 @@ func (r *resolver) decl(d ast.Decl) {
 				group.Exprs[i] = r.expr(e)
 			}
 		})
-	case *ast.EffectDecl, *ast.FixityDecl:
-		// Signatures and type declarations hold no expressions.
+	case *ast.EffectDecl:
+		for _, group := range d.Attributes {
+			for i, e := range group.Exprs {
+				group.Exprs[i] = r.expr(e)
+			}
+		}
+	case *ast.FixityDecl:
+		// A fixity declaration holds no expressions.
 	default:
 		panic(fmt.Sprintf("fixity: unhandled declaration %T", d))
 	}

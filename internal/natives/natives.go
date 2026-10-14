@@ -25,6 +25,10 @@ type Runtime struct {
 	// need their arguments as trees, and the template table lives with the
 	// checker (doc/design.md, "Compile-time metaprogramming").
 	Expand func(*meta.Code) ast.Expr
+	// Declared reflects the declared type of the top-level name a code value
+	// quotes; ok is false for any other code. The checker supplies it
+	// alongside Expand.
+	Declared func(*meta.Code) (repr *meta.TypeRepr, ok bool, err error)
 }
 
 // ExitError is how the interpreter represents Process.exit without terminating

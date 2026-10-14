@@ -1534,10 +1534,11 @@ type resolver struct {
 	seenModules, aliases, fullQualifiers map[string]bool
 
 	// schemas holds the canonical types whose constructors or record fields
-	// this module may read. `typeOf` copies it, which is the whole modularity
-	// story for reflection: `exposing (T)` reflects opaque and
-	// `exposing (T(..))` reflects in full, exactly as those two forms
-	// already govern patterns and field access.
+	// this module may read, and the effects whose operations it may name.
+	// `typeOf` and quotes copy it, which is the whole modularity story for
+	// reflection: `exposing (T)` reflects opaque and `exposing (T(..))`
+	// reflects in full, exactly as those two forms already govern patterns,
+	// field access, and handler clauses.
 	schemas map[string]bool
 
 	// prompt marks the REPL's resolver, whose module is never complete: a
@@ -1678,6 +1679,7 @@ func (r *resolver) declareHeaders(decls []ast.Decl) {
 			}
 		case *ast.EffectDecl:
 			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
+			r.schemas[r.canon(d.Name)] = true
 			for _, o := range d.Ops {
 				r.add(r.vals, o.Name, r.canon(o.Name), o.NameSpan)
 				r.add(r.ops, o.Name, r.canon(o.Name), o.NameSpan)
@@ -1803,6 +1805,11 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 			out = append(out, d)
 		case *ast.EffectDecl:
 			d.Name = r.canon(d.Name)
+			for _, group := range d.Attributes {
+				for _, e := range group.Exprs {
+					r.expr(e, r.vals, map[string]bool{})
+				}
+			}
 			for i := range d.Ops {
 				if d.Ops[i].Native != nil {
 					d.Ops[i].Native.Module = r.node.nativeModule
@@ -1867,6 +1874,11 @@ func (r *resolver) add(m map[string]string, k, v string, sp source.Span) {
 // exposeSchemas records the types i lets a reader see the insides of.
 func (r *resolver) exposeSchemas(i *iface) {
 	for name := range i.openTypes {
+		if v := i.types[name]; v != "" {
+			r.schemas[v] = true
+		}
+	}
+	for name := range i.openEffects {
 		if v := i.types[name]; v != "" {
 			r.schemas[v] = true
 		}
@@ -2034,6 +2046,7 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		// whole hygiene story: canonical symbols are fixed here, before
 		// inference, so a splice site can neither capture nor be captured.
 		r.expr(e.Body, vals, locals)
+		e.Visible = r.schemas
 	case *ast.Splice:
 		r.expr(e.Operand, vals, locals)
 	case *ast.Resume:

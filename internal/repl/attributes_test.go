@@ -46,3 +46,39 @@ func TestAttributesStageAndRollbackInREPL(t *testing.T) {
 		}
 	}
 }
+
+func TestEffectAttributesInREPL(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader("import Meta\n"+
+		"type Label = Label String\n"+
+		"#[Label \"service\"]\n"+
+		"effect Service\n"+
+		"    ask : () -> Int\n"+
+		"\n"+
+		"readLabel : Meta.TypeRepr -> Meta.Code\n"+
+		"readLabel repr =\n"+
+		"    case Meta.arrow repr of\n"+
+		"        Meta.Arrow parts ->\n"+
+		"            case parts.effects of\n"+
+		"                Meta.Item found _ ->\n"+
+		"                    case Meta.attributes @Label found.attributes of\n"+
+		"                        Meta.Item attached _ ->\n"+
+		"                            case attached.value of\n"+
+		"                                Label text -> Meta.lift text\n"+
+		"                        Meta.NoItems -> Meta.fail \"missing attribute\"\n"+
+		"                Meta.NoItems -> Meta.fail \"no effect\"\n"+
+		"        Meta.NotArrow -> Meta.fail \"not an arrow\"\n"+
+		"\n"+
+		"$(readLabel (typeOf (() ->{Service} ())))\n"+
+		"#[Meta.fail \"attachment failed\"] effect Broken\n"+
+		":quit\n"), &out)
+	got := out.String()
+	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "runtime error") {
+		t.Fatalf("unexpected failure:\n%s", got)
+	}
+	for _, want := range []string{`"service" : String`, "attachment failed"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
+	}
+}

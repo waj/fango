@@ -146,6 +146,16 @@ async function main() {
   const multilineAttribute = grammar.tokenizeLine('#[Json.Key "foo",');
   const attributeEnd = grammar.tokenizeLine('  Json.Default `0`] field : Int', multilineAttribute.ruleStack).tokens;
   assert(attributeEnd.some(t => t.scopes.includes('punctuation.definition.attribute.end.fango')));
+  const effectAttribute = grammar.tokenizeLine('#[Default `runSystem`]');
+  const attributedEffect = grammar.tokenizeLine('effect Console', effectAttribute.ruleStack).tokens;
+  assert(attributedEffect.some(t => t.scopes.includes('keyword.other.effect.fango')));
+  assert(attributedEffect.some(t => t.scopes.includes('entity.name.type.effect.fango')));
+  const inlineEffect = '#[Default `runSystem`] effect Console';
+  const inlineEffectTokens = grammar.tokenizeLine(inlineEffect).tokens;
+  const inlineEffectScopeAt = index => inlineEffectTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+  assert(inlineEffectScopeAt(inlineEffect.indexOf('runSystem')).includes('meta.attribute.fango'));
+  assert(inlineEffectScopeAt(inlineEffect.indexOf('effect')).includes('keyword.other.effect.fango'));
+  assert(inlineEffectScopeAt(inlineEffect.indexOf('Console')).includes('entity.name.type.effect.fango'));
   for (const witness of ['parse @Person input', 'parse @(List Person) input']) {
     const witnessTokens = grammar.tokenizeLine(witness).tokens;
     const at = witness.indexOf('@');

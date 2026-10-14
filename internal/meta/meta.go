@@ -20,6 +20,7 @@ import (
 // a TypeRepr answer questions about its own constructors.
 type Schema interface {
 	ADT(unique int) *types.ADTInfo
+	Effect(unique int) *types.EffectInfo
 }
 
 // TypeRepr is the compiler-owned value produced by typeOf. Identity comes
@@ -67,12 +68,39 @@ func (r *TypeRepr) Derive(t types.Type) *TypeRepr {
 	return &TypeRepr{Type: t, Visible: r.Visible, Schema: r.Schema}
 }
 
+// EffectRepr is one reflected effect application from a function row.
+// Identity is the label's Unique and structural arguments. Visible and Schema
+// follow the TypeRepr the row came from, so an effect whose operations the
+// reflection site cannot name keeps its attributes hidden.
+type EffectRepr struct {
+	Label   types.EffLabel
+	Visible map[int]bool
+	Schema  Schema `object:"omit"`
+}
+
+// Effect returns the reflected effect's declaration, or nil when it is not
+// visible from the reflection site.
+func (r *EffectRepr) Effect() *types.EffectInfo {
+	if r.Schema == nil || r.Visible != nil && !r.Visible[r.Label.Unique] {
+		return nil
+	}
+	return r.Schema.Effect(r.Label.Unique)
+}
+
+// Arg reflects one of the effect's arguments with the same visibility.
+func (r *EffectRepr) Arg(t types.Type) *TypeRepr {
+	return &TypeRepr{Type: t, Visible: r.Visible, Schema: r.Schema}
+}
+
 // Template is one quotation occurrence: the resolved expression it describes
 // plus its holes in source order. Holes are the `$(…)` nodes inside Body;
-// splicing replaces each with the code its hole evaluated to.
+// splicing replaces each with the code its hole evaluated to. Visible is the
+// quoting module's reflection visibility, used when the declared type of a
+// quoted name is reflected.
 type Template struct {
-	Body  ast.Expr
-	Holes []*ast.Splice
+	Body    ast.Expr
+	Holes   []*ast.Splice
+	Visible map[string]bool
 }
 
 // Table numbers the templates of one compilation. Indices are assigned in

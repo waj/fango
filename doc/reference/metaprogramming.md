@@ -55,6 +55,50 @@ its children.
 `List`, because `List` derives its own instances and so depends on the module
 that depends on `Meta`.
 
+## Effect reflection
+
+`Meta.arrow : TypeRepr -> Arrow` decomposes a function arrow:
+
+```fango
+type Arrow = NotArrow | Arrow ArrowInfo
+type ArrowInfo = { param : TypeRepr, result : TypeRepr, effects : Items Effect, tail : Tail }
+type Tail = Closed | Open TypeRepr
+type Effect = { name : String, moduleName : String, repr : EffectRepr, args : Items TypeRepr, attributes : Attributes }
+```
+
+A curried function is an arrow whose `result` is another arrow; each arrow
+carries its own row. `effects` lists the row's effect applications ordered by
+module and name, and `tail` is `Open` with the row variable when the row is
+open. `Meta.sameEffect` compares two applications by nominal identity and
+arguments; names never decide it. A closed arrow written in `typeOf`, such as
+`typeOf (() ->{IO} ())`, reflects a known effect to compare against.
+
+An effect's name, module, identity, and arguments are always readable. Its
+`attributes`, the tags written before its `effect` declaration, follow the
+visibility rule for type schemas, with handler clauses in place of
+constructors: they are readable where `exposing (E(..))` makes the effect's
+operations visible. Otherwise the collection is hidden, and looking anything up
+in it reports `COMPILE-TIME FAILURE` instead of answering `NoItems`, so a
+missing attribute is never confused with an unreadable one. Compiler-generated
+scope permissions do not appear in `effects`.
+
+`Meta.isReference : Code -> Bool` reports whether code is a quote of exactly
+one top-level name, such as `` `List.map` ``, and
+`Meta.declaredType : Code -> TypeRepr` reflects that declaration's type.
+Its quantified and row variables stay variables: `Meta.isVar` recognizes them
+and `Meta.sameType` relates two occurrences of one variable, so a generator can
+check a shape such as `(() ->{E | e} a) ->{IO | e} a`. Class constraints are
+not reflected. Schemas and effect attributes in the result are visible as they
+are where the quote was written. `declaredType` reports `COMPILE-TIME FAILURE`
+for code that is not a reference, and for a declaration whose type is still
+being inferred; an annotated declaration has its type as soon as it is
+declared.
+
+`Meta.siteOf : Code -> Site` is where a piece of code was written, so
+`Meta.failAt (Meta.siteOf code) message` reports a generator's failure at a
+quote it was given rather than at the splice. Code the compiler built has no
+source of its own; a failure there is reported at the splice site.
+
 ## Attributes
 
 An attribute is an ordinary Fango expression inside `#[...]`. Libraries define
@@ -75,14 +119,15 @@ single grouped tag have identical semantics: expressions are evaluated left to
 right, and the resulting attributes retain source order. Nested commas belong
 to their list, tuple, or record expressions. Formatting preserves tag grouping.
 
-Tags attach before `type`, before a union constructor name, or before a
-positional constructor field's type atom. Record-field tags may appear before
+Tags attach before `type`, before `effect`, before a union constructor name,
+or before a positional constructor field's type atom. Record-field tags may appear before
 the field name or after its complete type, before the comma or closing brace.
 A trailing tag on a separate line still belongs to that field; the comma starts
 the next field. Both placements may occur on one field, with leading tags
 followed by trailing tags in the attribute collection. Formatting preserves
 placement; see the [layout rules](commands.md#formatting).
-Tags do not attach to value declarations or expressions. Qualified names and
+Tags do not attach to value declarations, classes, or expressions
+(`ATTRIBUTE TARGET`). Qualified names and
 aliases obey ordinary import rules; attributes do not make libraries implicit
 imports.
 

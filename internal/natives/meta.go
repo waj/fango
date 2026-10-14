@@ -13,6 +13,7 @@ package natives
 import (
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
@@ -80,9 +81,7 @@ func installMeta(t map[string]Spec) {
 	})
 	t["Meta.typeModuleName"] = pure1(func(a any) any {
 		if c := repr(a).Con(); c != nil {
-			if i := strings.LastIndexByte(c.Name, '.'); i >= 0 {
-				return c.Name[:i]
-			}
+			return moduleOf(c.Name)
 		}
 		return ""
 	})
@@ -176,7 +175,121 @@ func installMeta(t map[string]Spec) {
 		return collection(r, entries)
 	}}
 	t["Meta.failAt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
-		return nil, &meta.Failure{Site: args[0].(*meta.Site), Message: args[1].(string)}
+		site := args[0].(*meta.Site)
+		if site.Span.File == nil {
+			// Compiler-built code has no source of its own; the splice site
+			// is the closest place to report.
+			return nil, fmt.Errorf("%s", args[1].(string))
+		}
+		return nil, &meta.Failure{Site: site, Message: args[1].(string)}
+	}}
+
+	// --- arrows, effects, and declared types ----------------------------
+
+	t["Meta.isArrow"] = pure1(func(a any) any {
+		_, ok := repr(a).Type.(*types.TFun)
+		return ok
+	})
+	t["Meta.arrowParam"] = pure1(func(a any) any {
+		r := repr(a)
+		if fn, ok := r.Type.(*types.TFun); ok {
+			return r.Derive(fn.Arg)
+		}
+		return r
+	})
+	t["Meta.arrowResult"] = pure1(func(a any) any {
+		r := repr(a)
+		if fn, ok := r.Type.(*types.TFun); ok {
+			return r.Derive(fn.Ret)
+		}
+		return r
+	})
+	t["Meta.arrowEffectCount"] = pure1(func(a any) any { return int64(len(rowEffects(repr(a)))) })
+	t["Meta.arrowEffectAt"] = pure2(func(a, i any) any {
+		r := repr(a)
+		labels := rowEffects(r)
+		n := int(i.(int64))
+		if n < 0 || n >= len(labels) {
+			return &meta.EffectRepr{Visible: r.Visible, Schema: r.Schema}
+		}
+		return &meta.EffectRepr{Label: labels[n], Visible: r.Visible, Schema: r.Schema}
+	})
+	t["Meta.arrowRowOpen"] = pure1(func(a any) any {
+		fn, ok := repr(a).Type.(*types.TFun)
+		return ok && fn.Eff.Tail != nil
+	})
+	t["Meta.arrowRowTail"] = pure1(func(a any) any {
+		r := repr(a)
+		if fn, ok := r.Type.(*types.TFun); ok && fn.Eff.Tail != nil {
+			return r.Derive(fn.Eff.Tail)
+		}
+		return r
+	})
+	t["Meta.sameEffectRepr"] = pure2(func(a, b any) any {
+		x, y := a.(*meta.EffectRepr).Label, b.(*meta.EffectRepr).Label
+		if x.Unique != y.Unique || len(x.Args) != len(y.Args) {
+			return false
+		}
+		for i := range x.Args {
+			if !types.Equal(x.Args[i], y.Args[i]) {
+				return false
+			}
+		}
+		return true
+	})
+	t["Meta.effectSurfaceName"] = pure1(func(a any) any { return types.SurfaceName(a.(*meta.EffectRepr).Label.Name) })
+	t["Meta.effectModuleName"] = pure1(func(a any) any { return moduleOf(a.(*meta.EffectRepr).Label.Name) })
+	t["Meta.effectArgCount"] = pure1(func(a any) any { return int64(len(a.(*meta.EffectRepr).Label.Args)) })
+	t["Meta.effectArgAt"] = pure2(func(a, i any) any {
+		e := a.(*meta.EffectRepr)
+		n := int(i.(int64))
+		if n < 0 || n >= len(e.Label.Args) {
+			return e.Arg(&types.TCon{Name: "()"})
+		}
+		return e.Arg(e.Label.Args[n])
+	})
+	// An effect's attributes follow the visibility of its operations, as a
+	// type's follow its constructors. A hidden collection is not empty: it
+	// refuses lookups, so a missing attribute is never confused with one the
+	// reflection site may not read.
+	t["Meta.effectAttributes"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		e := args[0].(*meta.EffectRepr)
+		info := e.Effect()
+		if info == nil {
+			name := types.SurfaceName(e.Label.Name)
+			return &meta.Attributes{Hidden: fmt.Sprintf("The attributes of effect `%s` are not visible here; import it with `%s(..)`.", name, name)}, nil
+		}
+		if info.AttributesPending {
+			return nil, fmt.Errorf("Cannot read attributes before their declaration is complete.")
+		}
+		return &meta.Attributes{Entries: info.Attributes}, nil
+	}}
+	t["Meta.isReference"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		if rt.Declared == nil {
+			return false, nil
+		}
+		_, ok, _ := rt.Declared(args[0].(*meta.Code))
+		return ok, nil
+	}}
+	t["Meta.declaredType"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		if rt.Declared == nil {
+			return nil, fmt.Errorf("declared types can only be read while the compiler is running")
+		}
+		r, ok, err := rt.Declared(args[0].(*meta.Code))
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("Meta.declaredType needs a quote of one top-level name.")
+		}
+		return r, nil
+	}}
+	t["Meta.siteOf"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		tree, err := expand(rt, args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &meta.Site{Span: tree.Span()}, nil
 	}}
 
 	// --- code construction --------------------------------------------
@@ -319,6 +432,40 @@ func installMeta(t map[string]Spec) {
 }
 
 func repr(v any) *meta.TypeRepr { return v.(*meta.TypeRepr) }
+
+func moduleOf(canonical string) string {
+	if i := strings.LastIndexByte(canonical, '.'); i >= 0 {
+		return canonical[:i]
+	}
+	return ""
+}
+
+// rowEffects lists the declared effects on an arrow's row, ordered by
+// canonical name and then displayed arguments. Uniques are not used: they
+// differ between a module checked from source and one installed from cache,
+// and generated code must not. Compiler-generated scope permissions have no
+// declaration and stay out of reflection.
+func rowEffects(r *meta.TypeRepr) []types.EffLabel {
+	fn, ok := r.Type.(*types.TFun)
+	if !ok {
+		return nil
+	}
+	var labels []types.EffLabel
+	for _, label := range fn.Eff.Labels {
+		if !label.Scoped {
+			labels = append(labels, label)
+		}
+	}
+	key := func(label types.EffLabel) string {
+		parts := []string{label.Name}
+		for _, arg := range label.Args {
+			parts = append(parts, types.Show(arg))
+		}
+		return strings.Join(parts, " ")
+	}
+	sort.SliceStable(labels, func(i, j int) bool { return key(labels[i]) < key(labels[j]) })
+	return labels
+}
 
 func argsOf(r *meta.TypeRepr) []types.Type {
 	if c := r.Con(); c != nil {

@@ -141,7 +141,7 @@ func (i *index) declare(decl ast.Decl) {
 			i.define(global("field", d.Name+"."+f.Name), f.NameSpan, text, nil, f.Attributes...)
 		}
 	case *ast.EffectDecl:
-		i.define(global("type", d.Name), d.NameSpan, apidoc.Head("effect", d.Name, d.Params), nil)
+		i.define(global("type", d.Name), d.NameSpan, apidoc.Head("effect", d.Name, d.Params), nil, d.Attributes...)
 		for _, op := range d.Ops {
 			text := ""
 			if info := ck.Operations[op.Name]; info != nil {
@@ -216,6 +216,11 @@ func (i *index) module(m *ast.Module) {
 				i.typ(f.Type)
 			}
 		case *ast.EffectDecl:
+			d.VisitAttributes(func(group *ast.AttributeGroup) {
+				for _, expression := range group.Exprs {
+					i.expr(expression, nil)
+				}
+			})
 			for _, op := range d.Ops {
 				i.typ(op.Type)
 			}

@@ -18,7 +18,13 @@ type Data struct {
 	Ctor      *types.CtorInfo
 	Fields    []*Data
 }
-type Attributes struct{ Entries []types.AttributeInfo }
+
+// Attributes is a reflected collection. Hidden, when set, is the reason the
+// reflection site may not read it; a lookup reports it instead of answering.
+type Attributes struct {
+	Entries []types.AttributeInfo
+	Hidden  string
+}
 type Site struct{ Span source.Span }
 type Failure struct {
 	Site    *Site

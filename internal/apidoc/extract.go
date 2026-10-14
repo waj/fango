@@ -326,7 +326,7 @@ func (x *extractor) collect(m modules.ResolvedModule) {
 			}
 		case *ast.EffectDecl:
 			x.types[d.Name] = &owned{id: KindEffect + ":" + d.Name, Declaration: Declaration{Kind: KindEffect, Name: types.SurfaceName(d.Name),
-				Signature: Head("effect", d.Name, d.Params), Documentation: x.leading(d.NameSpan), Source: x.location(d.NameSpan)}}
+				Signature: Head("effect", d.Name, d.Params), Documentation: x.leading(d.NameSpan, d.Attributes...), Source: x.location(d.NameSpan)}}
 			effect := ck.Effects[d.Name]
 			for _, op := range d.Ops {
 				sig := ""

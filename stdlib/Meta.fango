@@ -1,6 +1,6 @@
 {-# no-prelude #-}
--- The compile-time stage: code values, type reflection, attributes, and the
--- builders derivers use.
+-- The compile-time stage: code values, type and effect reflection,
+-- attributes, and the builders derivers use.
 --
 -- A backtick quotation is a `Code` value, and `$(...)` splices one back in.
 -- `typeOf T` reflects a type as a `TypeRepr`, which `info` reads as a schema
@@ -8,12 +8,14 @@
 -- types built from them exist only while the compiler runs, so a definition
 -- whose type mentions them is never part of a program.
 module Meta exposing
-    ( Attached(..), Attributes, Bound(..), BoundField(..), Code, Ctor(..)
-    , Field(..), Items(..), Lift(..), Reflected(..), Shape(..), Site
+    ( Arrow(..), ArrowInfo(..), Attached(..), Attributes, Bound(..)
+    , BoundField(..), Code, Ctor(..), Effect(..), EffectRepr, Field(..)
+    , Items(..), Lift(..), Reflected(..), Shape(..), Site, Tail(..)
     , TypeInfo(..), TypeRepr
-    , args, attributes, construct, ctorsIn, fail, failAt, foldItems, head, info
-    , isVar, lambda, lengthItems, localFunction, mapItems, match, sameType
-    , sequence, typeName
+    , args, arrow, attributes, construct, ctorsIn, declaredType, fail, failAt
+    , foldItems, head, info, isReference, isVar, lambda, lengthItems
+    , localFunction, mapItems, match, sameEffect, sameType, sequence, siteOf
+    , typeName
     )
 
 import Basics exposing (..)
@@ -349,6 +351,168 @@ ctorsIn subject =
     case subject.shape of
         Union ctors -> ctors
         Record ctor -> Item ctor NoItems
+
+-- Function arrows and the effects on their rows.
+
+-- A reflected effect application, compared with `sameEffect`.
+type EffectRepr = EffectRepr
+
+-- One effect application on an arrow's row. Its identity, name, and
+-- arguments are always readable. Its attributes are readable where the
+-- effect's operations are visible: `exposing (E(..))` reflects them, while
+-- `exposing (E)` leaves a collection whose lookups fail at compile time.
+type Effect =
+    {
+      -- The effect's name.
+      name : String
+      -- The module that declares it.
+    , moduleName : String
+      -- The reflected application.
+    , repr : EffectRepr
+      -- Its type arguments.
+    , args : Items TypeRepr
+      -- The attributes written before its `effect`.
+    , attributes : Attributes
+    }
+
+-- How an arrow's row ends.
+type Tail
+    -- The row lists every effect the arrow may perform.
+    = Closed
+    -- The row continues with this row variable.
+    | Open TypeRepr
+
+-- A decomposed function arrow.
+type ArrowInfo =
+    {
+      -- The argument type.
+      param : TypeRepr
+      -- The result type, which is itself an arrow for a curried function.
+    , result : TypeRepr
+      -- The effects on this arrow's row, ordered by module and name.
+    , effects : Items Effect
+      -- Whether the row is closed or open.
+    , tail : Tail
+    }
+
+-- What `arrow` finds.
+type Arrow
+    -- The type is not a function arrow.
+    = NotArrow
+    -- The arrow's parts.
+    | Arrow ArrowInfo
+
+isArrow : TypeRepr -> Bool
+isArrow = native "$1"
+
+arrowParam : TypeRepr -> TypeRepr
+arrowParam = native "$1"
+
+arrowResult : TypeRepr -> TypeRepr
+arrowResult = native "$1"
+
+arrowEffectCount : TypeRepr -> Int
+arrowEffectCount = native "$1"
+
+arrowEffectAt : TypeRepr -> Int -> EffectRepr
+arrowEffectAt = native "$1 == $2"
+
+arrowRowOpen : TypeRepr -> Bool
+arrowRowOpen = native "$1"
+
+arrowRowTail : TypeRepr -> TypeRepr
+arrowRowTail = native "$1"
+
+sameEffectRepr : EffectRepr -> EffectRepr -> Bool
+sameEffectRepr = native "$1 == $2"
+
+effectSurfaceName : EffectRepr -> String
+effectSurfaceName = native "$1"
+
+effectModuleName : EffectRepr -> String
+effectModuleName = native "$1"
+
+effectArgCount : EffectRepr -> Int
+effectArgCount = native "$1"
+
+effectArgAt : EffectRepr -> Int -> TypeRepr
+effectArgAt = native "$1 == $2"
+
+effectAttributes : EffectRepr -> Attributes
+effectAttributes = native "$1"
+
+effectArgsFrom : EffectRepr -> Int -> Items TypeRepr
+effectArgsFrom applied index =
+    if index >= effectArgCount applied then
+        NoItems
+    else
+        Item (effectArgAt applied index) (effectArgsFrom applied (index + 1))
+
+effectFor : EffectRepr -> Effect
+effectFor applied =
+    { name = effectSurfaceName applied
+    , moduleName = effectModuleName applied
+    , repr = applied
+    , args = effectArgsFrom applied 0
+    , attributes = effectAttributes applied
+    }
+
+effectsFrom : TypeRepr -> Int -> Items Effect
+effectsFrom repr index =
+    if index >= arrowEffectCount repr then
+        NoItems
+    else
+        Item (effectFor (arrowEffectAt repr index)) (effectsFrom repr (index + 1))
+
+-- Decomposes a function arrow. A curried function is an arrow whose result
+-- is another arrow, each with its own row.
+--
+-- ```fango
+-- import Meta exposing (Arrow(..))
+--
+-- resultIsString =
+--     $(Meta.lift
+--         (case Meta.arrow (typeOf (Int -> String)) of
+--             Arrow parts -> Meta.sameType parts.result (typeOf String)
+--             NotArrow -> False))
+--
+-- resultIsString
+-- ```
+arrow : TypeRepr -> Arrow
+arrow repr =
+    if isArrow repr then
+        parts = ArrowInfo
+            { param = arrowParam repr
+            , result = arrowResult repr
+            , effects = effectsFrom repr 0
+            , tail = if arrowRowOpen repr then Open (arrowRowTail repr) else Closed
+            }
+        Arrow parts
+    else
+        NotArrow
+
+-- Whether two effect applications are the same effect with the same
+-- arguments. Names never decide it.
+sameEffect : Effect -> Effect -> Bool
+sameEffect a b = sameEffectRepr a.repr b.repr
+
+-- Whether the code is a quote of exactly one top-level name, such as
+-- `` `List.map` ``.
+isReference : Code -> Bool
+isReference = native "$1"
+
+-- The declared type of a quoted top-level name. Its quantified type and row
+-- variables stay variables, so `isVar` and `sameType` can relate them; its
+-- schemas are visible as they are where the quote was written. Reading a
+-- declaration that is still being checked, or code that is not a reference,
+-- stops compilation.
+declaredType : Code -> TypeRepr
+declaredType = native "$1"
+
+-- Where a piece of code was written, for reporting a failure there with
+-- `failAt`. Code the compiler built reports at the splice site instead.
+siteOf : Code -> Site
+siteOf = native "$1"
 
 -- The traversal skeleton. The compiler owns every binder a generated method
 -- introduces, so a deriver never invents a name and exhaustiveness is

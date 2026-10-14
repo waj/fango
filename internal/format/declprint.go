@@ -21,7 +21,9 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span) bool {
 		p.typeDeclLines(d, sp)
 		return true
 	case *ast.EffectDecl:
-
+		for _, group := range d.Attributes {
+			p.attributeGroupLine(group, 0, "")
+		}
 		p.sigBlock("effect "+d.Name, paramNames(d.Params), d.Ops)
 		return true
 	case *ast.ClassDecl:

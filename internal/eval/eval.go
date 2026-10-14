@@ -336,6 +336,9 @@ type Env struct {
 	// compile-time environment. The Meta natives that assemble generated
 	// code need their arguments as trees, and expanding one needs the table.
 	Templates *meta.Table
+	// Declared is the checker's reflection of quoted top-level names, also
+	// installed only for the compile-time environment.
+	Declared func(*meta.Code) (*meta.TypeRepr, bool, error)
 }
 
 // Expand renders a compile-time code value. It answers nil outside the
@@ -345,6 +348,13 @@ func (e *Env) Expand(c *meta.Code) ast.Expr {
 		return nil
 	}
 	return e.Templates.Expand(c)
+}
+
+func (e *Env) declared(c *meta.Code) (*meta.TypeRepr, bool, error) {
+	if e == nil || e.Declared == nil {
+		return nil, false, fmt.Errorf("declared types can only be read while the compiler is running")
+	}
+	return e.Declared(c)
 }
 
 // Frame holds block-local bindings (doc/design.md, "Language semantics") — eager values, unlike the lazy
@@ -840,6 +850,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		bag, ok := value.(*meta.Attributes)
 		if !ok {
 			return nil, fmt.Errorf("eval: invalid attribute collection")
+		}
+		if bag.Hidden != "" {
+			return nil, fmt.Errorf("%s", bag.Hidden)
 		}
 		var result Value = &CtorVal{Ctor: e.NilCtor}
 		for i := len(bag.Entries) - 1; i >= 0; i-- {
@@ -1435,7 +1448,7 @@ func cloneEvidence(src map[types.EffectKey]*evidence) map[types.EffectKey]*evide
 }
 
 func (in *interp) nativeRuntime() *natives.Runtime {
-	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Expand: in.env.Expand}
+	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Expand: in.env.Expand, Declared: in.env.declared}
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.

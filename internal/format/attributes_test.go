@@ -35,6 +35,7 @@ func TestAttributeGroupsPreserveExpressionsAndComments(t *testing.T) {
 		"type T =\n    { #[Label \"x\"] -- wire name\n      #[Other \"x\"]\n      x : Int\n    }\n",
 		"type T =\n    { #[Label \"x\",\n        Other [1, 2],\n      ]\n      x : Int\n    }\n",
 		"type T = #[Label \"ctor\"] C #[Label \"field\"] Int\n",
+		"#[Default `run`] -- the system runner\n#[Label \"x\", Other 1]\neffect E\n    op : Int -> ()\n",
 	} {
 		out, errs := Source(source.NewFile("attributes.fango", []byte(text)))
 		if len(errs) > 0 {
@@ -110,5 +111,17 @@ func TestTrailingAttributeCommentsAndMultiline(t *testing.T) {
 		if len(errs) > 0 || string(out) != string(again) {
 			t.Fatalf("not idempotent:\n%s\n%s\n%v", out, again, errs)
 		}
+	}
+}
+
+func TestEffectAttributesPrintBeforeEffect(t *testing.T) {
+	input := "#[Default `run`,   Label \"x\"]\neffect   Console\n    write : String  -> ()\n"
+	want := "#[Default `run`, Label \"x\"]\neffect Console\n    write : String -> ()\n"
+	out, errs := Source(source.NewFile("effect.fango", []byte(input)))
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if string(out) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out, want)
 	}
 }

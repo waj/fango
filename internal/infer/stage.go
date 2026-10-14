@@ -16,6 +16,7 @@ package infer
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
@@ -31,9 +32,10 @@ const CodeTypeName = "Meta.Code"
 // The reflection surface: an opaque nominal identity, the schema record a
 // deriver walks, and the compiler-only projection from one to the other.
 const (
-	TypeReprName = "Meta.TypeRepr"
-	TypeInfoName = "Meta.TypeInfo"
-	InfoOfName   = "Meta.infoOf"
+	TypeReprName   = "Meta.TypeRepr"
+	EffectReprName = "Meta.EffectRepr"
+	TypeInfoName   = "Meta.TypeInfo"
+	InfoOfName     = "Meta.infoOf"
 )
 
 // Reflect builds the compile-time value of a reflected type. visible names
@@ -46,13 +48,52 @@ func (ck *Checker) Reflect(t types.Type, visible map[string]bool) *meta.TypeRepr
 	if visible == nil {
 		return repr
 	}
-	repr.Visible = map[int]bool{}
+	repr.Visible = ck.visibleUniques(visible)
+	return repr
+}
+
+// visibleUniques maps the schema names module resolution recorded to the
+// identities reflection compares. Types and effects share one unique space.
+func (ck *Checker) visibleUniques(visible map[string]bool) map[int]bool {
+	out := map[int]bool{}
 	for name := range visible {
 		if con, ok := ck.TypeNames[name].(*types.TCon); ok {
-			repr.Visible[con.Unique] = true
+			out[con.Unique] = true
+		}
+		if effect := ck.Effects[name]; effect != nil {
+			out[effect.Unique] = true
 		}
 	}
-	return repr
+	return out
+}
+
+// DeclaredType reflects the declared type of the top-level name a code value
+// quotes, such as a quote of `List.map`. ok is false for any other code: a
+// compound expression, a template with holes, or a compiler-built fragment.
+// The type keeps its quantified and row variables as rigid variables, and
+// reflects with the quoting module's visibility. A declaration still being
+// inferred has no declared type yet.
+func (ck *Checker) DeclaredType(c *meta.Code) (repr *meta.TypeRepr, ok bool, err error) {
+	if c == nil || c.Direct != nil || c.Pattern != nil || len(c.Holes) > 0 {
+		return nil, false, nil
+	}
+	tmpl := ck.Templates.Get(c.Template)
+	if tmpl == nil || len(tmpl.Holes) > 0 {
+		return nil, false, nil
+	}
+	v, isVar := tmpl.Body.(*ast.Var)
+	if !isVar {
+		return nil, false, nil
+	}
+	scheme, found := ck.Env.Lookup(v.Name)
+	var t types.Type
+	if found {
+		t = ck.Sub.Apply(scheme.Body)
+	}
+	if !found || containsMeta(t) {
+		return nil, true, fmt.Errorf("Cannot read the type of `%s` before its declaration is complete.", types.SurfaceName(v.Name))
+	}
+	return ck.Reflect(t, tmpl.Visible), true, nil
 }
 
 // codeType returns the compile-time code type. A quote or splice can only
@@ -76,7 +117,7 @@ func (ck *Checker) IsCompileTimeOnly(t types.Type) bool {
 		return false
 	}
 	roots := map[int]bool{}
-	for _, name := range []string{CodeTypeName, TypeReprName, "Meta.Attributes", "Meta.Site"} {
+	for _, name := range []string{CodeTypeName, TypeReprName, EffectReprName, "Meta.Attributes", "Meta.Site"} {
 		if con, ok := ck.TypeNames[name].(*types.TCon); ok {
 			roots[con.Unique] = true
 		}
@@ -532,8 +573,8 @@ func (x *stageExpander) quote(q *ast.Quote) ast.Expr {
 		return hole
 	})
 	x.quoted--
-	out := &ast.Quote{Body: body, Sp: q.Sp}
-	x.ck.QuoteTemplates[out] = x.ck.Templates.Add(&meta.Template{Body: body, Holes: holes})
+	out := &ast.Quote{Body: body, Visible: q.Visible, Sp: q.Sp}
+	x.ck.QuoteTemplates[out] = x.ck.Templates.Add(&meta.Template{Body: body, Holes: holes, Visible: q.Visible})
 	x.ck.QuoteHoles[out] = holes
 	return out
 }

@@ -856,6 +856,8 @@ func (r *remapper) remapPointer(v reflect.Value) {
 		for old, yes := range repr.Visible {
 			if n, ok := r.unique[old]; ok {
 				visible[n] = yes
+			} else if n, ok := r.effect[old]; ok {
+				visible[n] = yes
 			}
 		}
 		if repr.Visible != nil {

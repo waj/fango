@@ -310,18 +310,30 @@ func (p *parser) parseDecl() ast.Decl {
 	}
 	if t.Kind == token.ATTRIBUTE {
 		groups := p.parseAttributes()
+		if p.peek().Kind == token.EOF {
+			p.errorAt(t.Span, TitleUnexpectedEOF, "After an attribute I expect a type or effect declaration.")
+			return nil
+		}
 		var d ast.Decl
-		if p.peek().Kind == token.KwType {
+		switch p.peek().Kind {
+		case token.KwType:
 			d = p.parseTypeDecl()
-		} else {
+		case token.KwEffect:
+			d = p.parseEffectDecl()
+		default:
 			d = p.parseDecl()
 		}
-		if td, ok := d.(*ast.TypeDecl); ok {
-			td.Attributes = groups
-			td.Sp = t.Span.Merge(td.Sp)
-			return td
+		switch target := d.(type) {
+		case *ast.TypeDecl:
+			target.Attributes = groups
+			target.Sp = t.Span.Merge(target.Sp)
+			return target
+		case *ast.EffectDecl:
+			target.Attributes = groups
+			target.Sp = t.Span.Merge(target.Sp)
+			return target
 		}
-		p.errorAt(t.Span, "ATTRIBUTE TARGET", "An attribute here must precede a type declaration.")
+		p.errorAt(t.Span, "ATTRIBUTE TARGET", "An attribute here must precede a type or effect declaration.")
 		return d
 	}
 	if t.Kind == token.PRAGMA {
