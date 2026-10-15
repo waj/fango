@@ -27,7 +27,7 @@ func (g *gen) prepareRows() func([]goast.Stmt) []goast.Stmt {
 	}
 	for _, stack := range g.evidence {
 		if len(stack) != 0 {
-			if _, ok := stack[len(stack)-1].(*goast.Ident); ok {
+			if _, ok := stack[len(stack)-1].(*goast.Ident); ok || g.outlinedEvidence[stack[len(stack)-1]] != nil {
 				p.inputs[stack[len(stack)-1]] = true
 			}
 		}
@@ -84,7 +84,11 @@ func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
 		if len(stack) == 0 {
 			panic("codegen: missing residual evidence")
 		}
-		args = append(args, &goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Binding")})
+		value := stack[len(stack)-1]
+		if canonical := g.outlinedEvidence[value]; canonical != nil {
+			value = canonical
+		}
+		args = append(args, &goast.SelectorExpr{X: value, Sel: ident("Binding")})
 		eligible = eligible && p.inputs[stack[len(stack)-1]]
 		fmt.Fprintf(&key, ":%s:%p", ev.Key(), stack[len(stack)-1])
 	}

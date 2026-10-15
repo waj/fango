@@ -118,6 +118,15 @@ func DemangleWithEntryModule(goFunction, entryModule string) (Symbol, bool) {
 	}
 	base, rest, _ := strings.Cut(fn, ".")
 	lambda := rest != ""
+	if strings.HasPrefix(base, "callbackBodyShared") {
+		if _, link, ok := strings.Cut(base, "__V_"); ok {
+			owner, function := splitOwner(unlinkSymbol(link))
+			if owner == "" {
+				owner = module
+			}
+			return Symbol{Module: owner, Function: function, Lambda: true}, true
+		}
+	}
 	// A shared callback body and a function literal inside a package-level
 	// value's initializer have no enclosing Fango function.
 	if strings.HasPrefix(base, "callbackBody") || (base == "init" && lambda) {

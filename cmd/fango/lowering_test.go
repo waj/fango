@@ -201,17 +201,29 @@ func TestOptimizedAndGeneralLoweringAgree(t *testing.T) {
 }
 
 func TestClosedAsyncCallbackBodyIsShared(t *testing.T) {
-	files := emittedProject(t, filepath.Join("..", "..", "testdata", "run", "async_callback_sharing.fango"))
+	files := emittedProject(t, filepath.Join("..", "..", "testdata", "run", "async_callback_sharing_io.fango"))
 	source := string(entryFile(t, files))
 	for _, literal := range []string{`"Hola"`, `"Chau"`, `"unit"`} {
 		if count := strings.Count(source, literal); count != 1 {
 			t.Errorf("callback body literal %s emitted %d times, want once:\n%s", literal, count, source)
 		}
 	}
-	testLoweringAgreement(t, "async_callback_sharing")
+	testLoweringAgreement(t, "async_callback_sharing_io")
+}
+
+func TestEffectBodyStrategiesAgree(t *testing.T) {
+	for _, strategy := range []string{"factory", "selective"} {
+		t.Run(strategy, func(t *testing.T) {
+			testLoweringStrategies(t, "async_callback_sharing", strategy)
+		})
+	}
 }
 
 func testLoweringAgreement(t *testing.T, stem string) {
+	testLoweringStrategies(t, stem, "")
+}
+
+func testLoweringStrategies(t *testing.T, stem, strategy string) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("compiled lowering comparison")
@@ -224,7 +236,7 @@ func testLoweringAgreement(t *testing.T, stem string) {
 	}
 	var units []codegen.Unit
 	for _, unit := range result.Graph.Units {
-		units = append(units, codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source})
+		units = append(units, codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source, BodyStrategy: strategy})
 	}
 	native := emittedProject(t, source)
 	runtime, err := build.RuntimeFiles()
@@ -240,6 +252,14 @@ func testLoweringAgreement(t *testing.T, stem string) {
 		files, err := codegen.EmitProject(result.Program, result.Checker.B, units)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !disabled && strategy != "" && stem == "async_callback_sharing" {
+			limit := 2
+			for _, literal := range []string{`"Hola"`, `"Chau"`, `"unit"`} {
+				if count := strings.Count(string(entryFile(t, files)), literal); count < 1 || count > limit {
+					t.Errorf("%s: %s emitted %d times, limit %d", strategy, literal, count, limit)
+				}
+			}
 		}
 		for _, file := range native {
 			if len(file.Path) >= 7 && file.Path[:7] == "native/" {

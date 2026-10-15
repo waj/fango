@@ -46,9 +46,19 @@ func (g *gen) asyncLaunch(e *core.AsyncLaunch) goast.Expr {
 		return &goast.CompositeLit{Type: selector("fangort", "AsyncCompletion"), Elts: fields}
 	}
 	kv := func(k string, v goast.Expr) goast.Expr { return &goast.KeyValueExpr{Key: ident(k), Value: v} }
+	mode := call.Control.Resolve(types.Exit)
+	var callback goast.Expr
+	if lam, ok := call.Callee.(*core.Lambda); ok {
+		// Launch invokes exactly one transport. Keep its literal visible to
+		// Go's inliner, and avoid constructing the unused callable member.
+		// Nested callbacks still use the module's shared factories.
+		callback = g.literalLambdaMember(lam, mode)
+	} else {
+		callback = callbackMember(g.expr(call.Callee, 0), mode)
+	}
 	body := []goast.Stmt{
 		varDeclStmt("asyncOwner", g.goType(scopeTy), g.expr(call.Args[0], 0)),
-		varDeclStmt("asyncBody", g.goType(call.Callee.Type()), g.expr(call.Callee, 0)),
+		varDeclStmt("asyncBody", g.callbackMemberType(call.Callee.Type().(*types.TFun), mode), callback),
 		varDeclStmt("asyncRow", g.rowType(), g.rowArgument(call.Row)),
 		// Publish inherited activations before the goroutine exists.
 		exprStmt(callExpr(selector("fangort", "ShareEvidenceValue"), ident("asyncRow"))),
@@ -58,8 +68,7 @@ func (g *gen) asyncLaunch(e *core.AsyncLaunch) goast.Expr {
 		invokeArgs = append(invokeArgs, ident("asyncRow"))
 	}
 	invokeArgs = append(invokeArgs, g.ctorValue(e.ScopeCtor, g.boundaryTypeArgs(e.ScopeCtor, scopeTy), ident("child")))
-	mode := call.Control.Resolve(types.Exit)
-	invoke := callExpr(callbackMember(ident("asyncBody"), mode), invokeArgs...)
+	invoke := callExpr(ident("asyncBody"), invokeArgs...)
 	if mode == types.Exit {
 		g.markOutcomeCall(invoke.(*goast.CallExpr), g.goType(call.Ty))
 		invoke = callExpr(selector("fangort", "RequireNormal"), invoke)

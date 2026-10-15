@@ -17,7 +17,27 @@ import (
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/debugger"
 	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/runtime/fangort"
 )
+
+func (g *gen) markTransportBridges(file *goast.File) {
+	if len(g.transportBridges) == 0 {
+		return
+	}
+	span := source.Span{File: source.NewLineFile(fangort.TransportBridgeFile)}
+	goast.Inspect(file, func(node goast.Node) bool {
+		if block, ok := node.(*goast.BlockStmt); ok && g.transportBridges[block] {
+			goast.Inspect(block, func(n goast.Node) bool {
+				if pairedNode(n) {
+					g.origins[n] = span
+				}
+				return true
+			})
+			return false
+		}
+		return true
+	})
+}
 
 // Source positions reach generated Go as `//line` directives, so a Go stack
 // walk reports Fango files and lines (runtime/fangort/trace.go). Emission
@@ -264,7 +284,11 @@ func (g *gen) insertDirectives(file *goast.File, formatted []byte, unitPath stri
 		body := strings.TrimLeft(line, "\t")
 		eligible := body != line && !strings.HasPrefix(body, "}")
 		if sp, claimed := claims[i+1]; claimed && eligible {
-			out = append(out, "//line "+g.source+":"+strconv.Itoa(sp.StartPos().Line))
+			file := g.source
+			if sp.File.Name == fangort.TransportBridgeFile {
+				file = fangort.TransportBridgeFile
+			}
+			out = append(out, "//line "+file+":"+strconv.Itoa(sp.StartPos().Line))
 			redirected = true
 		} else if redirected && eligible {
 			out = append(out, "//line "+unitPath+":"+strconv.Itoa(len(out)+2))

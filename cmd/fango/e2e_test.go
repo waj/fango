@@ -955,8 +955,12 @@ func TestGeneratedGoMaterializesNativeUnitOnlyInValueContext(t *testing.T) {
 	if strings.Contains(src, "m_Console.V_Console_dot_write(ev_Console_dot_Console, \" \")\n\t\t\treturn fangort.UnitValue") {
 		t.Fatalf("statement-position Console.write unnecessarily materialized Unit:\n%s", src)
 	}
-	if !strings.Contains(src, "m_Console.V_Console_dot_write(ev_Console_dot_Console, \" \")") {
-		t.Fatalf("statement-position Console.write was not emitted directly:\n%s", src)
+	// A shared worker uses the Exit entry, whose concrete Unit result is
+	// erased to just the exit pointer. Both forms avoid materializing Unit.
+	direct := "m_Console.V_Console_dot_write(ev_Console_dot_Console, \" \")"
+	exit := "return m_Console.V_Console_dot_write_exit(ev_Console_dot_Console, \" \")"
+	if !strings.Contains(src, direct) && !strings.Contains(src, exit) {
+		t.Fatalf("statement-position Console.write did not use an erased Unit ABI:\n%s", src)
 	}
 }
 
@@ -1150,8 +1154,23 @@ func TestStatefulHandlersPublishTheirCellsBeforeTaskLaunch(t *testing.T) {
 		t.Errorf("stateful handler has no publication hook:\n%s", entry)
 	}
 	async := generatedFile(t, files, "modules/Async/module.go")
-	if !bytes.Contains(async, []byte("fangort.ShareEvidenceValue(asyncRow)")) {
-		t.Errorf("task launch does not publish its row:\n%s", async)
+	// Copy elimination may rename asyncRow to the prepared row local.
+	// Check every launch's publication in emitted order, independent of names.
+	launches := 0
+	for rest := string(async); ; {
+		spawn := strings.Index(rest, "fangort.SpawnAsync(")
+		if spawn < 0 {
+			break
+		}
+		launches++
+		if share := strings.Index(rest[:spawn], "fangort.ShareEvidenceValue("); share < 0 {
+			t.Errorf("task launch does not publish its row before spawning:\n%s", async)
+			break
+		}
+		rest = rest[spawn+len("fangort.SpawnAsync("):]
+	}
+	if launches == 0 {
+		t.Fatal("Async module emitted no task launch")
 	}
 }
 

@@ -21,7 +21,7 @@ func ParallelMap[A, B any](fn func(A) B, source List[A]) List[B] {
 	output := make([]B, len(input))
 	var next atomic.Int64
 	var done sync.WaitGroup
-	spawned := Capture(0)
+	spawned := captureStack()
 	work := func() {
 		defer done.Done()
 		defer recoverTask(spawned)

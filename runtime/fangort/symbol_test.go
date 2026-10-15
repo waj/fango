@@ -1,6 +1,9 @@
 package fangort
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestLinkNameRoundTrip(t *testing.T) {
 	for _, name := range []string{"Main.divide", "Basics.++", "List.map", "Main.x_plus_y", "Sub.Mod.go_dot", "Basics.<|", "Basics./=", "main"} {
@@ -31,6 +34,8 @@ func TestDemangle(t *testing.T) {
 		{"main.V__lift_Main_dot_outer_1_inner", "Main.outer.inner", true},
 		{"main.V__lift7_inner", "inner", true},
 		{"fangobuild/modules/Main.callbackBody3", "Main.<lambda>", true},
+		{"fangobuild/modules/Main.callbackBodyShared3__V_Main_dot_compute[go.shape.int64]", "Main.compute (lambda)", true},
+		{"main.callbackBodyShared4__V__lift_Main_dot_outer_1_inner.func2", "Main.outer.inner (lambda)", true},
 		{"fangobuild/modules/Main.init.func1", "Main.<lambda>", true},
 		{"main.init.func2.1", "<lambda>", true},
 		{"fangobuild/modules/Main.init", "", false},
@@ -44,6 +49,17 @@ func TestDemangle(t *testing.T) {
 		if ok != tc.ok || (ok && symbol.String() != tc.want) {
 			t.Errorf("Demangle(%q) = %q, %v; want %q, %v", tc.goFunction, symbol.String(), ok, tc.want, tc.ok)
 		}
+	}
+}
+
+func TestTransportBridgeIsNotASourceFrame(t *testing.T) {
+	frame := runtime.Frame{Function: "main.V_Main_dot_compute", File: TransportBridgeFile, Line: 1}
+	if _, ok := fangoFrame(frame); ok {
+		t.Fatal("synthetic transport frame was exposed")
+	}
+	frame.File = "Main.fango"
+	if _, ok := fangoFrame(frame); !ok {
+		t.Fatal("source frame was hidden")
 	}
 }
 

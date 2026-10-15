@@ -356,8 +356,11 @@ self tail-call iteration have no frame, and a one-line Go closure shares its
 enclosing statement's line. Every generated `main` defers `RecoverMain` and,
 for an entry with a module header, registers the module's name, since
 package `main` cannot carry it and its initializer lambdas are named by
-module alone; task goroutines defer the same recovery with the stack
-captured at spawn. `FANGO_TRACEBACK=go` leaves Go's own traceback in place.
+module alone; task goroutines defer the same recovery with return PCs captured
+at spawn. Those PCs are expanded and their symbols decoded only if the task
+crashes, so successful tasks retain their spawn site without allocating source
+frames or decoding generated adapter names. `FANGO_TRACEBACK=go` leaves Go's own
+traceback in place.
 
 The entry is always a nullary function. Generated `main` calls its worker;
 when the result is `Process.Status`, it passes the status's product field to

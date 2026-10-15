@@ -1,0 +1,27 @@
+import Async
+import Fail
+import IO
+
+makeTask text = Async.spawn { text }
+
+-- Writes straight to standard output, so the callbacks below stay closed
+-- over IO alone. A Console callback has a Direct and an Exit form instead.
+say : String ->{IO} ()
+say text = ignore (Fail.attempt { IO.write IO.stdout (text ++ "\n") })
+
+main() =
+    say (show (Async.runOutcome {
+            task = Async.spawn {
+                say "Hola"
+                "Chau"
+            }
+            Async.await task
+    }))
+    say (show (Async.runOutcome {
+            task = makeTask "captured"
+            Async.await task
+    }))
+    say (show (Async.runOutcome {
+            task = Async.spawn { say "unit" }
+            Async.await task
+    }))

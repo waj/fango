@@ -35,6 +35,10 @@ const TracebackVariable = "FANGO_TRACEBACK"
 
 const nativePackagePrefix = "fangobuild/native/"
 
+// TransportBridgeFile identifies compiler-only ABI adapters in Go line tables.
+// Their calls are not additional source-language stack frames.
+const TransportBridgeFile = "<fango-transport>"
+
 // Capture walks the calling goroutine's stack and keeps the frames that
 // belong to Fango code, innermost first, skipping the innermost `skip` Fango
 // frames. Consecutive frames with the same function and line collapse into
@@ -42,10 +46,27 @@ const nativePackagePrefix = "fangobuild/native/"
 func Capture(skip int) []Frame {
 	var pcs [256]uintptr
 	n := runtime.Callers(2, pcs[:])
-	if n == 0 {
+	out := symbolizeStack(pcs[:n])
+	if skip >= len(out) {
 		return nil
 	}
-	frames := runtime.CallersFrames(pcs[:n])
+	return out[skip:]
+}
+
+// Task spawn sites are only displayed after a crash. Retain return PCs while
+// the parent stack exists, but defer frame expansion and symbol decoding until
+// reporting. These are code addresses, not pointers into the parent's stack.
+func captureStack() []uintptr {
+	var pcs [256]uintptr
+	n := runtime.Callers(2, pcs[:])
+	return append([]uintptr(nil), pcs[:n]...)
+}
+
+func symbolizeStack(pcs []uintptr) []Frame {
+	if len(pcs) == 0 {
+		return nil
+	}
+	frames := runtime.CallersFrames(pcs)
 	var out []Frame
 	for {
 		frame, more := frames.Next()
@@ -58,13 +79,13 @@ func Capture(skip int) []Frame {
 			break
 		}
 	}
-	if skip >= len(out) {
-		return nil
-	}
-	return out[skip:]
+	return out
 }
 
 func fangoFrame(frame runtime.Frame) (Frame, bool) {
+	if frame.File == TransportBridgeFile {
+		return Frame{}, false
+	}
 	if symbol, ok := Demangle(frame.Function); ok {
 		return Frame{Function: symbol.String(), File: frame.File, Line: frame.Line}, true
 	}
@@ -122,12 +143,12 @@ func RecoverMain() {
 // recoverTask is deferred in the goroutines the runtime starts for tasks. A
 // panic there is a program crash, as it is without recovery; the report adds
 // where the task was spawned.
-func recoverTask(spawned []Frame) {
+func recoverTask(spawned []uintptr) {
 	if goTraceback() {
 		return
 	}
 	if recovered := recover(); recovered != nil {
-		crash(recovered, Capture(0), spawned)
+		crash(recovered, Capture(0), symbolizeStack(spawned))
 	}
 }
 

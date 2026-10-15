@@ -11,6 +11,9 @@ import (
 )
 
 func (g *gen) evidenceFamily(ev core.EffectInstance, value goast.Expr, actual types.Transport) goast.Expr {
+	if canonical := g.outlinedEvidence[value]; canonical != nil {
+		value = canonical
+	}
 	return &goast.SelectorExpr{X: &goast.SelectorExpr{X: value, Sel: ident("Binding")}, Sel: ident("Family")}
 }
 
@@ -180,13 +183,14 @@ func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual 
 	typ := g.effectTypeMode(desired, actual)
 	effect := g.effects[ev.Unique]
 	abort := effect != nil && len(effect.Ops) > 0 && effect.Ops[0].Abort
+	bothViews := actual == types.Direct || abort || g.canonicalExitEvidence
 	// Keep the typed records and binding in one allocation. Interior pointers
 	// retain the same immutable family identity without separate heap objects.
 	fields := []*goast.Field{
 		{Names: []*goast.Ident{ident("Own")}, Type: typ.(*goast.StarExpr).X},
 		{Names: []*goast.Ident{ident("Binding")}, Type: selector("fangort", "EvidenceBinding")},
 	}
-	if actual == types.Direct || abort {
+	if bothViews {
 		other := types.Exit
 		if actual == types.Exit {
 			other = types.Direct
@@ -204,7 +208,7 @@ func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual 
 		varDeclStmt(name, typ, &goast.UnaryExpr{Op: gotoken.AND, X: selector(storage, "Own")}),
 	}
 	var direct, exit goast.Expr = ident("nil"), own
-	if actual == types.Direct || abort {
+	if bothViews {
 		other := types.Exit
 		member, back := "Exit", "Direct"
 		if actual == types.Exit {
@@ -235,7 +239,7 @@ func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual 
 			&goast.KeyValueExpr{Key: ident("Family"), Value: family},
 		}}}},
 		&goast.AssignStmt{Lhs: []goast.Expr{binding}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{&goast.UnaryExpr{Op: gotoken.AND, X: selector(storage, "Binding")}}})
-	if actual == types.Direct || abort {
+	if bothViews {
 		other := "Exit"
 		if actual == types.Exit {
 			other = "Direct"

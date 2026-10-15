@@ -32,11 +32,14 @@ import (
 // than passed alongside it so that whole-program emission and the module
 // backend agree on where the entry lands: they are compared path by path.
 type Unit struct {
-	Debug   bool
-	Name    string
-	Program string
-	Imports []string
-	Entry   bool
+	// BodyStrategy selects a backend comparison strategy. Empty uses the
+	// compiler build's default, selective body sharing.
+	BodyStrategy string
+	Debug        bool
+	Name         string
+	Program      string
+	Imports      []string
+	Entry        bool
 	// Source is the owner's Fango file name as its spans report it. When
 	// set, the generated Go carries `//line` directives back to it; empty
 	// emits plain Go, which the structural tests compare textually.
@@ -168,11 +171,19 @@ func UnitProgram(p *core.Prog, unit Unit) *core.Prog {
 }
 
 func emitUnit(p *core.Prog, b *types.Builtins, unit Unit) ([]byte, error) {
+	strategy := unit.BodyStrategy
+	if strategy == "" {
+		strategy = effectBodyStrategy
+	}
+	if strategy != "baseline" && strategy != "factory" && strategy != "selective" {
+		return nil, fmt.Errorf("codegen: unknown effect body strategy %q", strategy)
+	}
 	lowered, err := lower.Module(p, unit.Name)
 	if err != nil {
 		return nil, err
 	}
 	g := &gen{
+		bodyStrategy:         strategy,
 		disableOptimizations: p.DisableOptimizations || unit.Debug,
 		debug:                unit.Debug,
 		lowered:              lowered,
@@ -322,6 +333,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit) ([]byte, error) {
 		g.elideCopies(file)
 		g.splitCallbackLocals(file)
 	}
+	g.markTransportBridges(file)
 	var buf bytes.Buffer
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
 		return nil, fmt.Errorf("codegen: printing generated Go: %w", err)
@@ -342,22 +354,29 @@ func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
 }
 
 type gen struct {
-	b               *types.Builtins
-	adts            map[int]*types.ADTInfo
-	tmp             int // type-switch binding counter (ts0, ts1, …)
-	usesFangort     bool
-	source          string                     // the owner's Fango file name; empty disables line directives
-	site            source.Span                // the innermost own-file origin being emitted
-	origins         map[goast.Node]source.Span // emitted nodes attributed to a source line
-	usesMath        bool
-	descriptorNames map[string]string
-	descriptorDecls []goast.Decl
-	callableNames   map[string]string
-	callableDecls   []goast.Decl
-	regexNames      map[string]string
-	regexDecls      []goast.Decl
-	rowPreparation  *rowPreparation
-	forwarders      map[string]*core.Lambda
+	currentWorker         string
+	canonicalExitEvidence bool
+	transportBridges      map[*goast.BlockStmt]bool
+	bodyStrategy          string
+	outlinedCallbacks     map[outlinedCallbackKey]*outlinedCallback
+	outlinedEvidence      map[goast.Expr]goast.Expr
+	initializingCells     map[string]bool
+	b                     *types.Builtins
+	adts                  map[int]*types.ADTInfo
+	tmp                   int // type-switch binding counter (ts0, ts1, …)
+	usesFangort           bool
+	source                string                     // the owner's Fango file name; empty disables line directives
+	site                  source.Span                // the innermost own-file origin being emitted
+	origins               map[goast.Node]source.Span // emitted nodes attributed to a source line
+	usesMath              bool
+	descriptorNames       map[string]string
+	descriptorDecls       []goast.Decl
+	callableNames         map[string]string
+	callableDecls         []goast.Decl
+	regexNames            map[string]string
+	regexDecls            []goast.Decl
+	rowPreparation        *rowPreparation
+	forwarders            map[string]*core.Lambda
 
 	sharedCallbacks     map[sharedCallbackKey]string
 	sharedCallbackDecls []goast.Decl
@@ -682,6 +701,12 @@ func (g *gen) unitValue() goast.Expr {
 // TyParams become Go type parameters — `any` for General vars,
 // fangort.Number for Number-kinded ones (doc/design.md, "Type inference", doc/design.md, "Go backend and runtime").
 func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
+	oldWorker := g.currentWorker
+	g.currentWorker = d.Name
+	defer func() { g.currentWorker = oldWorker }()
+	oldCanonical := g.canonicalExitEvidence
+	g.canonicalExitEvidence = g.bodyStrategy == "selective" && mode == types.Exit && g.shareWorkerBody(d)
+	defer func() { g.canonicalExitEvidence = oldCanonical }()
 	oldCallbacks := g.flatCallbacks
 	g.flatCallbacks = map[string]flatCallback{}
 	defer func() { g.flatCallbacks = oldCallbacks }()
@@ -749,15 +774,26 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 	// statement in Go, so no trailing return is needed in either result
 	// shape.
 	var body []goast.Stmt
-	finishRows := g.prepareRows()
-	body = g.loweredStmts(d, g.lowered.Functions[d.Name].Body, false, g.isUnit(ret))
-	body = finishRows(body)
+	bridge := g.bodyStrategy == "selective" && mode == types.Direct && abi == types.Direct && g.shareWorkerBody(d)
+	if bridge {
+		body = g.sharedWorkerBridge(d, argTys, ret, params)
+	} else {
+		finishRows := g.prepareRows()
+		body = g.loweredStmts(d, g.lowered.Functions[d.Name].Body, false, g.isUnit(ret))
+		body = finishRows(body)
+	}
 	name := g.topValueName(d.Name)
 	if abi == types.Exit {
 		name += "_exit"
 	}
 
 	decl := workerDecl(name, params, result, body).(*goast.FuncDecl)
+	if bridge {
+		if g.transportBridges == nil {
+			g.transportBridges = map[*goast.BlockStmt]bool{}
+		}
+		g.transportBridges[decl.Body] = true
+	}
 	for _, ev := range d.EffectParams {
 		g.evidence[ev.Key()] = g.evidence[ev.Key()][:len(g.evidence[ev.Key()])-1]
 		g.evidenceModes[ev.Key()] = g.evidenceModes[ev.Key()][:len(g.evidenceModes[ev.Key()])-1]
@@ -1443,12 +1479,19 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 				args = append(args, g.rowArgument(e.Row))
 			}
 			args = append(args, g.expr(e.Args[0], 0))
+			lambdaCall := func(lam *core.Lambda) goast.Expr {
+				call := g.markExpr(callExpr(g.directLambdaMember(lam, mode), args...))
+				if mode == types.Exit {
+					g.markOutcomeCall(call.(*goast.CallExpr), g.goType(e.Ty))
+				}
+				return call
+			}
 			if lam, ok := e.Callee.(*core.Lambda); ok {
-				return g.markExpr(callExpr(g.directLambdaMember(lam, mode), args...))
+				return lambdaCall(lam)
 			}
 			if ref, ok := e.Callee.(*core.VarRef); ok && ref.Local {
 				if lam := g.forwarders[ref.Name]; lam != nil {
-					return g.markExpr(callExpr(g.directLambdaMember(lam, mode), args...))
+					return lambdaCall(lam)
 				}
 			}
 			call := g.markExpr(callExpr(callbackMember(g.expr(e.Callee, 0), mode), args...))
@@ -2236,6 +2279,7 @@ func (g *gen) polymorphicHandlerClause(e *core.Handle, c core.HandlerClause, mod
 		g.tmp++
 		g.polyDescriptorNames[v.ID] = name
 		prefix = append(prefix, varDeclStmt(name, g.descriptorType(), &goast.IndexExpr{X: selector("t_request", "Types"), Index: intLit(int64(i))}))
+		prefix = append(prefix, assignBlank(ident(name)))
 	}
 	for i, p := range c.Params {
 		if p == "_" || p == "()" {
@@ -2387,6 +2431,12 @@ func (g *gen) currentEvidenceMode(unique types.EffectKey) types.Transport {
 }
 
 func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want types.Transport) goast.Expr {
+	if canonical := g.outlinedEvidence[value]; canonical != nil {
+		if want == types.Exit {
+			return canonical
+		}
+		return &goast.SelectorExpr{X: canonical, Sel: ident("Direct")}
+	}
 	if actual == want {
 		return value
 	}
@@ -2408,6 +2458,9 @@ func (g *gen) rawEvidenceAdapter(ev core.EffectInstance, value goast.Expr, actua
 		desired := ev
 		desired.Control = types.Control{Transport: want}
 		return &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: g.effectTypeMode(desired, want).(*goast.StarExpr).X, Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}, &goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}}}}}
+	}
+	if actual == types.Exit && want == types.Direct && g.canonicalExitEvidence {
+		return g.checkedDirectEvidence(ev, value)
 	}
 	if actual == want || want == types.Direct {
 		return value
@@ -2658,6 +2711,12 @@ func (g *gen) letBindingStmts(let *core.Let) (out []goast.Stmt) {
 		// A Go local is not in scope inside its own initializer:
 		// declare, then assign — the standard recursive-closure idiom.
 		name := mangleValue(let.Name)
+		if g.initializingCells == nil {
+			g.initializingCells = map[string]bool{}
+		}
+		previous := g.initializingCells[name]
+		g.initializingCells[name] = true
+		defer func() { g.initializingCells[name] = previous }()
 		return []goast.Stmt{
 			varDeclNoValue(name, g.goType(let.Rhs.Type())),
 			assignStmt(name, g.expr(let.Rhs, 0)),
@@ -2735,6 +2794,9 @@ func (g *gen) stmts(e core.Expr) (out []goast.Stmt) {
 		if e.Op.Native != nil && len(g.evidence[e.Effect.Key()]) == 0 {
 			return g.nativeStmts(&core.NativeCall{Name: e.Op.Native.Name, Module: e.Op.Native.Module, Args: e.Args, Ty: e.Ty})
 		}
+		if len(e.Op.LocalVars) > 0 && e.Op.Native == nil {
+			return []goast.Stmt{assignBlank(g.expr(e, 0))}
+		}
 		if g.isUnit(e.Op.ResultType) {
 			stack := g.evidence[e.Effect.Key()]
 			if len(stack) == 0 {
@@ -2803,7 +2865,7 @@ func mangleValue(name string) string {
 	return "v_" + fangort.LinkName(name)
 }
 
-func (g *gen) directLambdaMember(e *core.Lambda, mode types.Transport) goast.Expr {
+func (g *gen) literalLambdaMember(e *core.Lambda, mode types.Transport) goast.Expr {
 	oldCallbacks := g.flatCallbacks
 	g.flatCallbacks = maps.Clone(oldCallbacks)
 	delete(g.flatCallbacks, e.Param)

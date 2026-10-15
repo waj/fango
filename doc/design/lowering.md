@@ -78,7 +78,7 @@ A lexical check permits internal bindings and patterns but rejects outer term
 captures; every runtime type and call instantiation must be monomorphic, so
 no enclosing type descriptor is captured. The argument and unused invocation
 row remain ordinary parameters. Captured evidence, residual rows, runtime
-effect parameters, or generic descriptors retain the literal closure path.
+effect parameters, or generic descriptors use the shared factories below.
 Effect-polymorphic bodies retain separate transport paths. Keeping closed
 callbacks outside generic workers avoids Go dictionary closure allocations
 introduced by factory inlining.
@@ -91,6 +91,42 @@ at the declaration, preserving capture cells and evaluation order. This exposes
 the selected function to Go's devirtualizer after a known hidden package has
 been eliminated; retaining a struct-field projection can otherwise obstruct
 inlining even with zero allocations.
+
+## Bounded effect bodies
+
+The backend shares ordinary transport-polymorphic workers through one Exit
+implementation and a checked Direct entry. Direct callers prove normal completion;
+the entry projects the result with `RequireNormal`. Module exports retain both
+signatures, so this is an owner-local choice with no downstream specialization.
+Eligible workers have more than eight Core expression nodes, no function-typed
+parameters, and no self-tail loop. Tiny forwarders, loops, and higher-order workers
+retain separate bodies: their Direct specialization avoids repeated adapters,
+and a bridge can be larger than a small operation forwarder.
+
+General callbacks use module-local closure factories keyed by source lambda and
+transport. A factory contains the actual closure body; constructing a callback
+passes its captures to the factory. Invocation calls that closure directly.
+Nested callback construction repeats factory calls, not nested copies of their
+bodies, bounding each general callback to two bodies regardless of nesting depth.
+Selected multi-argument callbacks retain their flattened literal, and a task
+launch constructs only its selected member, preserving Go's inlining opportunities.
+Nested general callbacks still go through shared factories at these boundaries.
+
+Factories capture terms, type descriptors, evidence, and residual rows explicitly.
+Unused captures and unrelated enclosing type parameters are omitted. Captured
+evidence uses its linked Exit pointer as a canonical family reference; each body
+selects the appropriate view without specializing on combinations of captured
+handler modes. Invocation-time evidence remains an argument. Recursive bindings
+capture their typed cell and read its assigned value on invocation, preserving
+recursive initialization. Handler activations installed inside a shared Exit
+worker supply a checked Direct view where selected Direct callbacks need one;
+other Exit activations keep their existing representation.
+
+Factory names retain the containing Fango function for source traces. Compiler-only
+worker bridges have a private line-table marker and are omitted from those traces.
+Debug and optimization-disabled emission retain literal bodies. The
+[comparison harness](verification.md#effect-body-sharing-comparison) retains the
+original emitter and a factory-only control for performance checks.
 
 ## Exit results
 

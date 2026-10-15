@@ -89,7 +89,12 @@ func (g *gen) shareableDirectCallback(lam *core.Lambda) bool {
 }
 
 func (g *gen) sharedDirectCallback(lam *core.Lambda) goast.Expr {
-	key := sharedCallbackKey{lambda: lam, abi: g.abi}
+	abi := g.abi
+	fn := lam.Ty.(*types.TFun)
+	if !g.controlledType(fn.Arg, nil) && !g.controlledType(fn.Ret, nil) {
+		abi = types.Direct
+	}
+	key := sharedCallbackKey{lambda: lam, abi: abi}
 	if g.sharedCallbacks == nil {
 		g.sharedCallbacks = map[sharedCallbackKey]string{}
 	}
@@ -98,10 +103,12 @@ func (g *gen) sharedDirectCallback(lam *core.Lambda) goast.Expr {
 	if fresh {
 		name = fmt.Sprintf("callbackBody%d", len(g.sharedCallbacks))
 		g.sharedCallbacks[key] = name
-		body := g.directLambdaMember(lam, types.Direct).(*goast.FuncLit)
+		oldABI := g.abi
+		g.abi = abi
+		body := g.literalLambdaMember(lam, types.Direct).(*goast.FuncLit)
+		g.abi = oldABI
 		g.sharedCallbackDecls = append(g.sharedCallbackDecls, &goast.FuncDecl{Name: ident(name), Type: body.Type, Body: body.Body})
 	}
-	fn := lam.Ty.(*types.TFun)
 	var params []paramSpec
 	var args []goast.Expr
 	if lam.RowParam != 0 {
@@ -141,6 +148,13 @@ func (g *gen) callbackMinimum(lam *core.Lambda) types.Transport {
 	}
 	check := func(ev core.EffectInstance) {
 		if bound[ev.Unique] != 0 {
+			return
+		}
+		// Outlined captures retain their entire family through a canonical
+		// Exit pointer. Availability follows the caller's Core contract,
+		// rather than depending on the enclosing helper's transport.
+		stack := g.evidence[ev.Key()]
+		if len(stack) > 0 && g.outlinedEvidence[stack[len(stack)-1]] != nil {
 			return
 		}
 		if effect := g.effects[ev.Unique]; effect != nil && (len(effect.Ops) > 0 && effect.Ops[0].Abort) {

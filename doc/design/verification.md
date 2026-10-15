@@ -212,6 +212,74 @@ All three conditions reproduce on the original revision. Current map/filter and
 bracket pass their existing gates, which fail on that original revision; thresholds
 and stored baselines were left intact.
 
+### Effect body sharing comparison
+
+[`benchmarks/effectcompare/compare.py`](../../benchmarks/effectcompare/compare.py)
+compares the original `baseline` emitter with the default `selective` strategy
+for [bounded effect bodies](lowering.md#bounded-effect-bodies). The optional
+`factory` control shares callbacks but keeps both named-worker implementations.
+Select controls with Go's
+`-X github.com/waj/fango/internal/codegen.effectBodyStrategy=…` linker option;
+compiler build IDs isolate their cache namespaces. An explicit codegen unit
+override also participates in the emitted artifact key. Debug and
+optimization-disabled emission retain the baseline.
+
+`TestEffectCallbackGrowthIsBounded` checks depths zero through six with generic
+captured arguments and dictionaries. The Console async fixture covers effectful
+task callbacks; the separate IO fixture retains fixed-Direct sharing coverage.
+Comparison tests execute optimized and general emission against the fixture's
+expected output. The default compiler's differential, library, module-boundary,
+trace, and allocation suites exercise sharing. To check a comparison control,
+set `GOFLAGS=-ldflags=-X=github.com/waj/fango/internal/codegen.effectBodyStrategy=baseline`
+so subprocess compiler builds inherit that selection.
+
+On an idle host, from the Nix development shell:
+
+```sh
+python3 benchmarks/effectcompare/compare.py --out /tmp/fango-effects --runs 7
+```
+
+The destination must be new. `--variants baseline factory selective` includes the
+factory-only control. `--prepare-only` builds and validates without timing runtime;
+`--measure-only` measures an existing prepared directory. Generated Go, compiler
+binaries, raw samples, and `report.json` remain there. The harness measures
+uncached checking/emission, initial Go compilation with the host's Go cache,
+warm unchanged/edited builds, entry/dependency source bytes, and executable bytes.
+Initial Go compilation is not a cold OS/toolchain-cache measurement. Run preparation
+without other builds when comparing compilation times.
+
+Runtime samples rotate variant order after a warmup and measure in-process
+computation, including allocations, separately from startup and input creation.
+Workloads cover state, cleanup, saturated folds, in-memory Console output, async
+tasks, successful and aborting resumptive handlers, and a 10 MB typed JSON input.
+Every variant checks results and the zero-allocation fold contract before timing.
+Keep compilation and correctness tests out of the runtime measurement interval.
+The controls share runtime improvements, including deferred spawn-trace
+symbolization, so these ratios isolate emission choices rather than claiming the
+full improvement over an older runtime. Reject repeatable regressions above five
+percent and preserve existing allocation guarantees. Report variability; a median
+alone does not establish a repeatable regression.
+
+The 2026-10-14 comparison on an Apple M5 Max, macOS arm64, Go 1.26.7 used
+seven rotating samples at 500 ms per benchmark. At six callback nesting levels,
+the marker body fell from 128 copies to two and entry source from 125,079 to
+9,143 bytes. The nonnested generic worker's body fell from two copies to one.
+On the combined workload, entry Go fell from 935,273 to 695,513 bytes (25.6%);
+dependency Go grew from 2,132,604 to 2,149,221 bytes, leaving total generated Go
+7.3% smaller. Median uncached emission fell from 0.770 to 0.654 seconds.
+The executable grew from 5,283,122 to 5,503,266 bytes (4.2%); source sharing does
+not guarantee smaller Go machine code.
+
+State, Console, folds, and JSON median runtime changes were +0.4%, +1.6%, +2.2%,
+and +1.6%; successful/aborting resumptive handlers were 4.9%/2.9% faster.
+Cleanup's initial +5.1% and Async's +4.7% were checked with seven further
+alternating one-second samples: +1.7% and +3.6%, respectively. No regression
+above five percent repeated. Fold and cleanup allocations remained zero; State,
+Console, and resumptive-handler counts were unchanged. Async added about 66
+allocations per 64-task run, and the 10 MB JSON decode added one allocation.
+These are same-host observations, not portable timing guarantees. The full
+`make ci` gate passed with selective sharing as the default.
+
 ### Typed JSON comparison
 
 [Typed JSON comparison](json-performance.md) documents the opt-in 10 MB

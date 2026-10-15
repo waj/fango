@@ -148,7 +148,16 @@ func (g *gen) saturatedLambda(lam *core.Lambda, arity int, mode types.Transport)
 			}
 		}()
 	}
-	member := g.directLambdaMember(current, mode).(*goast.FuncLit)
+	var member *goast.FuncLit
+	if !g.disableOptimizations && g.bodyStrategy != "baseline" && arity == 1 {
+		return g.outlinedLambda(current, mode), true
+	} else if !g.disableOptimizations && g.bodyStrategy != "baseline" {
+		// Earlier curried arguments become parameters of the saturated
+		// function, rather than captures available at construction time.
+		member = g.literalLambdaMember(current, mode).(*goast.FuncLit)
+	} else {
+		member = g.directLambdaMember(current, mode).(*goast.FuncLit)
+	}
 	fields := member.Type.Params.List
 	var combined []*goast.Field
 	combined = append(combined, fields[:len(fields)-1]...)

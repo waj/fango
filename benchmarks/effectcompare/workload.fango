@@ -1,0 +1,96 @@
+import Async
+import Bytes
+import Console
+import Fail
+import Json exposing (Decode)
+import List
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+
+input : Int -> List Int
+input n = List.range 1 n
+
+fold : List Int -> Int
+fold values = List.foldl { value total -> value + total } 0 values
+
+advance : Int ->{State.State Int} Int
+advance n =
+    if n <= 0 then State.get()
+    else
+        current = State.get()
+        State.put (current + 1)
+        advance (n - 1)
+
+state : Int -> Int
+state n = (State.run 0 { advance n }).state
+
+bracketLoop : Int -> Int -> Int
+bracketLoop n total =
+    if n <= 0 then total
+    else
+        next = Runtime.Scope.bracket { 1 } { _ -> () } { value -> total + value }
+        bracketLoop (n - 1) next
+
+bracket : Int -> Int
+bracket n = bracketLoop n 0
+
+writeLoop : Int ->{Console} ()
+writeLoop n =
+    if n <= 0 then ()
+    else
+        Console.write "x"
+        writeLoop (n - 1)
+
+console : Int -> Int
+console n = Bytes.length (Console.runTest Bytes.empty { writeLoop n }).stdout
+
+async : Int ->{IO} Int
+async n =
+    case Async.runOutcome {
+        tasks = List.map { value -> Async.spawn { Async.checkpoint(); value } } (input n)
+        List.foldl { task total -> total + Async.await task } 0 tasks
+    } of
+        Async.Completed value -> value
+        Async.Cancelled -> -1
+
+effect Step
+    step : Int -> Int
+
+steps : Int ->{Step} Int
+steps n = if n <= 0 then 0 else steps (step n)
+
+resumptiveAbort : Bool -> Int -> Int
+resumptiveAbort shouldFail n =
+    result = Fail.attempt {
+        handle steps n on
+            step value ->
+                if shouldFail && value == 1 then Fail.fail 1
+                else resume (value - 1)
+    }
+    case result of
+        Ok value -> value
+        Err value -> value
+
+type Shipping = { city : String, postal : String, latitude : Float, longitude : Float } deriving (Decode)
+type Item = { sku : String, quantity : Int, unit_cents : Int } deriving (Decode)
+type Order =
+    { id : Int
+    , customer : String
+    , active : Bool
+    , total_cents : Int
+    , discount : Maybe String
+    , shipping : Shipping
+    , tags : List String
+    , items : List Item
+    , description : String
+    }
+    deriving (Decode)
+
+json : String -> Int
+json text =
+    case Json.parse @(List Order) text of
+        Err _ -> -1
+        Ok orders -> List.length orders
+
+main() = print (fold (input 100) + state 100 + bracket 100 + console 100 + async 16 + resumptiveAbort True 8 + json "[]")

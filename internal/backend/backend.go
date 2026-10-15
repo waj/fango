@@ -329,7 +329,7 @@ func emissionRecord(result *check.Result, unit codegen.Unit, summaries map[strin
 		}
 		linked = append(linked, linkedModule{Module: name, Semantic: summary.semantic, ABI: summary.abi})
 	}
-	record := unitRecord{Debug: unit.Debug, Schema: emissionSchema, Unit: unit.Name, Path: codegen.UnitPath(unit), Entry: unit.Entry,
+	record := unitRecord{BodyStrategy: unit.BodyStrategy, Debug: unit.Debug, Schema: emissionSchema, Unit: unit.Name, Path: codegen.UnitPath(unit), Entry: unit.Entry,
 		Implementation: own.implementation, Semantic: own.semantic, ABI: own.abi, Linked: linked}
 	if unit.Debug {
 		for _, module := range result.Graph.Modules {

@@ -191,7 +191,10 @@ transport joins its subject, state initializer, clauses, and return clause:
 its residual row is only an upper bound, which an enclosing annotation can
 widen with effects nothing inside performs. An abort handler consumes its own
 subject's exits, so its residual row decides which of them continue outward. Each defining module emits
-its available Direct/Exit workers independently of downstream consumers.
+its available Direct/Exit entries independently of downstream consumers.
+[Bounded body sharing](lowering.md#bounded-effect-bodies) lets ordinary workers
+share their implementation while retaining selected Direct specializations for
+small forwarders, loops, and higher-order functions.
 
 General function values carry typed callable members together in a Go record.
 [Invocation-only callback parameters](lowering.md#callback-contracts) can carry

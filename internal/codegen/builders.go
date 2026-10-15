@@ -34,7 +34,7 @@ func funcLit(result goast.Expr, body []goast.Stmt) goast.Expr {
 	return &goast.FuncLit{
 		Type: &goast.FuncType{
 			Params:  &goast.FieldList{},
-			Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
+			Results: resultFields(result),
 		},
 		Body: &goast.BlockStmt{List: body},
 	}

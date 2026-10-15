@@ -40,8 +40,9 @@ on ASCII codes, string spans are a single validating pass, keys match in
 place, and file pulls are 64 KiB; current numbers and the measured series are in the
 [typed JSON comparison](design/json-performance.md).
 
-[Generated-code performance](roadmap-performance.md) owns the next measured
-round: static-argument specialization.
+[Bounded effect-body sharing](design/lowering.md#bounded-effect-bodies) removes
+nested transport multiplication. [Generated-code performance](roadmap-performance.md)
+owns deferred static-argument specialization.
 
 The [buffered pull cursor](design/json.md) shares its text window's buffer
 description, defers reader commits to refills and scope exit, and fuses record

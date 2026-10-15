@@ -83,7 +83,7 @@ func SpawnAsync(owner *AsyncScope, body func(*AsyncScope) AsyncCompletion) *Asyn
 	}
 	owner.children[task] = struct{}{}
 	owner.mu.Unlock()
-	spawned := Capture(0)
+	spawned := captureStack()
 	go func() {
 		defer recoverTask(spawned)
 		task.publish(child.Finish(body(child)))
