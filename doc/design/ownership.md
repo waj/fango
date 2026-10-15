@@ -58,8 +58,8 @@ provider error. Every operation checks provider activity, including whole-file
 and metadata calls. An operation admitted before retirement may finish; the
 provider check does not serialize whole Fango handler clauses. Provider
 teardown is not a task scheduler or a drain scope; Async still owns task
-lifetime. Memory handler state remains subject to the existing non-atomic
-snapshot/commit rule. Native provider locks protect only provider and
+lifetime. Memory runner state is a separate
+[atomic state](effects.md#atomic-state) cell. Native provider locks protect only provider and
 system-handle validity, and are not held during blocking file reads or writes.
 
 Net follows the same model with its own provider type. System listeners,

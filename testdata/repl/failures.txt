@@ -3,8 +3,7 @@ Fango 0.1 — :help for commands
 loaded Trace
 loaded Failure
 loaded Fail
-> loaded State
-> Unhandled Error: "plain" : String
+> > Unhandled Error: "plain" : String
 > Opaque : Opaque
 > Unhandled Error: <value : Opaque> : Opaque
 > | | failCount : Int ->{Fail Int} a

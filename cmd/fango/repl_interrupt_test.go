@@ -144,8 +144,8 @@ func TestREPLInterruptInsideLevel(t *testing.T) {
 	defer cancel()
 	r := startREPL(t, ctx)
 	r.waitFor("> ")
+	// State is already loaded through the Prelude's Console.
 	r.write("import State\n")
-	r.waitFor("loaded State")
 	r.waitFor("> ")
 	r.write("count n = if n <= 0 then 0 else count (n - 1)\n")
 	r.waitFor("> ")

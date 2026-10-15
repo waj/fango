@@ -1,0 +1,80 @@
+module FixtureRunnerTasks exposing (tests)
+
+import Async exposing (Outcome(..))
+import Bytes
+import Console
+import Expect
+import Fail
+import File
+import IO exposing (Line(..))
+import List
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import String
+import Test
+
+-- Runs `count` copies of `action` in tasks and answers their results.
+inTasks : Int -> (Int ->{e} a) ->{Async.Async | e} List a
+inTasks count action = Async.awaitAll (List.map { n -> Async.spawn { action n } } (List.range 1 count))
+
+repeat : Int -> (() ->{e} ()) ->{e} ()
+repeat times action =
+    if times == 0 then
+        ()
+    else
+        action()
+        repeat (times - 1) action
+
+-- Five lines of input, as numbers; a missing line reads as zero.
+readFive : () ->{Console.Console} Int
+readFive() = List.foldl { _ sum -> sum + lineNumber Console.readLine() } 0 (List.range 1 5)
+
+lineNumber : Maybe Line -> Int
+lineNumber line =
+    case line of
+        Nothing -> 0
+        Just read -> Maybe.withDefault 0 (String.toInt read.text)
+
+-- Eight tasks write 100 times each and read five lines each of 40.
+console : () ->{IO.IO} Console.Transcript (Outcome (List Int))
+console() =
+    input = Bytes.fromString (String.concat (List.map { n -> show n ++ "\n" } (List.range 1 40)))
+    Console.runTest input {
+        Async.runOutcome {
+            _ = inTasks 8 { _ -> repeat 100 { Console.write "ab" } }
+            inTasks 8 { _ -> readFive() }
+        }
+    }
+
+-- Eight tasks append 50 bytes each to one file and write a file of their own.
+files : () ->{IO.IO} File.Snapshot (Outcome (List (Result IO.Error ())))
+files() = File.runMemory File.empty {
+    Async.runOutcome {
+        inTasks 8 { n ->
+            _ = Fail.attempt { File.withAppend "log" { file -> repeat 50 { File.write file "a" } } }
+            File.writeAll ("own" ++ show n) "x"
+        }
+    }
+}
+
+lengthOf : String -> File.Image -> Int
+lengthOf path image =
+    case File.textAt path image of
+        Ok text -> String.byteLength text
+        Err _ -> -1
+
+tests : Test.Test IO.IO
+tests = Test.test "fixture_runner_tasks" {
+    transcript = console()
+    Expect.equal 1600 (Bytes.length transcript.stdout)
+    Expect.equal Bytes.empty transcript.remaining
+    case transcript.value of
+        Completed sums -> Expect.equal 820 (List.foldl { sum total -> sum + total } 0 sums)
+        Cancelled -> Expect.failWith "tasks cancelled"
+    snapshot = files()
+    Expect.equal (Completed (List.map { _ -> Ok () } (List.range 1 8))) snapshot.value
+    Expect.equal 400 (lengthOf "log" snapshot.image)
+    Expect.equal [1, 1, 1, 1, 1, 1, 1, 1] (List.map { n -> lengthOf ("own" ++ show n) snapshot.image } (List.range 1 8))
+}
+
+main() = Test.run tests

@@ -106,6 +106,7 @@ import FileMemory
 import FileProviderTasks
 import FileProviders
 import FileStreaming
+import FixtureRunnerTasks
 import Firstclass
 import FloatInf
 import FloatNan
@@ -306,6 +307,7 @@ main() =
             , FileMemory.tests
             , FileProviders.tests
             , FileStreaming.tests
+            , FixtureRunnerTasks.tests
             , FileProviderTasks.tests
             , AbortCleanupCallback.tests
             , AbortHandlerUnitClause.tests

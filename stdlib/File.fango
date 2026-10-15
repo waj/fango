@@ -34,6 +34,7 @@ import Runtime.Entry
 import Runtime.IO
 import Runtime.Native
 import Runtime.Scope
+import State
 import String
 
 -- File acquisition, streaming access, and whole-file/directory queries. Every
@@ -776,43 +777,30 @@ runMemory image action = runMemoryWith noFaults image action
 -- invalidated at provider exit; scoped handles close on every language exit.
 -- Faults apply to both streaming and whole-file operations.
 --
--- This runner is sequential: concurrent handler clauses may lose state
--- updates. It models no symlinks or permissions. Directory sizes are zero.
+-- Tasks that inherit the runner share its image. Each operation, including
+-- a whole-file read or write, applies atomically: concurrent reads through
+-- one handle never return the same bytes, and appends never overwrite one
+-- another. Operations from different tasks interleave in scheduling order.
+-- It models no symlinks or permissions. Directory sizes are zero.
 -- An abort escaping the runner returns no snapshot; put Fail.attempt inside
 -- it to inspect partial progress.
 runMemoryWith : Faults -> Image -> (() ->{FileSystem | e} a) ->{e} Snapshot a
 runMemoryWith faults image action =
     withProvider { provider ->
-        handle action() with state = Memory { image = image, faults = faults, handles = Dict.empty, next = 0 } on
-            openRead path ->
-                (result, next) = memoryOpen provider ReadMode path state
-                resume result with next
-            openWrite path ->
-                (result, next) = memoryOpen provider WriteMode path state
-                resume result with next
-            openAppend path ->
-                (result, next) = memoryOpen provider AppendMode path state
-                resume result with next
-            closeHandle file ->
-                (result, next) = memoryClose provider file state
-                resume result with next
-            readHandleLine file ->
-                (result, next) = memoryLine provider file state
-                resume result with next
-            readHandleBytes file count ->
-                (result, next) = memoryRead provider file count False state
-                resume result with next
-            writeHandleBytes file data ->
-                (result, next) = memoryWrite provider file data state
-                resume result with next
-            readFileResult path ->
-                (result, next) = memoryReadFile provider path state
-                resume result with next
-            writeFileResult path text ->
-                (result, next) = memoryWriteFile provider path text state
-                resume result with next
-            isDirectoryPath path -> resume (activeResult provider path (memoryDirectory path state.image)) with state
-            fileSize path -> resume (activeResult provider path (memorySize path state.image)) with state
-            listDirectory path -> resume (activeResult provider path (memoryListing path state.image)) with state
-            return value -> Snapshot { value = value, image = state.image }
+        result = State.runAtomic (Memory { image = image, faults = faults, handles = Dict.empty, next = 0 }) {
+            handle action() on
+                openRead path -> resume (State.update { state -> memoryOpen provider ReadMode path state })
+                openWrite path -> resume (State.update { state -> memoryOpen provider WriteMode path state })
+                openAppend path -> resume (State.update { state -> memoryOpen provider AppendMode path state })
+                closeHandle file -> resume (State.update { state -> memoryClose provider file state })
+                readHandleLine file -> resume (State.update { state -> memoryLine provider file state })
+                readHandleBytes file count -> resume (State.update { state -> memoryRead provider file count False state })
+                writeHandleBytes file data -> resume (State.update { state -> memoryWrite provider file data state })
+                readFileResult path -> resume (State.update { state -> memoryReadFile provider path state })
+                writeFileResult path text -> resume (State.update { state -> memoryWriteFile provider path text state })
+                isDirectoryPath path -> resume (activeResult provider path (memoryDirectory path State.get().image))
+                fileSize path -> resume (activeResult provider path (memorySize path State.get().image))
+                listDirectory path -> resume (activeResult provider path (memoryListing path State.get().image))
+        }
+        Snapshot { value = result.value, image = result.state.image }
     }

@@ -31,6 +31,7 @@ import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
 import Runtime.Entry
 import Runtime.IO
+import State
 
 -- A standard output stream.
 type Output
@@ -179,6 +180,10 @@ joined chunks = Bytes.concat (List.reverse chunks)
 -- captures each output stream exactly, without adding or normalizing
 -- newlines. Writes always succeed.
 --
+-- Tasks that inherit the runner share its streams. Each read consumes its
+-- input exactly once and each write is captured whole, but writes and reads
+-- from different tasks interleave in scheduling order.
+--
 -- ```fango
 -- import Bytes
 -- import Console exposing (Output(..))
@@ -190,25 +195,36 @@ joined chunks = Bytes.concat (List.reverse chunks)
 -- ```
 runTest : Bytes -> (() ->{Console | e} a) ->{e} Transcript a
 runTest input action =
-    handle action() with state = Capture { input = input, out = [], err = [] } on
-        readLine () ->
-            if Bytes.length state.input == 0 then
-                resume Nothing with state
-            else
-                read = lineOf state.input
-                resume (Just read.line) with { state | input = read.rest }
-        readBytes count ->
-            length = Bytes.length state.input
-            if length == 0 then
-                resume Nothing with state
-            else if count <= 0 then
-                resume (Just Bytes.empty) with state
-            else
-                taken = if count < length then count else length
-                resume (Just (Bytes.slice 0 taken state.input)) with { state | input = Bytes.slice taken length state.input }
-        writeBytes output data ->
-            case output of
-                Stdout -> resume () with { state | out = [data | state.out] }
-                Stderr -> resume () with { state | err = [data | state.err] }
-        return value ->
-            Transcript { value = value, stdout = joined state.out, stderr = joined state.err, remaining = state.input }
+    result = State.runAtomic (Capture { input = input, out = [], err = [] }) {
+        handle action() on
+            readLine () -> resume (State.update takeLine)
+            readBytes count -> resume (State.update { state -> takeBytes count state })
+            writeBytes output data -> resume (State.modify { state -> captured output data state })
+    }
+    state = result.state
+    Transcript { value = result.value, stdout = joined state.out, stderr = joined state.err, remaining = state.input }
+
+takeLine : Capture -> (Maybe Line, Capture)
+takeLine state =
+    if Bytes.length state.input == 0 then
+        (Nothing, state)
+    else
+        read = lineOf state.input
+        (Just read.line, { state | input = read.rest })
+
+takeBytes : Int -> Capture -> (Maybe Bytes, Capture)
+takeBytes count state =
+    length = Bytes.length state.input
+    if length == 0 then
+        (Nothing, state)
+    else if count <= 0 then
+        (Just Bytes.empty, state)
+    else
+        taken = if count < length then count else length
+        (Just (Bytes.slice 0 taken state.input), { state | input = Bytes.slice taken length state.input })
+
+captured : Output -> Bytes -> Capture -> Capture
+captured output data state =
+    case output of
+        Stdout -> { state | out = [data | state.out] }
+        Stderr -> { state | err = [data | state.err] }

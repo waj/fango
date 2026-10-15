@@ -141,7 +141,8 @@ than once; no lock is held while it runs, and no task can block another. The
 private natives are typed as pure and reached only through the handler, as
 Async's are, and are registered as stage-safe so the runner can execute at
 compile time. Runners whose concurrent operations must not lose updates, such
-as `Random.runSeeded` and `Time.Clock.runStepped`, keep a private state type
+as `Random.runSeeded`, `Time.Clock.runStepped`, `Console.runTest`,
+`File.runMemoryWith`, and `Http.Client.stub`, keep a private state type
 in an enclosing `runAtomic`, which no caller's own `State` handler can
 intercept.
 
@@ -259,7 +260,10 @@ private native calls directly on the active session host, and turns a stream
 error into the host panic that ends the program, so no Console call raises
 and the diagnostic never becomes program output. Programs get that runner as
 `main`'s [default handler](pipeline.md#entry-assembly), and the REPL applies
-defaults to its inputs the same way.
+defaults to its inputs the same way. `Console.runTest` keeps its remaining
+input and captured output in a private [atomic state](#atomic-state) runner,
+so tasks sharing it consume each input line once and capture every write
+whole.
 
 A callee row that lists a label and also has a tail, such as a runner's
 `{Out | e}`, forwards that label's evidence in the residual row too. Rows
@@ -277,7 +281,9 @@ acquisition and bracket cleanup remain private to the runner. Entry assembly
 and the REPL select this default through the ordinary effect attribute.
 
 `runMemoryWith` holds immutable path entries, per-open cursors, and its fault
-configuration in ordinary handler state; `runMemory` is the fault-free case.
+configuration in a private [atomic state](#atomic-state) runner, and each
+operation, whole-file calls included, is one pure update of it; `runMemory`
+is the fault-free case.
 Its returned image contains only entries, so a snapshot can seed another run
 without carrying faults or live handles. Fixture construction may create parent
 directories; writes require existing parents. Whole-file mock operations use
@@ -290,8 +296,9 @@ and File runners compose independently in either order. `Runtime.IO` shares the
 raw line/byte EOF conversions and read bound. Generic code takes a row-indexed
 Source/Sink, Reader, or Writer; there is no shared IO handle.
 
-The memory runner remains sequential under the existing handler-state rule;
-provider validity synchronization does not make a handler clause atomic. Provider
+Because each operation is one atomic update, tasks that inherit the memory
+runner never lose a write or read the same bytes twice through one handle;
+provider validity synchronization is separate from that state. Provider
 identity, retirement, task inheritance, and checked payload projection are
 specified in the [resource design](ownership.md#file-provider-identity).
 

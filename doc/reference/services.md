@@ -39,10 +39,12 @@ same cancellation but does not simulate task scheduling. HTTP client requests
 are interruptible the same way inside
 [`Http.Client.cancellable`](../../stdlib/Http/Client.fango).
 
-Fixture runners that tasks share keep consistent state per operation:
-`Random.runSeeded`, `Time.Clock.runStepped`, `Http.Client.stub`, and
-`Http.Client.mock` never repeat a draw or reading or mix two requests. Their
-order between tasks follows scheduling. Handlers written with `with` state
+Every standard fixture runner keeps consistent state per operation when tasks
+share it: `Console.runTest` consumes each input line once and captures each
+write whole, `File.runMemory` applies each file operation atomically,
+`Random.runSeeded` and `Time.Clock.runStepped` never repeat a draw or
+reading, and `Http.Client.stub` and `mock` never mix two requests. Their order
+between tasks follows scheduling. Handlers written with `with` state
 need [`State.runAtomic`](../../stdlib/State.fango) for the same guarantee.
 
 A program's exit status is not a service: `main` returns a `Process.Status`,
