@@ -30,8 +30,8 @@ func TestFallibleNativeEmitsStraightLineGo(t *testing.T) {
 		"t_payload, t_err := n_File.SystemOpenRead(",
 		"var t_failure fangort.IOFailure = fangort.ClassifyIOError(t_err)",
 		"t_failure.Path, t_failure.Message",
-		"n_File.SystemCloseHandle(v_provider.F0, v_file.F0)",
-		"F1_0: C_File_dot_Handle{t_payload}",
+		"n_File.SystemCloseHandle(v_provider.F0, v_real.F0)",
+		"F1_0: C_File_dot_SystemFile{t_payload}",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("%s is missing %q", file.Path, want)

@@ -25,7 +25,7 @@ listeners, pools, and their checked construction API remain IOI6 work.
 
 ### Provider identity within a domain
 
-File's provider tokens, fresh handle identities, closed/foreign checks, and
+File's provider tokens, provider-scoped handle keys, foreign checks, and
 checked native projection are specified in the
 [design](design/ownership.md#file-provider-identity). A future Network backend
 must provide equivalent checks for its own nominal resources. It must not use

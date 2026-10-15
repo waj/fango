@@ -1,5 +1,6 @@
 module FileProviders exposing (tests)
 import Bytes
+import Dict exposing (Dict)
 import Expect
 import Fail
 import File
@@ -7,23 +8,50 @@ import IO
 import Result exposing (Result(..))
 import Test
 
-custom : (() ->{File.FileSystem | e} a) ->{e} a
+type Opened = { next : Int, open : Dict Int String }
+
+-- The handler owns which keys are open; the provider only proves ownership.
+owned : File.Provider -> Opened -> File.Handle -> Result IO.Error Int
+owned provider state file =
+    case File.handleKey provider file of
+        Err error -> Err error
+        Ok key ->
+            case Dict.get key state.open of
+                Just _ -> Ok key
+                Nothing -> Err (IO.Error { kind = IO.Other, path = "", message = "closed handle" })
+
+opened : File.Provider -> String -> Opened -> (Result IO.Error File.Handle, Opened)
+opened provider path state =
+    (Ok (File.newHandle provider path state.next), { state | next = state.next + 1, open = Dict.insert state.next path state.open })
+
+-- Answers the action's value and the number of handles left open.
+custom : (() ->{File.FileSystem | e} a) ->{e} (a, Int)
 custom action = File.withProvider { provider ->
-    handle action() on
-        File.openRead path -> resume (File.newHandle provider path 0)
-        File.openWrite path -> resume (File.newHandle provider path 0)
-        File.openAppend path -> resume (File.newHandle provider path 0)
-        File.closeHandle file -> resume (File.releaseHandle provider file)
+    handle action() with state = Opened { next = 0, open = Dict.empty } on
+        File.openRead path ->
+            (result, next) = opened provider path state
+            resume result with next
+        File.openWrite path ->
+            (result, next) = opened provider path state
+            resume result with next
+        File.openAppend path ->
+            (result, next) = opened provider path state
+            resume result with next
+        File.closeHandle file ->
+            case File.handleKey provider file of
+                Err error -> resume (Err error) with state
+                Ok key -> resume (Ok ()) with { state | open = Dict.remove key state.open }
         File.readHandleLine file ->
-            resume (Result.map { _ -> Just (IO.Line { text = "custom", ending = "\n" }) } (File.handleKey provider file))
+            resume (Result.map { _ -> Just (IO.Line { text = "custom", ending = "\n" }) } (owned provider state file)) with state
         File.readHandleBytes file count ->
-            resume (Result.map { _ -> Just (Bytes.slice 0 count (Bytes.fromString "custom")) } (File.handleKey provider file))
-        File.writeHandleBytes file _ -> resume (Result.map { _ -> () } (File.handleKey provider file))
-        File.readFileResult _ -> resume (Ok "custom")
-        File.writeFileResult _ _ -> resume (Ok ())
-        File.isDirectoryPath _ -> resume (Ok False)
-        File.fileSize _ -> resume (Ok 6)
-        File.listDirectory _ -> resume (Ok [])
+            resume (Result.map { _ -> Just (Bytes.slice 0 count (Bytes.fromString "custom")) } (owned provider state file)) with state
+        File.writeHandleBytes file _ -> resume (Result.map { _ -> () } (owned provider state file)) with state
+        File.readFileResult _ -> resume (Ok "custom") with state
+        File.writeFileResult _ _ -> resume (Ok ()) with state
+        File.isDirectoryPath _ -> resume (Ok False) with state
+        File.fileSize _ -> resume (Ok 6) with state
+        File.listDirectory _ -> resume (Ok []) with state
+        return value -> (value, Dict.size state.open)
 }
 
 problem : Result IO.Error a ->{Expect.Expect} IO.Error
@@ -35,7 +63,7 @@ problem result =
 tests : Test.Test {}
 tests = Test.describe "custom file providers"
     [ Test.test "custom handlers construct valid handles using checked public types" {
-        result = custom {
+        (result, open) = custom {
             Fail.attempt {
                 File.withFile "input" { file ->
                     Expect.equal (Just (Bytes.fromString "cu")) (File.readBytes file 2)
@@ -45,23 +73,33 @@ tests = Test.describe "custom file providers"
             }
         }
         Expect.equal (Ok ()) result
+        Expect.equal 0 open
     }
-    , Test.test "provider scopes protect identity, closed state, and key reuse" {
+    , Test.test "custom handlers own close state and may close twice" {
+        ((first, second, read), open) = custom {
+            file = Expect.ok (File.openRead "input")
+            (File.closeHandle file, File.closeHandle file, File.readHandleLine file)
+        }
+        Expect.equal (Ok ()) first
+        Expect.equal (Ok ()) second
+        Expect.equal "closed handle" (problem read).message
+        Expect.equal 0 open
+    }
+    , Test.test "providers distinguish nested, earlier, and retired owners" {
         escaped = File.withProvider { first ->
-            old = Expect.ok (File.newHandle first "old" 0)
-            File.releaseHandle first old |> Expect.ok
-            File.releaseHandle first old |> Expect.ok
-            fresh = Expect.ok (File.newHandle first "new" 0)
-            Expect.equal "closed handle" (problem (File.handleKey first old)).message
+            fresh = File.newHandle first "new" 0
             Expect.equal (Ok 0) (File.handleKey first fresh)
             inside = File.withProvider { second -> File.handleKey second fresh }
             Expect.equal "foreign handle" (problem inside).message
-            Expect.equal IO.Other (problem (File.newHandle first "bad" (-1))).kind
-            fresh
+            Expect.equal "new" (problem inside).path
+            (first, fresh)
         }
+        (retired, stale) = escaped
+        Expect.equal "closed provider" (problem (File.handleKey retired stale)).message
+        Expect.equal IO.Other (problem (File.handleKey retired stale)).kind
         File.withProvider { later ->
-            replacement = Expect.ok (File.newHandle later "other" 0)
-            Expect.equal "foreign handle" (problem (File.handleKey later escaped)).message
+            replacement = File.newHandle later "other" 0
+            Expect.equal "foreign handle" (problem (File.handleKey later stale)).message
             Expect.equal (Ok 0) (File.handleKey later replacement)
         }
     }

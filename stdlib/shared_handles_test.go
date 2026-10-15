@@ -106,62 +106,42 @@ func TestSharedConnectionCloseInterruptsRead(t *testing.T) {
 
 func TestVirtualProviderIdentityAndRetirement(t *testing.T) {
 	first, second := FreshProvider(), FreshProvider()
-	old, err := VirtualHandle(first, "old", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := VirtualHandle(second, "other", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ResourceKey(second, old); err == nil || !strings.Contains(err.Error(), "foreign handle") {
-		t.Fatalf("foreign handle: %v", err)
-	}
-	if err := ReleaseResource(first, old); err != nil {
-		t.Fatal(err)
-	}
-	if err := ReleaseResource(first, old); err != nil {
-		t.Fatal(err)
-	}
-	newer, err := VirtualHandle(first, "new", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ResourceKey(first, old); err == nil {
-		t.Fatal("closed key revived")
-	}
-	if _, err := ResourceKey(first, newer); err != nil {
-		t.Fatal(err)
+	if !SameProvider(first, first) || SameProvider(first, second) {
+		t.Fatal("provider identity is not by object")
 	}
 	RetireProvider(first)
-	if err := ProviderStatus(first); err == nil {
-		t.Fatal("retired provider usable")
+	if err := ProviderStatus(first); err == nil || !strings.Contains(err.Error(), "closed provider") {
+		t.Fatalf("retired provider: %v", err)
 	}
-	if _, err := ResourceKey(first, newer); err == nil {
-		t.Fatal("escaped handle usable")
-	}
-	if _, err := ResourceKey(second, other); err != nil {
+	if err := ProviderStatus(second); err != nil {
 		t.Fatal(err)
 	}
 	RetireProvider(second)
 }
 
 func TestSystemProviderChecksBeforeNativeProjection(t *testing.T) {
-	real, fake := SystemProvider(), FreshProvider()
-	virtual, err := VirtualHandle(fake, "virtual", 0)
+	path := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	owner, other, fake := SystemProvider(), SystemProvider(), FreshProvider()
+	h, err := SystemOpenRead(owner, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SystemReadHandleBytes(real, virtual, 1); err == nil || !strings.Contains(err.Error(), "foreign handle") {
-		t.Fatalf("virtual projection: %v", err)
+	if _, err := SystemReadHandleBytes(other, h, 1); err == nil || !strings.Contains(err.Error(), "foreign handle") {
+		t.Fatalf("foreign projection: %v", err)
 	}
-	if _, err := SystemReadHandleBytes(fake, virtual, 1); err == nil || !strings.Contains(err.Error(), "system handle expected") {
-		t.Fatalf("fake projection: %v", err)
+	if _, err := SystemOpenRead(fake, path); err == nil || !strings.Contains(err.Error(), "system provider expected") {
+		t.Fatalf("native file under virtual provider: %v", err)
 	}
-	if _, err := VirtualHandle(real, "forged", 0); err == nil {
-		t.Fatal("virtual handle constructed under real provider")
+	if SystemFilePath(h) != path {
+		t.Fatalf("path = %q", SystemFilePath(h))
 	}
-	if err := SystemRetireProvider(real); err != nil {
+	if err := SystemRetireProvider(owner); err != nil {
+		t.Fatal(err)
+	}
+	if err := SystemRetireProvider(other); err != nil {
 		t.Fatal(err)
 	}
 	RetireProvider(fake)

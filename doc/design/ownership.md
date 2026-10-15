@@ -23,22 +23,23 @@ type. Shared handlers and native resources own their synchronization.
 File keeps handler activation, resource provider, and cleanup scope separate.
 Handler dispatch uses effect identity rather than inspecting handle values, so
 File operations never intercept Console calls. Each system or virtual provider
-gets a fresh nonzero-sized native object; each
-handle gets another fresh object containing its owner, original path, backend
-key, and validity state. Backend integers are lookup keys inside an owning
-provider, never resource identities. Reusing a key cannot revive a closed
-handle or make it belong to a later provider.
+is a fresh native token compared by identity, never an integer. A system handle
+wraps a native object recording its owning provider, path, and open state. A
+virtual handle is a private Fango value holding its provider, path, and the
+handler's backend key; it carries no native state and cannot be constructed
+outside File.
 
 The system runner privately creates real providers. Its natives validate owner,
-provider activity, and resource kind before projecting the buffered native-file
-payload. Virtual providers cannot manufacture that payload. Virtual construction
-and validation are protected by a fresh scoped permission through an opaque
-Fango wrapper; neither that wrapper nor a callback requiring its permission can
-escape the scoped constructor. A returned File.Handle carries no live fixture
-state and is invalidated by provider retirement.
+provider activity, and open state before projecting the buffered native file,
+and virtual providers cannot open one. A virtual provider only proves
+ownership: `handleKey` answers the key of a handle of that provider while it is
+active. Whether that key is open is the handler's state, so handlers allocate
+keys monotonically; the memory runner drops a cursor on close and treats an
+owned key without one as closed. A returned File.Handle carries no live fixture
+state, and provider retirement makes every handle of that provider unusable.
 
 Provider retirement uses bracket cleanup on normal return and language abort.
-Memory retirement invalidates identity tokens; system retirement also closes
+Virtual retirement marks the token inactive; system retirement also closes
 remaining raw files in reverse acquisition order. Scoped closes retain the
 usual failure precedence and suppressed failures. Raw acquisitions have an
 explicit close obligation; teardown invalidates leftovers, and the system
@@ -55,10 +56,11 @@ Inherited handlers share the same provider token. A task drained inside the
 provider can use it; a task released after provider exit receives a retired
 provider error. Every operation checks provider activity, including whole-file
 and metadata calls. An operation admitted before retirement may finish; the
-provider check does not serialize whole Fango handler clauses. Provider teardown is not a task scheduler or a drain scope;
-Async still owns task lifetime. Memory handler state remains subject to the
-existing non-atomic snapshot/commit rule. Native provider locks protect only
-identity and validity, and are not held during blocking file reads or writes.
+provider check does not serialize whole Fango handler clauses. Provider
+teardown is not a task scheduler or a drain scope; Async still owns task
+lifetime. Memory handler state remains subject to the existing non-atomic
+snapshot/commit rule. Native provider locks protect only provider and
+system-handle validity, and are not held during blocking file reads or writes.
 
 Net remains a system-only backend: listeners and connections use fresh checked
 native objects, and each pool checkout has a fresh lease that retains its pool

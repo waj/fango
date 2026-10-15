@@ -255,13 +255,14 @@ handles them with private IO natives and a fresh resource provider. Directory
 acquisition and bracket cleanup remain private to the runner. Entry assembly
 and the REPL select this default through the ordinary effect attribute.
 
-`runMemory` holds immutable path entries, fault settings, and per-open offsets
-in ordinary handler state. Its returned image contains only entries and fault
-settings; no live handle table or mutable provider state is published. Fixture
-construction may create parent directories; writes require existing parents.
-Whole-file mock operations use the same acquisition/read/write/close machinery
-as streaming, including fault injection and partial writes. File's native text
-conversion preserves its replacement-per-invalid-run policy in both providers.
+`runMemoryWith` holds immutable path entries, per-open cursors, and its fault
+configuration in ordinary handler state; `runMemory` is the fault-free case.
+Its returned image contains only entries, so a snapshot can seed another run
+without carrying faults or live handles. Fixture construction may create parent
+directories; writes require existing parents. Whole-file mock operations use
+the same acquisition/read/write/close machinery as streaming, including fault
+injection and partial writes. File's native text conversion preserves its
+replacement-per-invalid-run policy in both providers.
 
 Each runner removes only `FileSystem` and preserves the residual row. Console
 and File runners compose independently in either order. `Runtime.IO` shares the
