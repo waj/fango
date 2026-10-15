@@ -118,8 +118,9 @@ streaming, [Net](../stdlib/Net.fango) with checked cancellation, and process
 arguments and status are implemented, with their
 [coverage map](reference/services.md). Runners that tasks share keep atomic
 state in [`State.runAtomic`](../stdlib/State.fango), and HTTP stubs and mocks
-use checked Net connections with cancellable requests. The completeness audit
-(IOI8) remains in the proposal; Clock, Random, and HTTP domain handlers remain
+use checked Net connections with cancellable requests. Only the
+[API and coverage contract](roadmap-io-interception.md#ioi1-api-and-coverage-contract)
+(IOI1) remains in the proposal; Clock, Random, and HTTP domain handlers remain
 their implemented foundations.
 
 ## HTTP and a concurrent server

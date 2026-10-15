@@ -301,7 +301,7 @@ committed separately.
 7. **IOI8, partially.** DONE: see [standard services](reference/services.md).
    Bundled callers no longer use `IO` for services, every bundled `main`
    names its services, and `Test.run` returns a status instead of exiting.
-   The parts that depend on IOI7 stay open.
+   The HTTP re-audit followed IOI7; see below.
 8. **IOI6.** DONE: see [Net](../stdlib/Net.fango) and
    [network services](design/effects.md#network-services). The `Network`
    effect, checked Net providers, and the `Net.Cancel` contract are
@@ -310,6 +310,9 @@ committed separately.
    and [mocking through framing](design/http.md#mocking-through-framing).
    Stub and mock connections are checked Net connections with per-connection
    exchanges, and `Client.cancellable` interrupts requests in cancelled tasks.
+10. **IOI8, HTTP re-audit.** DONE: loopback tests share one client runner
+    between tasks and interrupt a blocked request through real sockets in both
+    backends.
 
 ### IOI1 API and coverage contract
 
@@ -401,13 +404,14 @@ checked stub connections, per-connection exchanges, and the
 
 ### IOI8 Migration and completeness audit
 
-Status: partially done. [Standard services](reference/services.md) owns the
+Status: DONE. [Standard services](reference/services.md) owns the
 coverage map for Console, File, Net, Process, Random, Clock, and HTTP domain
-handlers, and lists the direct native boundaries. Bundled programs annotate
-`main` with their services and return statuses instead of calling
-`Process.exit`; `Test.run` answers a status rather than exiting.
-
-Remaining: re-audit HTTP's mocks and task behavior once IOI7 lands.
+handlers, their guarantees under tasks, and the direct native boundaries.
+Bundled programs annotate `main` with their services and return statuses
+instead of calling `Process.exit`; `Test.run` answers a status rather than
+exiting. HTTP's `stub` and `mock` exclude `Network` and `IO` from their rows,
+and its sidecars are pure byte transforms, so no real transport runs inside a
+mock.
 
 Acceptance: all existing correctness gates remain; missing service handlers
 produce deliberate diagnostics; no real implementation is accidentally selected

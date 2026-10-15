@@ -1,0 +1,31 @@
+import Async
+import Fail
+import Http.Client as Client
+import List
+import Process
+import Result exposing (Result(..))
+import Url
+
+fetch : String ->{Client.Http} Result Client.Error String
+fetch path = Fail.attempt { Client.getText path }
+
+-- Eight tasks share the runner's pool; a cancelled task blocked on a
+-- response that never comes ends cancelled; the pool still serves requests.
+main() =
+    case Process.args() of
+        [base] ->
+            Client.run {
+                Client.configure { config -> { config | baseUrl = Url.parse base } } {
+                    print (show (Async.runOutcome {
+                        Async.awaitAll (List.map { n -> Async.spawn { fetch ("/item/" ++ show n) } } (List.range 1 8))
+                    }))
+                    print (show (Async.runOutcome {
+                        task = Async.spawn { Client.cancellable { fetch "/hang" } }
+                        Async.sleep 300
+                        Async.cancel task
+                        Async.awaitOutcome task
+                    }))
+                    print (show (fetch "/item/9"))
+                }
+            }
+        _ -> Process.exit (Process.status 2)

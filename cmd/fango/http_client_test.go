@@ -278,3 +278,56 @@ func TestHTTPClientDoesNotRetryPartialResponse(t *testing.T) {
 		t.Fatalf("%d connections, want 1: partial response was retried", got)
 	}
 }
+
+// TestHTTPClientTasks shares one client runner between tasks over real
+// sockets, and cancels a task blocked on a response that never arrives.
+func TestHTTPClientTasks(t *testing.T) {
+	t.Parallel()
+	var connections, hung, longestHang atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("/item/", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		io.WriteString(w, r.URL.Path)
+	})
+	// Never answers. The client closing the connection ends the wait; an
+	// uninterrupted client would hold it until its 30 s read timeout.
+	mux.HandleFunc("/hang", func(w http.ResponseWriter, r *http.Request) {
+		hung.Add(1)
+		start := time.Now()
+		<-r.Context().Done()
+		held := int64(time.Since(start))
+		for {
+			old := longestHang.Load()
+			if held <= old || longestHang.CompareAndSwap(old, held) {
+				break
+			}
+		}
+	})
+	server := httptest.NewUnstartedServer(mux)
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	path := filepath.Join("testdata", "http_tasks.fango")
+	var items []string
+	for n := 1; n <= 8; n++ {
+		items = append(items, fmt.Sprintf("Ok %q", fmt.Sprintf("/item/%d", n)))
+	}
+	want := "Completed [" + strings.Join(items, ", ") + "]\nCompleted Cancelled\nOk \"/item/9\"\n"
+	runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{args: []string{server.URL}}, want)
+	if hung.Load() == 0 {
+		t.Fatal("no run reached the hanging request")
+	}
+	if held := time.Duration(longestHang.Load()); held > 10*time.Second {
+		t.Fatalf("a cancelled request held its connection for %v", held)
+	}
+	// Each run opens at most one connection per concurrent task, one for
+	// the cancelled request, and reuses one for the last request.
+	if runs, got := int64(len(executionTestBackends())), connections.Load(); got > 10*runs {
+		t.Fatalf("%d connections over %d runs", got, runs)
+	}
+}
