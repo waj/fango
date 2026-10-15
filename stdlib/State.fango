@@ -1,22 +1,28 @@
 {-# no-prelude #-}
--- A state effect and its runner.
+-- A state effect and its runners.
 --
 -- A computation performing `State s` reads and replaces one value of type
--- `s`; `run` gives it an initial value and returns the final one with the
--- result. `Runtime.Local` offers scoped local cells instead.
-module State exposing (State(..), StateResult(..), run)
+-- `s`; a runner gives it an initial value and returns the final one with the
+-- result. Use `run` for state that one task owns, and `runAtomic` when tasks
+-- that inherit the handler update it concurrently. `Runtime.Local` offers
+-- scoped local cells instead.
+module State exposing (State(..), StateResult(..), exchange, modify, run, runAtomic)
 
 import Basics exposing (..)
+import Runtime.Native
 
--- Access to one value of type `s`. Each `run` has its own cell, so nested
+-- Access to one value of type `s`. Each run has its own cell, so nested
 -- runs, even of the same `State s`, are independent.
 effect State s
     -- The current state.
     get : () -> s
     -- Replaces the state with `next`.
     put : s -> ()
+    -- Replaces the state with the second component of `step current` and
+    -- answers the first. Under `runAtomic`, `step` may run more than once.
+    update : (s -> (a, s)) -> a
 
--- What `run` returns: the action's value and the state it left.
+-- What a runner returns: the action's value and the state it left.
 type StateResult s a =
     {
       -- The action's result.
@@ -26,9 +32,37 @@ type StateResult s a =
     }
     deriving (Show)
 
+-- Replaces the state with `f` applied to it, as one `update`.
+--
+-- ```fango
+-- import State
+--
+-- (State.run 3 { State.modify { n -> n * 7 } }).state == 21
+-- ```
+modify : (s -> s) ->{State s} ()
+modify f = update { current -> ((), f current) }
+
+-- Replaces the state with `next` and answers the state it replaced, as one
+-- `update`.
+--
+-- ```fango
+-- import State
+--
+-- result = State.run "old" { State.exchange "new" }
+--
+-- result.value == "old"
+-- result.state == "new"
+-- ```
+exchange : s ->{State s} s
+exchange next = update { previous -> (previous, next) }
+
 -- Runs `action` with a fresh state cell holding `initial`, which is
 -- evaluated once, and returns its value with the final state. Other effects
 -- pass through.
+--
+-- Tasks that inherit this handler share its cell. Each operation reads or
+-- writes a complete value, but an `update` reads and writes separately, so
+-- concurrent updates can overwrite one another; use `runAtomic` for those.
 --
 -- ```fango
 -- import State
@@ -43,4 +77,64 @@ run initial action =
     handle action() with current = initial on
         get () -> resume current with current
         put next -> resume () with next
+        update step ->
+            (result, next) = step current
+            resume result with next
         return value -> { value = value, state = current }
+
+-- A native cell, shared by every task that inherits the runner's handler.
+{-# resource #-}
+type AtomicCell s = AtomicCell Runtime.Native.Any
+
+-- One published value of a cell. Replacing a version fails once any other
+-- write has superseded it, even a write of an equal value.
+{-# resource #-}
+type AtomicVersion s = AtomicVersion Runtime.Native.Any
+
+newAtomicCell : s -> AtomicCell s
+newAtomicCell = native
+
+loadAtomic : AtomicCell s -> AtomicVersion s
+loadAtomic = native
+
+atomicValue : AtomicVersion s -> s
+atomicValue = native
+
+replaceAtomic : AtomicVersion s -> s -> Bool
+replaceAtomic = native
+
+storeAtomic : AtomicCell s -> s -> ()
+storeAtomic = native
+
+-- Runs `action` like `run`, but every operation is atomic, including across
+-- tasks that inherit this handler: concurrent `update`, `modify`, and
+-- `exchange` calls never lose one another's changes. A `get` followed by a
+-- `put` is still two operations; combine them into one `update`.
+--
+-- An `update` whose state changed while `step` was running retries `step`
+-- on the newer state, so `step` must be pure and may run more than once. The
+-- returned state is the one when `action` finished; a task that outlives the
+-- runner can still change the cell later without affecting the result.
+--
+-- ```fango
+-- import State
+--
+-- result = State.runAtomic 1 { State.modify { n -> n + 1 }; State.update { n -> (n * 10, n + 1) } }
+--
+-- result.value == 20
+-- result.state == 3
+-- ```
+runAtomic : s -> (() ->{State s | e} a) ->{e} StateResult s a
+runAtomic initial action =
+    cell = newAtomicCell initial
+    handle action() on
+        get () -> resume (atomicValue (loadAtomic cell))
+        put next -> resume (storeAtomic cell next)
+        update step -> resume (updateAtomic cell step)
+        return value -> { value = value, state = atomicValue (loadAtomic cell) }
+
+updateAtomic : AtomicCell s -> (s -> (a, s)) -> a
+updateAtomic cell step =
+    current = loadAtomic cell
+    (result, next) = step (atomicValue current)
+    if replaceAtomic current next then result else updateAtomic cell step

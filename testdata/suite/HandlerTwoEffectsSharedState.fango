@@ -2,7 +2,7 @@ module HandlerTwoEffectsSharedState exposing (tests)
 
 import Expect
 import List exposing (List)
-import State exposing (State, get, put)
+import State exposing (State, get, put, update)
 import Test
 
 effect Emit
@@ -21,6 +21,11 @@ collect action =
         put : Int -> ()
         put n ->
             resume () with { context | count = n }
+
+        update : (Int -> (a, Int)) -> a
+        update step ->
+            (result, n) = step context.count
+            resume result with { context | count = n }
         emit message ->
             resume () with { context | messages = [message | context.messages] }
         return value ->

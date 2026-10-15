@@ -261,9 +261,9 @@ success with misleading semantics.
 
 Milestone IDs and titles below are stable. They form a dependency graph, not
 a requirement to delay useful console work until network interpretation is
-designed. IOI7 waits for a concrete consumer and the
+designed. IOI7 waits for a concrete consumer; its
 [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
-decision.
+mechanism is decided.
 
 | Milestone | Depends on | Deliverable |
 | --- | --- | --- |
@@ -273,7 +273,7 @@ decision.
 | IOI4 Files and standard handles | IOI3 | File interpretation, filesystem fixtures, retirement of the shared `IO.Handle` |
 | IOI5 Process arguments and exit | IOI1 | Argument runner, function-only `main` returning a status, hard-exit contract |
 | IOI6 Network interpretation | IOI3 | Public Net driver with a checked cancellation boundary; no stdlib scripted fixtures |
-| IOI7 HTTP and task integration | IOI6, [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency) | HTTP transport path and inherited mock behavior under real tasks |
+| IOI7 HTTP and task integration | IOI6, [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency) (decided) | HTTP transport path and inherited mock behavior under real tasks |
 | IOI8 Migration and completeness audit | IOI2, IOI4, IOI5, IOI7, IOI9 | Bundled caller migration, documentation, and verified coverage boundary |
 | IOI9 Entry assembly | IOI5, [effect reflection](reference/metaprogramming.md#effect-reflection) (done) | `DefaultHandler` attribute, `Runtime.Entry.assemble`, compiler entry splice |
 
@@ -346,8 +346,8 @@ or continuation machinery is added.
 Status: DONE. [Provider identity](design/ownership.md#file-provider-identity)
 owns File construction, validation, retirement, and task lifetimes. Checked
 custom File providers are documented in [File](../stdlib/File.fango).
-IOI6 extended the same checks to Net. The shared-handler-state question remains
-open.
+IOI6 extended the same checks to Net. Shared handler state is decided
+separately; see [mutable fixtures](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency).
 
 ### IOI4 Files and standard handles
 
@@ -398,8 +398,10 @@ or a checked transport of its own while keeping `run`, `stub`, and `mock`
 concise, and exercise inherited handlers, cancellation, shared fixture state,
 and connection lifetime under existing native tasks.
 
-Requires a decision on [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
-before claiming concurrent mock tests.
+Concurrent mock tests keep their fixture state in
+[`State.runAtomic`](../stdlib/State.fango), per the
+[shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
+decision.
 
 Acceptance: HTTP domain mocks remain concise; lower-level transport tests reach
 the real parser; task mocks preserve operation-level consistency under the

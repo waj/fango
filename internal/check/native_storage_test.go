@@ -47,6 +47,9 @@ freeze action = action
 bad() = handle StorageFixture.box (freeze { _ -> State.get() }) with current = 0 on
     State.get () -> resume current with current
     State.put next -> resume () with next
+    State.update step ->
+        (result, next) = step current
+        resume result with next
 main() = ()
 `, "HANDLER BINDING EFFECTS"},
 		{"borrowed stored payload", `save cell value = StorageFixture.store cell value
@@ -56,6 +59,9 @@ main() =
     handle save target { _ -> State.get() } with current = 0 on
         State.get () -> resume current with current
         State.put next -> resume () with next
+        State.update step ->
+            (result, next) = step current
+            resume result with next
     ()
 `, "HANDLER BINDING EFFECTS"},
 	} {

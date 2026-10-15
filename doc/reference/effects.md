@@ -366,6 +366,9 @@ and `on`:
 handle action() with current = initial on
     get () -> resume current with current
     put next -> resume () with next
+    update step ->
+        (result, next) = step current
+        resume result with next
     return value -> StateResult { value = value, state = current }
 ```
 
@@ -393,6 +396,11 @@ collect action =
         put : Int -> ()
         put n -> resume () with { context | count = n }
 
+        update : (Int -> (a, Int)) -> a
+        update step ->
+            (result, n) = step context.count
+            resume result with { context | count = n }
+
         emit message ->
             resume () with { context | messages = [message | context.messages] }
 
@@ -406,9 +414,9 @@ earlier update. A clause that resumes with its own snapshot binder, as in
 `resume current with current`, commits nothing and so never overwrites another
 task's update. Handlers are responsible for operation-level serialization.
 The snapshot is taken before the clause starts, so a lock acquired inside the
-clause cannot protect that implicit read. For atomic updates, keep state in an
-explicit reference and protect its read and write together, or serialize calls
-to the handler.
+clause cannot protect that implicit read. For atomic updates, keep the state
+in a [`State.runAtomic`](../../stdlib/State.fango) runner and change it with
+one `State.update`, or serialize calls to the handler.
 
 Children inherit resumptive handler activations and their state cells; see
 [handlers in tasks](#handlers-in-tasks).
@@ -428,7 +436,9 @@ A task started with [`Async.spawn`](../../stdlib/Async.fango) inherits the
 resumptive handler activations around it, and their state cells. Individual
 snapshots and commits publish complete values; handlers own any locking needed
 for atomic compound operations, and concurrent read-modify-write operations may
-lose updates. Install a handler inside the task when independent state is
+lose updates. A handler whose clauses delegate to an enclosing
+[`State.runAtomic`](../../stdlib/State.fango) gets atomic operations, as
+`Random.runSeeded` and `Time.Clock.runStepped` do. Install a handler inside the task when independent state is
 wanted. A parent's handler return clause does not transform task results. When
 one handler covers [several applications](#several-applications-in-one-handler),
 a task inherits its resumptive applications and the one cell they share; its

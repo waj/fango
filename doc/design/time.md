@@ -98,13 +98,13 @@ progression. Elapsed samples are immutable and expose floor seconds and a
 nonnegative nanosecond fraction; the calendar arithmetic remains in Fango.
 The starting zone is the default, and tasks inherit the same origin.
 
-`runStepped` uses ordinary Fango handler state to retain the last returned
-instant. The first read returns the starting instant; later reads add the
-signed Duration. Only instant reads advance it, so zone queries and `withZone`
-do not consume extra steps. Nested runners have independent state. Tasks share
-the inherited cell with the existing snapshot/commit synchronization, which
-does not make a whole read-and-advance atomic: concurrent reads may repeat
-values, while sequential reads have deterministic progression without IO.
+`runStepped` keeps the last returned instant in a private
+[atomic state](effects.md#atomic-state) runner. The first read returns the
+starting instant; later reads add the signed Duration. Only instant reads
+advance it, so zone queries and `withZone` do not consume extra steps. Nested
+runners have independent state. Each read-and-advance is one atomic update, so
+tasks sharing the runner never repeat a reading, and sequential reads have
+deterministic progression without IO.
 
 Both advancing runners use checked instant addition and handle its `Fail`
 locally, translating an out-of-range reading to a private native runtime fault.

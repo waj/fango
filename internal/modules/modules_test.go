@@ -204,6 +204,7 @@ func TestBundledPureNativeSidecars(t *testing.T) {
 		"IO:<stdlib>/IO.native.go",
 		"Char:<stdlib>/Char.native.go",
 		"Console:<stdlib>/Console.native.go",
+		"State:<stdlib>/State.native.go",
 		"Random:<stdlib>/Random.native.go",
 		"String:<stdlib>/String.native.go",
 		"Encoding:<stdlib>/Encoding.native.go",

@@ -20,3 +20,8 @@ var FangoPublishAsyncValue = fangort.PublishAsyncValue
 var FangoAsyncSleep = fangort.AsyncSleep
 var FangoAwaitAnyAsync = fangort.AwaitAnyAsync
 var FangoNewAsyncChannel = fangort.NewAsyncChannel[any]
+
+type FangoAtomicCell = fangort.AtomicCell
+type FangoAtomicVersion = fangort.AtomicVersion
+
+var FangoNewAtomicCell = fangort.NewAtomicCell

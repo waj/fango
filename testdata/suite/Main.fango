@@ -233,6 +233,7 @@ import ScopedRunnerEffects
 import SemicolonBlocks
 import ShowBuilder
 import ShowRepresentation
+import StateAtomic
 import StateIndependentResult
 import StatePublication
 import StdlibDict
@@ -532,6 +533,7 @@ main() =
             , SemicolonBlocks.tests
             , ShowBuilder.tests
             , ShowRepresentation.tests
+            , StateAtomic.tests
             , StateIndependentResult.tests
             , StatePublication.tests
             , StdlibDict.tests

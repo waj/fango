@@ -124,6 +124,27 @@ the scope. Source inference checks those boundaries after solving the group,
 and Core lint checks that a scoped call's outward signature has no fresh
 permission.
 
+### Atomic state
+
+[`State.runAtomic`](../../stdlib/State.fango) keeps its value outside handler
+state, in a native compare-and-swap cell (`fangort.AtomicCell`) that its
+clauses capture as an ordinary lexical value. The handler has no `with` state,
+so task rebuilding preserves that capture and every inheriting task reaches the
+same Go object. Each write publishes a fresh version, and a commit names the
+version it read, so a stale commit fails even when the current value is equal
+and the state type needs no equality.
+
+Sidecars cannot invoke Fango closures, so `update` is a Fango retry loop over
+private natives: load a version, apply the step to its value, and replace the
+version or retry from a newer one. The step is therefore pure and may run more
+than once; no lock is held while it runs, and no task can block another. The
+private natives are typed as pure and reached only through the handler, as
+Async's are, and are registered as stage-safe so the runner can execute at
+compile time. Runners whose concurrent operations must not lose updates, such
+as `Random.runSeeded` and `Time.Clock.runStepped`, keep a private state type
+in an enclosing `runAtomic`, which no caller's own `State` handler can
+intercept.
+
 ## Abort and cleanup protocol
 
 The [Parser library](../../stdlib/Parser.fango) composes a private resumptive

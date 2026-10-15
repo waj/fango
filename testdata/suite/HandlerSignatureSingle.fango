@@ -3,7 +3,7 @@ module HandlerSignatureSingle exposing (tests)
 import Expect
 import Fail exposing (Fail, fail)
 import Result exposing (Result(..))
-import State exposing (State, get, put)
+import State exposing (State, get, put, update)
 import Test
 
 effect Clock mode
@@ -27,6 +27,11 @@ counted action =
 
         put : Int -> ()
         put next -> resume () with next
+
+        update : (Int -> (a, Int)) -> a
+        update step ->
+            (result, next) = step current
+            resume result with next
         return value -> (value, current)
 
 -- `mode` appears in neither inputs nor result, so only the row names it.

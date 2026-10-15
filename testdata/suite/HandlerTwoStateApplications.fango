@@ -1,7 +1,7 @@
 module HandlerTwoStateApplications exposing (tests)
 
 import Expect
-import State exposing (State, get, put)
+import State exposing (State, get, put, update)
 import Test
 
 type Pair = { number : Int, label : String } deriving (Show)
@@ -16,11 +16,21 @@ both action =
         put : Int -> ()
         put n -> resume () with { cell | number = n }
 
+        update : (Int -> (a, Int)) -> a
+        update step ->
+            (result, n) = step cell.number
+            resume result with { cell | number = n }
+
         get : () -> String
         get () -> resume cell.label with cell
 
         put : String -> ()
         put s -> resume () with { cell | label = s }
+
+        update : (String -> (a, String)) -> a
+        update step ->
+            (result, s) = step cell.label
+            resume result with { cell | label = s }
         return value -> (value, cell)
 
 -- Inside the subject both applications are in scope, so a bare `get()`

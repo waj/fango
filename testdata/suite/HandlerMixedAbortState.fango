@@ -2,7 +2,7 @@ module HandlerMixedAbortState exposing (tests)
 
 import Expect
 import Result exposing (Result(..))
-import State exposing (State, get, put)
+import State exposing (State, get, put, update)
 import Test
 
 effect Fail error
@@ -15,6 +15,9 @@ guarded action =
     handle action() with cell = 0 on
         get () -> resume cell with cell
         put n -> resume () with n
+        update step ->
+            (result, n) = step cell
+            resume result with n
 
         fail : String -> a
         fail message -> Err (message ++ " at " ++ show cell)

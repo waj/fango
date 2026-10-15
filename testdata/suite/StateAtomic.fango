@@ -1,0 +1,107 @@
+module StateAtomic exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail
+import IO
+import List
+import Meta
+import Random
+import Result exposing (Result(..))
+import State
+import Test
+import Time.Clock as Clock
+import Time.DateTime as DT
+import Time.Duration as Duration
+import Time.Instant as Instant
+
+-- One update, modify, and exchange of each kind, observed through both
+-- runners: sequentially they agree.
+script : () ->{State.State Int} (Int, Int, String)
+script() =
+    State.modify { n -> n * 3 }
+    previous = State.exchange 10
+    label = State.update { n -> (show n, n + 1) }
+    (previous, State.get(), label)
+
+nested : () ->{State.State Int} (Int, Int)
+nested() =
+    inner = State.runAtomic 100 { State.modify { n -> n + 1 }; State.get() }
+    State.modify { n -> n + 1 }
+    (inner.state, State.get())
+
+outcome : State.StateResult s a -> (a, s)
+outcome result = (result.value, result.state)
+
+bump : Int ->{State.State Int} ()
+bump times =
+    if times == 0 then
+        ()
+    else
+        State.modify { n -> n + 1 }
+        bump (times - 1)
+
+-- Eight tasks inheriting one runner each add 500. The atomic runner loses
+-- none of the 4000 updates.
+concurrentBumps : () ->{Async.Async, State.State Int} ()
+concurrentBumps() =
+    _ = Async.awaitAll (List.map { _ -> Async.spawn { bump 500 } } (List.range 1 8))
+    ()
+
+draws : Int ->{Random.Random} List Int
+draws n = List.map { _ -> Random.int 0 1000000 } (List.range 1 n)
+
+-- Order-free fingerprint of a list of numbers.
+fingerprint : List Int -> (Int, Int, Int)
+fingerprint values =
+    ( List.length values
+    , List.foldl { value sum -> sum + value } 0 values
+    , List.foldl { value sum -> sum + value * value } 0 values
+    )
+
+flatten : List (List Int) -> List Int
+flatten lists = List.foldr { values rest -> List.foldr { value tail -> [value | tail] } rest values } [] lists
+
+-- Draws split across tasks are the sequential draws in some order.
+concurrentDraws : () ->{Async.Async, Random.Random} (Int, Int, Int)
+concurrentDraws() =
+    fingerprint (flatten (Async.awaitAll (List.map { _ -> Async.spawn { draws 50 } } (List.range 1 8))))
+
+seconds : () ->{Clock.Clock} Int
+seconds() =
+    (whole, _) = Instant.toUnix Clock.instant()
+    whole
+
+-- Stepped readings split across tasks are the sequential readings in some
+-- order: none repeats.
+concurrentReadings : () ->{Async.Async, Clock.Clock} (Int, Int, Int)
+concurrentReadings() =
+    tasks = List.map { _ -> Async.spawn { List.map { _ -> seconds() } (List.range 1 5) } } (List.range 1 8)
+    fingerprint (flatten (Async.awaitAll tasks))
+
+-- Both runners also evaluate at compile time.
+stagedState : Int
+stagedState = (State.runAtomic 5 { State.modify { n -> n * 2 }; State.get() }).value
+
+stagedDraw : Int
+stagedDraw = Random.runSeeded 7 { Random.int 1 1000 }
+
+tests : Test.Test IO.IO
+tests = Test.test "state_atomic" {
+    Expect.equal (outcome (State.run 2 script)) (outcome (State.runAtomic 2 script))
+    Expect.equal ((6, 11, "10"), 11) (outcome (State.runAtomic 2 script))
+    Expect.equal ((101, 2), 2) (outcome (State.runAtomic 1 nested))
+    Expect.equal (Completed ()) (State.runAtomic 0 { Async.runOutcome concurrentBumps }).value
+    Expect.equal 4000 (State.runAtomic 0 { Async.runOutcome concurrentBumps }).state
+    Expect.equal (Completed (Random.runSeeded 7 { fingerprint (draws 400) })) (Random.runSeeded 7 { Async.runOutcome concurrentDraws })
+    readings = Fail.attempt {
+        start = DT.parse "2026-01-01T00:00:00Z"
+        sequential = Clock.runStepped start (Duration.seconds 1) { fingerprint (List.map { _ -> seconds() } (List.range 1 40)) }
+        (Completed sequential, Clock.runStepped start (Duration.seconds 1) { Async.runOutcome concurrentReadings })
+    }
+    Expect.equal (Ok True) (Result.map { (expected, actual) -> expected == actual } readings)
+    Expect.equal 10 $(Meta.lift stagedState)
+    Expect.equal stagedDraw $(Meta.lift stagedDraw)
+}
+
+main() = Test.run tests

@@ -33,35 +33,20 @@ execution state belongs to a runner activation or checked resource backend.
 Starting two runners from the same fixture must not share mutable state.
 Publishing a snapshot must not expose a buffer that later writes can mutate.
 
-Open question; the decision is a prerequisite of IOI7.
+Decided: a runner whose operations must stay consistent under tasks keeps
+its mutable state in an enclosing [`State.runAtomic`](../stdlib/State.fango)
+under a private state type, and each clause changes it with one pure
+`State.update`; see [atomic state](design/effects.md#atomic-state).
+`Random.runSeeded` and `Time.Clock.runStepped` do this. Handler `with` cells
+keep their per-access synchronization, so `State.run` and user handlers built
+on `with` may still lose concurrent updates, and a sequence such as
+`State.get` followed by `State.put` is never atomic under either runner.
 
-The current [task runtime](design/tasks.md#async-runtime-foundation) can inherit
-resumptive handlers and publish their state for synchronized access. Protected
-cell loads and stores keep every observed value complete, but do not make an
-entire handler clause an atomic read-modify-write operation. Under tasks, a
-clause that appends to a snapshot can overwrite another task's commit. This
-applies to every stateful handler, not only mocks: `State.run`,
-`Random.runSeeded`, `Clock.runStepped`, and `Http.Client.stub` lose updates the
-same way. Even atomic operations do not make a sequence such as `State.get`
-followed by `State.put` atomic; that needs a single operation such as `modify`.
+Remaining for IOI7: move `Http.Client.stub` and `mock` state onto this
+mechanism, and decide the operations below whose consistency cannot be a pure
+state step, such as a mock read that must wait for a write.
 
-Candidate mechanisms:
-
-1. Restrict the test runners to sequential use, documenting that concurrent
-   use may lose updates.
-2. Implement the stdlib test runners natively with internal locks. User mocks
-   remain unprotected.
-3. Run clauses that perform no effects before their `resume` atomically by
-   holding the cell's lock from snapshot to commit. A clause that performs
-   effects, such as one with an added debug `print`, silently loses atomicity.
-4. Let a handler declare itself atomic, and reject any of its clauses that
-   performs effects at compile time. Undeclared handlers keep today's rule.
-5. Hold the lock across every clause of a shared handler, faulting on task
-   waits inside a clause. Waits through real IO can still deadlock, and slow
-   clauses serialize every task using the handler.
-
-Unshared cells use plain accesses and would not pay for any of these. A choice
-must answer the following questions for each operation:
+Each mock must still answer the following questions for its operations:
 
 | Operation | Required consistency question |
 | --- | --- |

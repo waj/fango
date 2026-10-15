@@ -58,6 +58,7 @@ var table = func() map[string]Spec {
 	installTextBuilder(t)
 	installTime(t)
 	installPure(t)
+	installState(t)
 	// These installers contain only deterministic adapters. Runtime-only
 	// fallbacks are installed afterwards, so new ambient calls are not made
 	// stage-safe by a name-based exclusion list.

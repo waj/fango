@@ -9,6 +9,7 @@ module Random exposing (Random(..), int, runSeeded, runSystem)
 import Basics exposing (..)
 import IO exposing (IO)
 import Runtime.Entry
+import State
 
 -- Drawing random integers. A `main` that performs it runs under
 -- `runSystem` unless it installs another runner.
@@ -39,6 +40,10 @@ entropySeed = native
 -- glibc's constants: it is modulo-biased and not suitable for cryptography. Nested runs keep separate
 -- sequences.
 --
+-- Tasks that inherit the runner share its sequence. Each draw consumes one
+-- step exactly once, so concurrent tasks never repeat a draw, but which task
+-- receives which draw depends on their scheduling.
+--
 -- ```fango
 -- import Random
 --
@@ -49,10 +54,21 @@ entropySeed = native
 -- ```
 runSeeded : Int -> (() ->{Random | e} a) ->{e} a
 runSeeded seed action =
-    handle action() with current = seed on
-        int lo hi ->
-            next = nextState current
-            resume (valueAt next lo hi) with next
+    result = State.runAtomic (Seed seed) {
+        handle action() on
+            int lo hi -> resume (State.update { state -> draw state lo hi })
+    }
+    result.value
+
+-- The generator state, private so that no caller's own `State` handler can
+-- intercept the runner's.
+type Seed = Seed Int
+
+draw : Seed -> Int -> Int -> (Int, Seed)
+draw state lo hi = case state of
+    Seed current ->
+        next = nextState current
+        (valueAt next lo hi, Seed next)
 
 -- `runSeeded` from a seed drawn from system entropy, so every run draws a
 -- fresh sequence.

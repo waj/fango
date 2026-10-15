@@ -27,6 +27,7 @@ import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
 import Runtime.Entry
 import Runtime.Native
+import State
 import Time.Date as Date
 import Time.DateTime as DateTime
 import Time.Duration as Duration
@@ -125,9 +126,10 @@ runOffset value action =
 -- zone. A requested instant outside the supported range is a runtime fault;
 -- the last valid reading still succeeds.
 --
--- Nested runners have independent sequences. Tasks inherit shared handler
--- state: sequential reads advance exactly, but simultaneous reads may repeat
--- values. Deterministic results require an ordered sequence of reads.
+-- Nested runners have independent sequences. Tasks that inherit the runner
+-- share its sequence: each reading consumes one step exactly once, so
+-- simultaneous reads never repeat a value, but which task receives which
+-- reading depends on their scheduling.
 --
 -- ```fango
 -- import Time.Clock as Clock
@@ -149,13 +151,23 @@ runOffset value action =
 runStepped : DateTime.DateTime -> Duration.Duration -> (() ->{Clock | e} a) ->{e} a
 runStepped value step action =
     initial = DateTime.toInstant value
-    handle action() with previous = Nothing on
-        instant () ->
-            reading = case previous of
-                Nothing -> initial
-                Just last -> advance "Clock.runStepped" step last
-            resume reading with Just reading
-        zone () -> resume (DateTime.zone value) with previous
+    result = State.runAtomic (Stepped Nothing) {
+        handle action() on
+            instant () -> resume (State.update { previous -> stepReading initial step previous })
+            zone () -> resume (DateTime.zone value)
+    }
+    result.value
+
+-- runStepped's last reading, private so that no caller's own `State` handler
+-- can intercept the runner's.
+type Stepped = Stepped (Maybe Instant.Instant)
+
+stepReading : Instant.Instant -> Duration.Duration -> Stepped -> (Instant.Instant, Stepped)
+stepReading initial step previous =
+    reading = case previous of
+        Stepped Nothing -> initial
+        Stepped (Just last) -> advance "Clock.runStepped" step last
+    (reading, Stepped (Just reading))
 
 -- Samples the system clock once per reading, with the machine's zone (see
 -- Time.Zone.system) as the default, detected when the handler is installed.
