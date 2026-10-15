@@ -76,15 +76,9 @@ and [server GZip](../stdlib/Http/GZip.fango).
 
 ## Open questions
 
-- [IO interception](roadmap-io-interception-api.md#http-client-and-server)
-  proposes an explicit client runner over an interpreted Net transport.
-  That proposal owns its API and integration gates; the transport policies
-  below remain independent questions.
-- Should sockets close when an `Async` task is cancelled (using
-  `Async.contextToken`), or should synchronous `Net` calls with deadlines be
-  enough? `Net` already has `…Async` variants that take a context token, so
-  `run`'s handler could use them when an `Async` handler is in scope without
-  `run` requiring `Async`.
+- Connecting, including a TLS handshake, is not interrupted by
+  [`Client.cancellable`](../stdlib/Http/Client.fango); only reads and writes
+  are. A cancellable connect would need a `Net.Cancel` on `poolConnect`.
 - A deadline for a whole request, as opposed to the idle timeouts per
   operation.
 - A server may answer before the client has sent the whole request body, for

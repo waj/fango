@@ -6,10 +6,9 @@ and [socket layer](../stdlib/Net.fango). Memory fixtures and loopback
 checks cover malformed framing, truncated bodies, oversized headers, chunked
 requests, keep-alive, simultaneous clients, and GZip.
 
-Net's transport is the replaceable `Network` effect; the
-[IO interception proposal](roadmap-io-interception.md) owns HTTP mock and task
-integration over it. Protocol variants and HTTP server policy remain on this
-page.
+Net's transport is the replaceable `Network` effect; the client's checked
+mocks and task cancellation are part of [the HTTP design](design/http.md).
+Protocol variants and HTTP server policy remain on this page.
 
 Server-side TLS and HTTP/2 are deferred; the
 [client](../stdlib/Http/Client.fango) supports TLS. A policy for request bodies that an application

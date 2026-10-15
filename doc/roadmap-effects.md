@@ -164,11 +164,18 @@ These are not automatically prerequisites for the first coroutine milestone:
   Invalid use of an effect parameter as both an ordinary type and a row
   reports a kind mismatch; declaration acceptance alone does not establish
   support for row-kinded effect parameters.
-- **Complete builtin IO interception.** The
-  [IO interception proposal](roadmap-io-interception.md) owns domain effects,
-  real and simulated runners, resource choices, and the coverage boundary.
-  Native-default interception still requires declared operations and a
-  checked operation ABI; arbitrary private sidecar actions are not covered.
+- **Further service interception.** Domain service effects and their runners
+  are implemented; see [service effects](design/effects.md#service-effects)
+  and the [coverage map](reference/services.md). Native-default interception
+  would still need declared operations and a checked operation ABI, and
+  arbitrary private sidecar actions are not covered. Deferred until programs
+  need them: environment variables, subprocesses, and other OS services, whose
+  operation boundary is decided when they are added; scoped capability records
+  whose row the handler chooses, which need row-kinded effect parameters or
+  existential rows; automatic forwarding of operations a handler omits;
+  effect-row aliases; scripted network fixtures, left to libraries; and
+  fixture operations that must wait for another task, such as a mock read
+  blocked until a write.
 - **Escaping coroutine owners and raw resumptions.** The chosen owner stays
   scoped. Dynamic allocation means allocation into a live owner, not detachment
   from every owner. Raw resume escape and continuation cloning are not included.

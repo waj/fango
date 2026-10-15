@@ -249,6 +249,52 @@ with explicit conversions at those boundaries. A polymorphic Exit
 lower-bound call can target a polymorphic Direct contract because mode selection
 chooses the available Exit member.
 
+## Service effects
+
+Host services are small domain effects declared in their own modules, such as
+`Console.Console`, `File.FileSystem`, `Net.Network`, and `Process.Arguments`,
+beside the older `Time.Clock.Clock`, `Random.Random`, and `Http.Client.Http`.
+Their operations are public so custom handlers name them directly; there are
+no separate driver modules. One effect per service keeps rows short and lets
+a custom handler answer only its domain: a single IO effect would make every
+handler broad, and one effect per operation would make rows long. Net keeps
+listeners, connections, and pools in one effect because their operations act
+on one another's resources.
+
+Operations sit at primitive boundaries: bytes, lines, handles, and whole-file
+calls. Formatting, buffering, text decoding, HTTP framing, and traversal stay
+ordinary Fango above them, so `print` is a helper rather than an operation. A
+convenience with a native fast path gets an operation of its own, as whole-file
+reads and writes do, instead of bypassing the effect. `IO` marks only code that
+reaches the host: the system runners and the
+[direct boundaries](../reference/services.md#direct-native-boundaries). An `IO`
+annotation never makes a call interceptable, and actions private to a sidecar
+are visible to no handler.
+
+Each service has an explicit system runner, `(() ->{S | e} a) ->{IO | e} a`,
+declared as its default handler, which [entry assembly](pipeline.md#entry-assembly)
+installs for effects in `main`'s row. Nothing reaches the host implicitly
+anywhere else, so a missing handler is an unhandled-effect diagnostic rather
+than a silent system call. Simulated runners discharge the service without
+`IO`, return typed observations of their own, such as a transcript or an image
+snapshot, rather than a generic world, and are never defaults. Every runner
+removes only its own effect and keeps the residual row, so a test replaces one
+service and keeps the rest real.
+
+Handlers stay complete: a handler that overrides one operation forwards the
+others by calling the outer operation explicitly. Resources are domain-specific
+handles with [provider identity](ownership.md#file-provider-identity); standard
+streams are Console operations, and generic code takes a Source/Sink or
+Reader/Writer. Each API keeps its existing `Result` or `Fail` boundary, and
+Console never raises: its runner owns stream failures. A program's exit status
+is `main`'s result, and `Process.exit` stays a hard native that skips cleanup.
+
+Simulated runners model observable semantics rather than the host's
+implementation, and their source comments state what they leave out, such as
+permissions, symlinks, TLS, and timing. Runners shared by tasks keep their
+state in [atomic state](#atomic-state), so each operation is consistent; none
+simulates scheduling, since tasks are real goroutines.
+
 ## Standard streams
 
 The program's standard streams are the `Console` effect, so printing is an

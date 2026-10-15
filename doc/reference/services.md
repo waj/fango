@@ -4,7 +4,9 @@ Library calls that reach the host go through small domain effects with
 replaceable runners. `IO` marks only the code that reaches the host directly:
 the system runners themselves and the boundaries listed under
 [direct native boundaries](#direct-native-boundaries). An `{IO}` annotation
-alone never makes a call interceptable.
+alone never makes a call interceptable. The
+[design](../design/effects.md#service-effects) records why services are
+shaped this way.
 
 A program names the services it uses in `main`'s row, and
 [entry assembly](commands.md#default-handlers) installs their system runners.

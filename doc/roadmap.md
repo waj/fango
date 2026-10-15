@@ -108,21 +108,6 @@ for otherwise unavailable semantics or measured performance needs.
   localized formatting, custom-pattern parsing, automatic JSON codecs, and
   public monotonic timing APIs remain deferred until concrete consumers need them.
 
-## IO interception
-
-[IO interception through domain effects](roadmap-io-interception.md) proposes
-explicit real and simulated runners for console and standard streams, files,
-networking, and process services, with domain-specific resource handles.
-Console, [File](../stdlib/File.fango) with checked providers and memory
-streaming, [Net](../stdlib/Net.fango) with checked cancellation, and process
-arguments and status are implemented, with their
-[coverage map](reference/services.md). Runners that tasks share keep atomic
-state in [`State.runAtomic`](../stdlib/State.fango), and HTTP stubs and mocks
-use checked Net connections with cancellable requests. Only the
-[API and coverage contract](roadmap-io-interception.md#ioi1-api-and-coverage-contract)
-(IOI1) remains in the proposal; Clock, Random, and HTTP domain handlers remain
-their implemented foundations.
-
 ## HTTP and a concurrent server
 
 [HTTP/1.1 framing and the concurrent server](../stdlib/Http.fango) are
