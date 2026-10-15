@@ -54,7 +54,7 @@ searchFile options path outcome =
         Ok found -> { outcome | matched = outcome.matched || found }
         Err error -> report error outcome
 
-searchPath : Options -> String -> Outcome ->{IO, Console} Outcome
+searchPath : Options -> String -> Outcome ->{IO, File.FileSystem, Console} Outcome
 searchPath options path outcome =
     case File.isDirectory path of
         Ok True ->

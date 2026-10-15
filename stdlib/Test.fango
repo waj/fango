@@ -31,7 +31,8 @@
 -- `console` for the default output, or a custom handler for other formats.
 -- `run` selects a format from command-line arguments, so it performs
 -- `Process.Arguments`, and applies the process exit policy; without options
--- it uses `console`.
+-- it uses `console`. Optional JSON reports perform `File.FileSystem`; a
+-- caller can capture them with `File.runMemory`.
 --
 -- By default, `run` prints its report to standard output. Each failure is
 -- printed in full, the heading naming the path through the groups, and a
@@ -71,6 +72,7 @@ module Test exposing
 import Basics exposing (..)
 import Console exposing (Console)
 import Expect exposing (Error, Expect)
+import File
 import IO exposing (IO)
 import List exposing (List(..), foldl, reverse)
 import Process
@@ -78,8 +80,9 @@ import Result exposing (Result(..))
 import Test.Reporter as Reporter exposing (CaseOutcome(..), Event(..), Reporter(..), Summary(..), Verdict(..), console, documentation, progress, silent)
 
 -- A test or a group of tests. The bodies may perform `Expect` and the
--- effects in `e` besides: `Test {}` holds pure tests, and `Test IO` tests
--- that read files. The constructors are private so the tree can grow.
+-- effects in `e` besides: `Test {}` holds pure tests, and
+-- `Test File.FileSystem` tests that use whole-file services. The constructors
+-- are private so the tree can grow.
 type Test e
     = Describe String (List (Test e))
     | Case String (() ->{Expect | e} ())
@@ -169,7 +172,7 @@ execute suite =
 -- the run. Use `execute` with a reporter handler to choose output and exit
 -- policy yourself. Command-line options select progress or documentation
 -- output and an optional JSON file; see [`Test.Reporter.run`](Test/Reporter.fango).
-run : Test e ->{IO, Console, Process.Arguments | e} ()
+run : Test e ->{IO, Console, File.FileSystem, Process.Arguments | e} ()
 run suite = Reporter.run { execute suite }
 
 -- Whether the tree focuses some tests. An `only` inside a `skip` does not

@@ -561,7 +561,7 @@ result is `()`.
 
 `main`'s row may contain `IO` and any effect that declares a default handler
 with a [`Runtime.Entry.DefaultHandler`](../../stdlib/Runtime/Entry.fango)
-attribute, such as `Console`, `Process.Arguments`, `Random`,
+attribute, such as `Console`, `File.FileSystem`, `Process.Arguments`, `Random`,
 `Time.Clock.Clock`, and `Http.Client.Http`. The program then starts at an entry the compiler
 assembles by splicing `Runtime.Entry.assemble`: `main` runs inside each of
 those defaults, and inside the defaults of the effects those runners perform

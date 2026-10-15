@@ -96,8 +96,7 @@ func TestShowEscapesEverythingThatIsNotPrintableAscii(t *testing.T) {
 	}
 }
 
-// toStringLossy replaces each malformed byte and leaves valid text alone,
-// which is what File.read already promises for text.
+// toStringLossy replaces each malformed byte and leaves valid text alone.
 func TestToStringLossyReplacesOnlyMalformedBytes(t *testing.T) {
 	if got := BytesToStringLossy(BytesFromString("año")); got != "año" {
 		t.Fatalf("valid text changed: %q", got)

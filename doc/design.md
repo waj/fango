@@ -28,7 +28,8 @@ Exact language rules are in the [reference topics](reference.md).
 ## Functions and effects
 
 [Effect execution](design/effects.md) — per-arrow timing, handler activation,
-abort routing, state, cleanup, and Direct/Exit transport.
+abort routing, state, cleanup, Direct/Exit transport, and
+[whole-file services](design/effects.md#whole-file-services).
 [Resources and evidence](design/ownership.md) — runtime resource validity and
 structural evidence summaries.
 

@@ -1,0 +1,161 @@
+module FileMemory exposing (tests)
+
+import Bytes
+import Console
+import Expect
+import Fail
+import File exposing (FileSystem)
+import IO exposing (Kind(..))
+import Result exposing (Result(..))
+import State
+import Test
+
+fixture : () ->{Expect.Expect} File.Image
+fixture() =
+    File.empty
+        |> File.withByteFile "nested/raw" (Bytes.fromList [65, 255, 254, 10])
+        |> Expect.ok
+        |> File.withTextFile "nested/é.txt" "héllo"
+        |> Expect.ok
+        |> File.withDirectory "empty"
+        |> Expect.ok
+
+-- A complete custom handler replaces reads and explicitly forwards the rest.
+replaceRead : (() ->{FileSystem | e} a) ->{FileSystem | e} a
+replaceRead action =
+    handle action() on
+        File.readFileResult _ -> resume (Ok "replacement")
+        File.writeFileResult path text -> resume (File.writeFileResult path text)
+        File.isDirectoryPath path -> resume (File.isDirectoryPath path)
+        File.fileSize path -> resume (File.fileSize path)
+        File.listDirectory path -> resume (File.listDirectory path)
+
+kind : Result IO.Error a ->{Expect.Expect} IO.Kind
+kind result =
+    case result of
+        Err error -> error.kind
+        Ok _ -> Expect.failWith "expected an error"
+
+stop : () ->{Fail.Fail String} ()
+stop() = Fail.fail "application failed"
+
+tests : Test.Test {}
+tests = Test.describe "whole-file interception"
+    [ Test.test "fixture paths, bytes, metadata, and sorted immediate listings" {
+        observed = File.runMemory fixture() {
+            Expect.equal (Ok "A�\n") (File.read "/nested//./raw")
+            Expect.equal (Ok "héllo") (File.read "empty/../nested/é.txt")
+            Expect.equal (Ok 6) (File.size "nested/é.txt")
+            Expect.equal (Ok 4) (File.size "nested/raw")
+            Expect.equal (Ok 0) (File.size "/")
+            Expect.equal (Ok True) (File.isDirectory ".")
+            Expect.equal (Ok False) (File.isDirectory "nested/raw")
+            Expect.equal (Ok ["empty", "nested"]) (File.listDirectory "../../")
+            Expect.equal (Ok ["raw", "é.txt"]) (File.listDirectory "nested")
+            Expect.equal (Ok []) (File.listDirectory "empty")
+        }
+        Expect.equal (Ok "héllo") (File.textAt "nested/é.txt" observed.image)
+    }
+    , Test.test "fixture constructors create parents, replace files, and reject conflicts" {
+        image = Expect.ok (File.withTextFile "a/b/c" "first" File.empty)
+        changed = Expect.ok (File.withTextFile "a/b/c" "second" image)
+        Expect.equal (Ok "first") (File.textAt "a/b/c" image)
+        Expect.equal (Ok "second") (File.textAt "a/b/c" changed)
+        Expect.equal NotDirectory (kind (File.withDirectory "a/b/c" image))
+        Expect.equal NotDirectory (kind (File.withTextFile "a/b/c/d" "x" image))
+        Expect.equal IsDirectory (kind (File.withTextFile "a" "x" image))
+        Expect.equal IsDirectory (kind (File.withByteFile "/" Bytes.empty image))
+        kept = Expect.ok (File.withDirectory "a/b" image)
+        Expect.equal (Ok "first") (File.textAt "a/b/c" kept)
+    }
+    , Test.test "invalid and missing paths preserve supplied error identities" {
+        nul = Bytes.toStringLossy (Bytes.fromList [0])
+        Expect.equal Other (kind (File.withDirectory "" File.empty))
+        Expect.equal Other (kind (File.withTextFile ("a" ++ nul) "x" File.empty))
+        ignored = File.runMemory fixture() {
+            problem = Expect.err (File.read "nested/../missing")
+            Expect.equal NotFound problem.kind
+            Expect.equal "nested/../missing" problem.path
+            Expect.equal "nested/../missing: no such file or directory" (IO.describeError problem)
+            Expect.equal NotFound (kind (File.size "missing"))
+            Expect.equal NotFound (kind (File.isDirectory "missing"))
+            Expect.equal NotFound (kind (File.listDirectory "missing"))
+            Expect.equal IsDirectory (kind (File.read "nested"))
+            Expect.equal NotDirectory (kind (File.read "nested/raw/child"))
+            Expect.equal NotDirectory (kind (File.listDirectory "nested/raw"))
+        }
+        ()
+    }
+    , Test.test "writes create and truncate, but require existing parents" {
+        changed = File.runMemory fixture() {
+            Expect.equal (Ok ()) (File.writeAll "new" "é")
+            Expect.equal (Ok 2) (File.size "new")
+            Expect.equal (Ok ()) (File.writeAll "new" "")
+            Expect.equal (Ok 0) (File.size "new")
+            Expect.equal (Ok ()) (File.writeAll "nested/raw" "replaced")
+            Expect.equal NotFound (kind (File.writeAll "absent/file" "x"))
+            Expect.equal NotDirectory (kind (File.writeAll "new/file" "x"))
+            Expect.equal IsDirectory (kind (File.writeAll "nested" "x"))
+        }
+        Expect.equal (Ok "") (File.textAt "new" changed.image)
+        Expect.equal (Ok "replaced") (File.textAt "nested/raw" changed.image)
+        Expect.equal (Ok "A�\n") (File.textAt "nested/raw" fixture())
+    }
+    , Test.test "snapshots and nested providers are independent" {
+        outer = File.runMemory fixture() {
+            File.writeAll "nested/raw" "outer" |> Expect.ok
+            inner = File.runMemory fixture() { File.writeAll "nested/raw" "inner" }
+            Expect.equal (Ok "inner") (File.textAt "nested/raw" inner.image)
+            Expect.equal (Ok "outer") (File.read "nested/raw")
+        }
+        untouched = File.runMemory fixture() { File.read "nested/raw" }
+        Expect.equal (Ok "A�\n") untouched.value
+        Expect.equal (Ok "outer") (File.textAt "nested/raw" outer.image)
+    }
+    , Test.test "Console and File compose in either order" {
+        first = Console.runTest Bytes.empty {
+            File.runMemory fixture() { print (Expect.ok (File.read "nested/é.txt")) }
+        }
+        second = File.runMemory fixture() {
+            Console.runTest Bytes.empty { print (Expect.ok (File.read "nested/é.txt")) }
+        }
+        Expect.equal (Bytes.fromString "héllo\n") first.stdout
+        Expect.equal first.stdout second.value.stdout
+    }
+    , Test.test "public custom handler and partial application forward to outer provider" {
+        observed = File.runMemory File.empty {
+            replaceRead {
+                put = File.writeAll "created"
+                Expect.equal (Ok ()) (put "saved")
+                Expect.equal (Ok "replacement") (File.read "missing")
+                Expect.equal (Ok 5) (File.size "created")
+                Expect.equal (Ok ["created"]) (File.listDirectory ".")
+            }
+        }
+        Expect.equal (Ok "saved") (File.textAt "created" observed.image)
+    }
+    , Test.test "failure inside runner preserves preceding changes" {
+        observed = File.runMemory File.empty {
+            Fail.attempt {
+                File.writeAll "saved" "before" |> Expect.ok
+                stop()
+            }
+        }
+        Expect.equal (Err "application failed") observed.value
+        Expect.equal (Ok "before") (File.textAt "saved" observed.image)
+    }
+    , Test.test "residual state and returned functions select invocation handler" {
+        stateful = State.run 0 {
+            File.runMemory fixture() {
+                State.put 42
+                ignored = File.read "nested/raw"
+                File.read
+            }
+        }
+        Expect.equal 42 stateful.state
+        result = File.runMemory File.empty { stateful.value.value "nested/raw" }
+        Expect.equal NotFound (kind result.value)
+    }
+    ]
+
+main() = Test.run tests

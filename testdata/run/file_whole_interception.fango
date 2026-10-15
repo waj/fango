@@ -1,0 +1,30 @@
+import Bytes
+import Console
+import File exposing (FileSystem)
+import IO
+import Result exposing (Result(..))
+
+probe : () ->{FileSystem, Console} ()
+probe() =
+    print (File.read "raw.bin")
+    print (File.writeAll "out.txt" "hé")
+    print (File.size "out.txt")
+    print (File.isDirectory ".")
+    print (File.listDirectory ".")
+    print (File.read "out.txt")
+    print (File.read "missing")
+
+main : () ->{IO, FileSystem, Console} ()
+main() =
+    -- The entry default is the real provider, even under a Console capture.
+    real = Console.runTest Bytes.empty { probe() }
+    case File.withByteFile "raw.bin" (Bytes.concat [Bytes.fromList [65, 255, 254, 10], Bytes.fromString "�", Bytes.fromList [255, 90]]) File.empty of
+        Err error -> print (IO.describeError error)
+        Ok image ->
+            virtual = Console.runTest Bytes.empty { File.runMemory image { probe() } }
+            reversed = File.runMemory image { Console.runTest Bytes.empty { probe() } }
+            explicit = Console.runTest Bytes.empty { File.runSystem { probe() } }
+            print (real.stdout == virtual.stdout)
+            print (real.stdout == reversed.value.stdout)
+            print (real.stdout == explicit.stdout)
+            print (File.textAt "out.txt" virtual.value.image == Ok "hé")

@@ -101,6 +101,7 @@ import FailureReportBorrow
 import FailureReportResourceRetained
 import FailureReportStoredRetained
 import FileGenericWrapper
+import FileMemory
 import Firstclass
 import FloatInf
 import FloatNan
@@ -294,6 +295,7 @@ main() =
             , TestReporter.checks
             , StdlibRandomSystem.tests
             , FileGenericWrapper.tests
+            , FileMemory.tests
             , AbortCleanupCallback.tests
             , AbortHandlerUnitClause.tests
             , AdtArea.tests

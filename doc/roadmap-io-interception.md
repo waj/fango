@@ -137,10 +137,11 @@ whatever order the runners nest in.
 ### Simulated services and observable results
 
 ```text
-fixture = File.withTextFile "greeting.txt" "Hello!" File.empty
-
 test = Console.runTest Bytes.empty {
-    File.runMemory fixture { app() }
+    File.runMemory File.empty {
+        File.writeAll "greeting.txt" "Hello!"
+        app()
+    }
 }
 
 test.stdout == Bytes.fromString "Hello!\n"
@@ -177,10 +178,11 @@ run outside all applications handled by their own activation.
 Implemented: see [default handlers](reference/commands.md#default-handlers),
 [Runtime.Entry](../stdlib/Runtime/Entry.fango), and the
 [design](design/pipeline.md#entry-assembly). `Arguments`, `Random`, `Clock`,
-`Http`, and `Console` declare defaults; File and Net declare theirs as
-their milestones land. `Test.run` is unchanged by it: a test program's `main` row
-decides which real services its tests may reach, and services a test mocks
-itself never reach `main`.
+`Http`, and `Console` declare defaults; `FileSystem` now declares its default for
+whole-file and directory calls. Net declares its default when its milestone
+lands. `Test.run` exposes `FileSystem` for its optional JSON report. A test
+program's `main` row decides which real services its tests may reach, and
+services a test mocks itself never reach `main`.
 
 ## Handler completeness and forwarding
 
@@ -302,9 +304,10 @@ committed separately.
 3. **IOI9.** DONE: see [default handlers](reference/commands.md#default-handlers).
 4. **IOI2.** DONE: see [Console](../stdlib/Console.fango). Effects are
    declared in their domain module with public operations.
-5. **IOI4, whole-file part.** Whole-file and directory operations behind
-   `FileSystem`, with `runSystem`, `runMemory`, the `Image` fixture API, and
-   its default. These need no handles, so they precede IOI3.
+5. **IOI4, whole-file part.** DONE: see [File](../stdlib/File.fango) and
+   [whole-file services](design/effects.md#whole-file-services). Whole-file and
+   directory operations, the memory image runner, and the system default need
+   no public handles, so they precede IOI3.
 6. **IOI3 and the rest of IOI4.** `File.Handle` with provider identity, handle
    operations, `File.source`/`File.sink`, and memory-backed handles. Then
    retire `IO.Handle`, the standard handles, and the generic handle
@@ -359,10 +362,14 @@ as an apparently pure callable; cleanup and cross-task ownership are explicit.
 
 ### IOI4 Files and standard handles
 
-Implement the File boundary with file-specific handles, immutable fixture
-construction, and final snapshots. Cover both streaming and whole-file native
-fast paths. Specify the handling of handles owned by another File provider
-and retain structured error identities. Retire `IO.Handle`, the standard
+Whole-file part DONE: [File](../stdlib/File.fango) owns the implemented API;
+[whole-file services](design/effects.md#whole-file-services) owns its boundary.
+Streaming handles, provider identity, streaming failure injection, and shared
+handle retirement remain unfinished in the next implementation phase.
+
+Extend the File boundary with file-specific handles over the existing immutable
+fixtures and final snapshots. Cover streaming native paths, specify the handling
+of handles owned by another File provider, and retain structured error identities. Retire `IO.Handle`, the standard
 handles, and the generic handle operations, moving their callers to Console,
 File, or Source/Sink parameters. Test-suite programs that write an empty string
 to `IO.stdout` only to require `IO` need another small `{IO}` call.

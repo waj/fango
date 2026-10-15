@@ -150,7 +150,7 @@ dropHeader lines =
         [] -> []
         [_ | rest] -> rest
 
-run : String ->{IO, Console} ()
+run : String ->{IO, File.FileSystem, Console} ()
 run path =
     case File.read path of
         Err error ->

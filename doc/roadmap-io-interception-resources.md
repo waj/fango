@@ -4,6 +4,9 @@ This companion to the [IO interception proposal](roadmap-io-interception.md)
 owns unresolved representation and execution choices. The
 [API catalogue](roadmap-io-interception-api.md) owns proposed public signatures.
 Nothing here expands the implemented resource or task contracts by itself.
+The implemented [File](../stdlib/File.fango) memory runner currently handles
+only whole-file and directory operations; it has no virtual resource payload.
+The handle requirements below remain prerequisites of the next phase.
 
 ## Required separation of identities
 

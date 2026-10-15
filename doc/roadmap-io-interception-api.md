@@ -43,19 +43,19 @@ standard-stream `IO` declarations remain until IOI4 retires them.
 
 ## Files and directories
 
-Current source: [File](../stdlib/File.fango). The baseline keeps all eight public
-functions and the current distinction between whole-file `Result` APIs and
-scoped helpers that raise `Fail`. Scoped helpers pass a file-specific
-`File.Handle`, and reading and writing it are File operations:
+Whole-file and directory calls, `FileSystem`'s five public operations,
+`runSystem`, `runMemory`, and the immutable `Image`/`Snapshot` API are
+implemented in [File](../stdlib/File.fango). Their boundary is specified in the
+[design](design/effects.md#whole-file-services). `listDirectory` is itself an
+operation; custom handlers need no directory resource. Fixture constructors
+return `Result IO.Error Image`, with path normalization and conflict behavior
+documented in File's source.
+
+The remaining proposal moves scoped helpers from `IO.Handle` to a file-specific
+handle and extends the same effect with streaming operations:
 
 ```text
 type Handle
-
-read : String ->{FileSystem} Result IO.Error String
-writeAll : String -> String ->{FileSystem} Result IO.Error ()
-isDirectory : String ->{FileSystem} Result IO.Error Bool
-size : String ->{FileSystem} Result IO.Error Int
-listDirectory : String ->{FileSystem} Result IO.Error (List String)
 
 withFile : String
         -> (Handle ->{FileSystem, Fail IO.Error | e} a)
@@ -82,74 +82,30 @@ service row. A file handle is not interchangeable with a standard stream.
 Generic parsing and output code take a `Bytes.Source`, `Bytes.Sink`,
 `Reader`, or `Writer` instead.
 
-The first driver inventory mirrors all current private native seams, including
-whole-file fast paths:
+The remaining driver inventory follows the existing private streaming seams:
 
 ```text
--- Candidate module File.Driver.
-effect FileSystem
-    openRead : String -> Result IO.Error Handle
-    openWrite : String -> Result IO.Error Handle
-    openAppend : String -> Result IO.Error Handle
-    closeHandle : Handle -> Result IO.Error ()
-    readHandleLine : Handle -> Result IO.Error (Maybe IO.Line)
-    readHandleBytes : Handle -> Int -> Result IO.Error (Maybe Bytes)
-    writeHandleBytes : Handle -> Bytes -> Result IO.Error ()
-    readFileResult : String -> Result IO.Error String
-    writeFileResult : String -> String -> Result IO.Error ()
-    openDirectory : String -> Result IO.Error Directory
-    readDirectoryEntry : Directory -> Result IO.Error String
-    closeDirectory : Directory -> Result IO.Error ()
-    isDirectoryPath : String -> Result IO.Error Bool
-    fileSize : String -> Result IO.Error Int
+-- Additional operations of File.FileSystem.
+openRead : String -> Result IO.Error Handle
+openWrite : String -> Result IO.Error Handle
+openAppend : String -> Result IO.Error Handle
+closeHandle : Handle -> Result IO.Error ()
+readHandleLine : Handle -> Result IO.Error (Maybe IO.Line)
+readHandleBytes : Handle -> Int -> Result IO.Error (Maybe Bytes)
+writeHandleBytes : Handle -> Bytes -> Result IO.Error ()
 ```
 
-This is a coverage inventory, not an argument that these fourteen operations
-must all become permanent public API. In particular:
-
-- A structured open mode could replace three acquisition operations, but needs
-  an exhaustive mode type and well-defined invalid mode handling.
-- Whole-file text read/write could be derived from streaming, if error,
-  malformed-text, cleanup, allocation, and performance behavior remain suitable.
-- A higher-level directory-listing operation avoids exposing a Directory
-  handle to custom handlers, at the cost of committing to materialization.
-- If directory iteration stays primitive, define its EOF representation and
-  ordering explicitly. Do not accidentally promote a private sentinel into a
-  public contract just because the existing native returns `String`.
-
-The selected public driver must expose the types custom handlers require.
-Today's private Directory representation is not automatically such an API.
+A structured open mode could replace the three acquisition operations, but
+needs an exhaustive mode type and well-defined invalid mode handling. The
+selected public driver must expose the checked types custom handlers need.
 
 ### File runners and fixtures
 
-```text
-runSystem : (() ->{FileSystem | e} a) ->{IO | e} a
-
-runMemory : Image
-         -> (() ->{FileSystem | e} a)
-         ->{e} Snapshot a
-
-type Image
-type Snapshot a = { value : a, image : Image }
-
-empty : Image
-withDirectory : String -> Image -> Image
-withTextFile : String -> String -> Image -> Image
-withByteFile : String -> Bytes -> Image -> Image
-textAt : String -> Image -> Result IO.Error String
-```
-
-`Image` is an opaque immutable fixture value, not a native handle table that
-survives execution. `Snapshot.image` is an immutable observation after the
-action and its scoped cleanup. The signature does not authorize references to
-live mock state in either the image or an apparently pure returned callback.
-
-Fixture constructors need a final decision about invalid paths and conflicting
-entries. The shorthand above assumes a validated fixture policy; if validation
-can fail, return a typed `Result` rather than silently dropping entries. Define
-whether parents are created automatically, how directories and files conflict,
-whether an existing entry is replaced, and how the virtual current directory
-is selected. Do not use the host filesystem to resolve a pure fixture.
+The implemented whole-file fixture constructors, lookup, and runner are
+[File's API](../stdlib/File.fango). Streaming interpretation must extend the
+same image and preserve its immutable snapshot contract. The current runner
+has no live resource state, models no permissions or symlinks, and supports
+sequential use; this does not settle provider identity or shared handler state.
 
 Mock semantics must cover read offsets, EOF, independent opens, append versus
 truncate, permissions or explicit unsupported permission behavior, text/byte
@@ -160,7 +116,8 @@ the promised real API, or explicitly limit assertions to order-independent
 results.
 
 ```text
-fixture = File.withTextFile "config.txt" "port=8080\n" File.empty
+fixtureResult = File.withTextFile "config.txt" "port=8080\n" File.empty
+fixture = Fail.fromResult fixtureResult -- inside an enclosing Fail boundary
 
 readFirstLine() =
     use handle <- File.withFile "config.txt"

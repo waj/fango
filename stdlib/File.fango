@@ -9,18 +9,46 @@
 -- reports a closed-resource error when used. Closing a handle interrupts a
 -- blocked read on it.
 --
--- The whole-file and directory operations need no handle and answer a
--- `Result`; a missing path is an `Err` of kind `NotFound`. Relative paths
--- resolve from the program's working directory.
-module File exposing (isDirectory, listDirectory, read, size, withAppend, withFile, withOutput, writeAll)
+-- Whole-file and directory operations perform `FileSystem` and answer a
+-- `Result`. `runSystem` is its default and resolves relative paths from the
+-- program's working directory; `runMemory` interprets them without OS access.
+-- Streaming scopes still perform `IO` and are outside this interception
+-- boundary.
+module File exposing
+    ( FileSystem(..), Image, Snapshot(..)
+    , empty, isDirectory, read, runMemory, runSystem, size, textAt, withAppend
+    , withByteFile, withDirectory, withFile, withOutput, withTextFile, writeAll
+    )
 
 import Basics exposing (..)
+import Bytes exposing (Bytes)
+import Dict exposing (Dict)
 import Fail exposing (Fail, attempt, fromResult)
-import IO exposing (Error, IO)
-import List exposing (List)
+import IO exposing (Error(..), IO)
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
+import Runtime.Entry
 import Runtime.Native
 import Runtime.Scope
+import String
+
+-- Whole-file access and directory queries. Every operation is public so
+-- custom handlers can interpret the complete boundary. Streaming handles are
+-- not part of this effect yet.
+#[Runtime.Entry.DefaultHandler `runSystem`]
+effect FileSystem
+    -- Reads the file as text, replacing each consecutive run of malformed
+    -- UTF-8 with U+FFFD.
+    readFileResult : String -> Result Error String
+    -- Creates or replaces a file with UTF-8 text; its parent must exist.
+    writeFileResult : String -> String -> Result Error ()
+    -- Whether the path names a directory.
+    isDirectoryPath : String -> Result Error Bool
+    -- The file's size in bytes. Directory sizes are provider-specific.
+    fileSize : String -> Result Error Int
+    -- The immediate entry names of the directory, sorted.
+    listDirectory : String -> Result Error (List String)
 
 -- File scopes acquire IO.Handle values and close them after the body.
 -- Calls through IO after the scope closes fail at runtime.
@@ -28,9 +56,13 @@ import Runtime.Scope
 {-# resource #-}
 type Directory = Directory Runtime.Native.Any
 
+-- File text conversion preserves the native whole-file replacement policy.
+fileText : Bytes -> String
+fileText = native
+
 -- The fallible natives. Each Go function returns an error that the compiler
 -- classifies into `IO.Error` at the boundary. None is exposed; the scoped API
--- below is the only way to reach them.
+-- and system runners below are the only ways to reach them.
 
 openRead : String ->{IO} Result Error IO.Handle
 openRead = native
@@ -44,11 +76,11 @@ openAppend = native
 closeHandle : IO.Handle ->{IO} Result Error ()
 closeHandle = native
 
-readFileResult : String ->{IO} Result Error String
-readFileResult = native
+systemReadFileResult : String ->{IO} Result Error String
+systemReadFileResult = native
 
-writeFileResult : String -> String ->{IO} Result Error ()
-writeFileResult = native
+systemWriteFileResult : String -> String ->{IO} Result Error ()
+systemWriteFileResult = native
 
 openDirectory : String ->{IO} Result Error Directory
 openDirectory = native
@@ -59,11 +91,11 @@ readDirectoryEntry = native
 closeDirectory : Directory ->{IO} Result Error ()
 closeDirectory = native
 
-isDirectoryPath : String ->{IO} Result Error Bool
-isDirectoryPath = native
+systemIsDirectoryPath : String ->{IO} Result Error Bool
+systemIsDirectoryPath = native
 
-fileSize : String ->{IO} Result Error Int
-fileSize = native
+systemFileSize : String ->{IO} Result Error Int
+systemFileSize = native
 
 -- Scopes. Opening raises the failure before anything is acquired, so a failed
 -- open releases nothing; closing raises after the body, so a failed close
@@ -94,21 +126,21 @@ withAppend path action = withOpened openAppend path action
 -- Whole-file operations need no handle and report failure as a Result.
 
 -- The whole contents of the file at `path` as text, with U+FFFD in place of
--- malformed UTF-8.
-read : String ->{IO} Result Error String
+-- each consecutive run of malformed UTF-8.
+read : String ->{FileSystem} Result Error String
 read path = readFileResult path
 
 -- Writes `text` as the whole contents of the file at `path`, creating or
 -- replacing it.
-writeAll : String -> String ->{IO} Result Error ()
+writeAll : String -> String ->{FileSystem} Result Error ()
 writeAll path text = writeFileResult path text
 
 -- Whether `path` names a directory rather than a file.
-isDirectory : String ->{IO} Result Error Bool
+isDirectory : String ->{FileSystem} Result Error Bool
 isDirectory path = isDirectoryPath path
 
 -- The size in bytes of the file at `path`.
-size : String ->{IO} Result Error Int
+size : String ->{FileSystem} Result Error Int
 size path = fileSize path
 
 collectEntries : Directory -> List String ->{IO, Fail Error} List String
@@ -122,11 +154,226 @@ collectEntries directory found =
 closeListing : Directory ->{IO, Fail Error} ()
 closeListing directory = fromResult (closeDirectory directory)
 
--- The names of the entries of the directory at `path`, sorted.
-listDirectory : String ->{IO} Result Error (List String)
-listDirectory path =
+systemListDirectory : String ->{IO} Result Error (List String)
+systemListDirectory path =
     attempt {
         Runtime.Scope.bracket { fromResult (openDirectory path) } closeListing { directory ->
             collectEntries directory []
         }
     }
+
+-- Interprets whole-file and directory operations through the OS. This is
+-- `FileSystem`'s default for `main` and the REPL.
+runSystem : (() ->{FileSystem | e} a) ->{IO | e} a
+runSystem action =
+    handle action() on
+        readFileResult path -> resume (systemReadFileResult path)
+        writeFileResult path text -> resume (systemWriteFileResult path text)
+        isDirectoryPath path -> resume (systemIsDirectoryPath path)
+        fileSize path -> resume (systemFileSize path)
+        listDirectory path -> resume (systemListDirectory path)
+
+type Entry = Folder | Contents Bytes
+
+-- An opaque immutable filesystem fixture. Paths use `/`, with `/` as both
+-- root and working directory. Repeated separators and `.` are removed;
+-- `..` moves to the parent and stays at root there. Empty paths and NUL are
+-- invalid. No symlinks, permissions, or host path lookup are modeled.
+type Image = Image (Dict String Entry)
+
+-- An action's result and the final immutable filesystem image.
+type Snapshot a =
+    {
+      -- The action's result.
+      value : a
+      -- The final image, independent of subsequent runners.
+    , image : Image
+    }
+
+-- An image containing only the root directory.
+empty : Image
+empty = Image (Dict.singleton "/" Folder)
+
+errorAt : IO.Kind -> String -> Error
+errorAt kind path =
+    Error { kind = kind, path = path, message = reason kind }
+
+reason : IO.Kind -> String
+reason kind =
+    case kind of
+        IO.NotFound -> "no such file or directory"
+        IO.PermissionDenied -> "permission denied"
+        IO.AlreadyExists -> "file exists"
+        IO.IsDirectory -> "is a directory"
+        IO.NotDirectory -> "not a directory"
+        IO.Other -> "invalid path"
+
+parts : List String -> List String -> List String
+parts remaining reversed =
+    case remaining of
+        [] -> List.reverse reversed
+        [part | rest] ->
+            if part == "" || part == "." then parts rest reversed
+            else if part == ".." then
+                case reversed of
+                    [] -> parts rest []
+                    [_ | parent] -> parts rest parent
+            else parts rest [part | reversed]
+
+normalized : String -> Result Error (List String)
+normalized path =
+    if path == "" || String.contains (Bytes.toStringLossy (Bytes.fromList [0])) path then
+        Err (errorAt IO.Other path)
+    else Ok (parts (String.split "/" path) [])
+
+child : String -> String -> String
+child parent name = if parent == "/" then "/" ++ name else parent ++ "/" ++ name
+
+keyOf : List String -> String
+keyOf names = List.foldl { name parent -> child parent name } "/" names
+
+-- Checks each parent so errors distinguish missing paths from file parents.
+parents : Bool -> String -> String -> List String -> Dict String Entry -> Result Error (Dict String Entry)
+parents create original parent names entries =
+    case names of
+        [] -> Ok entries
+        [_] -> Ok entries
+        [name | rest] ->
+            key = child parent name
+            case Dict.get key entries of
+                Just Folder -> parents create original key rest entries
+                Just (Contents _) -> Err (errorAt IO.NotDirectory original)
+                Nothing ->
+                    if create then parents create original key rest (Dict.insert key Folder entries)
+                    else Err (errorAt IO.NotFound original)
+
+put : Bool -> Entry -> String -> Image -> Result Error Image
+put create entry path (Image entries) =
+    case normalized path of
+        Err error -> Err error
+        Ok names ->
+            case parents create path "/" names entries of
+                Err error -> Err error
+                Ok ready ->
+                    key = keyOf names
+                    case (Dict.get key ready, entry) of
+                        (Just Folder, Contents _) -> Err (errorAt IO.IsDirectory path)
+                        (Just (Contents _), Folder) -> Err (errorAt IO.NotDirectory path)
+                        _ -> Ok (Image (Dict.insert key entry ready))
+
+-- Adds a directory and missing parents. An existing directory is kept;
+-- a file at the path or a parent answers `NotDirectory`.
+withDirectory : String -> Image -> Result Error Image
+withDirectory path image = put True Folder path image
+
+-- Adds or replaces a file and creates missing parents. A directory at the
+-- path answers `IsDirectory`; a file parent answers `NotDirectory`.
+withByteFile : String -> Bytes -> Image -> Result Error Image
+withByteFile path data image = put True (Contents data) path image
+
+-- Like `withByteFile`, storing the UTF-8 bytes of the text.
+--
+-- ```fango
+-- import File
+-- import Result exposing (Result(..))
+--
+-- case File.withTextFile "config/settings" "ready" File.empty of
+--     Ok image -> File.textAt "config/./settings" image == Ok "ready"
+--     Err _ -> False
+-- ```
+withTextFile : String -> String -> Image -> Result Error Image
+withTextFile path text image = withByteFile path (Bytes.fromString text) image
+
+entryAt : String -> Image -> Result Error Entry
+entryAt path (Image entries) =
+    case normalized path of
+        Err error -> Err error
+        Ok names ->
+            case parents False path "/" names entries of
+                Err error -> Err error
+                Ok _ ->
+                    case Dict.get (keyOf names) entries of
+                        Nothing -> Err (errorAt IO.NotFound path)
+                        Just entry -> Ok entry
+
+-- The file's text, replacing each consecutive run of malformed UTF-8 with
+-- U+FFFD, without running
+-- a service. Missing files and directory paths answer structured errors.
+textAt : String -> Image -> Result Error String
+textAt path image =
+    case entryAt path image of
+        Err error -> Err error
+        Ok Folder -> Err (errorAt IO.IsDirectory path)
+        Ok (Contents data) -> Ok (fileText data)
+
+memoryDirectory : String -> Image -> Result Error Bool
+memoryDirectory path image =
+    case entryAt path image of
+        Err error -> Err error
+        Ok Folder -> Ok True
+        Ok (Contents _) -> Ok False
+
+memorySize : String -> Image -> Result Error Int
+memorySize path image =
+    case entryAt path image of
+        Err error -> Err error
+        Ok Folder -> Ok 0
+        Ok (Contents data) -> Ok (Bytes.length data)
+
+memoryListing : String -> Image -> Result Error (List String)
+memoryListing path (Image entries) =
+    case entryAt path (Image entries) of
+        Err error -> Err error
+        Ok (Contents _) -> Err (errorAt IO.NotDirectory path)
+        Ok Folder ->
+            case normalized path of
+                Err error -> Err error
+                Ok names ->
+                    key = keyOf names
+                    prefix = if key == "/" then key else key ++ "/"
+                    direct = { candidate ->
+                        if String.startsWith prefix candidate then
+                            suffix = String.slice (String.length prefix) (String.length candidate) candidate
+                            suffix /= "" && String.contains "/" suffix == False
+                        else False
+                    }
+                    Ok (List.map { candidate -> String.slice (String.length prefix) (String.length candidate) candidate } (List.filter direct (Dict.keys entries)))
+
+-- Interprets whole-file and directory operations in an immutable image,
+-- preserving every residual effect of the action. Writes require an existing
+-- parent, unlike fixture constructors. Directory size is zero. All modeled
+-- entries are readable and writable; there is no failure injection yet.
+--
+-- This is a sequential fixture: concurrent tasks can lose handler-state
+-- updates. It does not virtualize tasks or streaming handle IO. An abort
+-- escaping the runner returns no snapshot; put `Fail.attempt` inside it to
+-- inspect changes preceding a failure.
+--
+-- ```fango
+-- import File
+-- import IO
+-- import Result exposing (Result(..))
+--
+-- changed = File.runMemory File.empty {
+--     written = File.writeAll "greeting.txt" "Hello!"
+--     File.read "greeting.txt"
+--     }
+--
+-- changed.value == Ok "Hello!"
+-- File.textAt "greeting.txt" changed.image == Ok "Hello!"
+-- case File.textAt "greeting.txt" File.empty of
+--     Err error -> error.kind == IO.NotFound
+--     Ok _ -> False
+-- ```
+runMemory : Image -> (() ->{FileSystem | e} a) ->{e} Snapshot a
+runMemory image action =
+    handle action() with state = image on
+        readFileResult path -> resume (textAt path state) with state
+        writeFileResult path text ->
+            case put False (Contents (Bytes.fromString text)) path state of
+                Err error -> resume (Err error) with state
+                Ok next -> resume (Ok ()) with next
+        isDirectoryPath path -> resume (memoryDirectory path state) with state
+        fileSize path -> resume (memorySize path state) with state
+        listDirectory path -> resume (memoryListing path state) with state
+        return value -> Snapshot { value = value, image = state }

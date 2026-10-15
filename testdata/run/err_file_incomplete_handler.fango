@@ -1,0 +1,7 @@
+import File
+import Result exposing (Result(..))
+
+main() =
+    handle File.read "missing" on
+        File.readFileResult _ -> resume (Ok "replaced")
+    ()

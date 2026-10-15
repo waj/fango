@@ -279,7 +279,8 @@ usage = "Usage: tests [--format console|progress|documentation|silent] [--json P
 --
 -- - `--format console|progress|documentation|silent`: selects stdout output.
 -- - `--json PATH`: also writes a UTF-8 JSON report after the run completes,
---   replacing PATH if it exists. Its parent directory must exist.
+--   replacing PATH if it exists through `File.FileSystem`. Its parent
+--   directory must exist.
 -- - `--help`: prints usage without executing the action.
 --
 -- Repeated format or JSON options use the last value. Unknown options,
@@ -306,7 +307,7 @@ usage = "Usage: tests [--format console|progress|documentation|silent] [--json P
 -- fango run Tests.fango --format documentation
 -- fango run Tests.fango --format silent --json report.json
 -- ```
-run : (() ->{Reporter | e} Summary) ->{IO, Console, Process.Arguments | e} ()
+run : (() ->{Reporter | e} Summary) ->{IO, Console, File.FileSystem, Process.Arguments | e} ()
 run action =
     case parseOptions (Options { format = ConsoleFormat, json = Nothing }) (Process.args ()) of
         Err message ->

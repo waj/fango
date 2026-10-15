@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 )
 
-// Every function here returns an error rather than panicking; the compiler
-// classifies it into IO.Error at the boundary. Errors are relabeled with the
+// OS operations return errors rather than panicking; the compiler classifies
+// them into IO.Error at the boundary. Errors are relabeled with the
 // path the program supplied, because filePath joins onto the working
 // directory and the absolute form would differ from run to run.
 //
@@ -71,15 +71,18 @@ func OpenAppend(path string) (any, error) {
 
 func CloseHandle(value any) error { return FangoCloseIOHandle(value) }
 
-func ReadFileResult(path string) (string, error) {
+// FileText uses the same replacement rule for real and memory whole-file reads.
+func FileText(data []byte) string { return strings.ToValidUTF8(string(data), "�") }
+
+func SystemReadFileResult(path string) (string, error) {
 	data, err := os.ReadFile(filePath(path))
 	if err != nil {
 		return "", relabel(err, path)
 	}
-	return strings.ToValidUTF8(string(data), "�"), nil
+	return FileText(data), nil
 }
 
-func WriteFileResult(path, text string) error {
+func SystemWriteFileResult(path, text string) error {
 	if err := os.WriteFile(filePath(path), []byte(text), 0o644); err != nil {
 		return relabel(err, path)
 	}
@@ -133,7 +136,7 @@ func CloseDirectory(value any) error {
 	return nil
 }
 
-func FileSize(path string) (int64, error) {
+func SystemFileSize(path string) (int64, error) {
 	info, err := os.Stat(filePath(path))
 	if err != nil {
 		return 0, relabel(err, path)
@@ -141,7 +144,7 @@ func FileSize(path string) (int64, error) {
 	return info.Size(), nil
 }
 
-func IsDirectoryPath(path string) (bool, error) {
+func SystemIsDirectoryPath(path string) (bool, error) {
 	info, err := os.Stat(filePath(path))
 	if err != nil {
 		return false, relabel(err, path)

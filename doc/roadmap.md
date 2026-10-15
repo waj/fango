@@ -112,9 +112,11 @@ for otherwise unavailable semantics or measured performance needs.
 
 [IO interception through domain effects](roadmap-io-interception.md) proposes
 explicit real and simulated runners for console and standard streams, files,
-networking, and process services, with domain-specific resource handles. Its
-API catalogue, resource design, and delivery gates are proposals for review; existing Clock, Random, and HTTP domain
-handlers remain their implemented foundations.
+networking, and process services, with domain-specific resource handles.
+Console and whole-file [File](../stdlib/File.fango) interpretation are
+implemented. Streaming file resources, networking, and the remaining delivery
+gates stay in the proposal; Clock, Random, and HTTP domain handlers remain
+their implemented foundations.
 
 ## HTTP and a concurrent server
 

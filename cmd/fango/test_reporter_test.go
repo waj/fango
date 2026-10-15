@@ -26,7 +26,7 @@ import File
 import IO exposing (IO)
 import Test exposing (Test, describe, skip, test, todo)
 
-suite : Test IO
+suite : Test File.FileSystem
 suite = describe "suite"
     [ test "passes" { File.writeAll "body-ran" "yes" |> Expect.ok }
     , describe "nested"

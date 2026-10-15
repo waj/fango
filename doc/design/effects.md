@@ -244,3 +244,27 @@ A callee row that lists a label and also has a tail, such as a runner's
 `{Out | e}`, forwards that label's evidence in the residual row too. Rows
 hold distinct applications, so where `e` also holds the label the call site
 sees it once, and a callback typed with `e` finds it only through that row.
+
+## Whole-file services
+
+[File](../../stdlib/File.fango) defines the public `FileSystem` effect for
+whole-file text reads/writes, directory tests, byte sizes, and sorted directory
+listings. Helpers call these operations, including the whole-file native fast
+paths. Its default `runSystem` handles them with private IO natives; directory
+acquisition and bracket cleanup remain private to that runner. Entry assembly
+and the REPL select this default through the ordinary effect attribute.
+
+`runMemory` holds an immutable path-to-entry dictionary in handler state and
+returns the final image with the action's result. Fixture constructors and
+writes share validation and insertion logic, with automatic parent creation
+limited to fixture construction. Reads decode bytes through the same lossy
+UTF-8 rule as system reads. No resource payload, host lookup, or native handle
+is needed; returned images cannot retain mutable provider state. A returned
+function still requires invocation-time effect evidence.
+
+Each runner removes only `FileSystem` and preserves the residual row. Console
+and File runners compose independently in either order. The memory runner is
+a sequential fixture under the existing handler-state rule; it adds no task
+scheduler or atomic clause mechanism. Streaming scopes and `IO.Handle`
+operations still require IO and bypass this boundary; their replacement is
+[unfinished work](../roadmap-io-interception.md#ioi3-resource-boundary).

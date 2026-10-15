@@ -86,8 +86,9 @@ abortBody reason = invalid (BodyAborted reason)
 
 -- A sized body that streams the file at `path`. The size is read now and the
 -- file is opened only while the body is written; a file that changed size in
--- between fails the length check.
-fileBody : String ->{IO, Fail IO.Error} Body {IO, Fail IO.Error | e}
+-- between fails the length check. The size query performs `FileSystem`;
+-- writing this streaming body still performs `IO`.
+fileBody : String ->{File.FileSystem, Fail IO.Error} Body {IO, Fail IO.Error | e}
 fileBody path =
     length = fromResult (File.size path)
     SizedBody length { output -> File.withFile path { file -> copyFile file output } }

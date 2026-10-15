@@ -1,0 +1,7 @@
+import File
+import Process
+
+pure : () -> File.Snapshot ()
+pure() = File.runMemory File.empty { Process.exit Process.success }
+
+main() = ()

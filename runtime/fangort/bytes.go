@@ -100,8 +100,8 @@ func BytesIsUtf8(b Bytes) bool { return utf8.Valid(b) }
 // pairs them and Bytes.toStringLossy substitutes instead.
 func BytesUnvalidatedString(b Bytes) string { return string(b) }
 
-// BytesToStringLossy substitutes U+FFFD for each malformed byte, the same
-// replacement File.read performs.
+// BytesToStringLossy substitutes U+FFFD for each malformed byte. Whole-file
+// File reads instead replace each consecutive run of malformed bytes once.
 func BytesToStringLossy(b Bytes) string {
 	if utf8.Valid(b) {
 		return string(b)

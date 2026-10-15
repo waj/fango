@@ -52,7 +52,7 @@ statusOf problem =
 storagePath : String
 storagePath = "todo.json"
 
-load : () ->{IO, Fail Problem} List Todo
+load : () ->{File.FileSystem, Fail Problem} List Todo
 load() =
     case File.read storagePath of
         Err error ->
@@ -64,7 +64,7 @@ load() =
                 Ok todos -> todos
                 Err _ -> Fail.fail InvalidStore
 
-save : List Todo ->{IO, Fail Problem} ()
+save : List Todo ->{File.FileSystem, Fail Problem} ()
 save todos =
     case Json.stringify todos of
         Err error -> Fail.fail (Unencodable error)
@@ -106,19 +106,19 @@ printTodos index todos =
             print (show index ++ " " ++ marker ++ " " ++ todo.text)
             printTodos (index + 1) rest
 
-addTodo : String ->{IO, Console, Fail Problem} ()
+addTodo : String ->{File.FileSystem, Console, Fail Problem} ()
 addTodo text =
     updated = append load() { text = text, done = False }
     save updated
     print ("Added " ++ show (count updated) ++ ": " ++ text)
 
-listTodos : () ->{IO, Console, Fail Problem} ()
+listTodos : () ->{File.FileSystem, Console, Fail Problem} ()
 listTodos() =
     case load() of
         [] -> print "No todos."
         todos -> printTodos 1 todos
 
-completeTodo : String ->{IO, Console, Fail Problem} ()
+completeTodo : String ->{File.FileSystem, Console, Fail Problem} ()
 completeTodo raw =
     case String.toInt raw of
         Nothing -> Fail.fail Usage
@@ -132,7 +132,7 @@ completeTodo raw =
                         save updated
                         print ("Completed " ++ show wanted ++ ".")
 
-command : List String ->{IO, Console, Fail Problem} ()
+command : List String ->{File.FileSystem, Console, Fail Problem} ()
 command args =
     case args of
         ["add", text] -> addTodo text
