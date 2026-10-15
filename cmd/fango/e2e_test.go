@@ -1187,7 +1187,7 @@ func TestCleanupScopesOverLiteralCallbacksInlineAtTheCallSite(t *testing.T) {
 	}
 	body := src[start:]
 	body = body[:strings.Index(body, "\n}\n")]
-	for _, want := range []string{"ev_Json_dot_Pull_dot_Pull.Op_Json_dot_Pull_dot_enter(v_segment)", "ev_Json_dot_Pull_dot_Pull.Op_Json_dot_Pull_dot_leave()", "v_action.Exit(ev_Fail_dot_Fail, ev_Json_dot_Pull_dot_Pull, fangort.UnitValue)", "fangort.Suppress("} {
+	for _, want := range []string{"ev_Json_dot_Pull_dot_Pull.Op_Json_dot_Pull_dot_enter(v_segment)", "ev_Json_dot_Pull_dot_Pull.Op_Json_dot_Pull_dot_leave()", "v_action.Exit(ev_Json_dot_Pull_dot_Pull, fangort.UnitValue)", "fangort.Suppress("} {
 		if !strings.Contains(body, want) {
 			t.Errorf("withKey_exit is missing %q:\n%s", want, body)
 		}

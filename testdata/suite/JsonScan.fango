@@ -3,7 +3,6 @@ module JsonScan exposing (tests)
 import Bytes
 import Encoding
 import Expect
-import Fail exposing (Fail)
 import Json
 import Json.Pull exposing (Decode(..), Pull, decodeValue)
 import List
@@ -24,7 +23,7 @@ type FastCount = FastCount Int deriving (Eq)
 
 instance Decode FastCount
     scanValue cursor =
-        scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Int) (Int, Json.Pull.Scan)
+        scanned : Result (() ->{Pull} Json.Pull.ScanStep Int) (Int, Json.Pull.Scan)
         scanned = scanValue cursor
         Json.Pull.mapScan { value -> FastCount (value + 1) } scanned
 

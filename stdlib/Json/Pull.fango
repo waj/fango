@@ -150,6 +150,8 @@ effect Pull
     enter : String -> ()
     enterIndex : Int -> ()
     leave : () -> ()
+    -- Fails the document with `error`. `fail` raises it at the current token.
+    abort failWith : Error -> value
 
 -- Types that decode from JSON. Derive it, or write `scanValue`; a decoder
 -- written with `Pull` operations is
@@ -160,7 +162,7 @@ class Decode a
     -- run, and is not a JSON error. Creating either consumes nothing, refills
     -- nothing, and performs no consumer effects; `Ok` keeps the nesting
     -- allowance `decodeValue` would.
-    scanValue : Scan -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan)
+    scanValue : Scan -> Result (() ->{Pull} ScanStep a) (a, Scan)
 
 -- One segment of the error path: an object key, or an element index.
 type Segment = { key : String, index : Maybe Int }
@@ -575,7 +577,7 @@ type ScanStep a
     -- The value and the position after it.
     = ScanDone a Scan
     -- More work, run in a loop with bounded stack.
-    | ScanContinue (Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan))
+    | ScanContinue (Result (() ->{Pull} ScanStep a) (a, Scan))
 
 -- Every typed value enters the same resumable parser, including when a
 -- custom token consumer has left lookahead pending.
@@ -583,7 +585,7 @@ type ScanStep a
 -- Decodes the next value as `a`: starts `scanValue` at the cursor, runs any
 -- suspended work, and publishes the final position. Calling it for a child
 -- runs that child's one parser.
-decodeValue : Decode a => () ->{Pull, Fail Error} a
+decodeValue : Decode a => () ->{Pull} a
 decodeValue() =
     start = currentScan()
     (value, rest) = runScan (scanValue start)
@@ -592,7 +594,7 @@ decodeValue() =
 
 -- Runs suspended scan work until it answers a value and position, or fails
 -- with a JSON or source failure.
-runScan : Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan) ->{Pull, Fail Error} (a, Scan)
+runScan : Result (() ->{Pull} ScanStep a) (a, Scan) ->{Pull} (a, Scan)
 runScan result = case result of
     Ok value -> value
     Err suspendedAction -> case suspendedAction() of
@@ -601,15 +603,15 @@ runScan result = case result of
 
 -- Keep recursive pure scans behind an explicitly pure thunk when their
 -- suspended action executes in an effectful scope.
-resumeScan : (() -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan)) -> ScanStep a
+resumeScan : (() -> Result (() ->{Pull} ScanStep a) (a, Scan)) -> ScanStep a
 resumeScan scan = ScanContinue scan()
 
-finishScan : (() -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan)) ->{Pull, Fail Error} (a, Scan)
+finishScan : (() -> Result (() ->{Pull} ScanStep a) (a, Scan)) ->{Pull} (a, Scan)
 finishScan scan = runScan scan()
 
 -- A deferred action runs only after the pure scan reaches a boundary or a
 -- token/custom decoder. It publishes that prefix and returns its new window.
-scanFromPull : Scan -> (() ->{Pull, Fail Error} a) -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan)
+scanFromPull : Scan -> (() ->{Pull} a) -> Result (() ->{Pull} ScanStep a) (a, Scan)
 scanFromPull cursor action = Err {
     acceptScan cursor
     value = action()
@@ -617,7 +619,7 @@ scanFromPull cursor action = Err {
 }
 
 -- Transforms a scan's value, buffered or resumed alike.
-mapScan : (a -> b) -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan) -> Result (() ->{Pull, Fail Error} ScanStep b) (b, Scan)
+mapScan : (a -> b) -> Result (() ->{Pull} ScanStep a) (a, Scan) -> Result (() ->{Pull} ScanStep b) (b, Scan)
 mapScan convert result = case result of
     Ok (value, rest) -> Ok (convert value, rest)
     Err suspendedAction -> Err {
@@ -849,14 +851,14 @@ floatResult text = case String.toFloat text of
     Just value -> Ok value
     Nothing -> Err "JSON number is outside Float range"
 
-scanNumericToken : Scan -> Result (() ->{Pull, Fail Error} ScanStep String) (String, Scan)
+scanNumericToken : Scan -> Result (() ->{Pull} ScanStep String) (String, Scan)
 scanNumericToken cursor = scanFromPull cursor {
     case next() of
         NumberToken text -> text
         _ -> fail "Expected JSON number"
 }
 
-scanNumeric : Scan -> Result (() ->{Pull, Fail Error} ScanStep String) (String, Scan)
+scanNumeric : Scan -> Result (() ->{Pull} ScanStep String) (String, Scan)
 scanNumeric cursor =
     if cursor.allowance < 0 then scanNumericToken cursor
     else case fastWhite cursor.window cursor.line cursor.column of
@@ -881,7 +883,7 @@ scanNumeric cursor =
                 else scanNumericToken cursor
             _ -> scanNumericToken cursor
 
-scanLiteral : Char -> String -> a -> Scan -> Maybe (Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan))
+scanLiteral : Char -> String -> a -> Scan -> Maybe (Result (() ->{Pull} ScanStep a) (a, Scan))
 scanLiteral first suffix value cursor =
     if cursor.allowance < 0 then Nothing else case fastWhite cursor.window cursor.line cursor.column of
         Nothing -> Nothing
@@ -955,7 +957,7 @@ scanElement first cursor = if cursor.allowance < 0 then Nothing else case fastEl
     Nothing -> Nothing
     Just scanned -> Just (scanned.more, { cursor | window = scanned.window, line = scanned.line, column = scanned.column, allowance = if scanned.more then cursor.allowance else cursor.allowance + 1 })
 
-scanListMore : (Scan -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan)) -> Int -> Bool -> List a -> Scan -> Result (() ->{Pull, Fail Error} ScanStep (List a)) (List a, Scan)
+scanListMore : (Scan -> Result (() ->{Pull} ScanStep a) (a, Scan)) -> Int -> Bool -> List a -> Scan -> Result (() ->{Pull} ScanStep (List a)) (List a, Scan)
 scanListMore scan index first reverse cursor = case scanElement first cursor of
     Nothing -> Err {
         acceptScan cursor
@@ -975,7 +977,7 @@ scanListMore scan index first reverse cursor = case scanElement first cursor of
             resumeScan { scanListMore scan (index + 1) False [value | reverse] rest }
         }
 
-scanListShort : (Scan -> Result (() ->{Pull, Fail Error} ScanStep a) (a, Scan)) -> Int -> Bool -> Int -> Scan -> Result (() ->{Pull, Fail Error} ScanStep (List a)) (List a, Scan)
+scanListShort : (Scan -> Result (() ->{Pull} ScanStep a) (a, Scan)) -> Int -> Bool -> Int -> Scan -> Result (() ->{Pull} ScanStep (List a)) (List a, Scan)
 scanListShort scan index first remaining cursor =
     if remaining == 0 then scanListMore scan index first [] cursor
     else case scanElement first cursor of
@@ -1050,12 +1052,12 @@ tokenScan cursor = case fastWhite cursor.window cursor.line cursor.column of
 --
 -- tokens == Ok [Json.Pull.BeginArray, Json.Pull.NumberToken "1", Json.Pull.NumberToken "1", Json.Pull.EndArray]
 -- ```
-withReader : Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
+withReader : Reader e -> (() ->{Pull} a) ->{e} Result Error a
 withReader reader action =
     TextReader.over reader { text -> withTextReader text action }
 
 -- `withReader` over a text reader, whose encoding the caller chose.
-withTextReader : TextReader.Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
+withTextReader : TextReader.Reader e -> (() ->{Pull} a) ->{e} Result Error a
 withTextReader reader action =
     initial = TextReader.window reader
     Fail.attempt {
@@ -1177,6 +1179,7 @@ withTextReader reader action =
                 case state.cursor.path of
                     [] -> resume () with state
                     [_ | rest] -> resume () with { state | cursor = { state.cursor | path = rest } }
+            failWith error -> Fail.fail error
             return value -> value
     }
 
@@ -1203,41 +1206,41 @@ withTextReader reader action =
 --
 -- Result.mapError { e -> (e.message, e.offset) } failure == Err ("no booleans", 1)
 -- ```
-fail : String ->{Pull, Fail Error} a
-fail message = Fail.fail { tokenAt() | message = message }
+fail : String ->{Pull} a
+fail message = failWith { tokenAt() | message = message }
 
 -- Runs `action` with `key` added to the path of errors raised inside it.
-withKey : String -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
+withKey : String -> (() ->{Pull} a) ->{Pull} a
 withKey segment action =
     Runtime.Scope.bracket { enter segment } { leave() } { action() }
 
 -- Runs `action` with element `index` added to the path of errors raised
 -- inside it.
-withIndex : Int -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
+withIndex : Int -> (() ->{Pull} a) ->{Pull} a
 withIndex index action =
     Runtime.Scope.bracket { enterIndex index } { leave() } { action() }
 
 -- Consumes an array's opening bracket, failing if the next token is another.
-beginArray : () ->{Pull, Fail Error} ()
+beginArray : () ->{Pull} ()
 beginArray() =
     case next() of
         BeginArray -> ()
         _ -> fail "Expected JSON array"
 
 -- Consumes an object's opening brace, failing if the next token is another.
-beginObject : () ->{Pull, Fail Error} ()
+beginObject : () ->{Pull} ()
 beginObject() =
     case next() of
         BeginObject -> ()
         _ -> fail "Expected JSON object"
 
-expectComma : () ->{Pull, Fail Error} ()
+expectComma : () ->{Pull} ()
 expectComma() =
     case next() of
         Comma -> ()
         _ -> fail "Expected union field separator"
 
-finishPayload : a ->{Pull, Fail Error} a
+finishPayload : a ->{Pull} a
 finishPayload value =
     case next() of
         EndArray -> ()
@@ -1246,7 +1249,7 @@ finishPayload value =
         EndObject -> value
         _ -> fail "Expected end of tagged union object"
 
-decodeUnion : (String ->{Pull, Fail Error} a) -> (String ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
+decodeUnion : (String ->{Pull} a) -> (String ->{Pull} a) ->{Pull} a
 decodeUnion nullary payload =
     case next() of
         StringToken tag -> nullary tag
@@ -1262,7 +1265,7 @@ decodeUnion nullary payload =
         _ -> fail "Expected tagged JSON union"
 
 -- Consumes the next value and builds its generic tree.
-readValue : () ->{Pull, Fail Error} Value
+readValue : () ->{Pull} Value
 readValue() =
     case next() of
         NullToken -> Null
@@ -1273,7 +1276,7 @@ readValue() =
         BeginObject -> Object (readObject [])
         _ -> fail "Expected JSON value"
 
-readArray : Int -> List Value ->{Pull, Fail Error} List Value
+readArray : Int -> List Value ->{Pull} List Value
 readArray index reverse =
     case peek() of
         EndArray ->
@@ -1286,13 +1289,13 @@ readArray index reverse =
                 EndArray -> List.reverse [value | reverse]
                 _ -> fail "Expected comma or array end"
 
-readArrayAfterComma : Int -> List Value ->{Pull, Fail Error} List Value
+readArrayAfterComma : Int -> List Value ->{Pull} List Value
 readArrayAfterComma index reverse =
     case peek() of
         EndArray -> fail "Trailing array comma"
         _ -> readArray index reverse
 
-readObject : List (String, Value) ->{Pull, Fail Error} List (String, Value)
+readObject : List (String, Value) ->{Pull} List (String, Value)
 readObject reverse =
     case peek() of
         EndObject ->
@@ -1311,7 +1314,7 @@ readObject reverse =
                 EndObject -> List.reverse [(key, value) | reverse]
                 _ -> fail "Expected comma or object end"
 
-readObjectAfterComma : List (String, Value) ->{Pull, Fail Error} List (String, Value)
+readObjectAfterComma : List (String, Value) ->{Pull} List (String, Value)
 readObjectAfterComma reverse =
     case peek() of
         EndObject -> fail "Trailing object comma"
@@ -1337,7 +1340,7 @@ readObjectAfterComma reverse =
 --
 -- rest == Ok (Json.Pull.NumberToken "3")
 -- ```
-skipValue : () ->{Pull, Fail Error} ()
+skipValue : () ->{Pull} ()
 skipValue() =
     case next() of
         BeginArray -> skipArray True
@@ -1348,14 +1351,14 @@ skipValue() =
         NullToken -> ()
         _ -> fail "Expected JSON value"
 
-skipArray : Bool ->{Pull, Fail Error} ()
+skipArray : Bool ->{Pull} ()
 skipArray first =
     if nextElement first then
         skipValue()
         skipArray False
     else ()
 
-skipObject : Bool ->{Pull, Fail Error} ()
+skipObject : Bool ->{Pull} ()
 skipObject first =
     case nextKey first of
         Nothing -> ()
@@ -1376,12 +1379,12 @@ instance Decode Char
             _ -> fail "Expected JSON string"
     }
 
-pullString : () ->{Pull, Fail Error} String
+pullString : () ->{Pull} String
 pullString() = case decodedString() of
     Ok text -> text
     Err message -> fail message
 
-scanStringValue : Scan -> Result (() ->{Pull, Fail Error} ScanStep String) (String, Scan)
+scanStringValue : Scan -> Result (() ->{Pull} ScanStep String) (String, Scan)
 scanStringValue cursor =
     if cursor.allowance < 0 then scanFromPull cursor { pullString() }
     else case fastWhite cursor.window cursor.line cursor.column of
@@ -1415,7 +1418,7 @@ instance Decode Int
                 Nothing -> pullInteger cursor
             Nothing -> pullInteger cursor
 
-pullInteger : Scan -> Result (() ->{Pull, Fail Error} ScanStep Int) (Int, Scan)
+pullInteger : Scan -> Result (() ->{Pull} ScanStep Int) (Int, Scan)
 pullInteger cursor = scanFromPull cursor {
     case decodedInt() of
         Ok value -> value
@@ -1486,7 +1489,7 @@ instance Decode a => Decode (Maybe a)
                         }
                 _ -> scanFromPull cursor { pullMaybe() }
 
-pullMaybe : Decode a => () ->{Pull, Fail Error} Maybe a
+pullMaybe : Decode a => () ->{Pull} Maybe a
 pullMaybe() = case peek() of
     NullToken ->
         ignore next()

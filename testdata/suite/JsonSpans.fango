@@ -3,7 +3,6 @@ module JsonSpans exposing (tests)
 import Bytes
 import Encoding exposing (Error(..))
 import Expect
-import Fail
 import Json
 import Json.Pull
 import List
@@ -63,17 +62,11 @@ tests = Test.test "json_spans" {
     } })
     number = Bytes.fromString "-12345.625e-2"
     Expect.equal (True) (all { index -> decoded (-123.45625) (decodeChunks @Float [Bytes.slice 0 index number, Bytes.empty, Bytes.slice index (Bytes.length number) number]) } (List.range 0 (Bytes.length number)))
+    -- A decoder failure ends the document with the path where it was raised.
     Expect.equal (True) (Reader.withBytes Bytes.empty { reader ->
-        case Json.Pull.withReader reader {
-            caught : Result Json.Error ()
-            caught = Fail.attempt { Json.Pull.withKey "outer" { Json.Pull.withKey "inner" { Json.Pull.fail "problem" } } }
-            location = Json.Pull.at()
-            case caught of
-                Err error -> error.path == "/outer/inner" && location.path == ""
-                Ok _ -> False
-        } of
-            Ok value -> value
-            Err _ -> False
+        case Json.Pull.withReader reader { Json.Pull.withKey "outer" { Json.Pull.withKey "inner" { Json.Pull.fail "problem" } } } of
+            Err error -> error.path == "/outer/inner" && error.message == "problem"
+            Ok _ -> False
     })
 }
 

@@ -136,7 +136,7 @@ tests = Test.test "json_windows" {
         outcome = Json.Pull.withReader reader {
             ignore (Json.Pull.next())
             case Json.Pull.next() of
-                Json.Pull.NumberToken _ -> Fail.fail (Json.Error { message = "custom", offset = 0, line = 0, column = 0, path = "" })
+                Json.Pull.NumberToken _ -> Json.Pull.fail "custom"
                 _ -> False
         }
         failed = case outcome of

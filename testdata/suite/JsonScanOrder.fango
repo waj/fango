@@ -3,7 +3,6 @@ module JsonScanOrder exposing (tests)
 import Bytes
 import Encoding
 import Expect
-import Fail exposing (Fail)
 import Json
 import Json.Pull exposing (Decode(..), Pull, decodeValue)
 import List
@@ -53,7 +52,7 @@ scans source = Reader.withBytes (Bytes.fromString (source ++ " 9")) { reader ->
         case Json.Pull.bufferedScan() of
             Nothing -> False
             Just start ->
-                scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Wide) (Wide, Json.Pull.Scan)
+                scanned : Result (() ->{Pull} Json.Pull.ScanStep Wide) (Wide, Json.Pull.Scan)
                 scanned = scanValue start
                 case scanned of
                     Err _ -> False
@@ -73,7 +72,7 @@ declines source = Reader.withBytes (Bytes.fromString source) { reader ->
         case Json.Pull.bufferedScan() of
             Nothing -> False
             Just start ->
-                scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Wide) (Wide, Json.Pull.Scan)
+                scanned : Result (() ->{Pull} Json.Pull.ScanStep Wide) (Wide, Json.Pull.Scan)
                 scanned = scanValue start
                 case scanned of
                     Err _ -> Json.Pull.at().offset == 0
@@ -125,7 +124,7 @@ scanAtLimit depth = Reader.withBytes (Bytes.fromString (String.padLeft depth '['
         case Json.Pull.bufferedScan() of
             Nothing -> False
             Just start ->
-                scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Named) (Named, Json.Pull.Scan)
+                scanned : Result (() ->{Pull} Json.Pull.ScanStep Named) (Named, Json.Pull.Scan)
                 scanned = scanValue start
                 case scanned of
                     Err _ -> Json.Pull.at().offset == depth && depth == 256
@@ -153,7 +152,7 @@ tests = Test.test "json_scan_order" {
                 case Json.Pull.bufferedScan() of
                     Nothing -> False
                     Just start ->
-                        scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Named) (Named, Json.Pull.Scan)
+                        scanned : Result (() ->{Pull} Json.Pull.ScanStep Named) (Named, Json.Pull.Scan)
                         scanned = scanValue start
                         case scanned of
                             Err _ -> False
