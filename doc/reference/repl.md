@@ -13,7 +13,7 @@ them, it also resolves the modules surface syntax desugars into — so `[1, 2]`,
 scope. Names resolve exactly as they do in a module: an unqualified name must
 be exposed by the prelude, an import, or a prompt declaration, and a qualifier
 must be an imported module's name or alias, so `Dict.empty` is an
-`UNKNOWN QUALIFIER` until `import Dict`, while `IO.write` works because the
+`UNKNOWN QUALIFIER` until `import Dict`, while `IO.describeError` works because the
 prelude imports `IO`. An input runs under the
 [default handlers](commands.md#default-handlers) of the effects it performs
 that no handler level grants, as a program's entry runs `main`: `print` uses

@@ -6,7 +6,7 @@
 --
 -- Unqualified, the prelude provides the standard classes and operators,
 -- `show`, `display`, `ignore`, `Type`, `print`, `readLine`, `write`, `Console`, `IO`,
--- `stdin`, `stdout`, `stderr`, `List`, and `Maybe` with its constructors.
+-- `List`, and `Maybe` with its constructors.
 module Prelude exposing ()
 
 -- The bundled standard library sits below this file and carries the pragma.
@@ -17,6 +17,6 @@ import Basics exposing
     , (*), (+), (++), (-), (/), (/=), (<), (<=), (<|), (==), (>), (>=), (|>)
     )
 import Console exposing (Console, print, readLine, write)
-import IO exposing (IO, stderr, stdin, stdout)
+import IO exposing (IO)
 import List exposing (List)
 import Maybe exposing (Maybe(..))

@@ -234,7 +234,7 @@ ordinary resumptive operation rather than a native call: a function that
 prints receives Console evidence and, like any code over a resumptive effect,
 has Direct and Exit members. The operations carry bytes; `print`'s display
 and encoding stay in Fango above them. `Console.runSystem` answers them with
-the IO handle natives on the host's standard handles, and turns a stream
+private native calls directly on the active session host, and turns a stream
 error into the host panic that ends the program, so no Console call raises
 and the diagnostic never becomes program output. Programs get that runner as
 `main`'s [default handler](pipeline.md#entry-assembly), and the REPL applies
@@ -245,26 +245,30 @@ A callee row that lists a label and also has a tail, such as a runner's
 hold distinct applications, so where `e` also holds the label the call site
 sees it once, and a callback typed with `e` finds it only through that row.
 
-## Whole-file services
+## File services
 
 [File](../../stdlib/File.fango) defines the public `FileSystem` effect for
-whole-file text reads/writes, directory tests, byte sizes, and sorted directory
-listings. Helpers call these operations, including the whole-file native fast
-paths. Its default `runSystem` handles them with private IO natives; directory
-acquisition and bracket cleanup remain private to that runner. Entry assembly
+acquisition, streaming reads/writes and close, whole-file text reads/writes,
+directory tests, byte sizes, and sorted directory listings. Helpers call these
+operations, including the whole-file native fast paths. Its default `runSystem`
+handles them with private IO natives and a fresh resource provider. Directory
+acquisition and bracket cleanup remain private to the runner. Entry assembly
 and the REPL select this default through the ordinary effect attribute.
 
-`runMemory` holds an immutable path-to-entry dictionary in handler state and
-returns the final image with the action's result. Fixture constructors and
-writes share validation and insertion logic, with automatic parent creation
-limited to fixture construction. Reads decode bytes through the same lossy
-UTF-8 rule as system reads. No resource payload, host lookup, or native handle
-is needed; returned images cannot retain mutable provider state. A returned
-function still requires invocation-time effect evidence.
+`runMemory` holds immutable path entries, fault settings, and per-open offsets
+in ordinary handler state. Its returned image contains only entries and fault
+settings; no live handle table or mutable provider state is published. Fixture
+construction may create parent directories; writes require existing parents.
+Whole-file mock operations use the same acquisition/read/write/close machinery
+as streaming, including fault injection and partial writes. File's native text
+conversion preserves its replacement-per-invalid-run policy in both providers.
 
 Each runner removes only `FileSystem` and preserves the residual row. Console
-and File runners compose independently in either order. The memory runner is
-a sequential fixture under the existing handler-state rule; it adds no task
-scheduler or atomic clause mechanism. Streaming scopes and `IO.Handle`
-operations still require IO and bypass this boundary; their replacement is
-[unfinished work](../roadmap-io-interception.md#ioi3-resource-boundary).
+and File runners compose independently in either order. `Runtime.IO` shares the
+raw line/byte EOF conversions and read bound. Generic code takes a row-indexed
+Source/Sink, Reader, or Writer; there is no shared IO handle.
+
+The memory runner remains sequential under the existing handler-state rule;
+provider validity synchronization does not make a handler clause atomic. Provider
+identity, retirement, task inheritance, and checked payload projection are
+specified in the [resource design](ownership.md#file-provider-identity).

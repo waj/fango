@@ -1,0 +1,95 @@
+module FileFaults exposing (tests)
+import Bytes
+import Expect
+import Fail
+import Failure
+import File exposing (Fault(..))
+import IO
+import Result exposing (Result(..))
+import Test
+
+fixture : () ->{Expect.Expect} File.Image
+fixture() = Expect.ok (File.withTextFile "file" "abcdef" File.empty)
+
+fault : String -> File.Fault -> File.Image ->{Expect.Expect} File.Image
+fault path plan image = Expect.ok (File.withFault path plan image)
+
+problem : Result IO.Error a ->{Expect.Expect} IO.Error
+problem result =
+    case result of
+        Err error -> error
+        Ok _ -> Expect.failWith "expected injected error"
+
+secondaryPath : Failure.Failure ->{Expect.Expect} String
+secondaryPath failure =
+    argument : Maybe IO.Error
+    argument = Failure.argument 0 failure
+    (Expect.just argument).path
+
+tests : Test.Test {}
+tests = Test.describe "memory file faults"
+    [ Test.test "open failures do not truncate and invalid fault limits are typed" {
+        image = fault "file" OpenFailure fixture()
+        captured = File.runMemory image { Fail.attempt { File.withOutput "file" { _ -> () } } }
+        Expect.equal "injected open failure" (problem captured.value).message
+        Expect.equal (Ok "abcdef") (File.textAt "file" captured.image)
+        Expect.equal IO.Other (problem (File.withFault "file" (ReadFailure (-1)) File.empty)).kind
+        Expect.equal IO.Other (problem (File.withFault "" CloseFailure File.empty)).kind
+    }
+    , Test.test "read failures permit a prefix and each open resets its budget" {
+        image = fault "file" (ReadFailure 3) fixture()
+        captured = File.runMemory image {
+            first = Expect.ok (File.openRead "file")
+            Expect.equal (Ok (Just Bytes.empty)) (File.readHandleBytes first 0)
+            Expect.equal (Ok (Just (Bytes.fromString "abc"))) (File.readHandleBytes first 9)
+            Expect.equal "injected read failure" (problem (File.readHandleBytes first 1)).message
+            second = Expect.ok (File.openRead "file")
+            Expect.equal (Ok (Just (IO.Line { text = "abc", ending = "" }))) (File.readHandleLine second)
+            Expect.equal "injected read failure" (problem (File.readHandleLine second)).message
+            File.closeHandle first |> Expect.ok
+            File.closeHandle second |> Expect.ok
+            Expect.equal "injected read failure" (problem (File.read "file")).message
+        }
+        Expect.equal (Ok "abcdef") (File.textAt "file" captured.image)
+    }
+    , Test.test "partial writes survive and close failures are suppressed in order" {
+        image = File.empty |> fault "inner" (WriteFailure 3) |> fault "inner" CloseFailure |> fault "outer" CloseFailure
+        captured = File.runMemory image {
+            Fail.attemptReport {
+                File.withOutput "outer" { outer ->
+                    File.write outer "outer data"
+                    File.withOutput "inner" { inner -> File.write inner "abcdef" }
+                }
+            }
+        }
+        report = Expect.err captured.value
+        Expect.equal "injected write failure" report.primary.message
+        Expect.equal ["inner", "outer"] (List.map secondaryPath report.suppressed)
+        Expect.equal (Ok "abc") (File.textAt "inner" captured.image)
+        Expect.equal (Ok "outer data") (File.textAt "outer" captured.image)
+    }
+    , Test.test "failed close invalidates once and a scope does not fail twice" {
+        image = fault "file" CloseFailure fixture()
+        captured = File.runMemory image {
+            file = Expect.ok (File.openRead "file")
+            Expect.equal "injected close failure" (problem (File.closeHandle file)).message
+            Expect.equal (Ok ()) (File.closeHandle file)
+            Expect.equal "closed handle" (problem (File.readHandleLine file)).message
+            Fail.attemptReport {
+                File.withFile "file" { owned -> Fail.fromResult (File.closeHandle owned) }
+            }
+        }
+        report = Expect.err captured.value
+        Expect.equal "injected close failure" report.primary.message
+        Expect.equal 0 (List.length report.suppressed)
+    }
+    , Test.test "whole-file calls use the same write and close fault machinery" {
+        image = fault "new" (WriteFailure 2) File.empty
+        captured = File.runMemory image { File.writeAll "new" "hello" }
+        Expect.equal "injected write failure" (problem captured.value).message
+        Expect.equal (Ok "he") (File.textAt "new" captured.image)
+        closeImage = fault "file" CloseFailure fixture()
+        closed = File.runMemory closeImage { File.read "file" }
+        Expect.equal "injected close failure" (problem closed.value).message
+    }
+    ]

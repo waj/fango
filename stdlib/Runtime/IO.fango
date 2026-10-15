@@ -1,0 +1,22 @@
+{-# no-prelude #-}
+-- Shared internal stream conversions for Console and File.
+module Runtime.IO exposing (bytes, chunk, line)
+
+import Basics exposing (..)
+import Bytes exposing (Bytes)
+import IO exposing (Line(..))
+import Maybe exposing (Maybe(..))
+
+-- The largest single byte read: 64 KiB.
+chunk : Int
+chunk = 65536
+
+-- A raw native line, or `Nothing` for the empty EOF sentinel.
+line : String -> Maybe Line
+line raw =
+    if raw == "" then Nothing
+    else Just (Line { text = IO.lineText raw, ending = IO.lineEnding raw })
+
+-- A nonempty byte read, or `Nothing` for the empty EOF sentinel.
+bytes : Bytes -> Maybe Bytes
+bytes raw = if Bytes.length raw == 0 then Nothing else Just raw

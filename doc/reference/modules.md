@@ -86,13 +86,13 @@ import Basics exposing
     , (+), (-), (*), (/), (==), (/=), (<), (>), (<=), (>=), (++)
     )
 import Console exposing (Console, print, readLine, write)
-import IO exposing (IO, stderr, stdin, stdout)
+import IO exposing (IO)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
 ```
 
 These are ordinary imports, so besides the unqualified names they also grant
-qualified access: `IO.write` and `Basics.modBy` need no import line of their
+qualified access: `IO.describeError` and `Basics.modBy` need no import line of their
 own. Everything the exposing lists leave out does — the named methods
 `fromInt` and `negate` among them, and every other standard-library module.
 Importing a module the prelude already names is not a duplicate import; it

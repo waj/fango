@@ -105,6 +105,9 @@ func runCompiled(t *testing.T, cmd *exec.Cmd, stdin, dir string) (string, int) {
 	err := cmd.Run()
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
+		if stderr.Len() != 0 {
+			t.Logf("compiled standard error:\n%s", stderr.String())
+		}
 		return stdout.String(), exitErr.ExitCode()
 	}
 	if err != nil {

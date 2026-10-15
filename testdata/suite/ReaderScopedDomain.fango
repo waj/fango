@@ -1,5 +1,6 @@
 module ReaderScopedDomain exposing (tests)
 
+import Random
 import Bytes
 import Expect
 import Fail
@@ -60,7 +61,7 @@ tests = Test.test "reader_scoped_domain" {
     Expect.equal "genericdb" generic
     Expect.equal 1 counter
     observed = Reader.withBytes (Bytes.fromString "io") { r ->
-        ignore (Fail.attempt { IO.write IO.stdout "" })
+        Random.runSystem { () }
         Bytes.toStringLossy (Reader.readUpTo r 99)
     }
     Expect.equal "io" observed

@@ -27,7 +27,7 @@ import IO
 import Result exposing (Result(..))
 
 main() =
-    case Fail.attemptReport ({ _ -> File.withOutput "output.txt" ({ file -> IO.write file "data" }) }) of
+    case Fail.attemptReport ({ _ -> File.withOutput "output.txt" ({ file -> File.write file "data" }) }) of
         Err report ->
             print (IO.describeError report.primary)
             List.each ({ failure ->
@@ -44,22 +44,20 @@ main() =
 	inject := func(module string, content []byte) []byte {
 		t.Helper()
 		text := string(content)
-		var before, after string
-		switch module {
-		case "IO":
-			text = strings.Replace(text, "import \"strings\"", "import (\"strings\"; \"errors\"; \"io/fs\")", 1)
-			before = "return FangoWriteIOHandleBytes(FangoHost, value, []byte(text))"
-			after = "if text == \"data\" { return &fs.PathError{Op: \"write\", Path: \"output.txt\", Err: errors.New(\"injected write failure\")} }; return FangoWriteIOHandleBytes(FangoHost, value, []byte(text))"
-		case "File":
-			before = "return FangoCloseIOHandle(value)"
-			after = "if err := FangoCloseIOHandle(value); err != nil { return err }; return &fs.PathError{Op: \"close\", Path: \"output.txt\", Err: errors.New(\"injected close failure\")}"
-		default:
+		if module != "File" {
 			return content
 		}
-		if strings.Count(text, before) != 1 {
-			t.Fatalf("%s injection point %q changed", module, before)
+		replacements := [][2]string{
+			{"return fangort.WriteFileHandleBytes(file, data)", "if string(data) == \"data\" { return &fs.PathError{Op: \"write\", Path: \"output.txt\", Err: errors.New(\"injected write failure\")} }; return fangort.WriteFileHandleBytes(file, data)"},
+			{"return fangort.CloseFileHandle(file)", "if err := fangort.CloseFileHandle(file); err != nil { return err }; return &fs.PathError{Op: \"close\", Path: \"output.txt\", Err: errors.New(\"injected close failure\")}"},
 		}
-		return []byte(strings.Replace(text, before, after, 1))
+		for _, replacement := range replacements {
+			if strings.Count(text, replacement[0]) != 1 {
+				t.Fatalf("%s injection point %q changed", module, replacement[0])
+			}
+			text = strings.Replace(text, replacement[0], replacement[1], 1)
+		}
+		return []byte(text)
 	}
 	want := "output.txt: injected write failure\noutput.txt: injected close failure\n"
 	if interpreterTestsEnabled() {

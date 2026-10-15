@@ -92,8 +92,8 @@ func TestInstallPreludeUsesDeclaredMetadata(t *testing.T) {
 	if ck.IO == nil || len(ck.IO.Ops) != 0 {
 		t.Fatal("IO must be an operation-free ambient effect")
 	}
-	if ck.Operations["IO.write"] != nil || ck.Natives["IO.writeHandle"] == nil {
-		t.Fatal("handle writes must use ordinary native functions")
+	if ck.Operations["Console.writeBytes"] == nil || ck.Natives["Console.writeOutputBytes"] == nil {
+		t.Fatal("Console operations must use private native host functions")
 	}
 }
 

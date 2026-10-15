@@ -1,6 +1,10 @@
 Fango 0.1 — :help for commands
 > loaded State
-> > 1
+> loaded String
+loaded Trace
+loaded Failure
+loaded Fail
+> 1
 x : ()
 > () : ()
 > 1> n : Int

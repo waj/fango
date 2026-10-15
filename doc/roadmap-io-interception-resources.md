@@ -3,93 +3,35 @@
 This companion to the [IO interception proposal](roadmap-io-interception.md)
 owns unresolved representation and execution choices. The
 [API catalogue](roadmap-io-interception-api.md) owns proposed public signatures.
-Nothing here expands the implemented resource or task contracts by itself.
-The implemented [File](../stdlib/File.fango) memory runner currently handles
-only whole-file and directory operations; it has no virtual resource payload.
-The handle requirements below remain prerequisites of the next phase.
+File resource ownership, provider identity, and retirement are implemented in
+[File](../stdlib/File.fango) and the [resource design](design/ownership.md).
+This page now owns the remaining Network resource requirements and the
+unresolved shared-handler-state question.
 
 ## Required separation of identities
 
-Keep three questions distinct:
-
-| Identity | Question |
-| --- | --- |
-| Handler activation | Which interpretation does this operation call select? |
-| Resource owner/provider | Which backend created this handle and may interpret its payload? |
-| Lifetime owner | Which scope closes this resource, and when? |
-
-A fresh handler activation does not automatically create a new resource, and
-closing a resource does not retire every operation handler of that effect.
-Two handles of the same nominal type may belong to different providers. Two
-tasks may share one resource under a handler inherited from the parent.
-
-The current [closure rule](reference/effects.md#closures-and-handler-effects)
-still applies: an ordinary effectful closure selects evidence at invocation.
-Creating a closure under a handler does not make it pure or automatically bind
-every later operation to that handler. Scoped activation binding carries a
-fresh permission and has its own escape checks.
+The implemented separation of handler activation, resource provider, and
+cleanup scope lives in the [resource design](design/ownership.md#file-provider-identity).
+Network interpretation must preserve the same distinction; inheriting a handler
+or closing one connection must not change the ownership of unrelated resources.
 
 ## Resource representation
 
-Resources use domain-specific handles. Standard streams are Console
-operations: input has a single source, and output takes a closed
-`Stdout`/`Stderr` choice. File handles are
-`File.Handle` values read and written through File operations, and network
-connections, listeners, and pools remain Net values with Net operations.
-Generic code receives a `Bytes.Source`, `Bytes.Sink`, `Reader`, or `Writer`
-whose row names the service behind it.
-
-### Why not a shared handle with a generic stream effect
-
-A handler is selected by an operation's effect, not by the values passed to
-it. If every handle were an `IO.Handle` read and written through one stream
-effect, each runner able to create handles would have to handle that effect,
-and the innermost one would receive operations on every handle, including
-those it did not create:
-
-```text
-IO.runStandardTest input {
-    File.runSystem { app() }      -- would also handle the stream effect
-}
-```
-
-A write to standard error inside `app` would reach the real file runner and the
-real terminal instead of the outer capture. With a memory file runner the write
-would be rejected as foreign, or need explicit forwarding in every runner.
-Reversing the nesting would make the standard-stream runner receive file
-reads. Only a combined runner owning every handle kind would compose.
-
-With domain-specific operations, a standard-stream write is a Console
-operation that file runners never handle, and a file read is a File operation
-that the console runner never handles. Runners of different services compose
-in either order.
+[File](../stdlib/File.fango) owns File.Handle and its checked virtual-provider
+API. [Console](../stdlib/Console.fango) owns standard streams through a closed
+output choice. Generic code takes Source/Sink or Reader/Writer values. Net
+currently exposes only its native resource representations; virtual connections,
+listeners, pools, and their checked construction API remain IOI6 work.
 
 ### Provider identity within a domain
 
-A wrong-provider handle remains possible only between two runners of the same
-domain, such as a memory filesystem nested inside the real one. Standard
-streams cannot be forged: Console's stream choice is a closed type with no
-payload.
-
-A virtual `File.Handle` or Net value needs an unforgeable association with its
-provider, an open or closed state, resource kind, and position or other
-resource-specific state. Do not assume that a plain integer index is enough.
-Reusing an index after a runner exits must not allow an escaped handle to
-alias an unrelated new file. Two independently created memory runners must not
-interpret equal integer indices as the same resource. The current
-`Http.Client` `Memory Int` connection has this weakness and is not the model.
-
-Possible representations include a library-owned sum of real and virtual
-payloads with checked owner tokens, or a checked opaque provider payload. The
-existing native `Runtime.Native.Any` wrapper is not already a safe public
-virtual-handle API. Native sidecars must project only the real case after
-ownership validation; passing a mock payload to Go and hoping a type assertion
-catches it is not the language contract.
-
-If driver operations are public, custom handlers need a way to create valid
-resources without constructing the native representation. That construction
-API is a required deliverable, not hidden implementation work. Its result must
-retain the relevant identity, effects, and lifetime obligations.
+File's provider tokens, fresh handle identities, closed/foreign checks, and
+checked native projection are specified in the
+[design](design/ownership.md#file-provider-identity). A future Network backend
+must provide equivalent checks for its own nominal resources. It must not use
+an integer alone as a provider identity or promote Runtime.Native.Any into an
+unchecked public construction API. Http.Client's current `Memory Int` mock is
+not a safe resource-provider model.
 
 ### Scoped capabilities remain deferred
 
@@ -103,67 +45,22 @@ only if that language work is undertaken for other reasons.
 
 ## Nested providers and foreign handles
 
-Installing a handler changes lexical operation dispatch; it does not grant
-ownership of every payload with the same nominal handle type. Because each
-domain has its own operations, this question arises only between runners of
-the same domain, such as an inner `File.runMemory` seeing a handle opened
-under an outer `File.runSystem`, or two nested Net handlers.
-
-Candidate policies:
-
-1. A closed mock rejects every foreign handle with a specified typed error or
-   documented resource fault. It never falls back to native IO.
-2. A forwarding adapter interprets owned handles and explicitly calls the outer
-   operation for foreign handles. The outer effect remains in its row.
-
-The baseline memory runner is closed. A simulated world of standard streams
-and files is the ordinary nesting of `Console.runTest` and `File.runMemory`,
-in either order.
-
-Pure fallback must remain pure. A forwarding mock that can use a real outer
-provider retains IO through that provider's runner. Missing handlers remain
-errors under the explicit-runner policy. Existence of a native default for
-some unrelated operation is not permission to access an unknown foreign
-resource.
+File runners are closed interpretations and reject foreign handles without
+fallback; custom forwarding retains the outer FileSystem row. The public
+[File API](../stdlib/File.fango) owns the exact errors. A future Network runner
+must settle the corresponding policy for connections, listeners, and pools.
+Pure fallback must remain pure, and a missing handler must not access the OS.
 
 ## Lifetimes, escape, and cleanup
 
-Preserve [cleanup ordering and failure precedence](reference/resources.md).
-Use `Runtime.Scope.bracket` or `finally` around acquisition and use; a normal
-handler return clause is insufficient because it is skipped by language
-aborts. Release must run with the evidence belonging to its lexical scope,
-not whatever handler happens to be active at an unrelated failure site.
-
-The existing handle contract uses runtime validity checks after close; it is
-not a compiler-wide proof that resources cannot escape. The baseline must
-preserve that distinction. A virtual handle that escapes a callback or an
-entire mock runner must become unusable at the required lifetime boundary.
-It must never keep live mutable fixture state usable through an apparently
-pure returned value. Provider teardown, stale-handle checking, and ownership
-tokens need a specified implementation even when the common path uses brackets.
-
-Any retained explicit raw acquisition API needs a stated close obligation and
-leak behavior.
-
-Required cases include:
-
-- Failed acquisition releases no unacquired handle; partial native acquisition
-  cleans up its own partial work.
-- Successful body and failed close report the close failure.
-- Failed body and failed close preserve the body failure and record the close
-  failure according to existing suppressed-failure rules.
-- Nested resources release in reverse acquisition order.
-- Explicit close followed by scope cleanup has a deliberate repeated-close
-  policy matching the API; it does not accidentally run a release twice.
-- A language abort to an outer handler triggers cleanup before that outer
-  handler observes it.
-- A returned Source or closure cannot evade closed-resource or scope checks.
-- A task cannot continue using a mock after its provider lifetime has ended;
-  establish the relationship between task drain and provider teardown.
-
-These guarantees do not apply to a Go panic, to `Process.exit`, which
-terminates without Fango cleanup, or to release code that never returns. A
-status returned from `main` takes effect only after cleanup has run.
+The [cleanup reference](reference/resources.md) and
+[File design](design/ownership.md#file-provider-identity) own implemented scope
+ordering, provider retirement, escape checks, and task ownership. IOI6 must
+preserve those obligations for virtual and native Net resources: failed
+acquisition releases nothing, scopes release in reverse order, body failures
+stay primary, and escaped resources cannot alias later acquisitions. Raw Net
+acquisition and pool leases need explicit close/release obligations, and
+cancellation must not bypass their cleanup.
 
 ## Mutable fixtures and concurrency
 
@@ -253,38 +150,18 @@ can provide acceptance scenarios without settling those policies by accident.
 
 ## Native and compiler boundary
 
-Prefer ordinary source-defined effect operations plus ordinary system handlers
-that call existing private natives. Source operations may exchange the Fango
-values supported by the language; that does not mean a new direct native ABI
-for every such value is required. The current bundled natives already provide
-some special byte, handle, and fallible-result boundaries.
+The implemented [native contract](reference/native.md),
+[backend](design/backend.md), and [resource design](design/ownership.md)
+own File/Console separation and checked native projection. Future Network
+operations should likewise be ordinary source-defined operations with system
+handlers calling private natives. Do not generalize native operation defaults,
+exchange arbitrary Go payloads, revive coroutine machinery, or add a task/channel
+per operation merely to implement interception.
 
-Separating Console from File follows the existing runtime split.
-`runtime/fangort/io_handle.go` already routes the standard streams to the
-session host, so the REPL and interpreter worker own the program's console,
-and only file handles use a buffered `*os.File`. Console natives call the
-session host directly. File natives keep the buffered handle without its
-standard-stream branches. The bounded byte read, the full-write check, error
-relabeling, line splitting, and UTF-8 replacement stay shared helpers.
-
-Generalizing native operation defaults remains separate work. If selected,
-check payload and reply representations, type descriptors, nominal resource
-identity, structured errors, callback effects, and dictionary transport rather
-than relying on unchecked conversion. An IO annotation on an ordinary native
-value does not supply hidden handler evidence by itself.
-
-Compiler changes must preserve operation identity through imports, reexports,
-partial application, module emission, staging, and the interpreter. Verify
-that native helpers used by real runners cannot be accidentally selected when
-a mock handler is active at the intended public boundary. Conversely, a real
-runner must call its private native helper rather than recursively dispatching
-through its own public operation.
-
-Preserve Direct/Exit execution, invocation-time evidence selection, typed
-resource checks, independent Core lint, and deterministic emitted modules.
-The proposal does not authorize reviving Machine/coroutine machinery or
-general lifetime analysis. Optimization may bypass an operation only when it
-proves that handler selection and externally observable behavior are unchanged.
+Network work must preserve operation identity through imports, reexports,
+partial application, staging, evidence adaptation, and module emission. Real
+runners must call private natives rather than recursively invoking their own
+operations. Optimizations must preserve handler selection and observable IO.
 
 ## Review checklist for provider identity
 

@@ -1,0 +1,219 @@
+module FileStreaming exposing (tests)
+
+import Bytes
+import Console
+import Expect
+import Fail
+import File
+import IO
+import Reader
+import Result exposing (Result(..))
+import State
+import String
+import Test
+import Writer
+
+fixture : () ->{Expect.Expect} File.Image
+fixture() = Expect.ok (File.withTextFile "input" "one\r\ntwo\nlast" File.empty)
+
+error : Result IO.Error a ->{Expect.Expect} IO.Error
+error result =
+    case result of
+        Err problem -> problem
+        Ok _ -> Expect.failWith "expected file failure"
+
+stop : () ->{Fail.Fail String} ()
+stop() = Fail.fail "stop"
+
+copy : Reader.Reader e -> Writer.Writer e ->{e} ()
+copy input output =
+    chunk = Reader.readUpTo input 4
+    if Bytes.length chunk == 0 then ()
+    else
+        Writer.write output chunk
+        copy input output
+
+copyTo : File.Handle -> Reader.Reader e ->{File.FileSystem, Fail.Fail IO.Error | e} ()
+copyTo output reader = Writer.over (File.sink output) 3 (copy reader)
+
+attemptFile : (() ->{Fail.Fail IO.Error | e} a) ->{e} Result IO.Error a
+attemptFile action = Fail.attempt action
+
+tests : Test.Test {}
+tests = Test.describe "streaming file interception"
+    [ Test.test "mixed reads share offsets and preserve endings and EOF" {
+        captured = File.runMemory fixture() {
+            Fail.attempt {
+                File.withFile "input" { file ->
+                    Expect.equal (Just (Bytes.fromString "o")) (File.readBytes file 1)
+                    Expect.equal (Just (IO.Line { text = "ne", ending = "\r\n" })) (File.readLine file)
+                    Expect.equal (Just Bytes.empty) (File.readBytes file 0)
+                    Expect.equal (Just (IO.Line { text = "two", ending = "\n" })) (File.readLine file)
+                    Expect.equal (Just (IO.Line { text = "last", ending = "" })) (File.readLine file)
+                    Expect.equal Nothing (File.readLine file)
+                    Expect.equal Nothing (File.readBytes file 0)
+                }
+            }
+        }
+        Expect.equal (Ok ()) captured.value
+    }
+    , Test.test "independent opens keep independent offsets" {
+        captured = File.runMemory fixture() {
+            Fail.attempt {
+                File.withFile "input" { first ->
+                    File.withFile "input" { second ->
+                        Expect.equal (Just (Bytes.fromString "one")) (File.readBytes first 3)
+                        Expect.equal (Just (Bytes.fromString "one\r")) (File.readBytes second 4)
+                        Expect.equal (Just (Bytes.fromString "\r")) (File.readBytes first 1)
+                    }
+                }
+            }
+        }
+        Expect.equal (Ok ()) captured.value
+    }
+    , Test.test "truncate, binary writes, and append at the current end" {
+        captured = File.runMemory fixture() {
+            Fail.attempt {
+                File.withOutput "input" { file -> File.writeBytes file (Bytes.fromList [255, 0, 65]) }
+                File.withAppend "input" { first ->
+                    File.withAppend "input" { second ->
+                        File.write first "B"
+                        File.write second "C"
+                        File.write first "D"
+                    }
+                }
+                File.withOutput "gap" { ahead ->
+                    File.write ahead "abc"
+                    File.writeAll "gap" "" |> Expect.ok
+                    File.writeBytes ahead Bytes.empty
+                    Expect.equal (Ok 0) (File.size "gap")
+                    File.write ahead "x"
+                }
+                File.withFile "gap" { file ->
+                    Expect.equal (Just (Bytes.fromList [0, 0, 0, 120])) (File.readBytes file 9)
+                }
+                File.withFile "input" { file -> File.readBytes file 99 }
+            }
+        }
+        Expect.equal (Ok (Just (Bytes.fromList [255, 0, 65, 66, 67, 68]))) captured.value
+    }
+    , Test.test "buffered parsing and copying use the memory boundary" {
+        captured = File.runMemory fixture() {
+            Fail.attempt {
+                File.withFile "input" { input ->
+                    File.withOutput "copy" { output ->
+                        Reader.over (File.source input) (copyTo output)
+                    }
+                }
+            }
+        }
+        Expect.equal (Ok ()) captured.value
+        Expect.equal (Ok "one\r\ntwo\nlast") (File.textAt "copy" captured.image)
+    }
+    , Test.test "direction and directory errors keep structured kinds" {
+        captured = File.runMemory fixture() {
+            readOnly = Expect.ok (File.openRead "input")
+            problem = error (File.writeHandleBytes readOnly Bytes.empty)
+            Expect.equal IO.Other problem.kind
+            Expect.equal "input" problem.path
+            Expect.equal "handle is not writable" problem.message
+            File.closeHandle readOnly |> Expect.ok
+            writeOnly = Expect.ok (File.openWrite "output")
+            Expect.equal "handle is not readable" (error (File.readHandleBytes writeOnly 1)).message
+            File.closeHandle writeOnly |> Expect.ok
+            directory = Expect.ok (File.openRead ".")
+            Expect.equal IO.IsDirectory (error (File.readHandleLine directory)).kind
+            File.closeHandle directory |> Expect.ok
+        }
+        Expect.equal () captured.value
+    }
+    , Test.test "explicit close is idempotent and escaped borrowers stay closed" {
+        captured = File.runMemory fixture() {
+            result = Fail.attempt {
+                File.withFile "input" { file ->
+                    File.closeHandle file |> Expect.ok
+                    File.closeHandle file |> Expect.ok
+                    Expect.equal "closed handle" (error (File.readHandleLine file)).message
+                }
+            }
+            Expect.equal (Ok ()) result
+            borrowed = Expect.ok (Fail.attempt { File.withFile "input" File.source })
+            Expect.equal "closed handle" (error (Fail.attempt borrowed.pull)).message
+        }
+        Expect.equal () captured.value
+    }
+    , Test.test "nested providers reject foreign handles without forwarding" {
+        captured = File.runMemory fixture() {
+            Fail.attempt {
+                File.withFile "input" { outer ->
+                    inner = File.runMemory fixture() { File.readHandleBytes outer 1 }
+                    problem = error inner.value
+                    Expect.equal IO.Other problem.kind
+                    Expect.equal "input" problem.path
+                    Expect.equal "foreign handle" problem.message
+                    Expect.equal (Just (Bytes.fromString "o")) (File.readBytes outer 1)
+                }
+            }
+        }
+        Expect.equal (Ok ()) captured.value
+    }
+    , Test.test "raw handles cannot alias a later provider's equal key" {
+        escaped = File.runMemory fixture() { File.openRead "input" }
+        old = Expect.ok escaped.value
+        later = File.runMemory fixture() {
+            fresh = Expect.ok (File.openRead "input")
+            Expect.equal "foreign handle" (error (File.readHandleLine old)).message
+            Expect.equal (Ok (Just (IO.Line { text = "one", ending = "\r\n" }))) (File.readHandleLine fresh)
+            File.closeHandle fresh |> Expect.ok
+        }
+        Expect.equal () later.value
+    }
+    , Test.test "cleanup runs before an outer abort is observed" {
+        captured = File.runMemory fixture() {
+            observed = State.run Nothing {
+                failed = Fail.attempt {
+                    attemptFile {
+                        File.withFile "input" { file ->
+                            State.put (Just file)
+                            stop()
+                        }
+                    }
+                }
+                Expect.equal (Err "stop") failed
+            }
+            file = Expect.just observed.state
+            Expect.equal "closed handle" (error (File.readHandleLine file)).message
+        }
+        Expect.equal () captured.value
+    }
+    , Test.test "byte reads retain the 64 KiB bound" {
+        image = Expect.ok (File.withTextFile "large" (String.padRight 70000 'x' "") File.empty)
+        captured = File.runMemory image {
+            Fail.attempt {
+                File.withFile "large" { file ->
+                    first = Expect.just (File.readBytes file 999999)
+                    last = Expect.just (File.readBytes file 999999)
+                    Expect.equal 65536 (Bytes.length first)
+                    Expect.equal 4464 (Bytes.length last)
+                    Expect.equal Nothing (File.readBytes file 1)
+                }
+            }
+        }
+        Expect.equal (Ok ()) captured.value
+    }
+    , Test.test "streaming files compose with Console in either order" {
+        body = {
+            File.withFile "input" { file ->
+                case File.readLine file of
+                    Nothing -> ()
+                    Just line -> Console.write (line.text ++ line.ending)
+            }
+        }
+        first = Console.runTest Bytes.empty { File.runMemory fixture() { Fail.attempt body } }
+        second = File.runMemory fixture() { Console.runTest Bytes.empty { Fail.attempt body } }
+        Expect.equal (Bytes.fromString "one\r\n") first.stdout
+        Expect.equal first.stdout second.value.stdout
+    }
+    ]
+
+main() = Test.run tests

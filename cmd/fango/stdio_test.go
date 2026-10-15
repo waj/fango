@@ -49,12 +49,12 @@ func compileInterpreterProgram(t *testing.T, path string) (*core.Prog, *nativeho
 func TestStandardStreams(t *testing.T) {
 	path := filepath.Join("testdata", "stdio.fango")
 	input := "ab\r\n\xfftail\nlast"
-	wantOutput := "[97]\nb:\"\\r\\n\"\n[255]\ntail:\"\\n\"\nTrue\nlast:\"\"\nTrue\nout\nstdout:Other\nstdin:Other\n[\"one\", \"two\"]\n"
+	wantOutput := "[97]\nb:\"\\r\\n\"\n[255]\ntail:\"\\n\"\nTrue\nlast:\"\"\nTrue\nout\n[\"one\", \"two\"]\n"
 	wantError := "err\n\xff\x00A"
 
 	if interpreterTestsEnabled() {
 		prog, executor := compileWithWorker(t, path)
-		// Retain memoized standard handles in the same environment across sessions.
+		// Reuse the environment while each evaluation borrows its current session host.
 		env := eval.NewEnv()
 		env.DefineProg(prog)
 		for range 2 {
@@ -99,13 +99,7 @@ func TestStreamFailuresAndConsoleWrappers(t *testing.T) {
 		panics     bool
 		input      bool
 	}{
-		{"handle", `case Fail.attempt { IO.write stdout "x" } of
-        Ok () -> ()
-        Err error -> ignore (Fail.attempt { IO.write stderr (IO.describeError error) })`, false, false},
 		{"console", `print "x"`, true, false},
-		{"input handle", `case Fail.attempt { IO.readLine stdin } of
-        Ok _ -> ()
-        Err error -> ignore (Fail.attempt { IO.write stderr (IO.describeError error) })`, false, true},
 		{"input console", `ignore (readLine())`, true, true},
 	} {
 		t.Run(source.name, func(t *testing.T) {

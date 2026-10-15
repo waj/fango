@@ -261,3 +261,18 @@ func TestFailedSpliceRollsBackTheInput(t *testing.T) {
 		t.Fatalf("the session did not recover from a failed splice:\n%s", out.String())
 	}
 }
+
+// Loading a module after prompt declarations must not publish those declarations
+// in the module's deferred stage section: another session has no prompt sources.
+func TestCachedModuleStageExcludesEarlierPromptDeclarations(t *testing.T) {
+	cache := newObjectCache()
+	script := "import State\ncount n = if n <= 0 then 0 else count (n - 1)\nuse State.run 41\nprint \"done\"\n:end\n:quit\n"
+	cold := run(script, Options{Cache: cache})
+	if strings.Contains(cold, "COMPILE-TIME FAILURE") || !strings.Contains(cold, "done\n") {
+		t.Fatalf("cold session failed:\n%s", cold)
+	}
+	warm := run(script, Options{Cache: cache})
+	if warm != cold {
+		t.Fatalf("cached module retained prompt stage Core:\n--- cold ---\n%s\n--- warm ---\n%s", cold, warm)
+	}
+}

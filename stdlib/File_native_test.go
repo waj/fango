@@ -16,28 +16,30 @@ func TestHandleBytes(t *testing.T) {
 	dir := t.TempDir()
 	FangoHost = &testHost{dir: dir}
 	t.Cleanup(func() { FangoHost = old })
+	provider := SystemProvider()
+	t.Cleanup(func() { _ = SystemRetireProvider(provider) })
 
 	body := "alpha\n\xff\xfe binary\x00\nomega"
 	if err := os.WriteFile(filepath.Join(dir, "input.bin"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	id, err := OpenRead("input.bin")
+	id, err := SystemOpenRead(provider, "input.bin")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	line, err := ReadHandleLine(id)
+	line, err := SystemReadHandleLine(provider, id)
 	if err != nil || line != "alpha\n" {
 		t.Fatalf("line = %q, %v", line, err)
 	}
 	// A short count answers a short read, and the result does not alias the
 	// reader: writing into it leaves the next read alone.
-	first, err := ReadHandleBytes(id, 3)
+	first, err := SystemReadHandleBytes(provider, id, 3)
 	if err != nil || string(first) != "\xff\xfe " {
 		t.Fatalf("counted read = %q, %v", first, err)
 	}
 	first[0] = 'x'
-	rest, err := ReadHandleBytes(id, 1024)
+	rest, err := SystemReadHandleBytes(provider, id, 1024)
 	if err != nil || string(rest) != "binary\x00\nomega" {
 		t.Fatalf("rest = %q, %v", rest, err)
 	}
@@ -45,16 +47,16 @@ func TestHandleBytes(t *testing.T) {
 	if grown := append(first, '!'); string(rest) != "binary\x00\nomega" {
 		t.Fatalf("appending to %q disturbed the next read: %q", grown, rest)
 	}
-	if end, err := ReadHandleBytes(id, 1024); err != nil || len(end) != 0 {
+	if end, err := SystemReadHandleBytes(provider, id, 1024); err != nil || len(end) != 0 {
 		t.Fatalf("at end of file = %q, %v", end, err)
 	}
-	if none, err := ReadHandleBytes(id, 0); err != nil || len(none) != 0 {
+	if none, err := SystemReadHandleBytes(provider, id, 0); err != nil || len(none) != 0 {
 		t.Fatalf("zero count = %q, %v", none, err)
 	}
-	if err := CloseHandle(id); err != nil {
+	if err := SystemCloseHandle(provider, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadHandleBytes(id, 1); err == nil || !strings.Contains(err.Error(), "closed handle") {
+	if _, err := SystemReadHandleBytes(provider, id, 1); err == nil || !strings.Contains(err.Error(), "closed handle") {
 		t.Fatalf("stale handle = %v", err)
 	}
 }
@@ -66,18 +68,20 @@ func TestWriteHandleBytes(t *testing.T) {
 	dir := t.TempDir()
 	FangoHost = &testHost{dir: dir}
 	t.Cleanup(func() { FangoHost = old })
+	provider := SystemProvider()
+	t.Cleanup(func() { _ = SystemRetireProvider(provider) })
 
-	id, err := OpenWrite("out.bin")
+	id, err := SystemOpenWrite(provider, "out.bin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteHandleBytes(id, []byte{0xff, 0x00, 'A'}); err != nil {
+	if err := SystemWriteHandleBytes(provider, id, []byte{0xff, 0x00, 'A'}); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteHandleBytes(id, nil); err != nil {
+	if err := SystemWriteHandleBytes(provider, id, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := CloseHandle(id); err != nil {
+	if err := SystemCloseHandle(provider, id); err != nil {
 		t.Fatal(err)
 	}
 	written, err := os.ReadFile(filepath.Join(dir, "out.bin"))
@@ -85,12 +89,12 @@ func TestWriteHandleBytes(t *testing.T) {
 		t.Fatalf("file = %q, %v", written, err)
 	}
 
-	reading, err := OpenRead("out.bin")
+	reading, err := SystemOpenRead(provider, "out.bin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer CloseHandle(reading)
-	if err := WriteHandleBytes(reading, []byte("x")); err == nil || !strings.Contains(err.Error(), "out.bin") {
+	defer SystemCloseHandle(provider, reading)
+	if err := SystemWriteHandleBytes(provider, reading, []byte("x")); err == nil || !strings.Contains(err.Error(), "out.bin") {
 		t.Fatalf("write to a read-only handle = %v", err)
 	}
 }

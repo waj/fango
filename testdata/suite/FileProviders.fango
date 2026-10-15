@@ -1,0 +1,68 @@
+module FileProviders exposing (tests)
+import Bytes
+import Expect
+import Fail
+import File
+import IO
+import Result exposing (Result(..))
+import Test
+
+custom : (() ->{File.FileSystem | e} a) ->{e} a
+custom action = File.withProvider { provider ->
+    handle action() on
+        File.openRead path -> resume (File.newHandle provider path 0)
+        File.openWrite path -> resume (File.newHandle provider path 0)
+        File.openAppend path -> resume (File.newHandle provider path 0)
+        File.closeHandle file -> resume (File.releaseHandle provider file)
+        File.readHandleLine file ->
+            resume (Result.map { _ -> Just (IO.Line { text = "custom", ending = "\n" }) } (File.handleKey provider file))
+        File.readHandleBytes file count ->
+            resume (Result.map { _ -> Just (Bytes.slice 0 count (Bytes.fromString "custom")) } (File.handleKey provider file))
+        File.writeHandleBytes file _ -> resume (Result.map { _ -> () } (File.handleKey provider file))
+        File.readFileResult _ -> resume (Ok "custom")
+        File.writeFileResult _ _ -> resume (Ok ())
+        File.isDirectoryPath _ -> resume (Ok False)
+        File.fileSize _ -> resume (Ok 6)
+        File.listDirectory _ -> resume (Ok [])
+}
+
+problem : Result IO.Error a ->{Expect.Expect} IO.Error
+problem result =
+    case result of
+        Err error -> error
+        Ok _ -> Expect.failWith "expected resource error"
+
+tests : Test.Test {}
+tests = Test.describe "custom file providers"
+    [ Test.test "custom handlers construct valid handles using checked public types" {
+        result = custom {
+            Fail.attempt {
+                File.withFile "input" { file ->
+                    Expect.equal (Just (Bytes.fromString "cu")) (File.readBytes file 2)
+                    Expect.equal (Just (IO.Line { text = "custom", ending = "\n" })) (File.readLine file)
+                    File.write file "discarded"
+                }
+            }
+        }
+        Expect.equal (Ok ()) result
+    }
+    , Test.test "provider scopes protect identity, closed state, and key reuse" {
+        escaped = File.withProvider { first ->
+            old = Expect.ok (File.newHandle first "old" 0)
+            File.releaseHandle first old |> Expect.ok
+            File.releaseHandle first old |> Expect.ok
+            fresh = Expect.ok (File.newHandle first "new" 0)
+            Expect.equal "closed handle" (problem (File.handleKey first old)).message
+            Expect.equal (Ok 0) (File.handleKey first fresh)
+            inside = File.withProvider { second -> File.handleKey second fresh }
+            Expect.equal "foreign handle" (problem inside).message
+            Expect.equal IO.Other (problem (File.newHandle first "bad" (-1))).kind
+            fresh
+        }
+        File.withProvider { later ->
+            replacement = Expect.ok (File.newHandle later "other" 0)
+            Expect.equal "foreign handle" (problem (File.handleKey later escaped)).message
+            Expect.equal (Ok 0) (File.handleKey later replacement)
+        }
+    }
+    ]

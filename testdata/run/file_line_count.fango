@@ -10,13 +10,13 @@ import Result exposing (Result(..))
 -- status says whether every file was counted, the way a command-line tool
 -- would report it.
 
-countLines : IO.Handle -> Int ->{IO, Fail Error} Int
+countLines : File.Handle -> Int ->{File.FileSystem, Fail Error} Int
 countLines file count =
-    case IO.readLine file of
+    case File.readLine file of
         Nothing -> count
         Just _ -> countLines file (count + 1)
 
-countFile : String -> Bool ->{IO, Console} Bool
+countFile : String -> Bool ->{File.FileSystem, Console} Bool
 countFile path ok =
     case attempt ({ _ -> File.withFile path ({ file -> countLines file 0 }) }) of
         Ok count ->

@@ -11,23 +11,20 @@ import (
 // is available. These adapters observe the host and are never stage-safe.
 func installHost(t map[string]Spec) {
 	installTimeHost(t)
-	t["IO.handleHasInput"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
-		value, err := fangort.IOHandleHasInput(rt.Host, args[0])
+	t["Console.inputHasBytes"] = Spec{Arity: 1, Eval: func(rt *Runtime, _ []any) (any, error) {
+		value, err := fangort.ConsoleHasInput(rt.Host)
 		return ioAnswer(value, err)
 	}}
-	t["IO.readHandleLine"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
-		value, err := fangort.ReadIOHandleLine(rt.Host, args[0])
+	t["Console.readInputLine"] = Spec{Arity: 1, Eval: func(rt *Runtime, _ []any) (any, error) {
+		value, err := fangort.ReadConsoleLine(rt.Host)
 		return ioAnswer(value, err)
 	}}
-	t["IO.readHandleBytes"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
-		value, err := fangort.ReadIOHandleBytes(rt.Host, args[0], args[1].(int64))
+	t["Console.readInputBytes"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		value, err := fangort.ReadConsoleBytes(rt.Host, args[0].(int64))
 		return ioAnswer(value, err)
 	}}
-	t["IO.writeHandle"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
-		return ioAnswer(struct{}{}, fangort.WriteIOHandleBytes(rt.Host, args[0], []byte(args[1].(string))))
-	}}
-	t["IO.writeHandleBytes"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
-		return ioAnswer(struct{}{}, fangort.WriteIOHandleBytes(rt.Host, args[0], args[1].([]byte)))
+	t["Console.writeOutputBytes"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
+		return ioAnswer(struct{}{}, fangort.WriteConsoleBytes(rt.Host, args[0].(int64), args[1].([]byte)))
 	}}
 	t["Console.panic"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		panic(args[0].(string))

@@ -310,7 +310,7 @@ func TestDocStrictReportsGaps(t *testing.T) {
 // must be True. Example computations retain a closed IO row so generic
 // async callbacks cannot acquire the test runner's aborting Expect effect.
 func exampleTestModule(texts []string) (program string, assertions, cases int) {
-	imports := map[string]bool{"import IO": true, "import Fail": true, "import Test": true, "import Expect": true}
+	imports := map[string]bool{"import IO": true, "import Random": true, "import Fail": true, "import Test": true, "import Expect": true}
 	var functions, tests []string
 	for _, text := range texts {
 		for _, block := range fencedBlocks(text) {
@@ -329,7 +329,7 @@ func exampleTestModule(texts []string) (program string, assertions, cases int) {
 			name := fmt.Sprintf("example%d", len(functions)+1)
 			// Bound fresh permissions with the same concrete IO budget for
 			// pure and effectful examples, as the old differential runner did.
-			body := []string{"    ignore (Fail.attempt { IO.write IO.stdout \"\" })"}
+			body := []string{"    Random.runSystem { () }"}
 			var checks []string
 			for _, item := range items {
 				if declares(item[0]) {

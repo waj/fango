@@ -8,11 +8,11 @@ import Test
 
 -- The wrapper exports the callback lifetime obligation to its callers.
 
-withWrapped : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withWrapped : String -> (File.Handle ->{File.FileSystem, Fail Error | e} a) ->{File.FileSystem, Fail Error | e} a
 withWrapped path action =
     File.withFile path action
 
-tests : Test.Test IO.IO
+tests : Test.Test File.FileSystem
 tests = Test.test "file_generic_wrapper" {
     path = "missing-file-generic-wrapper-test"
     error = Expect.err (Fail.attempt { withWrapped path { _ -> () } })

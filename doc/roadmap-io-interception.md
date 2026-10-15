@@ -244,24 +244,11 @@ service's effect; `IO` remains only on code that reaches the host directly.
 Preserve the ordering of formatting, argument evaluation, failures, writes,
 and cleanup throughout.
 
-Retiring the shared handle changes these calls. Calls such as
-`IO.write IO.stderr text` become Console calls, `IO.readLine file` becomes
-`File.readLine file`, and functions that accepted any `IO.Handle` take a
-`Bytes.Source`, `Bytes.Sink`, `Reader`, or `Writer`. The
-[API catalogue](roadmap-io-interception-api.md#retiring-the-shared-handle)
-lists the removed declarations.
-
-The entry point becomes function-only, and `main`'s value is no longer printed
-by any backend. Value-style fixtures, about half of `testdata/run` and the
-`String`-valued multi-module fixtures, become `main() = print (...)` with
-unchanged expected output. The WASI build stops printing the value, and the
-differential harness drops its hidden print-main compilation mode.
-
-Audit bundled programs, standard-library examples, test framework reporting,
-REPL output, debugger/host output, and native-worker transport separately.
-Runtime diagnostics and the worker's protocol channel must not accidentally
-become application output or be swallowed by an application console handler.
-Keep user program output and runtime control communication distinct.
+Implemented Console, Process, and File APIs live in their source comments;
+[entry points](reference/commands.md#entry-points) owns the function-only main
+and status contract. [File services](design/effects.md#file-services) owns the
+Source/Sink boundary after shared-handle retirement. Remaining migration work is
+the service-row/entry annotation audit and the deferred Net/HTTP transport path.
 
 The mock fixture specification must match observable semantics rather than
 the physical implementation of the host OS. In particular, define relative
@@ -305,13 +292,14 @@ committed separately.
 4. **IOI2.** DONE: see [Console](../stdlib/Console.fango). Effects are
    declared in their domain module with public operations.
 5. **IOI4, whole-file part.** DONE: see [File](../stdlib/File.fango) and
-   [whole-file services](design/effects.md#whole-file-services). Whole-file and
+   [file services](design/effects.md#file-services). Whole-file and
    directory operations, the memory image runner, and the system default need
    no public handles, so they precede IOI3.
-6. **IOI3 and the rest of IOI4.** `File.Handle` with provider identity, handle
-   operations, `File.source`/`File.sink`, and memory-backed handles. Then
-   retire `IO.Handle`, the standard handles, and the generic handle
-   operations, migrating every caller.
+6. **IOI3 and the rest of IOI4.** DONE: see [File](../stdlib/File.fango),
+   [provider identity](design/ownership.md#file-provider-identity), and
+   [file services](design/effects.md#file-services). File handles, checked
+   custom providers, memory streaming and faults are implemented; shared
+   `IO.Handle`, standard handles, and generic handle operations are retired.
 7. **IOI8, partially.** Migrate the remaining bundled callers and `{IO}`
    annotations, and publish the coverage map for what has landed. The parts
    that depend on IOI6 and IOI7 stay open.
@@ -336,11 +324,11 @@ the [standard streams design](design/effects.md#standard-streams).
 Implement the three-operation `Console` effect covering the Prelude helpers
 and all standard-stream access, preserving public printing and line semantics,
 and document the test transcript. Implement the
-[runner-owned failure policy](roadmap-io-interception-api.md#failure-policy):
+[runner-owned failure policy](../stdlib/Console.fango):
 the system runner ends the program on a stream error with today's diagnostic,
 and Console calls never raise. Verify forwarding, nested handlers, partial
-application, missing handlers, EOF, and unrelated residual effects. The
-standard-stream `IO` declarations may remain alongside until IOI4 retires them.
+application, missing handlers, EOF, and unrelated residual effects. IOI4 has
+retired the old standard-stream `IO` declarations.
 
 Acceptance: the same greeting program runs with real and scripted input;
 captured stdout and stderr are exact, including `writeTo` and `Console.sink`;
@@ -350,36 +338,25 @@ or continuation machinery is added.
 
 ### IOI3 Resource boundary
 
-Specify provider identity for the
-[domain-specific handles](roadmap-io-interception-resources.md#resource-representation):
-`File.Handle`, Net connections, listeners, and pools. Cover construction by
-custom handlers, foreign handles within a domain, close behavior, escape,
-nested providers, and sharing before implementing a virtual handle payload.
-
-Acceptance: no forged or stale handle can alias a later resource; provider
-identity survives module/evidence adaptation; mock-owned state cannot escape
-as an apparently pure callable; cleanup and cross-task ownership are explicit.
+Status: DONE. [Provider identity](design/ownership.md#file-provider-identity)
+owns File construction, validation, retirement, and task lifetimes. Checked
+custom File providers are documented in [File](../stdlib/File.fango).
+The [resource boundary](roadmap-io-interception-resources.md) links the existing
+native Net identities and the virtual Net construction work retained in IOI6.
+The shared-handler-state question remains open.
 
 ### IOI4 Files and standard handles
 
-Whole-file part DONE: [File](../stdlib/File.fango) owns the implemented API;
-[whole-file services](design/effects.md#whole-file-services) owns its boundary.
-Streaming handles, provider identity, streaming failure injection, and shared
-handle retirement remain unfinished in the next implementation phase.
+Status: DONE. [File](../stdlib/File.fango) owns the implemented API and fixtures;
+[file services](design/effects.md#file-services) owns interpretation and snapshots.
+Provider validation and lifetime rules live in
+[ownership](design/ownership.md#file-provider-identity).
 
-Extend the File boundary with file-specific handles over the existing immutable
-fixtures and final snapshots. Cover streaming native paths, specify the handling
-of handles owned by another File provider, and retain structured error identities. Retire `IO.Handle`, the standard
-handles, and the generic handle operations, moving their callers to Console,
-File, or Source/Sink parameters. Test-suite programs that write an empty string
-to `IO.stdout` only to require `IO` need another small `{IO}` call.
-
-Acceptance: memory fixtures exercise open/read/write/append/close, metadata,
-enumeration, EOF, closed/foreign handles, failure after partial progress, and
-cleanup precedence. The same parsing helpers work over real and virtual data
-through `Bytes.Source` and `Bytes.Sink`. Console and file runners compose in
-either nesting order. Mocks never send unsupported resources to the OS as an
-implicit fallback.
+The complete File boundary supports memory and system runners, streaming
+sources and sinks, deterministic faults, and scoped cleanup. The shared
+`IO.Handle`, standard handles, and generic handle operations are retired;
+bundled callers use File, Console, or explicit source/sink parameters.
+[IO](../stdlib/IO.fango) retains the IO effect and shared error/line data.
 
 ### IOI5 Process arguments and exit
 
@@ -447,7 +424,7 @@ inside a mock; the interpreter and compiler agree on each supported behavior.
 Status: DONE. The contract lives in
 [default handlers](reference/commands.md#default-handlers) and
 [Runtime.Entry](../stdlib/Runtime/Entry.fango); Console added its default
-with IOI2, and File and Net add theirs with IOI4 and IOI6.
+with IOI2 and File with IOI4; Net adds its default with IOI6.
 
 Implement [entry assembly](#entry-assembly): the `Runtime.Entry` module with
 its `DefaultHandler` attribute type and `assemble` metaprogram, and the

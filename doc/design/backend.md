@@ -431,11 +431,10 @@ The system host serializes input-buffer access and each output write. The
 interpreter worker serializes complete reverse-host request/reply exchanges so
 concurrent native calls cannot take one another's replies. Sidecars do not retain this host for background work.
 Its single source declaration is copied beside each sidecar with rewritten runtime
-imports. IO and File share runtime handle objects: IO owns stream operations, File owns
-acquisition and directory objects, Console owns convenience behavior, and Process
-owns arguments and exit. Standard handles contain endpoint identities and borrow
-the active host at invocation; no cached handle retains a session host. Native
-support bindings expose the shared runtime to sidecars. Net owns sockets, and
+imports. Console calls that host directly for standard streams; File owns
+buffered native files and checked provider tokens. There are no standard-stream
+handle values or cross-module handle wrappers. Process owns arguments and exit.
+Native support bindings expose the shared runtime to sidecars. Net owns sockets, and
 Random supplies system entropy; deterministic
 PRNG transitions and state remain Fango handler code.
 
@@ -444,14 +443,13 @@ native metadata, never re-derived by backends:
 
 - A same-module single-constructor/single-boundary-value wrapper is projected before a
   call and reconstructed after it. The loader recognizes its declared shape;
-  checking confirms resolved types. The bundled File module additionally accepts
-  canonical IO.Handle for shared acquisition and close; this does not admit
-  arbitrary imported wrappers in user sidecars. Interpreter CtorVal wrapping matches Go.
+  checking confirms resolved types. Imported wrappers are not admitted.
+  Interpreter CtorVal wrapping matches Go.
   Phantom indices and opaque payload tokens follow the
   [native storage contract](../reference/native.md).
 - The bundled `Runtime.Native.Any` is represented as Go `any`. Its constructor is
   private and carries no usable value; libraries expose only nominal wrappers
-  such as `IO.Handle` and `Net.Connection`. It has no Eq, Show, matching, or
+  such as `File.Handle` and `Net.Connection`. It has no Eq, Show, matching, or
   serialization contract. Resolved-type validation prevents an imported type
   merely named `Any` from acquiring this ABI.
 - The bundled Bytes crosses as a plain `[]byte`, admitted in bundled sidecars
@@ -459,9 +457,9 @@ native metadata, never re-derived by backends:
   declaration rather than by name, so a user type of that name keeps its own
   boundary. It is erased to nothing: nothing is projected, rebuilt, or
   validated, because Bytes has no well-formedness contract. A sidecar spells it
-  `[]byte` because sidecars cannot import fangort, and owes the copy-out every
-  Bytes producer owes.
-- Bundled IO, File, and Net value natives additionally map Go `(T, error)` to their
+  `[]byte` and owes the copy-out every Bytes producer owes. Sidecars may import
+  the supported runtime package as the [native contract](../reference/native.md) permits.
+- Bundled Console, File, and Net value natives additionally map Go `(T, error)` to their
   declared Result error. fangort supplies the shared classifiers; checked Kind
   constructor order is their ABI. Go emits the Result construction at the call
   site. User sidecars do not get this fallible shape.

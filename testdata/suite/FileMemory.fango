@@ -24,6 +24,13 @@ fixture() =
 replaceRead : (() ->{FileSystem | e} a) ->{FileSystem | e} a
 replaceRead action =
     handle action() on
+        File.openRead path -> resume (File.openRead path)
+        File.openWrite path -> resume (File.openWrite path)
+        File.openAppend path -> resume (File.openAppend path)
+        File.closeHandle file -> resume (File.closeHandle file)
+        File.readHandleLine file -> resume (File.readHandleLine file)
+        File.readHandleBytes file count -> resume (File.readHandleBytes file count)
+        File.writeHandleBytes file data -> resume (File.writeHandleBytes file data)
         File.readFileResult _ -> resume (Ok "replacement")
         File.writeFileResult path text -> resume (File.writeFileResult path text)
         File.isDirectoryPath path -> resume (File.isDirectoryPath path)

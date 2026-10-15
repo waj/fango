@@ -1,0 +1,25 @@
+import Fail
+import File
+import IO
+import Result exposing (Result(..))
+
+message : Result IO.Error a -> String
+message result =
+    case result of
+        Err error -> error.message
+        Ok _ -> "unexpected success"
+
+main() =
+    case Fail.attempt {
+        File.withFile "input" { outer ->
+            print (message (File.runSystem { File.readHandleLine outer }))
+            simulated = File.runMemory File.empty { File.readHandleLine outer }
+            print (message simulated.value)
+            case File.readLine outer of
+                Nothing -> print "unexpected EOF"
+                Just line -> print line.text
+            outer
+        }
+    } of
+        Err error -> print (IO.describeError error)
+        Ok closed -> print (message (File.readHandleLine closed))

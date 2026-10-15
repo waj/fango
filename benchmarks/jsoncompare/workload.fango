@@ -36,7 +36,7 @@ summarize order total = Totals
 main() =
     case Process.args() of
         [path] ->
-            case Fail.attempt { File.withFile path { file -> Reader.over (IO.source file) { reader -> Json.read @(List Order) reader } } } of
+            case Fail.attempt { File.withFile path { file -> Reader.over (File.source file) { reader -> Json.read @(List Order) reader } } } of
                 Err error ->
                     print (IO.describeError error)
                     Process.exit Process.failure

@@ -1,7 +1,7 @@
 {-# no-prelude #-}
 -- Files and directories.
 --
--- `withFile`, `withOutput`, and `withAppend` open a file as an `IO.Handle`
+-- `withFile`, `withOutput`, and `withAppend` open a file as a `Handle`
 -- for the length of a callback and close it exactly once when the callback
 -- exits, however it exits. A failed open raises before anything is acquired.
 -- A failed close after a successful callback is the scope's failure; after a
@@ -12,16 +12,18 @@
 -- Whole-file and directory operations perform `FileSystem` and answer a
 -- `Result`. `runSystem` is its default and resolves relative paths from the
 -- program's working directory; `runMemory` interprets them without OS access.
--- Streaming scopes still perform `IO` and are outside this interception
--- boundary.
+-- Streaming operations use the same effect. Handles belong to one runner and
+-- become invalid when closed or when that runner exits.
 module File exposing
-    ( FileSystem(..), Image, Snapshot(..)
-    , empty, isDirectory, read, runMemory, runSystem, size, textAt, withAppend
-    , withByteFile, withDirectory, withFile, withOutput, withTextFile, writeAll
+    ( Fault(..), FileSystem(..), Handle, Image, Provider, Snapshot(..)
+    , empty, handleKey, isDirectory, newHandle, read, readBytes, readLine
+    , releaseHandle, runMemory, runSystem, sink, size, source, textAt
+    , withAppend, withByteFile, withDirectory, withFault, withFile, withOutput
+    , withProvider, withTextFile, write, writeAll, writeBytes
     )
 
 import Basics exposing (..)
-import Bytes exposing (Bytes)
+import Bytes exposing (Bytes, Sink(..), Source(..))
 import Dict exposing (Dict)
 import Fail exposing (Fail, attempt, fromResult)
 import IO exposing (Error(..), IO)
@@ -29,15 +31,32 @@ import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
 import Runtime.Entry
+import Runtime.IO
+import Runtime.Local
 import Runtime.Native
 import Runtime.Scope
 import String
 
--- Whole-file access and directory queries. Every operation is public so
--- custom handlers can interpret the complete boundary. Streaming handles are
--- not part of this effect yet.
+-- File acquisition, streaming access, and whole-file/directory queries. Every
+-- operation is public so custom handlers can interpret the complete boundary.
 #[Runtime.Entry.DefaultHandler `runSystem`]
 effect FileSystem
+    -- Opens a file for reading. Raw acquisitions must be closed by the caller;
+    -- the provider also invalidates remaining handles at its exit.
+    openRead : String -> Result Error Handle
+    -- Creates or truncates a file and opens it for writing.
+    openWrite : String -> Result Error Handle
+    -- Opens a file for append, creating it when needed.
+    openAppend : String -> Result Error Handle
+    -- Closes a handle. Repeated close under its owning provider succeeds.
+    closeHandle : Handle -> Result Error ()
+    -- The next line, or `Nothing` at EOF. Invalid UTF-8 is replaced with U+FFFD.
+    readHandleLine : Handle -> Result Error (Maybe IO.Line)
+    -- Up to `count` bytes, bounded by 64 KiB, or `Nothing` at EOF. A nonpositive
+    -- count answers empty bytes while input remains.
+    readHandleBytes : Handle -> Int -> Result Error (Maybe Bytes)
+    -- Writes all bytes; failure may leave a written prefix.
+    writeHandleBytes : Handle -> Bytes -> Result Error ()
     -- Reads the file as text, replacing each consecutive run of malformed
     -- UTF-8 with U+FFFD.
     readFileResult : String -> Result Error String
@@ -50,8 +69,77 @@ effect FileSystem
     -- The immediate entry names of the directory, sorted.
     listDirectory : String -> Result Error (List String)
 
--- File scopes acquire IO.Handle values and close them after the body.
--- Calls through IO after the scope closes fail at runtime.
+-- A file handle with private provider identity and validity state. It cannot
+-- be forged, inspected, or compared. Standard runners reject use after its
+-- provider or scope exits; custom handlers must use the checked provider API.
+{-# resource #-}
+type Handle = Handle Runtime.Native.Any
+
+{-# resource #-}
+type ProviderToken = ProviderToken Runtime.Native.Any
+
+-- A scoped virtual-resource provider. Its permission prevents construction or
+-- validation methods from escaping their provider callback.
+{-# resource #-}
+type Provider e = Provider ProviderToken (() ->{e} ())
+
+freshProvider : () -> ProviderToken
+freshProvider = native
+
+retireProvider : ProviderToken -> ()
+retireProvider = native
+
+virtualHandle : ProviderToken -> String -> Int -> Result Error Handle
+virtualHandle = native
+
+providerStatus : ProviderToken -> Result Error ()
+providerStatus = native
+
+resourceKey : ProviderToken -> Handle -> Result Error Int
+resourceKey = native
+
+closingKey : ProviderToken -> Handle -> Result Error Int
+closingKey = native
+
+releaseResource : ProviderToken -> Handle -> Result Error ()
+releaseResource = native
+
+-- Gives a custom handler a fresh provider and retires it on every language
+-- exit. The result may contain handles, but they are invalid after this call.
+-- Provider values and callbacks carrying their permission cannot escape.
+withProvider : (Provider {s | e} ->{s | e} a) ->{e} a
+withProvider action =
+    Runtime.Local.run () { permission ->
+        Runtime.Scope.bracket freshProvider retireProvider { token ->
+            action (Provider token permission.read)
+        }
+    }
+
+-- Creates a fresh virtual handle associated with this provider and a
+-- nonnegative backend key. Reusing a key never revives a closed handle.
+newHandle : Provider e -> String -> Int ->{e} Result Error Handle
+newHandle (Provider token permission) path key =
+    permission()
+    virtualHandle token path key
+
+-- Validates provider identity and open state and answers the backend key.
+-- Foreign and closed resources answer `IO.Other` with their original path.
+handleKey : Provider e -> Handle ->{e} Result Error Int
+handleKey (Provider token permission) file =
+    permission()
+    resourceKey token file
+
+-- Invalidates a virtual handle. Repeated release succeeds; foreign resources
+-- are rejected. This does not run a custom backend's own release work.
+releaseHandle : Provider e -> Handle ->{e} Result Error ()
+releaseHandle (Provider token permission) file =
+    permission()
+    releaseResource token file
+
+closeKey : Provider e -> Handle ->{e} Result Error Int
+closeKey (Provider token permission) file =
+    permission()
+    closingKey token file
 
 {-# resource #-}
 type Directory = Directory Runtime.Native.Any
@@ -60,21 +148,38 @@ type Directory = Directory Runtime.Native.Any
 fileText : Bytes -> String
 fileText = native
 
--- The fallible natives. Each Go function returns an error that the compiler
--- classifies into `IO.Error` at the boundary. None is exposed; the scoped API
--- and system runners below are the only ways to reach them.
+systemFault : String ->{IO} ()
+systemFault = native
 
-openRead : String ->{IO} Result Error IO.Handle
-openRead = native
+systemProvider : () ->{IO} ProviderToken
+systemProvider = native
 
-openWrite : String ->{IO} Result Error IO.Handle
-openWrite = native
+systemRetireProvider : ProviderToken ->{IO} Result Error ()
+systemRetireProvider = native
 
-openAppend : String ->{IO} Result Error IO.Handle
-openAppend = native
+systemOpenRead : ProviderToken -> String ->{IO} Result Error Handle
+systemOpenRead = native
 
-closeHandle : IO.Handle ->{IO} Result Error ()
-closeHandle = native
+systemOpenWrite : ProviderToken -> String ->{IO} Result Error Handle
+systemOpenWrite = native
+
+systemOpenAppend : ProviderToken -> String ->{IO} Result Error Handle
+systemOpenAppend = native
+
+systemCloseHandle : ProviderToken -> Handle ->{IO} Result Error ()
+systemCloseHandle = native
+
+systemHandleHasInput : ProviderToken -> Handle ->{IO} Result Error Bool
+systemHandleHasInput = native
+
+systemReadHandleLine : ProviderToken -> Handle ->{IO} Result Error String
+systemReadHandleLine = native
+
+systemReadHandleBytes : ProviderToken -> Handle -> Int ->{IO} Result Error Bytes
+systemReadHandleBytes = native
+
+systemWriteHandleBytes : ProviderToken -> Handle -> Bytes ->{IO} Result Error ()
+systemWriteHandleBytes = native
 
 systemReadFileResult : String ->{IO} Result Error String
 systemReadFileResult = native
@@ -97,31 +202,54 @@ systemIsDirectoryPath = native
 systemFileSize : String ->{IO} Result Error Int
 systemFileSize = native
 
--- Scopes. Opening raises the failure before anything is acquired, so a failed
--- open releases nothing; closing raises after the body, so a failed close
--- after a successful body is the scope's failure and after a failed body it
--- is recorded alongside the body's (see Scope).
-
-close : IO.Handle ->{IO, Fail Error} ()
+close : Handle ->{FileSystem, Fail Error} ()
 close file = fromResult (closeHandle file)
 
-withOpened : (String ->{IO} Result Error IO.Handle) -> String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withOpened : (String ->{FileSystem} Result Error Handle) -> String -> (Handle ->{FileSystem, Fail Error | e} a) ->{FileSystem, Fail Error | e} a
 withOpened open path action = Runtime.Scope.bracket { fromResult (open path) } close action
 
--- Opens `path` for reading and runs `action` on the handle, closing it when
--- `action` exits. The callback may perform fewer effects than allowed.
-withFile : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+-- Opens `path` for reading, runs the callback, and closes exactly once on
+-- normal return or a language abort. Failed acquisition releases nothing.
+withFile : String -> (Handle ->{FileSystem, Fail Error | e} a) ->{FileSystem, Fail Error | e} a
 withFile path action = withOpened openRead path action
 
--- Creates or truncates `path`, opens it for writing, and runs `action` on
--- the handle, closing it when `action` exits.
-withOutput : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+-- Creates or truncates `path`, runs the callback, and closes on every exit.
+-- A close failure after success becomes primary; after a body failure it is
+-- recorded as a suppressed failure.
+withOutput : String -> (Handle ->{FileSystem, Fail Error | e} a) ->{FileSystem, Fail Error | e} a
 withOutput path action = withOpened openWrite path action
 
--- Opens `path` for appending, creating it if needed, and runs `action` on
--- the handle, closing it when `action` exits.
-withAppend : String -> (IO.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+-- Opens `path` for append, creating it if necessary, and closes on every exit.
+withAppend : String -> (Handle ->{FileSystem, Fail Error | e} a) ->{FileSystem, Fail Error | e} a
 withAppend path action = withOpened openAppend path action
+
+-- The next line and its exact terminator, or `Nothing` at EOF. Byte and line
+-- reads share one offset. A write-only, closed, or foreign handle fails.
+readLine : Handle ->{FileSystem, Fail Error} Maybe IO.Line
+readLine file = fromResult (readHandleLine file)
+
+-- Up to `count` bytes, at most 64 KiB, or `Nothing` at EOF. A nonpositive
+-- count returns empty bytes while input remains. Reads may be short.
+readBytes : Handle -> Int ->{FileSystem, Fail Error} Maybe Bytes
+readBytes file count = fromResult (readHandleBytes file count)
+
+-- Writes all UTF-8 bytes of the text without adding a newline.
+write : Handle -> String ->{FileSystem, Fail Error} ()
+write file text = writeBytes file (Bytes.fromString text)
+
+-- Writes all bytes. A read-only, closed, or foreign handle fails.
+writeBytes : Handle -> Bytes ->{FileSystem, Fail Error} ()
+writeBytes file data = fromResult (writeHandleBytes file data)
+
+-- A byte source borrowing the file. It takes no ownership and checks the
+-- handle's provider and validity on every pull.
+source : Handle -> Source {FileSystem, Fail Error}
+source file = Source { pull = { readBytes file Runtime.IO.chunk } }
+
+-- A byte sink borrowing the file. It takes no ownership and checks the
+-- handle's provider and validity on every write.
+sink : Handle -> Sink {FileSystem, Fail Error}
+sink file = Sink { write = { data -> writeBytes file data } }
 
 -- Whole-file operations need no handle and report failure as a Result.
 
@@ -162,16 +290,56 @@ systemListDirectory path =
         }
     }
 
--- Interprets whole-file and directory operations through the OS. This is
--- `FileSystem`'s default for `main` and the REPL.
+systemPath : ProviderToken -> String -> (() ->{IO} Result Error a) ->{IO} Result Error a
+systemPath provider path action =
+    case providerStatus provider of
+        Err error -> Err { error | path = path }
+        Ok () -> action()
+
+activeResult : Provider e -> String -> Result Error a ->{e} Result Error a
+activeResult (Provider token permission) path result =
+    permission()
+    case providerStatus token of
+        Err error -> Err { error | path = path }
+        Ok () -> result
+
+systemLine : ProviderToken -> Handle ->{IO} Result Error (Maybe IO.Line)
+systemLine provider file = Result.map Runtime.IO.line (systemReadHandleLine provider file)
+
+systemBytes : ProviderToken -> Handle -> Int ->{IO} Result Error (Maybe Bytes)
+systemBytes provider file count =
+    if count <= 0 then
+        Result.map { available -> if available then Just Bytes.empty else Nothing } (systemHandleHasInput provider file)
+    else
+        Result.map Runtime.IO.bytes (systemReadHandleBytes provider file count)
+
+-- Interprets FileSystem through the OS under a fresh provider. Scoped files
+-- close before their callbacks leave; remaining raw handles close and become
+-- invalid at runner exit. Raw acquisition callers must explicitly close their
+-- handles; teardown reports its first native close failure.
 runSystem : (() ->{FileSystem | e} a) ->{IO | e} a
 runSystem action =
-    handle action() on
-        readFileResult path -> resume (systemReadFileResult path)
-        writeFileResult path text -> resume (systemWriteFileResult path text)
-        isDirectoryPath path -> resume (systemIsDirectoryPath path)
-        fileSize path -> resume (systemFileSize path)
-        listDirectory path -> resume (systemListDirectory path)
+    -- Teardown failures are runtime faults: raw acquisition requires explicit
+    -- close, whereas scoped close failures retain the normal Fail contract.
+    Runtime.Scope.bracket systemProvider { provider ->
+        case systemRetireProvider provider of
+            Ok () -> ()
+            Err error -> systemFault (IO.describeError error)
+    } { provider ->
+        handle action() on
+            openRead path -> resume (systemOpenRead provider path)
+            openWrite path -> resume (systemOpenWrite provider path)
+            openAppend path -> resume (systemOpenAppend provider path)
+            closeHandle file -> resume (systemCloseHandle provider file)
+            readHandleLine file -> resume (systemLine provider file)
+            readHandleBytes file count -> resume (systemBytes provider file count)
+            writeHandleBytes file data -> resume (systemWriteHandleBytes provider file data)
+            readFileResult path -> resume (systemPath provider path { systemReadFileResult path })
+            writeFileResult path text -> resume (systemPath provider path { systemWriteFileResult path text })
+            isDirectoryPath path -> resume (systemPath provider path { systemIsDirectoryPath path })
+            fileSize path -> resume (systemPath provider path { systemFileSize path })
+            listDirectory path -> resume (systemPath provider path { systemListDirectory path })
+    }
 
 type Entry = Folder | Contents Bytes
 
@@ -179,7 +347,7 @@ type Entry = Folder | Contents Bytes
 -- root and working directory. Repeated separators and `.` are removed;
 -- `..` moves to the parent and stays at root there. Empty paths and NUL are
 -- invalid. No symlinks, permissions, or host path lookup are modeled.
-type Image = Image (Dict String Entry)
+type Image = Image (Dict String Entry) (Dict String (List Fault))
 
 -- An action's result and the final immutable filesystem image.
 type Snapshot a =
@@ -192,7 +360,7 @@ type Snapshot a =
 
 -- An image containing only the root directory.
 empty : Image
-empty = Image (Dict.singleton "/" Folder)
+empty = Image (Dict.singleton "/" Folder) Dict.empty
 
 errorAt : IO.Kind -> String -> Error
 errorAt kind path =
@@ -248,7 +416,7 @@ parents create original parent names entries =
                     else Err (errorAt IO.NotFound original)
 
 put : Bool -> Entry -> String -> Image -> Result Error Image
-put create entry path (Image entries) =
+put create entry path (Image entries faults) =
     case normalized path of
         Err error -> Err error
         Ok names ->
@@ -259,7 +427,7 @@ put create entry path (Image entries) =
                     case (Dict.get key ready, entry) of
                         (Just Folder, Contents _) -> Err (errorAt IO.IsDirectory path)
                         (Just (Contents _), Folder) -> Err (errorAt IO.NotDirectory path)
-                        _ -> Ok (Image (Dict.insert key entry ready))
+                        _ -> Ok (Image (Dict.insert key entry ready) faults)
 
 -- Adds a directory and missing parents. An existing directory is kept;
 -- a file at the path or a parent answers `NotDirectory`.
@@ -285,7 +453,7 @@ withTextFile : String -> String -> Image -> Result Error Image
 withTextFile path text image = withByteFile path (Bytes.fromString text) image
 
 entryAt : String -> Image -> Result Error Entry
-entryAt path (Image entries) =
+entryAt path (Image entries _) =
     case normalized path of
         Err error -> Err error
         Ok names ->
@@ -321,8 +489,8 @@ memorySize path image =
         Ok (Contents data) -> Ok (Bytes.length data)
 
 memoryListing : String -> Image -> Result Error (List String)
-memoryListing path (Image entries) =
-    case entryAt path (Image entries) of
+memoryListing path (Image entries faults) =
+    case entryAt path (Image entries faults) of
         Err error -> Err error
         Ok (Contents _) -> Err (errorAt IO.NotDirectory path)
         Ok Folder ->
@@ -339,15 +507,243 @@ memoryListing path (Image entries) =
                     }
                     Ok (List.map { candidate -> String.slice (String.length prefix) (String.length candidate) candidate } (List.filter direct (Dict.keys entries)))
 
--- Interprets whole-file and directory operations in an immutable image,
--- preserving every residual effect of the action. Writes require an existing
--- parent, unlike fixture constructors. Directory size is zero. All modeled
--- entries are readable and writable; there is no failure injection yet.
+type Mode = ReadMode | WriteMode | AppendMode deriving (Eq)
+type Cursor = { path : String, mode : Mode, position : Int, progress : Int }
+type Memory = { image : Image, handles : Dict Int Cursor, next : Int }
+
+-- A deterministic fault in a memory image.
+type Fault
+    -- Fails acquisition before creating or truncating anything.
+    = OpenFailure
+    -- Allows this many bytes per open handle, then fails a read while input
+    -- remains. EOF and nonpositive-count probes do not consume the budget.
+    | ReadFailure Int
+    -- Writes at most this many bytes per open handle; a short write fails
+    -- after publishing its prefix.
+    | WriteFailure Int
+    -- Fails the first close after invalidating the handle.
+    | CloseFailure
+    deriving (Eq, Show)
+
+-- Adds a fault for this normalized path, including paths not yet present.
+-- Later faults of the same kind take precedence. Negative byte limits and
+-- invalid paths answer `IO.Other`. Faults remain in returned snapshots.
+withFault : String -> Fault -> Image -> Result Error Image
+withFault path fault (Image entries faults) =
+    invalid = case fault of
+        ReadFailure n -> n < 0
+        WriteFailure n -> n < 0
+        _ -> False
+    if invalid then Err (faultError path "invalid fault limit")
+    else case normalized path of
+        Err error -> Err error
+        Ok names ->
+            key = keyOf names
+            old = Maybe.withDefault [] (Dict.get key faults)
+            Ok (Image entries (Dict.insert key [fault | old] faults))
+
+hasFault : Fault -> List Fault -> Bool
+hasFault target faults =
+    case faults of
+        [] -> False
+        [fault | rest] -> if fault == target then True else hasFault target rest
+
+faultError : String -> String -> Error
+faultError path message = Error { kind = IO.Other, path = path, message = message }
+
+faultsAt : String -> Image -> List Fault
+faultsAt path (Image _ faults) =
+    case normalized path of
+        Err _ -> []
+        Ok names -> Maybe.withDefault [] (Dict.get (keyOf names) faults)
+
+limitOf : Bool -> List Fault -> Maybe Int
+limitOf reading faults =
+    case faults of
+        [] -> Nothing
+        [ReadFailure n | rest] -> if reading then Just n else limitOf reading rest
+        [WriteFailure n | rest] -> if reading then limitOf reading rest else Just n
+        [_ | rest] -> limitOf reading rest
+
+allowance : Bool -> Cursor -> Int -> Image -> Int
+allowance reading cursor count image =
+    case limitOf reading (faultsAt cursor.path image) of
+        Nothing -> count
+        Just limit ->
+            left = limit - cursor.progress
+            if left <= 0 then 0 else if left < count then left else count
+
+remember : Int -> Cursor -> Memory -> Memory
+remember key cursor memory = { memory | handles = Dict.insert key cursor memory.handles }
+
+opened : Provider e -> Mode -> String -> Image -> Memory ->{e} (Result Error Handle, Memory)
+opened provider mode path image memory =
+    case newHandle provider path memory.next of
+        Err error -> (Err error, memory)
+        Ok file ->
+            cursor = Cursor { path = path, mode = mode, position = 0, progress = 0 }
+            (Ok file, remember memory.next cursor { memory | image = image, next = memory.next + 1 })
+
+memoryOpen : Provider e -> Mode -> String -> Memory ->{e} (Result Error Handle, Memory)
+memoryOpen provider mode path memory =
+    if hasFault OpenFailure (faultsAt path memory.image) then
+        (Err (faultError path "injected open failure"), memory)
+    else case mode of
+        ReadMode ->
+            case entryAt path memory.image of
+                Err error -> (Err error, memory)
+                Ok _ -> opened provider mode path memory.image memory
+        WriteMode ->
+            case put False (Contents Bytes.empty) path memory.image of
+                Err error -> (Err error, memory)
+                Ok image -> opened provider mode path image memory
+        AppendMode ->
+            case entryAt path memory.image of
+                Ok Folder -> (Err (errorAt IO.IsDirectory path), memory)
+                Ok (Contents _) -> opened provider mode path memory.image memory
+                Err error ->
+                    if error.kind == IO.NotFound then
+                        case put False (Contents Bytes.empty) path memory.image of
+                            Err problem -> (Err problem, memory)
+                            Ok image -> opened provider mode path image memory
+                    else (Err error, memory)
+
+cursorAt : Provider e -> Handle -> Memory ->{e} Result Error (Int, Cursor)
+cursorAt provider file memory =
+    case handleKey provider file of
+        Err error -> Err error
+        Ok key ->
+            case Dict.get key memory.handles of
+                Nothing -> Err (faultError "" "unknown handle")
+                Just cursor -> Ok (key, cursor)
+
+memoryRead : Provider e -> Handle -> Int -> Bool -> Memory ->{e} (Result Error (Maybe Bytes), Memory)
+memoryRead provider file count line memory =
+    case cursorAt provider file memory of
+        Err error -> (Err error, memory)
+        Ok (key, cursor) ->
+            if cursor.mode /= ReadMode then (Err (faultError cursor.path "handle is not readable"), memory)
+            else case entryAt cursor.path memory.image of
+                Err error -> (Err error, memory)
+                Ok Folder -> (Err (errorAt IO.IsDirectory cursor.path), memory)
+                Ok (Contents data) ->
+                    remaining = Bytes.slice cursor.position (Bytes.length data) data
+                    length = Bytes.length remaining
+                    if length == 0 then (Ok Nothing, memory)
+                    else if count <= 0 && line == False then (Ok (Just Bytes.empty), memory)
+                    else
+                        asked =
+                            if line then
+                                case Bytes.indexOf (Bytes.fromString "\n") remaining of
+                                    Nothing -> length
+                                    Just at -> at + 1
+                            else if count < length then count else length
+                        bounded = if line || asked <= Runtime.IO.chunk then asked else Runtime.IO.chunk
+                        taken = allowance True cursor bounded memory.image
+                        if taken == 0 then (Err (faultError cursor.path "injected read failure"), memory)
+                        else
+                            next = { cursor | position = cursor.position + taken, progress = cursor.progress + taken }
+                            (Ok (Just (Bytes.slice 0 taken remaining)), remember key next memory)
+
+memoryLine : Provider e -> Handle -> Memory ->{e} (Result Error (Maybe IO.Line), Memory)
+memoryLine provider file memory =
+    (result, next) = memoryRead provider file 1 True memory
+    line = Result.map { data ->
+        case data of
+            Nothing -> Nothing
+            Just raw -> Runtime.IO.line (fileText raw)
+    } result
+    (line, next)
+
+zeroes : Int -> List Int -> List Int
+zeroes n found = if n <= 0 then found else zeroes (n - 1) [0 | found]
+
+replaceBytes : Int -> Bytes -> Bytes -> Bytes
+replaceBytes position data old =
+    gap = if position > Bytes.length old then Bytes.fromList (zeroes (position - Bytes.length old) []) else Bytes.empty
+    Bytes.concat [Bytes.slice 0 position old, gap, data, Bytes.slice (position + Bytes.length data) (Bytes.length old) old]
+
+memoryWrite : Provider e -> Handle -> Bytes -> Memory ->{e} (Result Error (), Memory)
+memoryWrite provider file data memory =
+    case cursorAt provider file memory of
+        Err error -> (Err error, memory)
+        Ok (key, cursor) ->
+            if cursor.mode == ReadMode then (Err (faultError cursor.path "handle is not writable"), memory)
+            else case entryAt cursor.path memory.image of
+                Err error -> (Err error, memory)
+                Ok Folder -> (Err (errorAt IO.IsDirectory cursor.path), memory)
+                Ok (Contents old) ->
+                    taken = allowance False cursor (Bytes.length data) memory.image
+                    position = if cursor.mode == AppendMode then Bytes.length old else cursor.position
+                    written = Bytes.slice 0 taken data
+                    contents = if taken == 0 then old else replaceBytes position written old
+                    case put False (Contents contents) cursor.path memory.image of
+                        Err error -> (Err error, memory)
+                        Ok image ->
+                            next = remember key { cursor | position = position + taken, progress = cursor.progress + taken } { memory | image = image }
+                            if taken < Bytes.length data then (Err (faultError cursor.path "injected write failure"), next)
+                            else (Ok (), next)
+
+memoryClose : Provider e -> Handle -> Memory ->{e} (Result Error (), Memory)
+memoryClose provider file memory =
+    case closeKey provider file of
+        Err error -> (Err error, memory)
+        Ok key ->
+            -- Closed cursors are dropped; an owned handle without one is closed.
+            case Dict.get key memory.handles of
+                Nothing -> (Ok (), memory)
+                Just cursor ->
+                    case releaseHandle provider file of
+                        Err error -> (Err error, memory)
+                        Ok () ->
+                            next = { memory | handles = Dict.remove key memory.handles }
+                            if hasFault CloseFailure (faultsAt cursor.path memory.image) then
+                                (Err (faultError cursor.path "injected close failure"), next)
+                            else (Ok (), next)
+
+readChunks : Provider e -> Handle -> List Bytes -> Memory ->{e} (Result Error String, Memory)
+readChunks provider file reversed memory =
+    (result, next) = memoryRead provider file Runtime.IO.chunk False memory
+    case result of
+        Err error -> (Err error, next)
+        Ok Nothing -> (Ok (fileText (Bytes.concat (List.reverse reversed))), next)
+        Ok (Just data) -> readChunks provider file [data | reversed] next
+
+closedResult : Provider e -> Handle -> Result Error a -> Memory ->{e} (Result Error a, Memory)
+closedResult provider file result memory =
+    (closed, next) = memoryClose provider file memory
+    case result of
+        Err error -> (Err error, next)
+        Ok value -> (Result.map { _ -> value } closed, next)
+
+memoryReadFile : Provider e -> String -> Memory ->{e} (Result Error String, Memory)
+memoryReadFile provider path memory =
+    (openedFile, acquired) = memoryOpen provider ReadMode path memory
+    case openedFile of
+        Err error -> (Err error, acquired)
+        Ok file ->
+            (result, next) = readChunks provider file [] acquired
+            closedResult provider file result next
+
+memoryWriteFile : Provider e -> String -> String -> Memory ->{e} (Result Error (), Memory)
+memoryWriteFile provider path text memory =
+    (openedFile, acquired) = memoryOpen provider WriteMode path memory
+    case openedFile of
+        Err error -> (Err error, acquired)
+        Ok file ->
+            (result, next) = memoryWrite provider file (Bytes.fromString text) acquired
+            closedResult provider file result next
+
+-- Interprets FileSystem without OS access, returning an immutable snapshot.
+-- Reads/writes share the same image as whole-file calls; each open has its
+-- own offset. Appends choose the current end on every write. Raw handles are
+-- invalidated at provider exit; scoped handles close on every language exit.
 --
--- This is a sequential fixture: concurrent tasks can lose handler-state
--- updates. It does not virtualize tasks or streaming handle IO. An abort
--- escaping the runner returns no snapshot; put `Fail.attempt` inside it to
--- inspect changes preceding a failure.
+-- This runner is sequential: concurrent handler clauses may lose state
+-- updates. It models no symlinks or permissions. Directory sizes are zero.
+-- An abort escaping the runner returns no snapshot; put Fail.attempt inside
+-- it to inspect partial progress. Fault injection applies to both streaming
+-- and whole-file operations.
 --
 -- ```fango
 -- import File
@@ -367,13 +763,37 @@ memoryListing path (Image entries) =
 -- ```
 runMemory : Image -> (() ->{FileSystem | e} a) ->{e} Snapshot a
 runMemory image action =
-    handle action() with state = image on
-        readFileResult path -> resume (textAt path state) with state
-        writeFileResult path text ->
-            case put False (Contents (Bytes.fromString text)) path state of
-                Err error -> resume (Err error) with state
-                Ok next -> resume (Ok ()) with next
-        isDirectoryPath path -> resume (memoryDirectory path state) with state
-        fileSize path -> resume (memorySize path state) with state
-        listDirectory path -> resume (memoryListing path state) with state
-        return value -> Snapshot { value = value, image = state }
+    withProvider { provider ->
+        handle action() with state = Memory { image = image, handles = Dict.empty, next = 0 } on
+            openRead path ->
+                (result, next) = memoryOpen provider ReadMode path state
+                resume result with next
+            openWrite path ->
+                (result, next) = memoryOpen provider WriteMode path state
+                resume result with next
+            openAppend path ->
+                (result, next) = memoryOpen provider AppendMode path state
+                resume result with next
+            closeHandle file ->
+                (result, next) = memoryClose provider file state
+                resume result with next
+            readHandleLine file ->
+                (result, next) = memoryLine provider file state
+                resume result with next
+            readHandleBytes file count ->
+                (result, next) = memoryRead provider file count False state
+                resume result with next
+            writeHandleBytes file data ->
+                (result, next) = memoryWrite provider file data state
+                resume result with next
+            readFileResult path ->
+                (result, next) = memoryReadFile provider path state
+                resume result with next
+            writeFileResult path text ->
+                (result, next) = memoryWriteFile provider path text state
+                resume result with next
+            isDirectoryPath path -> resume (activeResult provider path (memoryDirectory path state.image)) with state
+            fileSize path -> resume (activeResult provider path (memorySize path state.image)) with state
+            listDirectory path -> resume (activeResult provider path (memoryListing path state.image)) with state
+            return value -> Snapshot { value = value, image = state.image }
+    }

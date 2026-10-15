@@ -45,8 +45,8 @@ checked first with the effects no level grants deferred, when they declare
 default handlers. If any were, the checker restores its checkpoint and checks
 the input again inside the same `Runtime.Entry.assemble` splice a program's
 entry uses, built around a thunk of the input; an input that performs none
-keeps its own shape, laziness, and stack. The session's standard handles make
-`Console.runSystem` answer with the session's streams. Tooling evaluates
+keeps its own shape, laziness, and stack. `Console.runSystem` borrows the active
+session host directly, so inputs use the session's streams. Tooling evaluates
 an observed expression once. The REPL echoes a result through available Show
 evidence, the representation, so a String result is quoted. Without evidence
 it shows an opaque typed placeholder or `<function>`, and observation never

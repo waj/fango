@@ -1,0 +1,5 @@
+import File
+
+escaped = File.withProvider { provider -> provider }
+
+main() = ()

@@ -1,5 +1,6 @@
 module AsyncEffectPermissions exposing (tests)
 
+import Random
 import Async exposing (Async, Task)
 import Expect
 import Fail exposing (Fail)
@@ -27,7 +28,7 @@ type Observation = Trace String | PairOutcome (Async.Outcome (Int, Int)) derivin
 
 record : Observation ->{IO, State.State (List Observation)} ()
 record value =
-    ignore (Fail.attempt { IO.write IO.stdout "" })
+    Random.runSystem { () }
     State.put [value | State.get()]
 
 recordTrace : String ->{IO, State.State (List Observation)} ()

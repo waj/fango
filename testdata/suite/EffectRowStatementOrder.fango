@@ -1,5 +1,6 @@
 module EffectRowStatementOrder exposing (tests)
 
+import Random
 import Expect
 import Fail
 import IO
@@ -45,7 +46,7 @@ report : (() ->{Exception ex | e} ()) -> (() ->{e} ()) ->{IO, Exception ex | e} 
 report risky plain =
     plain()
     risky()
-    ignore (Fail.attempt { IO.write IO.stdout "" })
+    Random.runSystem { () }
 
 recordText : String ->{State.State (List String)} ()
 recordText value = State.put [value | State.get()]

@@ -2,6 +2,7 @@ package native
 
 import (
 	"errors"
+	"github.com/waj/fango/runtime/fangort"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ import (
 // path the program supplied, because filePath joins onto the working
 // directory and the absolute form would differ from run to run.
 //
-// Handles cross the native boundary as opaque Go values. IO.Handle and
+// Handles cross the native boundary as opaque Go values. File.Handle and
 // File.Directory remain distinct nominal Fango types even though both carry
 // `any`; no module-owned id table is needed to keep the Go object alive.
 
@@ -51,25 +52,274 @@ func relabel(err error, path string) error {
 	return err
 }
 
-func openWith(path string, readable bool, open func(string) (*os.File, error)) (any, error) {
+// Provider tokens are fresh objects, never integer IDs or Fango-visible payloads.
+// Native methods validate ownership before projecting the real-file case.
+type fileProvider struct {
+	mu        sync.Mutex
+	active    bool
+	real      bool
+	resources []*fileResource
+}
+
+type fileResource struct {
+	owner  *fileProvider
+	path   string
+	key    int64
+	closed bool // protected by owner.mu
+	file   any  // nonnil only for real resources
+}
+
+func resourceError(path, message string) error {
+	return &fs.PathError{Op: "use", Path: path, Err: errors.New(message)}
+}
+
+func checkedProvider(value any) (*fileProvider, error) {
+	p, ok := value.(*fileProvider)
+	if !ok || p == nil {
+		return nil, resourceError("", "invalid provider")
+	}
+	return p, nil
+}
+
+func FreshProvider() any  { return &fileProvider{active: true} }
+func SystemProvider() any { return &fileProvider{active: true, real: true} }
+
+func ProviderStatus(value any) error {
+	p, err := checkedProvider(value)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.active {
+		return resourceError("", "closed provider")
+	}
+	return nil
+}
+
+func RetireProvider(value any) {
+	p, err := checkedProvider(value)
+	if err != nil {
+		panic(err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.real {
+		panic("virtual provider expected")
+	}
+	p.active = false
+	for _, h := range p.resources {
+		h.closed = true
+	}
+	p.resources = nil
+}
+
+func SystemRetireProvider(value any) error {
+	p, err := checkedProvider(value)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.active = false
+	resources := p.resources
+	p.resources = nil
+	for _, h := range resources {
+		h.closed = true
+	}
+	p.mu.Unlock()
+	var first error
+	for i := len(resources) - 1; i >= 0; i-- {
+		if resources[i].file != nil {
+			if err := fangort.CloseFileHandle(resources[i].file); err != nil && first == nil {
+				first = err
+			}
+		}
+	}
+	return first
+}
+
+func VirtualHandle(value any, path string, key int64) (any, error) {
+	p, err := checkedProvider(value)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.active {
+		return nil, resourceError(path, "closed provider")
+	}
+	if p.real {
+		return nil, resourceError(path, "virtual provider expected")
+	}
+	if key < 0 {
+		return nil, resourceError(path, "invalid handle key")
+	}
+	h := &fileResource{owner: p, path: path, key: key}
+	return h, nil
+}
+
+// ownedResource is called with p.mu held. A closed foreign handle is still
+// foreign; an escaped handle can never become a resource of a later provider.
+func ownedResource(p *fileProvider, value any, allowClosed bool) (*fileResource, error) {
+	h, ok := value.(*fileResource)
+	if !ok || h == nil {
+		return nil, resourceError("", "invalid handle")
+	}
+	if h.owner != p {
+		return nil, resourceError(h.path, "foreign handle")
+	}
+	if !p.active {
+		return nil, resourceError(h.path, "closed provider")
+	}
+	if h.closed && !allowClosed {
+		return nil, resourceError(h.path, "closed handle")
+	}
+	return h, nil
+}
+
+func ResourceKey(provider, value any) (int64, error) {
+	p, err := checkedProvider(provider)
+	if err != nil {
+		return 0, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	h, err := ownedResource(p, value, false)
+	if err != nil {
+		return 0, err
+	}
+	return h.key, nil
+}
+
+func ClosingKey(provider, value any) (int64, error) {
+	p, err := checkedProvider(provider)
+	if err != nil {
+		return 0, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	h, err := ownedResource(p, value, true)
+	if err != nil {
+		return 0, err
+	}
+	return h.key, nil
+}
+
+func ReleaseResource(provider, value any) error {
+	p, err := checkedProvider(provider)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	h, err := ownedResource(p, value, true)
+	if err != nil {
+		return err
+	}
+	if h.file != nil {
+		return resourceError(h.path, "virtual handle expected")
+	}
+	h.closed = true
+	return nil
+}
+
+func openWith(provider any, path string, readable bool, open func(string) (*os.File, error)) (any, error) {
+	p, err := checkedProvider(provider)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.active {
+		return nil, resourceError(path, "closed provider")
+	}
+	if !p.real {
+		return nil, resourceError(path, "system provider expected")
+	}
 	file, err := open(filePath(path))
 	if err != nil {
 		return nil, relabel(err, path)
 	}
-	return FangoNewIOHandle(path, file, readable, !readable), nil
+	h := &fileResource{owner: p, path: path, file: fangort.NewFileHandle(path, file, readable, !readable)}
+	p.resources = append(p.resources, h)
+	return h, nil
 }
 
-func OpenRead(path string) (any, error) { return openWith(path, true, os.Open) }
-
-func OpenWrite(path string) (any, error) { return openWith(path, false, os.Create) }
-
-func OpenAppend(path string) (any, error) {
-	return openWith(path, false, func(p string) (*os.File, error) {
-		return os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+func SystemOpenRead(provider any, path string) (any, error) {
+	return openWith(provider, path, true, os.Open)
+}
+func SystemOpenWrite(provider any, path string) (any, error) {
+	return openWith(provider, path, false, os.Create)
+}
+func SystemOpenAppend(provider any, path string) (any, error) {
+	return openWith(provider, path, false, func(path string) (*os.File, error) {
+		return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	})
 }
 
-func CloseHandle(value any) error { return FangoCloseIOHandle(value) }
+func realResource(provider, value any, closing bool) (any, error) {
+	p, err := checkedProvider(provider)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	h, err := ownedResource(p, value, closing)
+	if err != nil {
+		return nil, err
+	}
+	if !p.real || h.file == nil {
+		return nil, resourceError(h.path, "system handle expected")
+	}
+	if closing && !h.closed {
+		h.closed = true
+		for i, resource := range p.resources {
+			if resource == h {
+				copy(p.resources[i:], p.resources[i+1:])
+				p.resources[len(p.resources)-1] = nil
+				p.resources = p.resources[:len(p.resources)-1]
+				break
+			}
+		}
+	}
+	return h.file, nil
+}
+
+func SystemCloseHandle(provider, value any) error {
+	file, err := realResource(provider, value, true)
+	if err != nil {
+		return err
+	}
+	return fangort.CloseFileHandle(file)
+}
+func SystemHandleHasInput(provider, value any) (bool, error) {
+	file, err := realResource(provider, value, false)
+	if err != nil {
+		return false, err
+	}
+	return fangort.FileHandleHasInput(file)
+}
+func SystemReadHandleLine(provider, value any) (string, error) {
+	file, err := realResource(provider, value, false)
+	if err != nil {
+		return "", err
+	}
+	return fangort.ReadFileHandleLine(file)
+}
+func SystemReadHandleBytes(provider, value any, count int64) ([]byte, error) {
+	file, err := realResource(provider, value, false)
+	if err != nil {
+		return nil, err
+	}
+	return fangort.ReadFileHandleBytes(file, count)
+}
+func SystemWriteHandleBytes(provider, value any, data []byte) error {
+	file, err := realResource(provider, value, false)
+	if err != nil {
+		return err
+	}
+	return fangort.WriteFileHandleBytes(file, data)
+}
 
 // FileText uses the same replacement rule for real and memory whole-file reads.
 func FileText(data []byte) string { return strings.ToValidUTF8(string(data), "�") }
@@ -151,3 +401,5 @@ func SystemIsDirectoryPath(path string) (bool, error) {
 	}
 	return info.IsDir(), nil
 }
+
+func SystemFault(message string) { panic(message) }

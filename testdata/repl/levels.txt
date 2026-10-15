@@ -2,16 +2,20 @@ Fango 0.1 — :help for commands
 > loaded State
 > loaded Char
 loaded Dict
-loaded Encoding
 loaded Iterator
-loaded Json.Field
 loaded Runtime.Local
 loaded Runtime.Scope
+loaded Stream
+loaded Reader
+loaded String
+loaded Encoding
+loaded Json.Field
+loaded Trace
+loaded Failure
+loaded Fail
 loaded Async
 loaded File
 loaded Net
-loaded Stream
-loaded Reader
 loaded Text.Reader
 loaded Json.Pull
 loaded Url

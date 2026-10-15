@@ -87,7 +87,9 @@ is `()`, it places no restriction on the result it returns.
 
 A resource or a closure referring to it may outlive its acquiring scope. This
 does not keep the resource open: bracket release still runs at scope exit.
-Native resource operations validate the handle and report use after close.
+Resource operations validate handles and report use after close or provider
+retirement. [File](../../stdlib/File.fango) documents scoped provider construction,
+foreign-handle errors, and raw acquisition obligations.
 The compiler does not infer resource retention or non-escape contracts.
 Consume a stream backed by a resource inside that resource's cleanup scope,
 and have each task construct its own scoped buffered readers and writers.

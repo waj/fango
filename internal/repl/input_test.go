@@ -108,7 +108,7 @@ func TestEmptyEffectHeaderStillAcceptsOperations(t *testing.T) {
 
 func TestREPLStandardErrorIsSeparate(t *testing.T) {
 	var out, errorOutput strings.Builder
-	RunWith(strings.NewReader("import Fail\nignore (Fail.attempt { IO.write stderr \"diagnostic\" })\nprint \"still running\"\n:quit\n"), &out, Options{ErrorWriter: &errorOutput})
+	RunWith(strings.NewReader("import Console exposing (Output(..))\nConsole.writeTo Stderr \"diagnostic\"\nprint \"still running\"\n:quit\n"), &out, Options{ErrorWriter: &errorOutput})
 	if errorOutput.String() != "diagnostic" || strings.Contains(out.String(), "diagnostic") || !strings.Contains(out.String(), "still running") {
 		t.Fatalf("streams = %q / %q", out.String(), errorOutput.String())
 	}

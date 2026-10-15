@@ -338,7 +338,22 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit) ([]byte, error) {
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
 		return nil, fmt.Errorf("codegen: printing generated Go: %w", err)
 	}
-	return g.lineDirectives(file, buf.Bytes(), UnitPath(unit))
+	return g.lineDirectives(file, separateDirectiveDocs(buf.Bytes()), UnitPath(unit))
+}
+
+// separateDirectiveDocs adds the blank line gofmt puts before a top-level
+// `//go:` doc comment. Generated declarations have no positions, so the printer
+// attaches the comment directly to the preceding declaration's last line.
+func separateDirectiveDocs(src []byte) []byte {
+	lines := bytes.Split(src, []byte("\n"))
+	out := make([][]byte, 0, len(lines))
+	for i, line := range lines {
+		if i > 0 && bytes.HasPrefix(line, []byte("//go:")) && len(lines[i-1]) > 0 && !bytes.HasPrefix(lines[i-1], []byte("//")) {
+			out = append(out, nil)
+		}
+		out = append(out, line)
+	}
+	return bytes.Join(out, []byte("\n"))
 }
 
 func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {

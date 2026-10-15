@@ -65,10 +65,10 @@ located () =
 --
 -- ```fango
 -- import Expect exposing (inspect)
--- import IO
+-- import Process
 --
 -- inspect (Just "a") == "Just \"a\""
--- inspect IO.stdin == "<value>"
+-- inspect Process.success == "<value>"
 -- ```
 class Inspect a
     -- The value's text in a failure message.

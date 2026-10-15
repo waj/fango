@@ -1,19 +1,10 @@
 {-# no-prelude #-}
--- External input and output: the `IO` effect, handles, and structured
--- errors.
---
--- Open files and the standard streams share one opaque `Handle`. The
--- operations here fail with `Fail Error`; `File` opens and closes file
--- handles, and `Reader` and `Writer` buffer them through `source` and
--- `sink`. The prelude exposes `IO`, `stdin`, `stdout`, and `stderr`.
-module IO exposing (Error(..), Handle, IO, Kind(..), Line(..), describeError, lineEnding, lineText, readBytes, readLine, sink, source, stderr, stdin, stdout, write, writeBytes)
+-- Permission for real native interaction, with structured errors and line data.
+-- Console owns the standard streams; File owns file handles. Generic byte IO
+-- uses Bytes.Source and Bytes.Sink rather than a shared handle.
+module IO exposing (Error(..), IO, Kind(..), Line(..), describeError, lineEnding, lineText)
 
 import Basics exposing (..)
-import Bytes exposing (Bytes, Sink(..), Source(..))
-import Fail exposing (Fail, fromResult)
-import Maybe exposing (Maybe(..))
-import Result exposing (Result(..))
-import Runtime.Native
 
 -- One line of input and the exact terminator that ended it.
 type Line =
@@ -81,28 +72,6 @@ describeError error =
 -- own: natives perform it, and only `main` and the interpreter can run it.
 effect IO
 
--- An open file or standard stream. It has no public constructor, equality,
--- display, or close operation: standard handles live as long as the
--- process, and file handles until their `File` scope closes them.
-{-# resource #-}
-type Handle = Handle Runtime.Native.Any
-
-standardHandle : Int -> Handle
-standardHandle = native
-
--- Standard input, which is readable. Standard handles reach the running
--- program's streams, or the REPL session's.
-stdin : Handle
-stdin = standardHandle 0
-
--- Standard output, which is writable.
-stdout : Handle
-stdout = standardHandle 1
-
--- Standard error, which is writable.
-stderr : Handle
-stderr = standardHandle 2
-
 -- A raw line without its terminator, as `readLine` splits it.
 --
 -- ```fango
@@ -124,68 +93,3 @@ lineText = native
 -- ```
 lineEnding : String -> String
 lineEnding = native
-
-handleHasInput : Handle ->{IO} Result Error Bool
-handleHasInput = native
-
-readHandleLine : Handle ->{IO} Result Error String
-readHandleLine = native
-
-readHandleBytes : Handle -> Int ->{IO} Result Error Bytes
-readHandleBytes = native
-
-writeHandle : Handle -> String ->{IO} Result Error ()
-writeHandle = native
-
-writeHandleBytes : Handle -> Bytes ->{IO} Result Error ()
-writeHandleBytes = native
-
--- The next line and its exact terminator, or `Nothing` at the end of input.
--- Malformed UTF-8 reads as U+FFFD. Reading from a handle opened for writing
--- fails with kind `Other`.
-readLine : Handle ->{IO, Fail Error} Maybe Line
-readLine file =
-    raw = fromResult (readHandleLine file)
-    if raw == "" then Nothing else Just ({ text = lineText raw, ending = lineEnding raw })
-
--- Writes the text exactly as given, with no newline or buffering of its
--- own. Writes to one handle do not interleave. Writing to `stdin` fails with
--- kind `Other`.
-write : Handle -> String ->{IO, Fail Error} ()
-write file text = fromResult (writeHandle file text)
-
--- Up to `count` bytes, at most 64 KiB, or `Nothing` at the end of input. A
--- read may return fewer bytes than asked for. A count of zero or less
--- returns empty bytes while input remains. Byte and line reads share the
--- handle's input buffer, so they may interleave.
-readBytes : Handle -> Int ->{IO, Fail Error} Maybe Bytes
-readBytes file count =
-    if count <= 0 then
-        if fromResult (handleHasInput file) then Just Bytes.empty else Nothing
-    else
-        data = fromResult (readHandleBytes file count)
-        if Bytes.length data == 0 then Nothing else Just data
-
--- Writes all the bytes. Writing to `stdin` fails with kind `Other`.
-writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
-writeBytes file data = fromResult (writeHandleBytes file data)
-
--- chunk is how much one pull asks for. A pull answers what is there, so a
--- smaller read is ordinary and the number only bounds the ask. It matches
--- the natives' largest single read, so a buffered reader over a large file
--- refills, and copies its unconsumed tail, as rarely as possible.
-chunk : Int
-chunk = 65536
-
--- source and sink adapt an open file to the leaves a Reader and a Writer are
--- built over. Each captures the handle and checks its validity on use.
-
--- The handle as a byte source for `Reader`. It does not take ownership of
--- the handle or close it.
-source : Handle -> Source {IO, Fail Error}
-source file = Source { pull = { readBytes file chunk } }
-
--- The handle as a byte sink for `Writer`. It does not take ownership of the
--- handle or close it.
-sink : Handle -> Sink {IO, Fail Error}
-sink file = Sink { write = { data -> writeBytes file data } }

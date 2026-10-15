@@ -61,7 +61,7 @@ main() =
         case Process.args() of
             [kind, source, path] ->
                 case source of
-                    "file" -> File.withFile path { file -> Reader.over (IO.source file) { reader -> TextReader.over reader { text -> runTask kind text } } }
+                    "file" -> File.withFile path { file -> Reader.over (File.source file) { reader -> TextReader.over reader { text -> runTask kind text } } }
                     _ ->
                         text = Fail.fromResult (File.read path)
                         if kind == "encoding" then

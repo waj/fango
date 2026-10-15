@@ -1,5 +1,6 @@
 module AsyncSharedHandlers exposing (tests)
 
+import Random
 import Async exposing (Outcome(..))
 import Expect
 import Fail exposing (Fail)
@@ -33,7 +34,7 @@ type Observation
 
 record : Observation ->{IO, State.State (List Observation)} ()
 record value =
-    ignore (Fail.attempt { IO.write IO.stdout "" })
+    Random.runSystem { () }
     State.put [value | State.get()]
 
 recordCounterOutcome : (Async.Outcome (Int, Int), Int) ->{IO, State.State (List Observation)} ()

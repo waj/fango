@@ -1,0 +1,7 @@
+import File
+
+escaped = File.withProvider { provider ->
+    { () -> File.newHandle provider "file" 0 }
+}
+
+main() = ()

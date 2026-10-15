@@ -113,7 +113,10 @@ before capture analysis/evaluation. Checked is an append-only completion log,
 not a source prefix. The shared batch session also snapshots each completed
 module's declarative stage Core for its installable module object; this includes
 compile-time-only definitions and ordinary functions a later splice may call.
-The snapshot runs after runtime elaboration and runs the same `decl`. The
+Pending prompt groups are completed before an imported module starts, so its
+persistent stage section contains only that module's definitions and never
+prompt source provenance. The snapshot runs after runtime elaboration and runs
+the same `decl`. The
 runtime Core differs only by scalar specialization, which erases values the
 analysis already treats as scalars. So the snapshot solves every definition's
 summaries and contracts but discharges only definitions runtime elaboration did

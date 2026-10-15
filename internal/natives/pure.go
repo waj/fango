@@ -69,7 +69,4 @@ func installPure(t map[string]Spec) {
 	t["IO.lineEnding"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return lineEnding(args[0].(string)), nil
 	}}
-	t["IO.standardHandle"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return fangort.StandardIOHandle(args[0].(int64)), nil
-	}}
 }

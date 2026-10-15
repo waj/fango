@@ -1,1 +1,1 @@
-() ->{Async, Console} ()
+() ->{Console, Async} ()

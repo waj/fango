@@ -37,8 +37,8 @@ func boolTy() *types.TCon   { return &types.TCon{Unique: 3, Name: "Bool"} }
 func unitTy() *types.TCon   { return &types.TCon{Unique: 4, Name: "()"} }
 
 func writeExpr(text string) core.Expr {
-	handle := &core.NativeCall{Name: "IO.standardHandle", Module: "IO", Ty: unitTy(), Args: []core.Expr{&core.IntLit{Val: 1, Ty: intTy()}}}
-	return &core.NativeCall{Name: "IO.writeHandle", Module: "IO", Ty: unitTy(), Args: []core.Expr{handle, &core.StringLit{Val: text, Ty: stringTy()}}}
+	data := &core.NativeCall{Name: "Bytes.fromString", Module: "Bytes", Ty: unitTy(), Args: []core.Expr{&core.StringLit{Val: text, Ty: stringTy()}}}
+	return &core.NativeCall{Name: "Console.writeOutputBytes", Module: "Console", Ty: unitTy(), Args: []core.Expr{&core.IntLit{Val: 1, Ty: intTy()}, data}}
 }
 
 func run(t *testing.T, e core.Expr) Value {

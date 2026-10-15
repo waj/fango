@@ -284,6 +284,20 @@ func (g *gen) outlinedLambda(lam *core.Lambda, mode types.Transport) goast.Expr 
 		}
 		factory := workerDecl(name, params, body.Type, []goast.Stmt{returnStmt(body)}).(*goast.FuncDecl)
 		factory.Type.TypeParams = typeFields
+		// Keep callback-record captures behind a real construction boundary.
+		// Go 1.26 on darwin/arm64 can corrupt a captured cleanup callback when
+		// it inlines this factory into a generic scope worker. Other captures
+		// and invocation of the returned closure retain normal Go inlining.
+		callables := map[string]bool{}
+		for _, callable := range g.callableNames {
+			callables[callable] = true
+		}
+		for _, p := range params {
+			if callables[callbackAliasName(p.typ)] {
+				factory.Doc = &goast.CommentGroup{List: []*goast.Comment{{Text: "//go:noinline"}}}
+				break
+			}
+		}
 		g.sharedCallbackDecls = append(g.sharedCallbackDecls, factory)
 	}
 

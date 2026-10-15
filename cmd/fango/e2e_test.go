@@ -589,7 +589,7 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 		switch {
 		case errors.As(err, &exitErr):
 			if exitErr.Code != in.status {
-				t.Fatalf("eval: exited with status %d, want %d", exitErr.Code, in.status)
+				t.Fatalf("eval: exited with status %d, want %d\n%s", exitErr.Code, in.status, printed.String())
 			}
 			return printed.String()
 		case err != nil:
@@ -773,8 +773,8 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 			t.Errorf("%s has no generated host binding:\n%s", path, host)
 		}
 	}
-	if src := generatedFile(t, files, "native/IO/native.go"); !bytes.Contains(src, []byte("func Write")) || bytes.Contains(src, []byte("fangort.")) {
-		t.Errorf("IO sidecar does not own its implementation:\n%s", src)
+	if src := generatedFile(t, files, "native/IO/native.go"); !bytes.Contains(src, []byte("func LineText")) || bytes.Contains(src, []byte("fangort.")) {
+		t.Errorf("IO sidecar does not own its line conversion:\n%s", src)
 	}
 	if src := generatedFile(t, files, "native/Text_dBuilder/native.go"); !bytes.Contains(src, []byte("func BufferAppendStringLiteral")) || bytes.Contains(src, []byte("fangort.")) {
 		t.Errorf("Text.Builder sidecar does not own its implementation:\n%s", src)

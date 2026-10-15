@@ -108,6 +108,10 @@ transport. A factory contains the actual closure body; constructing a callback
 passes its captures to the factory. Invocation calls that closure directly.
 Nested callback construction repeats factory calls, not nested copies of their
 bodies, bounding each general callback to two bodies regardless of nesting depth.
+Factories that capture callback records carry a Go inlining barrier: inlining
+that construction into a generic cleanup worker can corrupt the captured
+callback on Go 1.26 darwin/arm64. Invocation of the returned closure retains
+normal Go optimization.
 Selected multi-argument callbacks retain their flattened literal, and a task
 launch constructs only its selected member, preserving Go's inlining opportunities.
 Nested general callbacks still go through shared factories at these boundaries.

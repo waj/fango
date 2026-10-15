@@ -8,14 +8,6 @@ type FangoNativeHost = fangort.NativeHost
 
 var FangoHost FangoNativeHost = fangort.SystemNativeHost
 
-var FangoNewIOHandle = fangort.NewIOHandle
-var FangoStandardIOHandle = fangort.StandardIOHandle
-var FangoCloseIOHandle = fangort.CloseIOHandle
-var FangoIOHandleHasInput = fangort.IOHandleHasInput
-var FangoReadIOHandleLine = fangort.ReadIOHandleLine
-var FangoReadIOHandleBytes = fangort.ReadIOHandleBytes
-var FangoWriteIOHandleBytes = fangort.WriteIOHandleBytes
-
 type FangoAsyncScope = fangort.AsyncScope
 type FangoAsyncTask = fangort.AsyncTask
 type FangoAsyncCompletion = fangort.AsyncCompletion

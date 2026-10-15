@@ -1,5 +1,6 @@
 module FailureReportResourceRetained exposing (tests)
 
+import Random
 import Expect
 import Fail
 import IO
@@ -13,7 +14,7 @@ effect Release
 
 fixtureBody() =
     report = Fail.attemptReport { _ ->
-        Runtime.Scope.bracket { _ -> Port { emit = { _ -> ignore (Fail.attempt { IO.write IO.stdout "" }) } } } { _ -> () } { port ->
+        Runtime.Scope.bracket { _ -> Port { emit = { _ -> Random.runSystem { () } } } } { _ -> () } { port ->
             handle Runtime.Scope.finally { _ -> Fail.fail "body" } { _ -> release port.emit } on
                 release _ -> ()
         }

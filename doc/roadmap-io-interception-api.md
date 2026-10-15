@@ -39,148 +39,31 @@ Implemented: see [Console](../stdlib/Console.fango) and the
 [standard streams design](design/effects.md#standard-streams). The effect is
 declared in the `Console` module itself, with its operations public, rather
 than in a separate driver module; later drivers follow the same rule. The
-standard-stream `IO` declarations remain until IOI4 retires them.
+standard streams have no handle values; raw native access stays private.
 
 ## Files and directories
 
-Whole-file and directory calls, `FileSystem`'s five public operations,
-`runSystem`, `runMemory`, and the immutable `Image`/`Snapshot` API are
-implemented in [File](../stdlib/File.fango). Their boundary is specified in the
-[design](design/effects.md#whole-file-services). `listDirectory` is itself an
-operation; custom handlers need no directory resource. Fixture constructors
-return `Result IO.Error Image`, with path normalization and conflict behavior
-documented in File's source.
-
-The remaining proposal moves scoped helpers from `IO.Handle` to a file-specific
-handle and extends the same effect with streaming operations:
-
-```text
-type Handle
-
-withFile : String
-        -> (Handle ->{FileSystem, Fail IO.Error | e} a)
-        ->{FileSystem, Fail IO.Error | e} a
-
-withOutput : String
-          -> (Handle ->{FileSystem, Fail IO.Error | e} a)
-          ->{FileSystem, Fail IO.Error | e} a
-
-withAppend : String
-          -> (Handle ->{FileSystem, Fail IO.Error | e} a)
-          ->{FileSystem, Fail IO.Error | e} a
-
-readLine : Handle ->{FileSystem, Fail IO.Error} Maybe IO.Line
-readBytes : Handle -> Int ->{FileSystem, Fail IO.Error} Maybe Bytes
-write : Handle -> String ->{FileSystem, Fail IO.Error} ()
-writeBytes : Handle -> Bytes ->{FileSystem, Fail IO.Error} ()
-source : Handle -> Bytes.Source {FileSystem, Fail IO.Error}
-sink : Handle -> Bytes.Sink {FileSystem, Fail IO.Error}
-```
-
-One effect covers both acquisition and handle IO, so file code has one
-service row. A file handle is not interchangeable with a standard stream.
-Generic parsing and output code take a `Bytes.Source`, `Bytes.Sink`,
-`Reader`, or `Writer` instead.
-
-The remaining driver inventory follows the existing private streaming seams:
-
-```text
--- Additional operations of File.FileSystem.
-openRead : String -> Result IO.Error Handle
-openWrite : String -> Result IO.Error Handle
-openAppend : String -> Result IO.Error Handle
-closeHandle : Handle -> Result IO.Error ()
-readHandleLine : Handle -> Result IO.Error (Maybe IO.Line)
-readHandleBytes : Handle -> Int -> Result IO.Error (Maybe Bytes)
-writeHandleBytes : Handle -> Bytes -> Result IO.Error ()
-```
-
-A structured open mode could replace the three acquisition operations, but
-needs an exhaustive mode type and well-defined invalid mode handling. The
-selected public driver must expose the checked types custom handlers need.
+FileSystem, all streaming and whole-file operations, scoped and raw handles,
+provider construction, memory images, faults, snapshots, and the runners are
+documented in [File](../stdlib/File.fango). [File services](design/effects.md#file-services)
+and [resource identity](design/ownership.md#file-provider-identity) own the
+implemented architecture. There is no separate File.Driver module.
 
 ### File runners and fixtures
 
-The implemented whole-file fixture constructors, lookup, and runner are
-[File's API](../stdlib/File.fango). Streaming interpretation must extend the
-same image and preserve its immutable snapshot contract. The current runner
-has no live resource state, models no permissions or symlinks, and supports
-sequential use; this does not settle provider identity or shared handler state.
-
-Mock semantics must cover read offsets, EOF, independent opens, append versus
-truncate, permissions or explicit unsupported permission behavior, text/byte
-conversion, metadata, enumeration, close, and failures. Size should use the
-same unit as the real API. Path and error rendering must preserve the public
-error vocabulary. Pick a deterministic listing policy only if compatible with
-the promised real API, or explicitly limit assertions to order-independent
-results.
-
-```text
-fixtureResult = File.withTextFile "config.txt" "port=8080\n" File.empty
-fixture = Fail.fromResult fixtureResult -- inside an enclosing Fail boundary
-
-readFirstLine() =
-    use handle <- File.withFile "config.txt"
-    File.readLine handle
-
-snapshot = File.runMemory fixture {
-    Fail.attempt { readFirstLine() }
-}
-```
-
-Failure injection needs a further typed fixture vocabulary: fail opening a
-particular path, fail after a byte count, fail close, and distinguish read from
-write failures. Snapshot state must represent partial progress accurately.
-Whole-file convenience calls must agree with streaming observations over the
-same virtual files.
+File's source owns fixture path normalization, directory conflicts, append and
+truncate rules, offsets, EOF, partial progress, failure injection, and snapshot
+semantics. The memory runner is sequential and does not model permissions or
+symlinks. Concurrent consistency remains in the
+[shared-state question](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency).
 
 ## Retiring the shared handle
 
-Current source: [IO](../stdlib/IO.fango). Standard streams move to Console and
-file handles to File, so IO no longer has a handle type or handle operations.
-There is no generic handle-IO effect; the
-[resource proposal](roadmap-io-interception-resources.md#resource-representation)
-explains why. IO keeps the real-native marker and the data shared by every
-domain:
-
-```text
-effect IO
-
-type Error
-type Kind
-type Line
-
-describeError : Error -> String
-lineText : String -> String
-lineEnding : String -> String
-```
-
-The existing error and line data contracts remain authoritative in source.
-Errors on standard streams keep the paths `stdin`, `stdout`, and `stderr`.
-`IO.Handle`, `stdin`, `stdout`, `stderr`, `readLine`, `write`, `readBytes`,
-`writeBytes`, `source`, and `sink` are removed, together with the Prelude's
-reexports of the three standard handles.
-
-The Console system runner and File share the conversion from a raw native read
-to `Maybe Line` or `Maybe Bytes` and the chunk size of their sources, rather
-than copying them. Place these helpers in IO or a library-internal module.
-
-Code that chose between a standard stream and a file through a handle takes a
-sink or writer instead:
-
-```text
--- Before
-report out = IO.write out "done\n"
-report (if toFile then file else IO.stdout)
-
--- After
-report : Bytes.Sink {e} ->{e} ()
-report out = out.write (Bytes.fromString "done\n")
-report (if toFile then File.sink file else Console.sink Stdout)
-```
-
-The sink's row records which service each choice uses. Both branches must
-agree on one row, so the caller's row includes both services.
+Completed: [IO](../stdlib/IO.fango) keeps the native-interaction marker and
+shared error/line data. Console owns standard streams; File owns file handles.
+There is no shared Handle or standard-handle value. Source/Sink and Reader/Writer
+values carry the row of their backing service, and Runtime.IO shares raw
+line/byte conversions and the read bound.
 
 ## Networking
 
@@ -285,7 +168,8 @@ ordinary `Network` handler once the driver provides:
 
 - Public operation names and argument/result types.
 - A checked way to construct `Connection`, `Listener`, and `Pool` values owned
-  by a non-native provider, as specified by IOI3.
+  by a non-native provider, with the checks of File's
+  [provider identity](design/ownership.md#file-provider-identity).
 - A public cancellation contract that a custom handler can observe.
 
 These are requirements for any custom Net handler, including small
@@ -410,4 +294,4 @@ adapters should continue to operate over their existing row-indexed inputs.
 Changing the effect of a source/sink must propagate through those types rather
 than creating a dedicated effect for each helper. `Console.source`,
 `Console.sink`, `File.source`, `File.sink`, and the existing Net adapters
-supply those inputs in place of `IO.source` and `IO.sink`.
+supply those inputs for standard streams, files, and connections.

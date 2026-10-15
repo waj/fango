@@ -1,5 +1,6 @@
 module AsyncRootCleanup exposing (tests)
 
+import Random
 import Async
 import Expect
 import Fail
@@ -24,7 +25,7 @@ type Observation
 
 record : Observation ->{IO, State.State (List Observation)} ()
 record value =
-    ignore (Fail.attempt { IO.write IO.stdout "" })
+    Random.runSystem { () }
     State.put [value | State.get()]
 
 recordTrace : String ->{IO, State.State (List Observation)} ()

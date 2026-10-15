@@ -251,6 +251,12 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	if err := i.stage.Force(); err != nil {
 		return nil, nil, err
 	}
+	// Prompt declarations can be pending when a REPL imports this module.
+	// Complete them before the module's snapshot boundary, so its persistent
+	// stage section never acquires prompt definitions or source provenance.
+	if _, stageErrs := i.stage.Snapshot(); len(stageErrs) != 0 {
+		return nil, stageErrs, nil
+	}
 	i.stage.BeginModule(module.Name, module.NativeModule)
 	checkStart := i.begin("check", owner)
 	checked, checkErrs := i.ck.CheckModule(module.Module, infer.ModuleOptions{Name: module.Name, Role: role, Entry: module.Entry})

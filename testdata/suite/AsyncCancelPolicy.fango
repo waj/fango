@@ -1,5 +1,6 @@
 module AsyncCancelPolicy exposing (tests)
 
+import Random
 import Async
 import Expect
 import Fail
@@ -13,7 +14,7 @@ type Observation = ChannelOutcome (Async.Outcome (Maybe Int)) | ValueOutcome (As
 
 record : Observation ->{IO, State.State (List Observation)} ()
 record value =
-    ignore (Fail.attempt { IO.write IO.stdout "" })
+    Random.runSystem { () }
     State.put [value | State.get()]
 
 recordChannelOutcome : Async.Outcome (Maybe Int) ->{IO, State.State (List Observation)} ()

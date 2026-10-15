@@ -25,11 +25,12 @@ module Console exposing (Console(..), Output(..), Transcript(..), print, runSyst
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Sink(..), Source(..))
-import Fail
 import IO exposing (IO, Line(..))
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
 import Runtime.Entry
+import Runtime.IO
 
 -- A standard output stream.
 type Output
@@ -65,12 +66,9 @@ write text = writeTo Stdout text
 print : Display a => a ->{Console} ()
 print value = write (display value ++ "\n")
 
-chunk : Int
-chunk = 65536
-
 -- Standard input as a byte source for `Reader`.
 source : Source {Console}
-source = Source { pull = { readBytes chunk } }
+source = Source { pull = { readBytes Runtime.IO.chunk } }
 
 -- An output stream as a byte sink for `Writer`.
 sink : Output -> Sink {Console}
@@ -87,29 +85,43 @@ failed error =
     panic (IO.describeError error)
     failed error
 
-handleFor : Output -> IO.Handle
-handleFor output =
-    case output of
-        Stdout -> IO.stdout
-        Stderr -> IO.stderr
+inputHasBytes : () ->{IO} Result IO.Error Bool
+inputHasBytes = native
+
+readInputLine : () ->{IO} Result IO.Error String
+readInputLine = native
+
+readInputBytes : Int ->{IO} Result IO.Error Bytes
+readInputBytes = native
+
+writeOutputBytes : Int -> Bytes ->{IO} Result IO.Error ()
+writeOutputBytes = native
 
 systemReadLine : () ->{IO} Maybe Line
 systemReadLine() =
-    handle IO.readLine IO.stdin on
-        Fail.fail error -> failed error
-        return line -> line
+    case readInputLine() of
+        Err error -> failed error
+        Ok raw -> Runtime.IO.line raw
 
 systemReadBytes : Int ->{IO} Maybe Bytes
 systemReadBytes count =
-    handle IO.readBytes IO.stdin count on
-        Fail.fail error -> failed error
-        return data -> data
+    if count <= 0 then
+        case inputHasBytes() of
+            Err error -> failed error
+            Ok available -> if available then Just Bytes.empty else Nothing
+    else
+        case readInputBytes count of
+            Err error -> failed error
+            Ok raw -> Runtime.IO.bytes raw
 
 systemWriteBytes : Output -> Bytes ->{IO} ()
 systemWriteBytes output data =
-    handle IO.writeBytes (handleFor output) data on
-        Fail.fail error -> failed error
-        return value -> value
+    endpoint = case output of
+        Stdout -> 1
+        Stderr -> 2
+    case writeOutputBytes endpoint data of
+        Err error -> failed error
+        Ok () -> ()
 
 -- Answers `Console` with the process's standard streams, or the REPL
 -- session's. A stream error ends the program with the error's description
@@ -145,7 +157,7 @@ carriageReturn = Bytes.fromString "\r"
 
 type LineRead = { line : Line, rest : Bytes }
 
--- A line of `input` as `IO.readLine` would read it, and what follows it.
+-- A line of input and what follows it.
 lineOf : Bytes -> LineRead
 lineOf input =
     length = Bytes.length input

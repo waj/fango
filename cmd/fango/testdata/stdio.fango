@@ -1,5 +1,5 @@
 import Bytes
-import Fail exposing (Fail, attempt)
+import Console exposing (Output(..))
 import Process
 import Result exposing (Result(..))
 
@@ -15,28 +15,20 @@ bytes value =
         Nothing -> []
         Just found -> Bytes.toList found
 
-exercise : () ->{IO, Console, Fail IO.Error} ()
+exercise : () ->{Console} ()
 exercise() =
-    print (bytes (IO.readBytes stdin 1))
-    print (line (IO.readLine stdin))
-    print (bytes (IO.readBytes stdin 1))
-    print (line (IO.readLine stdin))
-    print (IO.readBytes stdin 0 == Just Bytes.empty)
-    print (line (IO.readLine stdin))
-    print (IO.readBytes stdin 0 == Nothing)
-    IO.write stdout "out\n"
-    IO.write stderr "err\n"
-    IO.writeBytes stderr (Bytes.fromList [255, 0, 65])
+    print (bytes (Console.readBytes 1))
+    print (line (Console.readLine()))
+    print (bytes (Console.readBytes 1))
+    print (line (Console.readLine()))
+    print (Console.readBytes 0 == Just Bytes.empty)
+    print (line (Console.readLine()))
+    print (Console.readBytes 0 == Nothing)
+    Console.write "out\n"
+    Console.writeTo Stderr "err\n"
+    Console.writeBytes Stderr (Bytes.fromList [255, 0, 65])
 
 main() =
-    case attempt exercise of
-        Ok () -> ()
-        Err error -> print (IO.describeError error)
-    case attempt { IO.readLine stdout } of
-        Ok _ -> print "unexpected readable stdout"
-        Err error -> print (error.path ++ ":" ++ show error.kind)
-    case attempt { IO.write stdin "bad" } of
-        Ok () -> print "unexpected writable stdin"
-        Err error -> print (error.path ++ ":" ++ show error.kind)
+    exercise()
     print (Process.args())
     Process.exit Process.success

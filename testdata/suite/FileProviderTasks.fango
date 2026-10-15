@@ -1,0 +1,78 @@
+module FileProviderTasks exposing (tests)
+
+import Async
+import Expect
+import File
+import IO
+import Result exposing (Result(..))
+import Test
+
+problem : Result IO.Error a ->{Expect.Expect} IO.Error
+problem result =
+    case result of
+        Err error -> error
+        Ok _ -> Expect.failWith "expected retired provider error"
+
+finished : Async.Outcome a ->{Expect.Expect} a
+finished outcome =
+    case outcome of
+        Async.Completed value -> value
+        Async.Cancelled -> Expect.failWith "task runtime cancelled"
+
+inside : File.Image ->{IO} Async.Outcome (Result IO.Error String)
+inside image =
+    observed = File.runMemory image {
+        Async.runOutcome {
+            task = Async.spawn { File.read "input" }
+            Async.await task
+        }
+    }
+    observed.value
+
+outsideMemory : () ->{IO} Async.Outcome (Result IO.Error Bool)
+outsideMemory() = Async.runOutcome {
+    gate = Async.channel 0
+    captured = File.runMemory File.empty {
+        Async.spawn {
+            ignored = Async.receive gate
+            File.isDirectory "."
+        }
+    }
+    ignored = Async.send gate ()
+    Async.await captured.value
+}
+
+outsideSystem : () ->{IO} Async.Outcome (Result IO.Error Int)
+outsideSystem() = Async.runOutcome {
+    gate = Async.channel 0
+    task = File.runSystem {
+        Async.spawn {
+            ignored = Async.receive gate
+            File.size "never-read-after-provider-exit"
+        }
+    }
+    ignored = Async.send gate ()
+    Async.await task
+}
+
+tests : Test.Test IO.IO
+tests = Test.describe "file provider task lifetimes"
+    [ Test.test "task drained inside memory provider can read its files" {
+        image = Expect.ok (File.withTextFile "input" "ready" File.empty)
+        Expect.equal (Ok "ready") (finished (inside image))
+    }
+    , Test.test "task outliving memory provider cannot query its snapshot" {
+        result = finished outsideMemory()
+        Expect.equal IO.Other (problem result).kind
+        Expect.equal "closed provider" (problem result).message
+        Expect.equal "." (problem result).path
+    }
+    , Test.test "task outliving system provider cannot fall through to the OS" {
+        result = finished outsideSystem()
+        Expect.equal IO.Other (problem result).kind
+        Expect.equal "closed provider" (problem result).message
+        Expect.equal "never-read-after-provider-exit" (problem result).path
+    }
+    ]
+
+main() = Test.run tests
