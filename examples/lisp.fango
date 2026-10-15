@@ -31,6 +31,7 @@
 -- non-tail expressions still use the host stack.
 
 import Dict exposing (Dict)
+import Fail exposing (Fail)
 import File
 import LispEval
 import LispReader
@@ -38,29 +39,27 @@ import Process
 import Result exposing (Result(..))
 import String
 
-execute : String -> String -> Dict String LispEval.Value -> List LispReader.Expr ->{IO} (Dict String LispEval.Value, Bool)
+-- Evaluates the forms in order, printing each value, and stops at the first
+-- error. Returns the definitions made so far and that error's diagnostic.
+execute : String -> String -> Dict String LispEval.Value -> List LispReader.Expr ->{Console} (Dict String LispEval.Value, Maybe String)
 execute filename source globals forms = case forms of
-    [] -> (globals, True)
+    [] -> (globals, Nothing)
     [first | rest] ->
         (next, result) = LispEval.top globals first
         case result of
             Ok value ->
                 print (LispEval.render value)
                 execute filename source next rest
-            Err error ->
-                print (LispReader.diagnostic filename source error)
-                (next, False)
+            Err error -> (next, Just (LispReader.diagnostic filename source error))
 
-repl : Dict String LispEval.Value -> String ->{IO} ()
+repl : Dict String LispEval.Value -> String ->{Console, Fail String} ()
 repl globals pending =
     Console.write (if pending == "" then "lisp> " else "...> ")
     case readLine() of
         Nothing ->
             if pending == "" then ()
             else case LispReader.read pending of
-                Err error ->
-                    print (LispReader.diagnostic "<stdin>" pending error)
-                    Process.exit 1
+                Err error -> Fail.fail (LispReader.diagnostic "<stdin>" pending error)
                 Ok _ -> ()
         Just line ->
             if pending == "" && String.trim line.text == ":quit" then ()
@@ -73,19 +72,32 @@ repl globals pending =
                             print (LispReader.diagnostic "<stdin>" source error)
                             repl globals ""
                     Ok forms ->
-                        (next, _) = execute "<stdin>" source globals forms
+                        (next, failure) = execute "<stdin>" source globals forms
+                        case failure of
+                            Nothing -> ()
+                            Just diagnostic -> print diagnostic
                         repl next ""
 
-file : String ->{IO} ()
-file path = case File.read path of
-    Err error -> print (IO.describeError error); Process.exit 1
-    Ok source -> case LispReader.read source of
-        Err error -> print (LispReader.diagnostic path source error); Process.exit 1
-        Ok forms ->
-            (_, succeeded) = execute path source LispEval.initial forms
-            if succeeded then () else Process.exit 1
+file : String ->{Console, File.FileSystem, Fail String} ()
+file path =
+    source = case File.read path of
+        Err error -> Fail.fail (IO.describeError error)
+        Ok text -> text
+    forms = case LispReader.read source of
+        Err error -> Fail.fail (LispReader.diagnostic path source error)
+        Ok parsed -> parsed
+    (_, failure) = execute path source LispEval.initial forms
+    case failure of
+        Nothing -> ()
+        Just diagnostic -> Fail.fail diagnostic
+
+-- Prints a failure's diagnostic and reports it in the exit status.
+report : (() ->{Fail String | e} ()) ->{Console | e} Process.Status
+report action = case Fail.attempt action of
+    Ok () -> Process.success
+    Err diagnostic -> print diagnostic; Process.failure
 
 main() = case Process.args() of
-    [] -> repl LispEval.initial ""
-    [path] -> file path
-    _ -> print "usage: lisp [file]"; Process.exit 2
+    [] -> report { repl LispEval.initial "" }
+    [path] -> report { file path }
+    _ -> print "usage: lisp [file]"; Process.status 2
