@@ -67,113 +67,13 @@ line/byte conversions and the read bound.
 
 ## Networking
 
-Current source: [Net](../stdlib/Net.fango). Net already has domain-specific
-handles: connection reads and writes are Net functions on `Net.Connection`,
-not generic handle IO. A complete interception boundary must cover the entire
-existing surface, not only `withClient`:
-
-```text
-type Listener
-type Connection
-type Pool
-type Error
-type Kind
-
-withListener : Int
-            -> (Listener ->{Network, Fail Error | e} a)
-            ->{Network, Fail Error | e} a
-accept : Listener
-      -> (Connection ->{Network, Fail Error | e} a)
-      ->{Network, Fail Error | e} a
-acceptAsync : Listener
-           -> (Connection ->{Network, Fail Error, Async.Async | e} a)
-           ->{Network, Fail Error, Async.Async | e} a
-withClient : String -> Int
-          -> (Connection ->{Network, Fail Error | e} a)
-          ->{Network, Fail Error | e} a
-
-dialTimeout : String -> Int -> Int ->{Network} Result Error Connection
-dialTls : String -> Int -> Int -> String ->{Network} Result Error Connection
-closeConnection : Connection ->{Network} Result Error ()
-readConnectionBytes : Connection -> Int ->{Network} Result Error Bytes
-writeConnectionBytes : Connection -> Bytes ->{Network} Result Error ()
-setReadDeadline : Connection -> Int ->{Network} Result Error ()
-setWriteDeadline : Connection -> Int ->{Network} Result Error ()
-
-stopListener : Listener ->{Network} Result Error ()
-listenerStopped : Listener ->{Network} Bool
-
-source : Connection -> Bytes.Source {Network, Fail Error}
-sink : Connection -> Bytes.Sink {Network, Fail Error}
-sourceAsync : Connection ->{Async.Async} Bytes.Source {Network, Fail Error}
-sinkAsync : Connection ->{Async.Async} Bytes.Sink {Network, Fail Error}
-
-newPool : Int -> Int ->{Network} Pool
-poolConnect : Pool -> String -> Int -> Int -> Bool -> String -> Bool
-           ->{Network} Result Error Connection
-poolRelease : Connection -> Bool ->{Network} Result Error ()
-connectionReused : Connection ->{Network} Bool
-closePool : Pool ->{Network} Result Error ()
-```
-
-These signatures deliberately expose today's awkward parameter-heavy calls
-instead of hiding them behind an unspecified ergonomic facade. An Endpoint or
-connection-options record could improve the API, but is a distinct migration
-decision. Preserve the source's meanings and units for timeouts, TLS hostnames,
-certificate inputs, and pooling options.
-
-### Network operation inventory
-
-| Operation family | Existing native seams to cover |
-| --- | --- |
-| Listener lifecycle | `listen`, `closeListener`, `stopListener`, `listenerStopped` |
-| Accept | `acceptConnection`, `acceptConnectionAsync` |
-| Connection creation | `dial`, `dialTimeout`, `dialTls` |
-| Connection lifecycle | `closeConnection`, `connectionHasInput` |
-| Byte transport | `readConnectionBytes`, `writeConnectionBytes`, `readConnectionBytesAsync`, `writeConnectionBytesAsync` |
-| Deadlines | `setReadDeadline`, `setWriteDeadline` |
-| Pools | `newPool`, `poolConnect`, `poolRelease`, `connectionReused`, `closePool` |
-
-The public driver signatures are not closed. Async native seams currently take
-a private runtime context token. A checked cancellation capability must replace
-that detail at a public operation boundary. Merely copying the native type
-`Runtime.Native.Any` into the driver would not constitute a finished API.
-
-Options include explicit synchronous/cancellable operation pairs, a checked
-opaque cancellation capability, or a runner whose clauses have a declared
-Async dependency. Each choice must account for the runner's residual effects
-and handler inheritance. Do not silently make a synchronous runner require
-Async because an unused clause references it.
-
-One `Network` effect is the catalogue baseline. Splitting it into listener,
-connection, and pool effects may reduce custom-handler size but creates more
-effect rows and runner dependencies. Review real server and client examples
-before choosing. Keep the error distinctions used by HTTP transport mapping.
-
-### Network runners
-
-```text
-runSystem : (() ->{Network | e} a) ->{IO | e} a
-```
-
-The shape above covers the synchronous candidate. Cancellable variants may
-need a different signature once their capability is selected.
-
-The standard library provides the seam and the system runner, not simulated
-networks. Its own transport tests keep real loopback sockets, and HTTP
-application tests keep `Client.stub` and `Client.mock`. Scripted network
-fixtures (expected endpoints, inbound chunks, outbound expectations, listener
-and pool scripts) are left to libraries. A library can write one as an
-ordinary `Network` handler once the driver provides:
-
-- Public operation names and argument/result types.
-- A checked way to construct `Connection`, `Listener`, and `Pool` values owned
-  by a non-native provider, with the checks of File's
-  [provider identity](design/ownership.md#file-provider-identity).
-- A public cancellation contract that a custom handler can observe.
-
-These are requirements for any custom Net handler, including small
-hand-written test handlers, not extra work for scripts alone.
+Implemented: see [Net](../stdlib/Net.fango),
+[network services](design/effects.md#network-services), and
+[resource ownership](design/ownership.md#file-provider-identity). Dialing takes
+an `Endpoint` record rather than positional host, timeout, and TLS arguments,
+and `Net.Cancel` is the checked cancellation argument of accepts, reads, and
+writes. The standard library ships only the system runner; scripted network
+fixtures are left to libraries, written as ordinary `Network` handlers.
 
 ## Process arguments and exit
 

@@ -2,8 +2,8 @@
 -- An HTTP/1.1 client.
 --
 -- Code that makes requests performs the `Http` effect and `Fail Error`, and
--- needs no `IO`: `run` connects `Http` to sockets where the program starts
--- it. `stub` answers raw bytes and `mock` runs server handlers in memory,
+-- performs no networking itself: `run` connects `Http` to Net where the
+-- program starts it. `stub` answers raw bytes and `mock` runs server handlers in memory,
 -- for tests. Requests follow redirects, decompress gzip responses, reuse
 -- connections, and support `https`. A URL without a scheme resolves against the configured base URL.
 module Http.Client exposing
@@ -21,7 +21,6 @@ import Http exposing (Body(..), Header(..), Protocol(..))
 import Http.GZip as GZip
 import Http.Server as Server
 import Http.Wire as Wire exposing (Framing(..))
-import IO exposing (IO)
 import Json exposing (Decode, Encode)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
@@ -194,52 +193,57 @@ fromNet result =
 foreign : Result Error a
 foreign = Err (Protocol (Http.InvalidMessage "connection belongs to another transport"))
 
-dial : Net.Pool -> Endpoint ->{IO} Result Error Connection
+dial : Net.Pool -> Endpoint ->{Net.Network} Result Error Connection
 dial pool endpoint =
-    roots = Maybe.withDefault "" endpoint.caFile
-    case Net.poolConnect pool endpoint.host endpoint.port endpoint.connectTimeoutMs endpoint.secure roots endpoint.fresh of
+    target = Net.Endpoint
+        { host = endpoint.host
+        , port = endpoint.port
+        , timeoutMs = endpoint.connectTimeoutMs
+        , security = if endpoint.secure then Net.Tls endpoint.caFile else Net.Plain
+        }
+    case Net.poolConnect pool target endpoint.fresh of
         Ok connection -> Ok (Socket connection (Net.connectionReused connection))
         Err error -> Err (netError error)
 
-socketWrite : Connection -> Bytes -> Int ->{IO} Result Error ()
+socketWrite : Connection -> Bytes -> Int ->{Net.Network} Result Error ()
 socketWrite connection bytes timeout =
     case connection of
         Socket socket _ ->
             case fromNet (Net.setWriteDeadline socket timeout) of
-                Ok _ -> fromNet (Net.writeConnectionBytes socket bytes)
+                Ok _ -> fromNet (Net.writeConnectionBytes socket bytes Net.uncancellable)
                 Err error -> Err error
         Memory _ -> foreign
 
-socketRead : Connection -> Int -> Int ->{IO} Result Error (Maybe Bytes)
+socketRead : Connection -> Int -> Int ->{Net.Network} Result Error (Maybe Bytes)
 socketRead connection most timeout =
     case connection of
         Socket socket _ ->
             case fromNet (Net.setReadDeadline socket timeout) of
                 Err error -> Err error
                 Ok _ ->
-                    case fromNet (Net.readConnectionBytes socket most) of
+                    case fromNet (Net.readConnectionBytes socket most Net.uncancellable) of
                         Ok bytes -> Ok (if Bytes.length bytes == 0 then Nothing else Just bytes)
                         Err error -> Err error
         Memory _ -> foreign
 
-socketRelease : Connection -> Bool ->{IO} Result Error ()
+socketRelease : Connection -> Bool ->{Net.Network} Result Error ()
 socketRelease connection reusable =
     case connection of
         Socket socket _ -> fromNet (Net.poolRelease socket reusable)
         Memory _ -> foreign
 
--- Runs requests over TCP and TLS with `defaultConfig`, which `configure`
--- adjusts. Idle connections are kept for reuse, up to 8 per endpoint for up
--- to 60 s, until `run` returns; tasks that inherit the handler share them. A
--- request that fails on a reused connection before any response arrives is
--- retried once on a new one when it is idempotent and its body can be sent
--- again. Once any response bytes arrive, failures propagate without retry,
--- including an incomplete head or body. A connection is reused only when its
--- response was read to the end,
--- both sides spoke HTTP/1.1, neither sent `Connection: close`, and the body
--- was framed by length or chunks; an unread body is drained if at most
--- 64 KiB remain, and otherwise the connection closes.
-run : (() ->{Http | e} a) ->{IO | e} a
+-- Runs requests over Net's TCP and TLS connections with `defaultConfig`,
+-- which `configure` adjusts. Idle connections are kept for reuse, up to 8 per
+-- endpoint for up to 60 s, until `run` returns; tasks that inherit the handler
+-- share them. A request that fails on a reused connection before any response
+-- arrives is retried once on a new one when it is idempotent and its body can
+-- be sent again. Once any response bytes arrive, failures propagate without
+-- retry, including an incomplete head or body. A connection is reused only
+-- when its response was read to the end, both sides spoke HTTP/1.1, neither
+-- sent `Connection: close`, and the body was framed by length or chunks; an
+-- unread body is drained if at most 64 KiB remain, and otherwise the
+-- connection closes.
+run : (() ->{Http | e} a) ->{Net.Network | e} a
 run action =
     pool = Net.newPool 8 60000
     Runtime.Scope.finally {
@@ -314,7 +318,7 @@ stub respond action =
         release _ _ -> resume (Ok ()) with exchange
         currentConfig () -> resume defaultConfig with exchange
 
--- Runs `action` against a server handler without sockets or `IO`. The
+-- Runs `action` against a server handler without sockets or `Network`. The
 -- client writes its real HTTP bytes, the server parses them and serializes
 -- the handler's response, and the client reads that response normally.
 -- Requests and responses are buffered in full; requests run one at a time,

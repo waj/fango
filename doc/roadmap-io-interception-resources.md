@@ -1,39 +1,22 @@
 # Roadmap: resources and execution for IO interception
 
 This companion to the [IO interception proposal](roadmap-io-interception.md)
-owns unresolved representation and execution choices. The
-[API catalogue](roadmap-io-interception-api.md) owns proposed public signatures.
-File resource ownership, provider identity, and retirement are implemented in
-[File](../stdlib/File.fango) and the [resource design](design/ownership.md).
-This page now owns the remaining Network resource requirements and the
-unresolved shared-handler-state question.
-
-## Required separation of identities
-
-The implemented separation of handler activation, resource provider, and
-cleanup scope lives in the [resource design](design/ownership.md#file-provider-identity).
-Network interpretation must preserve the same distinction; inheriting a handler
-or closing one connection must not change the ownership of unrelated resources.
+owns the execution questions that remain open. Resource ownership, provider
+identity, retirement, and foreign-resource checks for File and Net are
+implemented; see the [resource design](design/ownership.md#file-provider-identity).
+Network cancellation is implemented; see
+[network services](design/effects.md#network-services).
 
 ## Resource representation
 
-[File](../stdlib/File.fango) owns File.Handle and its checked virtual-provider
-API. [Console](../stdlib/Console.fango) owns standard streams through a closed
-output choice. Generic code takes Source/Sink or Reader/Writer values. Net
-currently exposes only its native resource representations; virtual connections,
-listeners, pools, and their checked construction API remain IOI6 work.
+Implemented: File and Net resources are either provider-owned native objects
+or Fango values naming their provider and a handler key, and Console owns
+standard streams through a closed output choice. Generic code takes
+Source/Sink or Reader/Writer values. Http.Client's `Memory Int` mock
+connection is still not a safe resource-provider model; IOI7 replaces it when
+it routes mocks through the checked Net boundary.
 
-### Provider identity within a domain
-
-File's provider tokens, provider-scoped handle keys, foreign checks, and
-checked native projection are specified in the
-[design](design/ownership.md#file-provider-identity). A future Network backend
-must provide equivalent checks for its own nominal resources. It must not use
-an integer alone as a provider identity or promote Runtime.Native.Any into an
-unchecked public construction API. Http.Client's current `Memory Int` mock is
-not a safe resource-provider model.
-
-### Scoped capabilities remain deferred
+## Scoped capabilities remain deferred
 
 Acquisition could instead pass a row-indexed Source/Sink record whose
 operations call the provider selected at acquisition, so no ambient handler
@@ -42,25 +25,6 @@ a record whose row the handler chooses: a real provider's `{IO}`, or a mock's
 fresh local permission. Operation signatures cannot express that today; it
 needs row-kinded effect parameters or existential rows. Revisit capabilities
 only if that language work is undertaken for other reasons.
-
-## Nested providers and foreign handles
-
-File runners are closed interpretations and reject foreign handles without
-fallback; custom forwarding retains the outer FileSystem row. The public
-[File API](../stdlib/File.fango) owns the exact errors. A future Network runner
-must settle the corresponding policy for connections, listeners, and pools.
-Pure fallback must remain pure, and a missing handler must not access the OS.
-
-## Lifetimes, escape, and cleanup
-
-The [cleanup reference](reference/resources.md) and
-[File design](design/ownership.md#file-provider-identity) own implemented scope
-ordering, provider retirement, escape checks, and task ownership. IOI6 must
-preserve those obligations for virtual and native Net resources: failed
-acquisition releases nothing, scopes release in reverse order, body failures
-stay primary, and escaped resources cannot alias later acquisitions. Raw Net
-acquisition and pool leases need explicit close/release obligations, and
-cancellation must not bypass their cleanup.
 
 ## Mutable fixtures and concurrency
 
@@ -117,51 +81,6 @@ Tests should assert per-resource order and valid causal relationships. A
 global trace can record observed order but does not make that order repeatable
 across native schedules. Fixed clock readings and seeded randomness do not
 establish deterministic ordering between tasks.
-
-## Cancellation
-
-Cancellation must remain attached to the requesting task and supported
-operation lifetime. The public Net driver cannot expose an unchecked Go
-context payload as its contract. A checked token/capability must specify
-whether it can be retained, inherited, copied, and used after its owner ends.
-
-Evaluate synchronous and cancellable variants independently. If a system
-handler clause performs Async operations, account for that dependency in the
-runner type and in child-handler reconstruction. Do not capture a parent's
-task identity and accidentally use it for every child call. Native default
-selection must not depend on an undocumented search for optional ambient
-effects.
-
-Real cancellation acceptance includes blocked accepts, reads and writes where
-supported, deadline races, close interrupting a blocked operation, and cleanup
-after cancellation. A custom handler that immediately returns a
-cancellation-shaped error tests application handling but does not establish
-that the real native operation can be interrupted.
-
-Keep application failures, EOF, timeouts, and cancellation distinct. Decide whether task cancellation is observed through the existing
-task cancellation boundary or translated to a transport error at a particular
-API; preserve whichever distinction the public operation promises. Retain
-the current restrictions on abort-only handlers in child tasks.
-
-Whole-request timeout policy, early HTTP responses during upload, and other
-HTTP-specific choices remain in the
-[client roadmap](roadmap-http-client.md#open-questions). A custom Net handler
-can provide acceptance scenarios without settling those policies by accident.
-
-## Native and compiler boundary
-
-The implemented [native contract](reference/native.md),
-[backend](design/backend.md), and [resource design](design/ownership.md)
-own File/Console separation and checked native projection. Future Network
-operations should likewise be ordinary source-defined operations with system
-handlers calling private natives. Do not generalize native operation defaults,
-exchange arbitrary Go payloads, revive coroutine machinery, or add a task/channel
-per operation merely to implement interception.
-
-Network work must preserve operation identity through imports, reexports,
-partial application, staging, evidence adaptation, and module emission. Real
-runners must call private natives rather than recursively invoking their own
-operations. Optimizations must preserve handler selection and observable IO.
 
 ## Review checklist for provider identity
 

@@ -101,8 +101,9 @@ so a failure reaches the caller's own `attempt` rather than the handler outside
 write); only then do `configure` overrides, which sit inside `run`, reach the
 transport.
 
-Idle connections live in a pool owned by `run` and implemented in `Net`'s
-native code, whose lock makes it safe across tasks without requiring `Async`.
+Idle connections live in a pool owned by `run` and created through Net's
+`Network` effect; the system runner's native pool lock makes it safe across
+tasks without requiring `Async`.
 Each checkout is a new lease on a connection, and releasing a lease again does
 nothing. So the cleanup that closes a connection after a failed request can
 never close one a later request took from the pool. A request releases its

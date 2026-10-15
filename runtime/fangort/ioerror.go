@@ -38,7 +38,12 @@ func ClassifyIOError(err error) IOFailure {
 	failure := IOFailure{Kind: IOErrorOther, Message: err.Error()}
 	var pathErr *fs.PathError
 	var linkErr *os.LinkError
+	var resourceErr *ResourceError
 	switch {
+	case errors.As(err, &resourceErr):
+		failure.Path = resourceErr.Label
+		failure.Message = resourceErr.Problem
+		return failure
 	case errors.As(err, &pathErr):
 		failure.Path = pathErr.Path
 		failure.Message = pathErr.Err.Error()

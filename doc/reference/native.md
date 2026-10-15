@@ -59,8 +59,9 @@ sees the underlying value (`int64` here, or `any` for `Runtime.Native.Any`); the
 and rebuilds the constructor on the way out, in both backends. Keep the
 constructor out of the module's exposing list and derive no `Show` or `Eq`,
 and callers hold an opaque handle they can neither forge nor inspect — the
-bundled `File.Handle`, `Net.Listener`, and `Net.Connection` use this with
-`Runtime.Native.Any`, with `{-# resource #-}` adding their scoped capability contract.
+private native wrappers behind the bundled `File.Handle`, `Net.Listener`, and
+`Net.Connection` use this with `Runtime.Native.Any`, with `{-# resource #-}`
+adding their scoped capability contract.
 The indexed storage forms below additionally admit opaque typed payloads.
 Other direct functions, ADTs, records, polymorphic variables, class constraints,
 Go type parameters, and multiple results are `NATIVE ABI` errors. A Go `error` result is likewise

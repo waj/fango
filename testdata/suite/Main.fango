@@ -167,6 +167,7 @@ import NativeStorage
 import NativeStringUnchecked
 import Negative
 import NetApi
+import NetProviders
 import Oversat
 import PatternBindings
 import PerArrowEffects
@@ -465,6 +466,7 @@ main() =
             , NativeStringUnchecked.tests
             , Negative.tests
             , NetApi.tests
+            , NetProviders.tests
             , Oversat.tests
             , PatternBindings.tests
             , PerArrowEffects.tests

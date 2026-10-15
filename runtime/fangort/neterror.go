@@ -19,6 +19,12 @@ const (
 // the endpoint involved in the operation when net exposes it.
 func ClassifyNetError(err error) IOFailure {
 	failure := IOFailure{Kind: NetErrorOther, Message: err.Error()}
+	var resourceErr *ResourceError
+	if errors.As(err, &resourceErr) {
+		failure.Path = resourceErr.Label
+		failure.Message = resourceErr.Problem
+		return failure
+	}
 	var opErr *net.OpError
 	if errors.As(err, &opErr) {
 		if opErr.Addr != nil {

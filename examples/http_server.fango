@@ -7,6 +7,7 @@ import Http.Server
 import Http.Server.Route as Route
 import IO
 import List exposing (List)
+import Net
 import Process
 import Reader
 import String
@@ -46,7 +47,7 @@ route request =
 app : Http.Server.Request {Protocol | e} ->{Protocol | e} Http.Server.Response {Protocol | e}
 app request = Http.GZip.wrap route request
 
-main : () ->{IO, Console, Process.Arguments} ()
+main : () ->{IO, Console, Net.Network, Process.Arguments} ()
 main() =
     case Process.args() of
         [raw] ->

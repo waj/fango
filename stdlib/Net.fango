@@ -7,9 +7,27 @@
 -- lifetime themselves, as the HTTP client does, use the unscoped operations
 -- and pools. Reads on one connection serialize, as do whole writes, so tasks
 -- may share it; closing interrupts a blocked read or write and makes later
--- operations fail. Cancelling a task does not close its connections, except
--- through the `Async` variants.
-module Net exposing (Connection, Error(..), Kind(..), Listener, Pool, accept, acceptAsync, closeConnection, closePool, connectionReused, dialTimeout, dialTls, listenerStopped, newPool, poolConnect, poolRelease, readConnectionBytes, setReadDeadline, setWriteDeadline, sink, sinkAsync, source, sourceAsync, stopListener, withClient, withListener, writeConnectionBytes)
+-- operations fail.
+--
+-- Every call performs `Network`. `runSystem` is its default and reaches the
+-- OS; a custom handler can answer the same operations without sockets, using
+-- `withProvider` to create listeners, connections, and pools of its own.
+-- Sockets belong to the runner that opened them, which rejects those of any
+-- other runner and closes its remaining sockets when it exits.
+--
+-- Accepts, reads, and writes take a `Cancel`. The `Async` variants pass the
+-- task's lifetime: when the task is cancelled during the call, the system
+-- runner closes the listener or connection to interrupt it, and the variant
+-- then stops the task as cancelled rather than raising a network error. Other
+-- calls pass `uncancellable`; cancelling their task does not close anything.
+module Net exposing
+    ( Cancel, Connection, Endpoint(..), Error(..), Kind(..), Listener
+    , Network(..), Pool, Provider, Security(..)
+    , accept, acceptAsync, connectionFor, connectionKey, endpoint, isCancelled
+    , listenerFor, listenerKey, poolFor, poolKey, runSystem, sink, sinkAsync
+    , source, sourceAsync, taskCancel, uncancellable, withClient, withListener
+    , withProvider
+    )
 
 import Async
 import Basics exposing (..)
@@ -18,11 +36,9 @@ import Fail exposing (Fail, fromResult)
 import IO exposing (IO)
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
+import Runtime.Entry
 import Runtime.Native
 import Runtime.Scope
-
-{- TCP sockets as scoped resources. Listener and Connection contain opaque Go
-values with private constructors. Native operations reject sockets after closure. -}
 
 -- The kinds of network failure a program can act on portably.
 type Kind
@@ -34,7 +50,8 @@ type Kind
     | AddressInUse
     -- An operation exceeded its time limit or deadline.
     | TimedOut
-    -- Any other failure.
+    -- Any other failure, including use of a closed, foreign, or retired
+    -- resource.
     | Other
     deriving (Eq, Show)
 
@@ -50,170 +67,440 @@ type Error =
     }
     deriving (Eq, Show)
 
--- A listening socket. It has no public constructor; `withListener` scopes
--- one.
+-- How a connection is secured.
+type Security
+    -- Plain TCP.
+    = Plain
+    -- TLS, verifying the server certificate for the host against the system
+    -- roots plus those in the PEM file, when one is given. The host is also
+    -- sent for SNI. The connection then carries plaintext like any other.
+    | Tls (Maybe String)
+    deriving (Eq, Show)
+
+-- Where and how to connect.
+type Endpoint =
+    {
+      -- The host name or address.
+      host : String
+      -- The TCP port.
+    , port : Int
+      -- The connection limit in milliseconds; 0 leaves it to the system.
+    , timeoutMs : Int
+      -- Plain TCP or TLS.
+    , security : Security
+    }
+    deriving (Eq, Show)
+
+-- A plain endpoint with no timeout of its own.
+--
+-- ```fango
+-- import Net
+--
+-- (Net.endpoint "localhost" 80).security == Net.Plain
+-- ```
+endpoint : String -> Int -> Endpoint
+endpoint host port = Endpoint { host = host, port = port, timeoutMs = 0, security = Plain }
+
+-- A listening socket. It cannot be forged, inspected, or compared.
 {-# resource #-}
-type Listener = Listener Runtime.Native.Any
+type Listener
+    = SystemListener NativeListener
+    | VirtualListener Provider Int
 
--- A connected socket. It has no public constructor; `accept`, `withClient`,
--- and the dialing operations produce one.
+-- A connected socket. It cannot be forged, inspected, or compared.
 {-# resource #-}
-type Connection = Connection Runtime.Native.Any
-
-listen : Int ->{IO} Result Error Listener
-listen = native
-
-closeListener : Listener ->{IO} Result Error ()
-closeListener = native
-
--- Closes the listener, interrupting a blocked accept. Stopping it again does
--- nothing.
-stopListener : Listener ->{IO} Result Error ()
-stopListener listener = closeListener listener
-
--- Whether the listener has been closed.
-listenerStopped : Listener ->{IO} Bool
-listenerStopped = native
-
-acceptConnection : Listener ->{IO} Result Error Connection
-acceptConnection = native
-
-acceptConnectionAsync : Runtime.Native.Any -> Listener ->{IO} Result Error Connection
-acceptConnectionAsync = native
-
-dial : String -> Int ->{IO} Result Error Connection
-dial = native
-
--- Connects within `millis` milliseconds; 0 leaves the limit to the system.
-dialTimeout : String -> Int -> Int ->{IO} Result Error Connection
-dialTimeout = native
-
--- Connects and completes a TLS handshake within `millis` milliseconds,
--- verifying the certificate for the host against the system roots plus those
--- in the PEM file at `roots`, unless it is "". It sends `host` for SNI. The
--- connection then reads and writes plaintext like any other.
-dialTls : String -> Int -> Int -> String ->{IO} Result Error Connection
-dialTls = native
+type Connection
+    = SystemConnection NativeConnection
+    | VirtualConnection Provider String Int
 
 -- Idle client connections kept per endpoint, shared safely between tasks.
-type Pool = Pool Runtime.Native.Any
+-- Connections leased from a pool belong to the pool's runner.
+{-# resource #-}
+type Pool
+    = SystemPool NativePool
+    | VirtualPool Provider Int
 
--- At most `maxIdle` idle connections per endpoint, each kept `idleMillis`.
-newPool : Int -> Int ->{IO} Pool
-newPool = native
+{-# resource #-}
+type NativeListener = NativeListener Runtime.Native.Any
 
--- Leases an idle connection to the endpoint, unless `fresh`, or dials one like
--- `dialTls` (when secure, trusting `roots`) or `dialTimeout`.
-poolConnect : Pool -> String -> Int -> Int -> Bool -> String -> Bool ->{IO} Result Error Connection
-poolConnect = native
+{-# resource #-}
+type NativeConnection = NativeConnection Runtime.Native.Any
 
--- Ends a lease: a reusable connection returns to the pool, anything else is
--- closed. Releasing again does nothing.
-poolRelease : Connection -> Bool ->{IO} Result Error ()
-poolRelease = native
+{-# resource #-}
+type NativePool = NativePool Runtime.Native.Any
 
--- Whether a leased connection came from the pool rather than a new dial.
-connectionReused : Connection ->{IO} Bool
-connectionReused = native
+-- Whether a blocking operation may be interrupted, and by which task
+-- lifetime. A value obtained in one task keeps naming that task's lifetime;
+-- once that lifetime has ended it reads as cancelled.
+type Cancel
+    = Uncancellable
+    | TaskCancel Runtime.Native.Any
 
--- Closes the pool's idle connections.
-closePool : Pool ->{IO} Result Error ()
-closePool = native
+-- An operation that cancellation never interrupts.
+uncancellable : Cancel
+uncancellable = Uncancellable
 
--- Closes the connection.
-closeConnection : Connection ->{IO} Result Error ()
-closeConnection = native
+-- The current task's lifetime: cancelling the task interrupts the operation.
+taskCancel : () ->{Async.Async} Cancel
+taskCancel() = TaskCancel Async.contextToken()
 
-connectionHasInput : Connection ->{IO} Result Error Bool
-connectionHasInput = native
+tokenCancelled : Runtime.Native.Any -> Bool
+tokenCancelled = native
 
--- Up to `count` bytes, or empty bytes at the end of the stream.
-readConnectionBytes : Connection -> Int ->{IO} Result Error Bytes
-readConnectionBytes = native
+-- Whether the operation's task has been cancelled at this moment. A custom
+-- handler may poll it while it would otherwise wait.
+isCancelled : Cancel -> Bool
+isCancelled cancel =
+    case cancel of
+        Uncancellable -> False
+        TaskCancel token -> tokenCancelled token
 
-readConnectionBytesAsync : Runtime.Native.Any -> Connection -> Int ->{IO} Result Error Bytes
-readConnectionBytesAsync = native
+-- Listeners, connections, and pools. Every operation is public so custom
+-- handlers can interpret the complete boundary.
+#[Runtime.Entry.DefaultHandler `runSystem`]
+effect Network
+    -- Listens on the port at every address; port 0 picks a free one.
+    listen : Int -> Result Error Listener
+    -- Closes the listener, interrupting a blocked accept. Stopping it again
+    -- does nothing.
+    stopListener : Listener -> Result Error ()
+    -- Whether the listener is closed, or is not usable by this runner.
+    listenerStopped : Listener -> Bool
+    -- Waits for one client. Cancellation closes the listener.
+    acceptConnection : Listener -> Cancel -> Result Error Connection
+    -- Connects to the endpoint.
+    connect : Endpoint -> Result Error Connection
+    -- Closes the connection, interrupting blocked reads and writes. Closing it
+    -- again does nothing.
+    closeConnection : Connection -> Result Error ()
+    -- Up to `count` bytes once any arrive, at most 64 KiB, or empty bytes at
+    -- the end of the stream. Cancellation closes the connection.
+    readConnectionBytes : Connection -> Int -> Cancel -> Result Error Bytes
+    -- Writes all the bytes. Cancellation closes the connection.
+    writeConnectionBytes : Connection -> Bytes -> Cancel -> Result Error ()
+    -- Makes reads fail once `millis` milliseconds from now have passed; zero
+    -- or less clears the deadline.
+    setReadDeadline : Connection -> Int -> Result Error ()
+    -- Makes writes fail once `millis` milliseconds from now have passed; zero
+    -- or less clears the deadline.
+    setWriteDeadline : Connection -> Int -> Result Error ()
+    -- A pool of at most `maxIdle` idle connections per endpoint, each kept
+    -- `idleMillis` milliseconds.
+    newPool : Int -> Int -> Pool
+    -- Leases an idle connection to the endpoint, unless `fresh`, or connects
+    -- a new one.
+    poolConnect : Pool -> Endpoint -> Bool -> Result Error Connection
+    -- Ends a lease: a reusable connection returns to its pool, anything else
+    -- closes. Releasing again does nothing.
+    poolRelease : Connection -> Bool -> Result Error ()
+    -- Whether a leased connection came from the pool rather than a new
+    -- connection.
+    connectionReused : Connection -> Bool
+    -- Closes the pool's idle connections; leases still out close on release.
+    closePool : Pool -> Result Error ()
 
--- Writes all the bytes.
-writeConnectionBytes : Connection -> Bytes ->{IO} Result Error ()
-writeConnectionBytes = native
+-- The identity of one handler's listeners, connections, and pools. A custom
+-- handler gets a fresh one from `withProvider`; comparing a resource's
+-- provider tells its own resources apart from those of other runners.
+{-# resource #-}
+type Provider = Provider Runtime.Native.Any
 
-writeConnectionBytesAsync : Runtime.Native.Any -> Connection -> Bytes ->{IO} Result Error ()
-writeConnectionBytesAsync = native
+netFreshProvider : () -> Provider
+netFreshProvider = native
 
--- Makes reads fail once `millis` milliseconds from now have passed; zero
--- or less clears the deadline.
-setReadDeadline : Connection -> Int ->{IO} Result Error ()
-setReadDeadline = native
+netRetireProvider : Provider -> ()
+netRetireProvider = native
 
--- Makes writes fail once `millis` milliseconds from now have passed;
--- zero or less clears the deadline.
-setWriteDeadline : Connection -> Int ->{IO} Result Error ()
-setWriteDeadline = native
+netProviderStatus : Provider -> Result Error ()
+netProviderStatus = native
 
-closeListenerFail : Listener ->{IO, Fail Error} ()
-closeListenerFail listener = fromResult (closeListener listener)
+netSameProvider : Provider -> Provider -> Bool
+netSameProvider = native
 
-closeConnectionFail : Connection ->{IO, Fail Error} ()
+-- Gives a custom handler a fresh provider and retires it on every exit of
+-- `action`. Resources created under it, including any the result carries,
+-- then answer `closed provider`.
+withProvider : (Provider ->{e} a) ->{e} a
+withProvider action = Runtime.Scope.bracket netFreshProvider netRetireProvider action
+
+-- A listener owned by the provider, for the handler's own backend `key`.
+-- The handler decides which keys are open and must not reuse one within a
+-- provider, or a closed resource would become valid again. The same holds
+-- for connections and pools.
+listenerFor : Provider -> Int -> Listener
+listenerFor provider key = VirtualListener provider key
+
+-- A connection owned by the provider, labelled with its peer address.
+connectionFor : Provider -> String -> Int -> Connection
+connectionFor provider address key = VirtualConnection provider address key
+
+-- A pool owned by the provider.
+poolFor : Provider -> Int -> Pool
+poolFor provider key = VirtualPool provider key
+
+resourceError : String -> String -> Error
+resourceError address message = Error { kind = Other, address = address, message = message }
+
+ownedKey : Provider -> Provider -> String -> String -> Int -> Result Error Int
+ownedKey provider owner address noun key =
+    if netSameProvider owner provider then
+        case netProviderStatus provider of
+            Err error -> Err { error | address = address }
+            Ok () -> Ok key
+    else Err (resourceError address ("foreign " ++ noun))
+
+systemListenerLabel : NativeListener -> String
+systemListenerLabel = native
+
+systemConnectionLabel : NativeConnection -> String
+systemConnectionLabel = native
+
+-- The backend key of a listener this provider created. Any other listener,
+-- including a system one, answers `foreign listener`; after the provider
+-- exits, `closed provider`. Both are `Other` errors.
+listenerKey : Provider -> Listener -> Result Error Int
+listenerKey provider listener =
+    case listener of
+        SystemListener real -> Err (resourceError (systemListenerLabel real) "foreign listener")
+        VirtualListener owner key -> ownedKey provider owner "" "listener" key
+
+-- The backend key of a connection this provider created, checked like
+-- `listenerKey`.
+connectionKey : Provider -> Connection -> Result Error Int
+connectionKey provider connection =
+    case connection of
+        SystemConnection real -> Err (resourceError (systemConnectionLabel real) "foreign connection")
+        VirtualConnection owner address key -> ownedKey provider owner address "connection" key
+
+-- The backend key of a pool this provider created, checked like
+-- `listenerKey`.
+poolKey : Provider -> Pool -> Result Error Int
+poolKey provider pool =
+    case pool of
+        SystemPool _ -> Err (resourceError "" "foreign pool")
+        VirtualPool owner key -> ownedKey provider owner "" "pool" key
+
+netSystemProvider : () ->{IO} Provider
+netSystemProvider = native
+
+netRetireSystem : Provider ->{IO} ()
+netRetireSystem = native
+
+systemListen : Provider -> Int ->{IO} Result Error NativeListener
+systemListen = native
+
+systemStopListener : Provider -> NativeListener ->{IO} Result Error ()
+systemStopListener = native
+
+systemListenerStopped : Provider -> NativeListener ->{IO} Bool
+systemListenerStopped = native
+
+systemAccept : Provider -> NativeListener ->{IO} Result Error NativeConnection
+systemAccept = native
+
+systemAcceptWithin : Runtime.Native.Any -> Provider -> NativeListener ->{IO} Result Error NativeConnection
+systemAcceptWithin = native
+
+systemConnect : Provider -> String -> Int -> Int -> Bool -> String ->{IO} Result Error NativeConnection
+systemConnect = native
+
+systemCloseConnection : Provider -> NativeConnection ->{IO} Result Error ()
+systemCloseConnection = native
+
+systemRead : Provider -> NativeConnection -> Int ->{IO} Result Error Bytes
+systemRead = native
+
+systemReadWithin : Runtime.Native.Any -> Provider -> NativeConnection -> Int ->{IO} Result Error Bytes
+systemReadWithin = native
+
+systemWrite : Provider -> NativeConnection -> Bytes ->{IO} Result Error ()
+systemWrite = native
+
+systemWriteWithin : Runtime.Native.Any -> Provider -> NativeConnection -> Bytes ->{IO} Result Error ()
+systemWriteWithin = native
+
+systemSetReadDeadline : Provider -> NativeConnection -> Int ->{IO} Result Error ()
+systemSetReadDeadline = native
+
+systemSetWriteDeadline : Provider -> NativeConnection -> Int ->{IO} Result Error ()
+systemSetWriteDeadline = native
+
+systemNewPool : Provider -> Int -> Int ->{IO} NativePool
+systemNewPool = native
+
+systemPoolConnect : Provider -> NativePool -> String -> Int -> Int -> Bool -> String -> Bool ->{IO} Result Error NativeConnection
+systemPoolConnect = native
+
+systemPoolRelease : Provider -> NativeConnection -> Bool ->{IO} Result Error ()
+systemPoolRelease = native
+
+systemConnectionReused : Provider -> NativeConnection ->{IO} Bool
+systemConnectionReused = native
+
+systemClosePool : Provider -> NativePool ->{IO} Result Error ()
+systemClosePool = native
+
+-- The system runner owns only system resources; its natives check the owner.
+realListener : Listener -> (NativeListener ->{IO} Result Error a) ->{IO} Result Error a
+realListener listener action =
+    case listener of
+        SystemListener real -> action real
+        VirtualListener _ _ -> Err (resourceError "" "foreign listener")
+
+realConnection : Connection -> (NativeConnection ->{IO} Result Error a) ->{IO} Result Error a
+realConnection connection action =
+    case connection of
+        SystemConnection real -> action real
+        VirtualConnection _ address _ -> Err (resourceError address "foreign connection")
+
+realPool : Pool -> (NativePool ->{IO} Result Error a) ->{IO} Result Error a
+realPool pool action =
+    case pool of
+        SystemPool real -> action real
+        VirtualPool _ _ -> Err (resourceError "" "foreign pool")
+
+connected : Result Error NativeConnection -> Result Error Connection
+connected result = Result.map SystemConnection result
+
+tlsRoots : Security -> (Bool, String)
+tlsRoots security =
+    case security of
+        Plain -> (False, "")
+        Tls roots -> (True, Maybe.withDefault "" roots)
+
+systemConnectTo : Provider -> Endpoint ->{IO} Result Error Connection
+systemConnectTo provider target =
+    (secure, roots) = tlsRoots target.security
+    connected (systemConnect provider target.host target.port target.timeoutMs secure roots)
+
+systemAcceptOn : Provider -> Listener -> Cancel ->{IO} Result Error Connection
+systemAcceptOn provider listener cancel =
+    realListener listener { real ->
+        case cancel of
+            Uncancellable -> connected (systemAccept provider real)
+            TaskCancel token -> connected (systemAcceptWithin token provider real)
+    }
+
+systemReadOn : Provider -> Connection -> Int -> Cancel ->{IO} Result Error Bytes
+systemReadOn provider connection count cancel =
+    realConnection connection { real ->
+        case cancel of
+            Uncancellable -> systemRead provider real count
+            TaskCancel token -> systemReadWithin token provider real count
+    }
+
+systemWriteOn : Provider -> Connection -> Bytes -> Cancel ->{IO} Result Error ()
+systemWriteOn provider connection data cancel =
+    realConnection connection { real ->
+        case cancel of
+            Uncancellable -> systemWrite provider real data
+            TaskCancel token -> systemWriteWithin token provider real data
+    }
+
+systemPoolConnectTo : Provider -> Pool -> Endpoint -> Bool ->{IO} Result Error Connection
+systemPoolConnectTo provider pool target fresh =
+    realPool pool { real ->
+        (secure, roots) = tlsRoots target.security
+        connected (systemPoolConnect provider real target.host target.port target.timeoutMs secure roots fresh)
+    }
+
+-- Interprets Network through the OS under a fresh provider. Scoped sockets
+-- close before their callbacks leave; remaining listeners, connections, and
+-- pools close when the runner exits, ignoring close failures. A task that
+-- outlives the runner gets `closed provider` errors rather than OS access.
+runSystem : (() ->{Network | e} a) ->{IO | e} a
+runSystem action =
+    Runtime.Scope.bracket netSystemProvider netRetireSystem { provider ->
+        handle action() on
+            listen port -> resume (Result.map SystemListener (systemListen provider port))
+            stopListener listener -> resume (realListener listener { real -> systemStopListener provider real })
+            listenerStopped listener ->
+                case listener of
+                    SystemListener real -> resume (systemListenerStopped provider real)
+                    VirtualListener _ _ -> resume True
+            acceptConnection listener cancel -> resume (systemAcceptOn provider listener cancel)
+            connect target -> resume (systemConnectTo provider target)
+            closeConnection connection -> resume (realConnection connection { real -> systemCloseConnection provider real })
+            readConnectionBytes connection count cancel -> resume (systemReadOn provider connection count cancel)
+            writeConnectionBytes connection data cancel -> resume (systemWriteOn provider connection data cancel)
+            setReadDeadline connection millis -> resume (realConnection connection { real -> systemSetReadDeadline provider real millis })
+            setWriteDeadline connection millis -> resume (realConnection connection { real -> systemSetWriteDeadline provider real millis })
+            newPool maxIdle idleMillis -> resume (SystemPool (systemNewPool provider maxIdle idleMillis))
+            poolConnect pool target fresh -> resume (systemPoolConnectTo provider pool target fresh)
+            poolRelease connection reusable -> resume (realConnection connection { real -> systemPoolRelease provider real reusable })
+            connectionReused connection ->
+                case connection of
+                    SystemConnection real -> resume (systemConnectionReused provider real)
+                    VirtualConnection _ _ _ -> resume False
+            closePool pool -> resume (realPool pool { real -> systemClosePool provider real })
+    }
+
+closeListenerFail : Listener ->{Network, Fail Error} ()
+closeListenerFail listener = fromResult (stopListener listener)
+
+closeConnectionFail : Connection ->{Network, Fail Error} ()
 closeConnectionFail connection = fromResult (closeConnection connection)
+
+-- A failed cancellable call stops a cancelled task before its error escapes.
+interrupted : Result Error a ->{Async.Async, Fail Error} a
+interrupted result =
+    case result of
+        Ok value -> value
+        Err error ->
+            Async.checkpoint()
+            Fail.fail error
 
 -- Listens on `port` at every address, runs `action` with the listener, and
 -- closes it on every exit.
-withListener : Int -> (Listener ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withListener : Int -> (Listener ->{Network, Fail Error | e} a) ->{Network, Fail Error | e} a
 withListener port action =
     Runtime.Scope.bracket { fromResult (listen port) } closeListenerFail action
 
 -- Waits for one client, runs `action` with its connection, and closes it on
 -- every exit.
-accept : Listener -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+accept : Listener -> (Connection ->{Network, Fail Error | e} a) ->{Network, Fail Error | e} a
 accept listener action =
-    Runtime.Scope.bracket { fromResult (acceptConnection listener) } closeConnectionFail action
+    Runtime.Scope.bracket { fromResult (acceptConnection listener uncancellable) } closeConnectionFail action
 
--- `accept` in a task: cancelling the waiting task closes the listener.
-acceptAsync : Listener -> (Connection ->{IO, Fail Error, Async.Async | e} a) ->{IO, Fail Error, Async.Async | e} a
+-- `accept` in a task: cancelling the waiting task closes the listener and
+-- stops the task.
+acceptAsync : Listener -> (Connection ->{Network, Fail Error, Async.Async | e} a) ->{Network, Fail Error, Async.Async | e} a
 acceptAsync listener action =
-    token = Async.contextToken()
-    Runtime.Scope.bracket { fromResult (acceptConnectionAsync token listener) } closeConnectionFail action
+    cancel = taskCancel()
+    Runtime.Scope.bracket { interrupted (acceptConnection listener cancel) } closeConnectionFail action
 
--- Connects to `host` and `port`, runs `action` with the connection, and
--- closes it on every exit.
-withClient : String -> Int -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+-- Connects to `host` and `port` over plain TCP, runs `action` with the
+-- connection, and closes it on every exit.
+withClient : String -> Int -> (Connection ->{Network, Fail Error | e} a) ->{Network, Fail Error | e} a
 withClient host port action =
-    Runtime.Scope.bracket { fromResult (dial host port) } closeConnectionFail action
+    Runtime.Scope.bracket { fromResult (connect (endpoint host port)) } closeConnectionFail action
 
 chunk : Int
 chunk = 8192
 
-readBytes : Connection ->{IO, Fail Error} Maybe Bytes
-readBytes connection =
-    data = fromResult (readConnectionBytes connection chunk)
-    if Bytes.length data == 0 then Nothing else Just data
+nonEmpty : Bytes -> Maybe Bytes
+nonEmpty data = if Bytes.length data == 0 then Nothing else Just data
 
 -- The connection as a byte source, answering at most 8192 bytes per pull
 -- once any arrive. It does not close the connection.
-source : Connection -> Source {IO, Fail Error}
-source connection = Source { pull = { readBytes connection } }
-
-readBytesAsync : Runtime.Native.Any -> Connection ->{IO, Fail Error} Maybe Bytes
-readBytesAsync token connection =
-    data = fromResult (readConnectionBytesAsync token connection chunk)
-    if Bytes.length data == 0 then Nothing else Just data
+source : Connection -> Source {Network, Fail Error}
+source connection = Source { pull = { nonEmpty (fromResult (readConnectionBytes connection chunk uncancellable)) } }
 
 -- `source` in a task: cancelling a task blocked in a read closes the
--- connection.
-sourceAsync : Connection ->{Async.Async} Source {IO, Fail Error}
+-- connection and stops the task.
+sourceAsync : Connection ->{Async.Async} Source {Network, Async.Async, Fail Error}
 sourceAsync connection =
-    token = Async.contextToken()
-    Source { pull = { readBytesAsync token connection } }
+    cancel = taskCancel()
+    Source { pull = { nonEmpty (interrupted (readConnectionBytes connection chunk cancel)) } }
 
 -- The connection as a byte sink that writes each chunk completely. It does
 -- not close the connection.
-sink : Connection -> Sink {IO, Fail Error}
-sink connection = Sink { write = { data -> fromResult (writeConnectionBytes connection data) } }
+sink : Connection -> Sink {Network, Fail Error}
+sink connection = Sink { write = { data -> fromResult (writeConnectionBytes connection data uncancellable) } }
 
 -- `sink` in a task: cancelling a task blocked in a write closes the
--- connection.
-sinkAsync : Connection ->{Async.Async} Sink {IO, Fail Error}
+-- connection and stops the task.
+sinkAsync : Connection ->{Async.Async} Sink {Network, Async.Async, Fail Error}
 sinkAsync connection =
-    token = Async.contextToken()
-    Sink { write = { data -> fromResult (writeConnectionBytesAsync token connection data) } }
+    cancel = taskCancel()
+    Sink { write = { data -> interrupted (writeConnectionBytes connection data cancel) } }

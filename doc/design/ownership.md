@@ -62,11 +62,15 @@ lifetime. Memory handler state remains subject to the existing non-atomic
 snapshot/commit rule. Native provider locks protect only provider and
 system-handle validity, and are not held during blocking file reads or writes.
 
-Net remains a system-only backend: listeners and connections use fresh checked
-native objects, and each pool checkout has a fresh lease that retains its pool
-owner. Releasing a stale lease cannot affect a later checkout. Virtual Net
-construction and foreign-provider dispatch remain part of the deferred Network
-interpretation; File's virtual payload is never accepted as a Net resource.
+Net follows the same model with its own provider type. System listeners,
+connections, and pools are provider-owned native objects validated before
+projection; virtual ones are Fango values naming their provider and the
+handler's key. A pool belongs to one provider, so its leases and idle
+connections never cross runners, and each checkout is a fresh lease that
+retains its pool: releasing a stale lease cannot affect a later checkout.
+System Net retirement closes the remaining sockets and ignores their close
+failures. File and Net share the provider core in `fangort` but keep distinct
+provider types, so neither domain accepts the other's provider or resources.
 
 ## Evidence summaries
 

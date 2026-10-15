@@ -15,7 +15,6 @@
 
 import Bytes
 import Fail exposing (Fail, attempt)
-import IO
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Net
@@ -48,13 +47,13 @@ echoLines reader writer =
                 writer.flush()
         Overflowed -> ()
 
-echoReader : Net.Connection -> Reader e ->{IO, Fail Net.Error | e} ()
+echoReader : Net.Connection -> Reader e ->{Net.Network, Fail Net.Error | e} ()
 echoReader connection reader = Writer.over (Net.sink connection) 8192 (echoLines reader)
 
-echoConnection : Net.Connection ->{IO, Fail Net.Error} ()
+echoConnection : Net.Connection ->{Net.Network, Fail Net.Error} ()
 echoConnection connection = Reader.over (Net.source connection) (echoReader connection)
 
-serve : Net.Listener ->{IO, Fail Net.Error} ()
+serve : Net.Listener ->{Net.Network, Fail Net.Error} ()
 serve listener =
     Net.accept listener echoConnection
     serve listener
@@ -69,15 +68,15 @@ portFrom arguments =
                 Nothing -> Nothing
         _ -> Nothing
 
-runListener : Int -> Net.Listener ->{IO, Console, Fail Net.Error} ()
+runListener : Int -> Net.Listener ->{Net.Network, Console, Fail Net.Error} ()
 runListener port listener =
     print ("Echo server listening on port " ++ show port)
     serve listener
 
-run : Int ->{IO, Console, Fail Net.Error} ()
+run : Int ->{Net.Network, Console, Fail Net.Error} ()
 run port = Net.withListener port (runListener port)
 
-main : () ->{IO, Console, Process.Arguments} Process.Status
+main : () ->{Console, Net.Network, Process.Arguments} Process.Status
 main() =
     case portFrom Process.args() of
         Nothing ->

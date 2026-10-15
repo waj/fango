@@ -2,13 +2,14 @@ package native
 
 import (
 	"errors"
-	"github.com/waj/fango/runtime/fangort"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/waj/fango/runtime/fangort"
 )
 
 // OS operations return errors rather than panicking; the compiler classifies
@@ -52,116 +53,56 @@ func relabel(err error, path string) error {
 	return err
 }
 
-// Provider tokens are fresh objects, never integer IDs. Virtual handles are
-// Fango values naming their provider; only system handles carry a native file,
-// and its natives validate the owning provider before projecting it.
-type fileProvider struct {
-	mu        sync.Mutex
-	active    bool
-	real      bool
-	resources []*fileResource
-}
+// Providers are fangort resource providers: fresh tokens compared by
+// identity. Virtual handles are Fango values naming their provider; only system
+// handles carry a native file, owned by the provider that opened it.
+func provider(value any) (*fangort.ResourceProvider, error) { return fangort.CheckedProvider(value) }
 
-type fileResource struct {
-	owner  *fileProvider
-	path   string
-	closed bool // protected by owner.mu
-	file   any
-}
-
-func resourceError(path, message string) error {
-	return &fs.PathError{Op: "use", Path: path, Err: errors.New(message)}
-}
-
-func checkedProvider(value any) (*fileProvider, error) {
-	p, ok := value.(*fileProvider)
-	if !ok || p == nil {
-		return nil, resourceError("", "invalid provider")
-	}
-	return p, nil
-}
-
-func FreshProvider() any  { return &fileProvider{active: true} }
-func SystemProvider() any { return &fileProvider{active: true, real: true} }
+func FreshProvider() any  { return fangort.NewResourceProvider(false) }
+func SystemProvider() any { return fangort.NewResourceProvider(true) }
 
 func SameProvider(a, b any) bool { return a == b }
 
 func ProviderStatus(value any) error {
-	p, err := checkedProvider(value)
+	p, err := provider(value)
 	if err != nil {
 		return err
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.active {
-		return resourceError("", "closed provider")
-	}
-	return nil
+	return p.Status("")
 }
 
 func RetireProvider(value any) {
-	p, err := checkedProvider(value)
+	p, err := provider(value)
 	if err != nil {
 		panic(err)
 	}
-	if p.real {
-		panic("virtual provider expected")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.active = false
+	_ = p.Retire()
 }
 
 func SystemRetireProvider(value any) error {
-	p, err := checkedProvider(value)
+	p, err := provider(value)
 	if err != nil {
 		return err
 	}
-	p.mu.Lock()
-	p.active = false
-	resources := p.resources
-	p.resources = nil
-	for _, h := range resources {
-		h.closed = true
-	}
-	p.mu.Unlock()
-	var first error
-	for i := len(resources) - 1; i >= 0; i-- {
-		if err := fangort.CloseFileHandle(resources[i].file); err != nil && first == nil {
-			first = err
-		}
-	}
-	return first
+	return p.Retire()
 }
 
-// SystemFilePath reads an immutable field, so it needs no lock.
-func SystemFilePath(value any) string {
-	if h, ok := value.(*fileResource); ok && h != nil {
-		return h.path
-	}
-	return ""
-}
+// SystemFilePath reads an immutable label, so it needs no lock.
+func SystemFilePath(value any) string { return fangort.ResourceLabel(value) }
 
-func openWith(provider any, path string, readable bool, open func(string) (*os.File, error)) (any, error) {
-	p, err := checkedProvider(provider)
+func openWith(value any, path string, readable bool, open func(string) (*os.File, error)) (any, error) {
+	p, err := provider(value)
 	if err != nil {
 		return nil, err
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.active {
-		return nil, resourceError(path, "closed provider")
-	}
-	if !p.real {
-		return nil, resourceError(path, "system provider expected")
-	}
-	file, err := open(filePath(path))
-	if err != nil {
-		return nil, relabel(err, path)
-	}
-	h := &fileResource{owner: p, path: path, file: fangort.NewFileHandle(path, file, readable, !readable)}
-	p.resources = append(p.resources, h)
-	return h, nil
+	return p.Adopt(path, func() (any, func() error, error) {
+		file, err := open(filePath(path))
+		if err != nil {
+			return nil, nil, relabel(err, path)
+		}
+		h := fangort.NewFileHandle(path, file, readable, !readable)
+		return h, func() error { return fangort.CloseFileHandle(h) }, nil
+	})
 }
 
 func SystemOpenRead(provider any, path string) (any, error) {
@@ -178,38 +119,16 @@ func SystemOpenAppend(provider any, path string) (any, error) {
 
 // realResource is the only projection of a system handle's native file. A
 // closed handle stays owned, so a repeated close reaches the idempotent close.
-func realResource(provider, value any, closing bool) (any, error) {
-	p, err := checkedProvider(provider)
+func realResource(value, handle any, closing bool) (any, error) {
+	p, err := provider(value)
 	if err != nil {
 		return nil, err
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	h, ok := value.(*fileResource)
-	if !ok || h == nil {
-		return nil, resourceError("", "invalid handle")
+	r, err := p.Use(handle, "handle", closing)
+	if err != nil {
+		return nil, err
 	}
-	if h.owner != p {
-		return nil, resourceError(h.path, "foreign handle")
-	}
-	if !p.active {
-		return nil, resourceError(h.path, "closed provider")
-	}
-	if h.closed && !closing {
-		return nil, resourceError(h.path, "closed handle")
-	}
-	if closing && !h.closed {
-		h.closed = true
-		for i, resource := range p.resources {
-			if resource == h {
-				copy(p.resources[i:], p.resources[i+1:])
-				p.resources[len(p.resources)-1] = nil
-				p.resources = p.resources[:len(p.resources)-1]
-				break
-			}
-		}
-	}
-	return h.file, nil
+	return r.Value, nil
 }
 
 func SystemCloseHandle(provider, value any) error {

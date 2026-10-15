@@ -22,12 +22,20 @@ when nothing else in its row needs `IO`.
 | Process arguments | `Process.Arguments` | `Process.args` | `Process.runSystem` | `Process.withArgs` |
 | Randomness | `Random.Random` | `Random.int` | `Random.runSystem` | `Random.runSeeded` |
 | Clock | `Time.Clock.Clock` | `now`, `nowIn`, `today`, `todayIn`, `withZone` | `runSystem`, `runSystemIn`, `runOffset` | `runFixed`, `runStepped` |
-| HTTP client | `Http.Client.Http` | Request functions of [Http.Client](../../stdlib/Http/Client.fango) | `Http.Client.run` | `stub`, `mock` |
+| Networking | `Net.Network` | Listeners, accepts, connects, TLS, reads and writes, deadlines, pools, `Net.source`/`sink` and their `Async` variants | `Net.runSystem` | Custom handlers through `Net.withProvider` |
+| HTTP client | `Http.Client.Http` | Request functions of [Http.Client](../../stdlib/Http/Client.fango) | `Http.Client.run`, over `Network` | `stub`, `mock` |
 
 The source comments of each module own the operation lists, failure policies,
-and fixture semantics. Generic helpers such as Reader, Writer, Text, and Json
-streaming take a `Bytes.Source`, `Bytes.Sink`, `Reader`, or `Writer` whose row
-names the service behind it; they add no effect of their own.
+and fixture semantics. `Http.Server.serve` performs `Network`, so a custom
+Network handler also reaches the server's framing. Generic helpers such as
+Reader, Writer, Text, and Json streaming take a `Bytes.Source`, `Bytes.Sink`,
+`Reader`, or `Writer` whose row names the service behind it; they add no
+effect of their own.
+
+Network accepts, reads, and writes take a [`Net.Cancel`](../../stdlib/Net.fango).
+Through the `Async` helpers, cancelling the calling task interrupts a blocked
+system socket and ends the task as cancelled; a custom handler can observe the
+same cancellation but does not simulate task scheduling.
 
 A program's exit status is not a service: `main` returns a `Process.Status`,
 and [`Test.run`](../../stdlib/Test.fango) answers one for it to return.
@@ -39,8 +47,6 @@ means not calling them, or wrapping them in an application-level effect.
 
 | Boundary | Calls | Reason |
 | --- | --- | --- |
-| Networking | Every function of [Net](../../stdlib/Net.fango): listeners, connections, TLS, pools, deadlines, sources and sinks | Interception is [unfinished](../roadmap-io-interception.md#ioi6-network-interpretation) |
-| HTTP transport | `Http.Server.serve`, and the socket path inside `Http.Client.run` | Waits on the Net interpretation; [roadmap](../roadmap-io-interception.md#ioi7-http-and-task-integration) |
 | Task runtime | `Async.run`, `Async.runOutcome`, and the waits they make | Tasks are real goroutines; no runner simulates scheduling |
 | Time zone database | `Time.Zone.load`, `Time.Zone.system` | Host zone lookup; pass a `Zone` value instead to keep code pure |
 | Process exit | `Process.exit` | Ends the process at once, skipping cleanup |

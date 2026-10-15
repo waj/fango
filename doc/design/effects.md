@@ -273,3 +273,26 @@ The memory runner remains sequential under the existing handler-state rule;
 provider validity synchronization does not make a handler clause atomic. Provider
 identity, retirement, task inheritance, and checked payload projection are
 specified in the [resource design](ownership.md#file-provider-identity).
+
+## Network services
+
+[Net](../../stdlib/Net.fango) defines the public `Network` effect for
+listeners, accepts, connects, byte transport, deadlines, and pools. Scoped
+helpers, sources, and sinks call these operations, and `runSystem`, the
+default, handles them with private natives under a fresh provider. A custom
+handler creates its own resources through `withProvider`, as File's do.
+
+Cancellation crosses the operation boundary as a `Net.Cancel` argument to
+accepts, reads, and writes: either uncancellable or a task lifetime taken from
+`Async.contextToken`. It is an ordinary value, so `runSystem` needs no `Async`
+and a synchronous caller never acquires one. The system clause passes the
+lifetime to a native that closes the socket if the lifetime ends during the
+call. The `Async` helpers then checkpoint, so a cancelled task ends cancelled
+instead of raising the interrupted call's error; other failures stay Net
+errors, and deadlines stay `TimedOut`. A custom handler observes the same value
+with `isCancelled`. Answering it with an immediate error tests application
+handling, not native interruption, which loopback tests cover.
+
+`Http.Client.run` and `Http.Server.serve` perform `Network` rather than `IO`,
+so entry assembly nests the Net default outside HTTP's and a custom Network
+handler reaches the same HTTP framing as sockets do.

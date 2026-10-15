@@ -2,6 +2,7 @@ package native
 
 import (
 	"bufio"
+
 	"fmt"
 	"net"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/waj/fango/runtime/fangort"
 )
 
 func TestSharedFileReadsConsumeEachLineOnce(t *testing.T) {
@@ -77,12 +80,12 @@ func TestSharedConnectionCloseInterruptsRead(t *testing.T) {
 	c := &connection{value: observed, reader: bufio.NewReader(observed)}
 	finished := make(chan error, 1)
 	go func() {
-		_, err := ReadConnectionBytes(c, 1)
+		_, err := readConnectionBytes(c, 1)
 		finished <- err
 	}()
 	<-observed.started
 	closed := make(chan error, 1)
-	go func() { closed <- CloseConnection(c) }()
+	go func() { closed <- closeConnection(c) }()
 	select {
 	case err := <-closed:
 		if err != nil {
@@ -99,7 +102,7 @@ func TestSharedConnectionCloseInterruptsRead(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("close did not interrupt read")
 	}
-	if _, err := ReadConnectionBytes(c, 1); err == nil {
+	if _, err := readConnectionBytes(c, 1); err == nil {
 		t.Fatal("read after close succeeded")
 	}
 }
@@ -160,7 +163,7 @@ func TestSystemProviderClosesRawHandlesAndForgetsClosedOnes(t *testing.T) {
 	if err := SystemCloseHandle(provider, h); err != nil {
 		t.Fatal(err)
 	}
-	if len(provider.(*fileProvider).resources) != 0 {
+	if provider.(*fangort.ResourceProvider).OpenCount() != 0 {
 		t.Fatal("closed native file retained by provider")
 	}
 	raw, err := SystemOpenWrite(provider, path)

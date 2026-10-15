@@ -1,0 +1,175 @@
+module NetProviders exposing (tests)
+
+import Async
+import Bytes exposing (Bytes)
+import Dict exposing (Dict)
+import Expect
+import Fail
+import Http.Client as Client
+import IO
+import Net
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import String
+import Test
+
+-- A scripted network: every connection reads `reply`, and all writes are
+-- collected in order.
+type Wire = { inbound : Dict Int Bytes, outbound : Bytes, next : Int, reply : Bytes }
+
+closedConnection : Net.Error
+closedConnection = Net.Error { kind = Net.Other, address = "", message = "closed connection" }
+
+opened : Net.Provider -> Net.Endpoint -> Wire -> (Result Net.Error Net.Connection, Wire)
+opened provider target state =
+    address = target.host ++ ":" ++ show target.port
+    (Ok (Net.connectionFor provider address state.next), { state | inbound = Dict.insert state.next state.reply state.inbound, next = state.next + 1 })
+
+-- The key of an open connection; the handler owns which keys are open.
+live : Net.Provider -> Wire -> Net.Connection -> Result Net.Error Int
+live provider state connection =
+    case Net.connectionKey provider connection of
+        Err error -> Err error
+        Ok key -> if Dict.member key state.inbound then Ok key else Err closedConnection
+
+closing : Net.Provider -> Wire -> Net.Connection -> (Result Net.Error (), Wire)
+closing provider state connection =
+    case Net.connectionKey provider connection of
+        Err error -> (Err error, state)
+        Ok key -> (Ok (), { state | inbound = Dict.remove key state.inbound })
+
+reading : Net.Provider -> Wire -> Net.Connection -> Int -> (Result Net.Error Bytes, Wire)
+reading provider state connection count =
+    case live provider state connection of
+        Err error -> (Err error, state)
+        Ok key ->
+            pending = Maybe.withDefault Bytes.empty (Dict.get key state.inbound)
+            taken = if count < Bytes.length pending then count else Bytes.length pending
+            rest = Bytes.slice taken (Bytes.length pending) pending
+            (Ok (Bytes.slice 0 taken pending), { state | inbound = Dict.insert key rest state.inbound })
+
+done : Result Net.Error a -> Result Net.Error ()
+done result = Result.map { _ -> () } result
+
+scripted : Bytes -> (() ->{Net.Network | e} a) ->{e} (a, Bytes)
+scripted reply action = Net.withProvider { provider ->
+    handle action() with state = Wire { inbound = Dict.empty, outbound = Bytes.empty, next = 0, reply = reply } on
+        Net.listen _ -> resume (Ok (Net.listenerFor provider 0)) with state
+        Net.stopListener listener -> resume (done (Net.listenerKey provider listener)) with state
+        Net.listenerStopped _ -> resume False with state
+        Net.acceptConnection _ _ -> resume (Err closedConnection) with state
+        Net.connect target ->
+            (result, next) = opened provider target state
+            resume result with next
+        Net.closeConnection connection ->
+            (result, next) = closing provider state connection
+            resume result with next
+        Net.readConnectionBytes connection count _ ->
+            (result, next) = reading provider state connection count
+            resume result with next
+        Net.writeConnectionBytes connection data _ ->
+            case live provider state connection of
+                Err error -> resume (Err error) with state
+                Ok _ -> resume (Ok ()) with { state | outbound = Bytes.concat [state.outbound, data] }
+        Net.setReadDeadline connection _ -> resume (done (live provider state connection)) with state
+        Net.setWriteDeadline connection _ -> resume (done (live provider state connection)) with state
+        Net.newPool _ _ -> resume (Net.poolFor provider 0) with state
+        Net.poolConnect pool target _ ->
+            case Net.poolKey provider pool of
+                Err error -> resume (Err error) with state
+                Ok _ ->
+                    (result, next) = opened provider target state
+                    resume result with next
+        Net.poolRelease connection _ ->
+            (result, next) = closing provider state connection
+            resume result with next
+        Net.connectionReused _ -> resume False with state
+        Net.closePool pool -> resume (done (Net.poolKey provider pool)) with state
+        return value -> (value, state.outbound)
+}
+
+problem : Result Net.Error a ->{Expect.Expect} Net.Error
+problem result =
+    case result of
+        Err error -> error
+        Ok _ -> Expect.failWith "expected network error"
+
+-- A virtual connection whose provider has already exited.
+stale : (Net.Provider, Net.Connection)
+stale = Net.withProvider { provider -> (provider, Net.connectionFor provider "old:1" 0) }
+
+systemRejectsVirtual : () ->{IO.IO} Result Net.Error ()
+systemRejectsVirtual() =
+    (_, connection) = stale
+    Net.runSystem { Net.closeConnection connection }
+
+-- A task cancelled while blocked in `acceptAsync` ends cancelled, closes the
+-- listener, and still runs its cleanup.
+acceptCancelled : () ->{IO.IO} State.StateResult Bool (Async.Outcome (Result Net.Error (Async.Outcome (), Bool)))
+acceptCancelled() = State.run False {
+    Net.runSystem {
+        Async.runOutcome {
+            case Net.listen 0 of
+                Err error -> Err error
+                Ok listener ->
+                    started = Async.channel 1
+                    task = Async.spawn {
+                        Runtime.Scope.finally {
+                            ignore (Async.send started ())
+                            ignore (Fail.attempt { Net.acceptAsync listener { _ -> () } })
+                        } { State.put True }
+                    }
+                    ignore (Async.receive started)
+                    Async.cancel task
+                    outcome = Async.awaitOutcome task
+                    stopped = Net.listenerStopped listener
+                    ignore (Net.stopListener listener)
+                    Ok (outcome, stopped)
+        }
+    }
+}
+
+tests : Test.Test IO.IO
+tests = Test.describe "network providers"
+    [ Test.test "custom handlers feed in-memory bytes to the real HTTP client" {
+        reply = Bytes.fromString "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello"
+        (result, sent) = scripted reply { Fail.attempt { Client.run { Client.getText "http://example.test/greeting" } } }
+        Expect.equal (Ok "hello") result
+        Expect.equal True (String.startsWith "GET /greeting HTTP/1.1\r\n" (Bytes.toStringLossy sent))
+    }
+    , Test.test "custom handlers reject foreign, closed, and retired resources" {
+        (outcomes, _) = scripted Bytes.empty {
+            connection = Expect.ok (Net.connect (Net.endpoint "peer" 1))
+            (nested, _) = scripted Bytes.empty { Net.closeConnection connection }
+            first = Net.closeConnection connection
+            second = Net.closeConnection connection
+            read = Net.readConnectionBytes connection 1 Net.uncancellable
+            ((nested, first), (second, read))
+        }
+        ((nested, first), (second, read)) = outcomes
+        Expect.equal "foreign connection" (problem nested).message
+        Expect.equal "peer:1" (problem nested).address
+        Expect.equal (Ok ()) first
+        Expect.equal (Ok ()) second
+        Expect.equal "closed connection" (problem read).message
+        (provider, connection) = stale
+        Expect.equal "closed provider" (problem (Net.connectionKey provider connection)).message
+        Expect.equal "old:1" (problem (Net.connectionKey provider connection)).address
+    }
+    , Test.test "the system runner rejects virtual connections" {
+        Expect.equal "foreign connection" (problem systemRejectsVirtual()).message
+    }
+    , Test.test "cancellation tokens follow their task's lifetime" {
+        Expect.equal False (Net.isCancelled Net.uncancellable)
+        Expect.equal (Async.Completed False) (Async.runOutcome { Net.isCancelled Net.taskCancel() })
+        case Async.runOutcome { Net.taskCancel() } of
+            Async.Completed ended -> Expect.equal True (Net.isCancelled ended)
+            Async.Cancelled -> Expect.failWith "root cancelled"
+    }
+    , Test.test "cancelling a blocked accept stops the task and runs its cleanup" {
+        observed = acceptCancelled()
+        Expect.equal (Async.Completed (Ok (Async.Cancelled, True))) observed.value
+        Expect.equal True observed.state
+    }
+    ]

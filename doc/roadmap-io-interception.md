@@ -179,8 +179,7 @@ Implemented: see [default handlers](reference/commands.md#default-handlers),
 [Runtime.Entry](../stdlib/Runtime/Entry.fango), and the
 [design](design/pipeline.md#entry-assembly). `Arguments`, `Random`, `Clock`,
 `Http`, and `Console` declare defaults; `FileSystem` now declares its default for
-whole-file and directory calls. Net declares its default when its milestone
-lands. `Test.run` exposes `FileSystem` for its optional JSON report. A test
+whole-file and directory calls, and `Network` for sockets. `Test.run` exposes `FileSystem` for its optional JSON report. A test
 program's `main` row decides which real services its tests may reach, and
 services a test mocks itself never reach `main`.
 
@@ -262,7 +261,7 @@ success with misleading semantics.
 
 Milestone IDs and titles below are stable. They form a dependency graph, not
 a requirement to delay useful console work until network interpretation is
-designed. IOI6 and IOI7 wait for a concrete consumer and the
+designed. IOI7 waits for a concrete consumer and the
 [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
 decision.
 
@@ -304,7 +303,11 @@ committed separately.
 7. **IOI8, partially.** DONE: see [standard services](reference/services.md).
    Bundled callers no longer use `IO` for services, every bundled `main`
    names its services, and `Test.run` returns a status instead of exiting.
-   The parts that depend on IOI6 and IOI7 stay open.
+   The parts that depend on IOI7 stay open.
+8. **IOI6.** DONE: see [Net](../stdlib/Net.fango) and
+   [network services](design/effects.md#network-services). The `Network`
+   effect, checked Net providers, and the `Net.Cancel` contract are
+   implemented; HTTP's client and server perform `Network`.
 
 ### IOI1 API and coverage contract
 
@@ -343,9 +346,8 @@ or continuation machinery is added.
 Status: DONE. [Provider identity](design/ownership.md#file-provider-identity)
 owns File construction, validation, retirement, and task lifetimes. Checked
 custom File providers are documented in [File](../stdlib/File.fango).
-The [resource boundary](roadmap-io-interception-resources.md) links the existing
-native Net identities and the virtual Net construction work retained in IOI6.
-The shared-handler-state question remains open.
+IOI6 extended the same checks to Net. The shared-handler-state question remains
+open.
 
 ### IOI4 Files and standard handles
 
@@ -381,24 +383,20 @@ statuses; argument tests need no real process arguments.
 
 ### IOI6 Network interpretation
 
-Publish the Net driver's operation names and types so custom handlers can
-interpret networking. Specify a checked public cancellation contract rather
-than exposing raw native context payloads. Include TLS, pooling, deadlines,
-synchronous and async paths, and foreign connection checks in the coverage
-audit. Scripted network fixtures are not a standard-library deliverable;
-libraries can build them on the public driver.
-
-Acceptance: a custom handler can answer connections with in-memory bytes that
-reach the same framing code as real sockets; cancellation interrupts supported
-blocking operations without skipping cleanup; pool reuse cannot cross provider
-identities; scheduling simulation remains out of scope.
+Status: DONE. [Net](../stdlib/Net.fango) owns the `Network` operations,
+`Endpoint`, `Cancel`, the system runner, and the custom-provider API.
+[Network services](design/effects.md#network-services) owns the cancellation
+contract and [resource ownership](design/ownership.md#file-provider-identity)
+the provider checks. Scripted network fixtures are left to libraries.
 
 ### IOI7 HTTP and task integration
 
-Add the candidate `Client.runNet` path while keeping existing `run`, `stub`, and
-`mock` contracts. Route server transport through the selected Net boundary.
-Exercise inherited handlers, cancellation, shared fixture state, and connection
-lifetime under existing native tasks.
+Since IOI6, `Http.Client.run` and `Http.Server.serve` perform `Network`, so a
+custom Network handler already reaches the client's real parser. Remaining:
+replace the client mock's `Memory Int` connection with checked Net resources
+or a checked transport of its own while keeping `run`, `stub`, and `mock`
+concise, and exercise inherited handlers, cancellation, shared fixture state,
+and connection lifetime under existing native tasks.
 
 Requires a decision on [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
 before claiming concurrent mock tests.
@@ -411,14 +409,12 @@ to obey the checked task boundary.
 ### IOI8 Migration and completeness audit
 
 Status: partially done. [Standard services](reference/services.md) owns the
-coverage map for Console, File, Process, Random, Clock, and HTTP domain
+coverage map for Console, File, Net, Process, Random, Clock, and HTTP domain
 handlers, and lists the direct native boundaries. Bundled programs annotate
 `main` with their services and return statuses instead of calling
 `Process.exit`; `Test.run` answers a status rather than exiting.
 
-Remaining: migrate Net and the HTTP transport once IOI6 and IOI7 land, move
-their rows from the direct-boundary table into the interpreted-services table,
-and re-audit bundled callers and native wrappers for the new boundary.
+Remaining: re-audit HTTP's mocks and task behavior once IOI7 lands.
 
 Acceptance: all existing correctness gates remain; missing service handlers
 produce deliberate diagnostics; no real implementation is accidentally selected
@@ -429,7 +425,7 @@ inside a mock; the interpreter and compiler agree on each supported behavior.
 Status: DONE. The contract lives in
 [default handlers](reference/commands.md#default-handlers) and
 [Runtime.Entry](../stdlib/Runtime/Entry.fango); Console added its default
-with IOI2 and File with IOI4; Net adds its default with IOI6.
+with IOI2, File with IOI4, and Net with IOI6.
 
 Implement [entry assembly](#entry-assembly): the `Runtime.Entry` module with
 its `DefaultHandler` attribute type and `assemble` metaprogram, and the

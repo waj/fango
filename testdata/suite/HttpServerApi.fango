@@ -19,12 +19,14 @@ hello request = Http.Server.Response
     }
 
 fixtureBody : () ->{IO.IO} Result Net.Error (Async.Outcome ())
-fixtureBody() = Fail.attempt {
-    Async.runOutcome {
-        stop = Async.channel 1
-        ignore (Async.send stop ())
-        config = Http.Server.defaultConfig 0
-        Http.Server.serve { config | workers = 2 } stop hello
+fixtureBody() = Net.runSystem {
+    Fail.attempt {
+        Async.runOutcome {
+            stop = Async.channel 1
+            ignore (Async.send stop ())
+            config = Http.Server.defaultConfig 0
+            Http.Server.serve { config | workers = 2 } stop hello
+        }
     }
 }
 

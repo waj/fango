@@ -1,7 +1,7 @@
 import Process
 import Fail exposing (Fail)
 import Http.Client as Client
-import IO
+import Net
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
 
@@ -15,7 +15,7 @@ outcome result =
         Err (Client.Transport _) -> "rejected"
         Err error -> show error
 
-fetchWith : Maybe String -> String ->{IO} String
+fetchWith : Maybe String -> String ->{Net.Network} String
 fetchWith caFile target =
     outcome (Fail.attempt { Client.run { Client.configure { config -> { config | caFile = caFile } } { Client.getText target } } })
 

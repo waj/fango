@@ -15,7 +15,6 @@ import Bytes exposing (Bytes)
 import Fail exposing (Fail, attempt, fromResult)
 import Http exposing (Body(..), Error(..), Header(..), Protocol(..), Version(..))
 import Http.Wire as Wire exposing (Framing(..))
-import IO exposing (IO)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Net
@@ -262,7 +261,7 @@ serveRequest lineLimit headersLimit bodyLimit input output handler =
             sendError output (errorStatus error)
             Just False
 
-serveConnection : Config -> Net.Connection -> (Request {s | e} ->{s | e} Response {s | e}) ->{Async, IO, Fail Net.Error, Protocol | e} ()
+serveConnection : Config -> Net.Connection -> (Request {s | e} ->{s | e} Response {s | e}) ->{Async, Net.Network, Fail Net.Error, Protocol | e} ()
 serveConnection config connection handler =
     source = Net.sourceAsync connection
     sink = Net.sinkAsync connection
@@ -286,7 +285,7 @@ serveConnection config connection handler =
 -- Each worker installs its own connection, buffer, protocol, and Fail
 -- handlers. Only a fatal accept error leaves this runner; its task captures
 -- that error and reports it through the server's shutdown channel.
-worker : Config -> Net.Listener -> (Request {Protocol, s | {}} ->{Protocol, s | {}} Response {Protocol, s | {}}) ->{Async, IO, Fail Net.Error} ()
+worker : Config -> Net.Listener -> (Request {Protocol, s | {}} ->{Protocol, s | {}} Response {Protocol, s | {}}) ->{Async, Net.Network, Fail Net.Error} ()
 worker config listener handler =
     loop() =
         outcome = attempt {
@@ -331,7 +330,7 @@ listenerResult stopped first =
                 Just (Just error) -> Err error
                 _ -> Ok ()
 
-runListener : Config -> Channel () -> Net.Listener -> (Channel (Maybe Net.Error) ->{Async, IO} List (Task ())) ->{Async, IO, Fail Net.Error} ()
+runListener : Config -> Channel () -> Net.Listener -> (Channel (Maybe Net.Error) ->{Async, Net.Network} List (Task ())) ->{Async, Net.Network, Fail Net.Error} ()
 runListener config stop listener startWorkers =
     result = Async.scope {
         events = Async.channel (config.workers + 1)
@@ -363,10 +362,10 @@ runListener config stop listener startWorkers =
 -- inside workers and do not stop unrelated connections. Fatal accept errors
 -- trigger coordinated shutdown through the server's event channel; `serve`
 -- raises the selected Net error in the caller after its workers are joined.
-serve : Config -> Channel () -> (Request {Protocol, s | {}} ->{Protocol, s | {}} Response {Protocol, s | {}}) ->{Async, IO, Fail Net.Error} ()
+serve : Config -> Channel () -> (Request {Protocol, s | {}} ->{Protocol, s | {}} Response {Protocol, s | {}}) ->{Async, Net.Network, Fail Net.Error} ()
 serve config stop handler =
     Net.withListener config.port { listener ->
-        startWorkers : Channel (Maybe Net.Error) ->{Async, IO} List (Task ())
+        startWorkers : Channel (Maybe Net.Error) ->{Async, Net.Network} List (Task ())
         startWorkers events =
             loop remaining =
                 if remaining <= 0 then []

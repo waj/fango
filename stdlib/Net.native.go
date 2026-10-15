@@ -14,7 +14,84 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/waj/fango/runtime/fangort"
 )
+
+// Sockets belong to the fangort resource provider of the Network runner that
+// opened them: each system native validates the owner before projecting the
+// native socket, and retirement closes what is still open. Virtual
+// listeners, connections, and pools are Fango values and never reach Go.
+
+func netProvider(value any) (*fangort.ResourceProvider, error) { return fangort.CheckedProvider(value) }
+
+func NetFreshProvider() any  { return fangort.NewResourceProvider(false) }
+func NetSystemProvider() any { return fangort.NewResourceProvider(true) }
+
+func NetSameProvider(a, b any) bool { return a == b }
+
+func NetProviderStatus(value any) error {
+	p, err := netProvider(value)
+	if err != nil {
+		return err
+	}
+	return p.Status("")
+}
+
+func NetRetireProvider(value any) {
+	if p, err := netProvider(value); err == nil {
+		_ = p.Retire()
+	}
+}
+
+// NetRetireSystem closes the runner's remaining sockets. Their close failures
+// are ignored: a peer may already have reset them.
+func NetRetireSystem(value any) {
+	if p, err := netProvider(value); err == nil {
+		_ = p.Retire()
+	}
+}
+
+// TokenCancelled reports whether a task lifetime's context has ended.
+func TokenCancelled(token any) bool {
+	scope, ok := token.(*FangoAsyncScope)
+	return ok && scope.Context().Err() != nil
+}
+
+func SystemListenerLabel(value any) string   { return fangort.ResourceLabel(value) }
+func SystemConnectionLabel(value any) string { return fangort.ResourceLabel(value) }
+
+// owned projects a system resource of the provider.
+func owned(provider, value any, noun string, closing bool) (any, error) {
+	p, err := netProvider(provider)
+	if err != nil {
+		return nil, err
+	}
+	r, err := p.Use(value, noun, closing)
+	if err != nil {
+		return nil, err
+	}
+	return r.Value, nil
+}
+
+func adoptConnection(provider any, label string, open func() (any, error)) (any, error) {
+	p, err := netProvider(provider)
+	if err != nil {
+		return nil, err
+	}
+	return p.Adopt(label, func() (any, func() error, error) {
+		value, err := open()
+		if err != nil {
+			return nil, nil, err
+		}
+		return value, func() error { return closeConnection(value) }, nil
+	})
+}
+
+// withinTask closes the resource if the task lifetime ends during the call.
+func withinTask(token any, close func()) func() bool {
+	return context.AfterFunc(token.(*FangoAsyncScope).Context(), close)
+}
 
 type listener struct {
 	value  net.Listener
@@ -51,7 +128,7 @@ func connectionValue(value any) (*connection, error) {
 	return c, nil
 }
 
-func Listen(port int64) (any, error) {
+func listenSocket(port int64) (any, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort("", strconv.FormatInt(port, 10)))
 	if err != nil {
 		return nil, err
@@ -59,7 +136,7 @@ func Listen(port int64) (any, error) {
 	return &listener{value: l}, nil
 }
 
-func CloseListener(value any) error {
+func closeListener(value any) error {
 	l, ok := value.(*listener)
 	if !ok || l == nil {
 		return errors.New("closed listener")
@@ -70,20 +147,12 @@ func CloseListener(value any) error {
 	return l.value.Close()
 }
 
-func ListenerStopped(value any) bool {
+func listenerStopped(value any) bool {
 	l, ok := value.(*listener)
 	return !ok || l == nil || l.closed.Load()
 }
 
-func AcceptConnectionAsync(token, value any) (any, error) {
-	scope := token.(*FangoAsyncScope)
-	ctx := scope.Context()
-	stop := context.AfterFunc(ctx, func() { _ = CloseListener(value) })
-	defer stop()
-	return AcceptConnection(value)
-}
-
-func AcceptConnection(value any) (any, error) {
+func acceptConnection(value any) (any, error) {
 	l, err := listenerValue(value)
 	if err != nil {
 		return nil, err
@@ -95,17 +164,9 @@ func AcceptConnection(value any) (any, error) {
 	return &connection{value: c, reader: bufio.NewReader(c)}, nil
 }
 
-func Dial(host string, port int64) (any, error) {
-	c, err := net.Dial("tcp", net.JoinHostPort(host, strconv.FormatInt(port, 10)))
-	if err != nil {
-		return nil, err
-	}
-	return &connection{value: c, reader: bufio.NewReader(c)}, nil
-}
-
-// DialTimeout connects like Dial but gives up after millis; zero waits as long
+// dialTimeout connects like a plain dial but gives up after millis; zero waits as long
 // as the system does.
-func DialTimeout(host string, port int64, millis int64) (any, error) {
+func dialTimeout(host string, port int64, millis int64) (any, error) {
 	dialer := net.Dialer{Timeout: time.Duration(millis) * time.Millisecond}
 	c, err := dialer.Dial("tcp", net.JoinHostPort(host, strconv.FormatInt(port, 10)))
 	if err != nil {
@@ -114,10 +175,10 @@ func DialTimeout(host string, port int64, millis int64) (any, error) {
 	return &connection{value: c, reader: bufio.NewReader(c)}, nil
 }
 
-// DialTls connects and completes a TLS handshake within millis, verifying the
+// dialTls connects and completes a TLS handshake within millis, verifying the
 // server's certificate for host against the system roots plus any in the PEM
 // file at rootsPath.
-func DialTls(host string, port int64, millis int64, rootsPath string) (any, error) {
+func dialTls(host string, port int64, millis int64, rootsPath string) (any, error) {
 	config := &tls.Config{ServerName: host}
 	if rootsPath != "" {
 		roots, err := x509.SystemCertPool()
@@ -147,7 +208,7 @@ func DialTls(host string, port int64, millis int64, rootsPath string) (any, erro
 	return &connection{value: c, reader: bufio.NewReader(c)}, nil
 }
 
-func CloseConnection(value any) error {
+func closeConnection(value any) error {
 	if l, ok := value.(*lease); ok && l != nil {
 		if l.done.Swap(true) {
 			return nil
@@ -164,29 +225,9 @@ func CloseConnection(value any) error {
 	return c.value.Close()
 }
 
-// ConnectionHasInput blocks until one byte is available or the peer closes.
-func ConnectionHasInput(value any) (bool, error) {
-	c, err := connectionValue(value)
-	if err != nil {
-		return false, err
-	}
-	c.readMu.Lock()
-	defer c.readMu.Unlock()
-	if _, err := connectionValue(c); err != nil {
-		return false, err
-	}
-	if _, err := c.reader.Peek(1); err != nil {
-		if err == io.EOF {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
 const maxSocketRead = 1 << 16
 
-func ReadConnectionBytes(value any, max int64) ([]byte, error) {
+func readConnectionBytes(value any, max int64) ([]byte, error) {
 	c, err := connectionValue(value)
 	if err != nil {
 		return nil, err
@@ -222,14 +263,7 @@ func ReadConnectionBytes(value any, max int64) ([]byte, error) {
 	return buf, nil
 }
 
-func ReadConnectionBytesAsync(token, value any, max int64) ([]byte, error) {
-	scope := token.(*FangoAsyncScope)
-	stop := context.AfterFunc(scope.Context(), func() { _ = CloseConnection(value) })
-	defer stop()
-	return ReadConnectionBytes(value, max)
-}
-
-func WriteConnectionBytes(value any, data []byte) error {
+func writeConnectionBytes(value any, data []byte) error {
 	c, err := connectionValue(value)
 	if err != nil {
 		return err
@@ -252,14 +286,7 @@ func WriteConnectionBytes(value any, data []byte) error {
 	return nil
 }
 
-func WriteConnectionBytesAsync(token, value any, data []byte) error {
-	scope := token.(*FangoAsyncScope)
-	stop := context.AfterFunc(scope.Context(), func() { _ = CloseConnection(value) })
-	defer stop()
-	return WriteConnectionBytes(value, data)
-}
-
-func SetReadDeadline(value any, millis int64) error {
+func setReadDeadline(value any, millis int64) error {
 	c, err := connectionValue(value)
 	if err != nil {
 		return err
@@ -271,7 +298,7 @@ func SetReadDeadline(value any, millis int64) error {
 	return c.value.SetReadDeadline(deadline)
 }
 
-func SetWriteDeadline(value any, millis int64) error {
+func setWriteDeadline(value any, millis int64) error {
 	c, err := connectionValue(value)
 	if err != nil {
 		return err
@@ -307,7 +334,7 @@ type lease struct {
 	done   atomic.Bool
 }
 
-func NewPool(maxIdle int64, idleMillis int64) any {
+func newPool(maxIdle int64, idleMillis int64) any {
 	return &pool{idle: map[string][]idleConnection{}, maxIdle: int(maxIdle), timeout: time.Duration(idleMillis) * time.Millisecond}
 }
 
@@ -351,9 +378,9 @@ func closeRaw(c *connection) error {
 	return c.value.Close()
 }
 
-// PoolConnect leases an idle connection to the endpoint, unless fresh, or
+// poolConnect leases an idle connection to the endpoint, unless fresh, or
 // dials a new one as DialTimeout or DialTls would.
-func PoolConnect(value any, host string, port int64, millis int64, secure bool, roots string, fresh bool) (any, error) {
+func poolConnect(value any, host string, port int64, millis int64, secure bool, roots string, fresh bool) (any, error) {
 	p := value.(*pool)
 	key := poolKey(host, port, secure, roots)
 	if !fresh {
@@ -364,9 +391,9 @@ func PoolConnect(value any, host string, port int64, millis int64, secure bool, 
 	var dialed any
 	var err error
 	if secure {
-		dialed, err = DialTls(host, port, millis, roots)
+		dialed, err = dialTls(host, port, millis, roots)
 	} else {
-		dialed, err = DialTimeout(host, port, millis)
+		dialed, err = dialTimeout(host, port, millis)
 	}
 	if err != nil {
 		return nil, err
@@ -374,9 +401,9 @@ func PoolConnect(value any, host string, port int64, millis int64, secure bool, 
 	return &lease{conn: dialed.(*connection), pool: p, key: key}, nil
 }
 
-// PoolRelease ends a lease: a reusable connection goes back to the pool,
+// poolRelease ends a lease: a reusable connection goes back to the pool,
 // anything else is closed. Later releases of the same lease do nothing.
-func PoolRelease(value any, reusable bool) error {
+func poolRelease(value any, reusable bool) error {
 	l := value.(*lease)
 	if l.done.Swap(true) {
 		return nil
@@ -396,13 +423,13 @@ func PoolRelease(value any, reusable bool) error {
 	return closeRaw(c)
 }
 
-func ConnectionReused(value any) bool {
+func connectionReused(value any) bool {
 	l, ok := value.(*lease)
 	return ok && l.reused
 }
 
-// ClosePool closes every idle connection; leases still out close on release.
-func ClosePool(value any) error {
+// closePool closes every idle connection; leases still out close on release.
+func closePool(value any) error {
 	p := value.(*pool)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -414,4 +441,175 @@ func ClosePool(value any) error {
 		delete(p.idle, key)
 	}
 	return nil
+}
+
+func SystemListen(provider any, port int64) (any, error) {
+	p, err := netProvider(provider)
+	if err != nil {
+		return nil, err
+	}
+	return p.Adopt(":"+strconv.FormatInt(port, 10), func() (any, func() error, error) {
+		l, err := listenSocket(port)
+		if err != nil {
+			return nil, nil, err
+		}
+		return l, func() error { return closeListener(l) }, nil
+	})
+}
+
+func SystemStopListener(provider, value any) error {
+	l, err := owned(provider, value, "listener", true)
+	if err != nil {
+		return err
+	}
+	return closeListener(l)
+}
+
+// SystemListenerStopped answers true for a listener this runner cannot use.
+func SystemListenerStopped(provider, value any) bool {
+	l, err := owned(provider, value, "listener", false)
+	return err != nil || listenerStopped(l)
+}
+
+func SystemAccept(provider, value any) (any, error) {
+	l, err := owned(provider, value, "listener", false)
+	if err != nil {
+		return nil, err
+	}
+	return adoptConnection(provider, fangort.ResourceLabel(value), func() (any, error) { return acceptConnection(l) })
+}
+
+// SystemAcceptWithin closes the listener if the task lifetime ends while it
+// waits, as every waiting worker shares it.
+func SystemAcceptWithin(token, provider, value any) (any, error) {
+	l, err := owned(provider, value, "listener", false)
+	if err != nil {
+		return nil, err
+	}
+	stop := withinTask(token, func() { _ = closeListener(l) })
+	defer stop()
+	return adoptConnection(provider, fangort.ResourceLabel(value), func() (any, error) { return acceptConnection(l) })
+}
+
+func SystemConnect(provider any, host string, port int64, millis int64, secure bool, roots string) (any, error) {
+	return adoptConnection(provider, net.JoinHostPort(host, strconv.FormatInt(port, 10)), func() (any, error) {
+		if secure {
+			return dialTls(host, port, millis, roots)
+		}
+		return dialTimeout(host, port, millis)
+	})
+}
+
+func SystemCloseConnection(provider, value any) error {
+	c, err := owned(provider, value, "connection", true)
+	if err != nil {
+		return err
+	}
+	return closeConnection(c)
+}
+
+func SystemRead(provider, value any, max int64) ([]byte, error) {
+	c, err := owned(provider, value, "connection", false)
+	if err != nil {
+		return nil, err
+	}
+	return readConnectionBytes(c, max)
+}
+
+func SystemReadWithin(token, provider, value any, max int64) ([]byte, error) {
+	c, err := owned(provider, value, "connection", false)
+	if err != nil {
+		return nil, err
+	}
+	stop := withinTask(token, func() { _ = closeConnection(c) })
+	defer stop()
+	return readConnectionBytes(c, max)
+}
+
+func SystemWrite(provider, value any, data []byte) error {
+	c, err := owned(provider, value, "connection", false)
+	if err != nil {
+		return err
+	}
+	return writeConnectionBytes(c, data)
+}
+
+func SystemWriteWithin(token, provider, value any, data []byte) error {
+	c, err := owned(provider, value, "connection", false)
+	if err != nil {
+		return err
+	}
+	stop := withinTask(token, func() { _ = closeConnection(c) })
+	defer stop()
+	return writeConnectionBytes(c, data)
+}
+
+func SystemSetReadDeadline(provider, value any, millis int64) error {
+	c, err := owned(provider, value, "connection", false)
+	if err != nil {
+		return err
+	}
+	return setReadDeadline(c, millis)
+}
+
+func SystemSetWriteDeadline(provider, value any, millis int64) error {
+	c, err := owned(provider, value, "connection", false)
+	if err != nil {
+		return err
+	}
+	return setWriteDeadline(c, millis)
+}
+
+// SystemNewPool answers a closed pool once the runner has retired, so its
+// connects fail with the provider error rather than dialing.
+func SystemNewPool(provider any, maxIdle int64, idleMillis int64) any {
+	p, err := netProvider(provider)
+	if err != nil {
+		panic(err)
+	}
+	r, err := p.Adopt("", func() (any, func() error, error) {
+		pl := newPool(maxIdle, idleMillis)
+		return pl, func() error { return closePool(pl) }, nil
+	})
+	if err != nil {
+		return p.Retired("")
+	}
+	return r
+}
+
+// SystemPoolConnect leases under the pool's own provider, so idle
+// connections never cross runners.
+func SystemPoolConnect(provider, value any, host string, port int64, millis int64, secure bool, roots string, fresh bool) (any, error) {
+	pl, err := owned(provider, value, "pool", false)
+	if err != nil {
+		return nil, err
+	}
+	return adoptConnection(provider, net.JoinHostPort(host, strconv.FormatInt(port, 10)), func() (any, error) {
+		return poolConnect(pl, host, port, millis, secure, roots, fresh)
+	})
+}
+
+// SystemPoolRelease ends a lease, or closes a connection that was not leased.
+func SystemPoolRelease(provider, value any, reusable bool) error {
+	c, err := owned(provider, value, "connection", true)
+	if err != nil {
+		return err
+	}
+	if _, leased := c.(*lease); leased {
+		return poolRelease(c, reusable)
+	}
+	return closeConnection(c)
+}
+
+func SystemConnectionReused(provider, value any) bool {
+	c, err := owned(provider, value, "connection", false)
+	return err == nil && connectionReused(c)
+}
+
+func SystemClosePool(provider, value any) error {
+	pl, err := owned(provider, value, "pool", true)
+	if err != nil {
+		return err
+	}
+	return closePool(pl)
 }
