@@ -1,0 +1,109 @@
+module HttpClientTasks exposing (tests)
+
+import Async exposing (Outcome(..))
+import Bytes exposing (Bytes)
+import Expect
+import Fail
+import Http exposing (Body(..))
+import Http.Client as Client
+import Http.Server as Server
+import IO
+import List
+import Net
+import Result exposing (Result(..))
+import Runtime.Scope
+import State
+import String
+import Test
+
+-- Answers each stubbed request with its own request line and records the
+-- line atomically, since tasks share the record.
+echoLine : Bytes ->{State.State (List String)} Result Client.Error Bytes
+echoLine request =
+    line = case String.split "\r\n" (Bytes.toStringLossy request) of
+        [first | _] -> first
+        [] -> ""
+    State.modify { seen -> [line | seen] }
+    Ok (Bytes.fromString ("HTTP/1.1 200 OK\r\nContent-Length: " ++ show (String.byteLength line) ++ "\r\n\r\n" ++ line))
+
+-- A server handler answering with the request target.
+target : Server.Request e ->{e} Server.Response e
+target request = Server.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString request.target) }
+
+-- Eight tasks request their own path at once.
+fetchPaths : () ->{Async.Async, Client.Http} List (Result Client.Error String)
+fetchPaths() =
+    tasks = List.map { n -> Async.spawn { Fail.attempt { Client.getText ("http://example.test/" ++ show n) } } } (List.range 1 8)
+    Async.awaitAll tasks
+
+expectedLines : List (Result Client.Error String)
+expectedLines = List.map { n -> Ok ("GET /" ++ show n ++ " HTTP/1.1") } (List.range 1 8)
+
+stubbed : () ->{IO.IO} (Outcome (List (Result Client.Error String)), Int)
+stubbed() =
+    result = State.runAtomic [] { Client.stub echoLine { Async.runOutcome fetchPaths } }
+    (result.value, List.length result.state)
+
+mocked : () ->{IO.IO} Outcome (List (Result Client.Error String))
+mocked() = Client.mock target { Async.runOutcome { Client.cancellable fetchPaths } }
+
+closedConnection : Net.Error
+closedConnection = Net.Error { kind = Net.Other, address = "silent:80", message = "closed connection" }
+
+-- Waits until the read's task is cancelled.
+waitFor : Net.Cancel -> Result Net.Error Bytes
+waitFor cancel = if Net.isCancelled cancel then Err closedConnection else waitFor cancel
+
+-- A network whose connections accept writes and never answer: a read waits
+-- for its task's cancellation.
+silent : (() ->{Net.Network | e} a) ->{e} a
+silent action = Net.withProvider { provider ->
+    handle action() on
+        Net.listen _ -> resume (Ok (Net.listenerFor provider 0))
+        Net.stopListener _ -> resume (Ok ())
+        Net.listenerStopped _ -> resume False
+        Net.acceptConnection _ _ -> resume (Err closedConnection)
+        Net.connect _ -> resume (Ok (Net.connectionFor provider "silent:80" 0))
+        Net.closeConnection _ -> resume (Ok ())
+        Net.readConnectionBytes _ _ cancel -> resume (waitFor cancel)
+        Net.writeConnectionBytes _ _ _ -> resume (Ok ())
+        Net.setReadDeadline _ _ -> resume (Ok ())
+        Net.setWriteDeadline _ _ -> resume (Ok ())
+        Net.newPool _ _ -> resume (Net.poolFor provider 0)
+        Net.poolConnect _ _ _ -> resume (Ok (Net.connectionFor provider "silent:80" 0))
+        Net.poolRelease _ _ -> resume (Ok ())
+        Net.connectionReused _ -> resume False
+        Net.closePool _ -> resume (Ok ())
+}
+
+-- A task blocked reading a response stops as cancelled, and its cleanup runs.
+interrupted : () ->{IO.IO} State.StateResult Bool (Outcome (Outcome (Result Client.Error String)))
+interrupted() = State.runAtomic False {
+    silent {
+        Client.run {
+            Async.runOutcome {
+                started = Async.channel 1
+                task = Async.spawn {
+                    Runtime.Scope.finally {
+                        ignore (Async.send started ())
+                        Client.cancellable { Fail.attempt { Client.getText "http://silent.test/" } }
+                    } { State.put True }
+                }
+                ignore (Async.receive started)
+                Async.cancel task
+                Async.awaitOutcome task
+            }
+        }
+    }
+}
+
+tests : Test.Test IO.IO
+tests = Test.test "http_client_tasks" {
+    Expect.equal (Completed expectedLines, 8) stubbed()
+    Expect.equal (Completed (List.map { n -> Ok ("/" ++ show n) } (List.range 1 8))) mocked()
+    result = interrupted()
+    Expect.equal (Completed Cancelled) result.value
+    Expect.equal True result.state
+}
+
+main() = Test.run tests

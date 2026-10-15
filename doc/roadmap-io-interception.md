@@ -261,9 +261,7 @@ success with misleading semantics.
 
 Milestone IDs and titles below are stable. They form a dependency graph, not
 a requirement to delay useful console work until network interpretation is
-designed. IOI7 waits for a concrete consumer; its
-[shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
-mechanism is decided.
+designed.
 
 | Milestone | Depends on | Deliverable |
 | --- | --- | --- |
@@ -273,7 +271,7 @@ mechanism is decided.
 | IOI4 Files and standard handles | IOI3 | File interpretation, filesystem fixtures, retirement of the shared `IO.Handle` |
 | IOI5 Process arguments and exit | IOI1 | Argument runner, function-only `main` returning a status, hard-exit contract |
 | IOI6 Network interpretation | IOI3 | Public Net driver with a checked cancellation boundary; no stdlib scripted fixtures |
-| IOI7 HTTP and task integration | IOI6, [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency) (decided) | HTTP transport path and inherited mock behavior under real tasks |
+| IOI7 HTTP and task integration | IOI6, [shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency) (done) | HTTP transport path and inherited mock behavior under real tasks |
 | IOI8 Migration and completeness audit | IOI2, IOI4, IOI5, IOI7, IOI9 | Bundled caller migration, documentation, and verified coverage boundary |
 | IOI9 Entry assembly | IOI5, [effect reflection](reference/metaprogramming.md#effect-reflection) (done) | `DefaultHandler` attribute, `Runtime.Entry.assemble`, compiler entry splice |
 
@@ -308,6 +306,10 @@ committed separately.
    [network services](design/effects.md#network-services). The `Network`
    effect, checked Net providers, and the `Net.Cancel` contract are
    implemented; HTTP's client and server perform `Network`.
+9. **IOI7.** DONE: see [the client transport](design/http.md#the-client-transport)
+   and [mocking through framing](design/http.md#mocking-through-framing).
+   Stub and mock connections are checked Net connections with per-connection
+   exchanges, and `Client.cancellable` interrupts requests in cancelled tasks.
 
 ### IOI1 API and coverage contract
 
@@ -391,22 +393,11 @@ the provider checks. Scripted network fixtures are left to libraries.
 
 ### IOI7 HTTP and task integration
 
-Since IOI6, `Http.Client.run` and `Http.Server.serve` perform `Network`, so a
-custom Network handler already reaches the client's real parser. Remaining:
-replace the client mock's `Memory Int` connection with checked Net resources
-or a checked transport of its own while keeping `run`, `stub`, and `mock`
-concise, and exercise inherited handlers, cancellation, shared fixture state,
-and connection lifetime under existing native tasks.
-
-Concurrent mock tests keep their fixture state in
-[`State.runAtomic`](../stdlib/State.fango), per the
-[shared handler state](roadmap-io-interception-resources.md#mutable-fixtures-and-concurrency)
-decision.
-
-Acceptance: HTTP domain mocks remain concise; lower-level transport tests reach
-the real parser; task mocks preserve operation-level consistency under the
-selected concurrency mechanism, without claiming deterministic task ordering; application abort dependencies continue
-to obey the checked task boundary.
+Status: DONE. [The client transport](design/http.md#the-client-transport) and
+[mocking through framing](design/http.md#mocking-through-framing) own the
+checked stub connections, per-connection exchanges, and the
+`Client.cancellable` contract;
+[standard services](reference/services.md) states the task guarantees.
 
 ### IOI8 Migration and completeness audit
 

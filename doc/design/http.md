@@ -92,8 +92,8 @@ reach those handlers.
 A local cell records the first nonempty response chunk; after that point,
 header, body, and callback failures propagate without replaying the request.
 
-The `run` handler keeps no state: a `Socket` handle carries the live
-connection. Each operation returns a `Result`, and the caller's code raises it,
+The `run` handler keeps no state: a connection handle carries the live
+`Net.Connection` and whether the pool reused it. Each operation returns a `Result`, and the caller's code raises it,
 so a failure reaches the caller's own `attempt` rather than the handler outside
 `run`, and `run`, `stub`, and `mock` handle `Http` alone; the program decides where
 `Fail Error` is handled. Configuration is read once per request and passed to each operation
@@ -110,6 +110,14 @@ never close one a later request took from the pool. A request releases its
 lease explicitly once it knows whether the connection is reusable; the
 surrounding bracket's release only matters when the request fails.
 
+Reads and writes pass a `Net.Cancel`. The client passes `uncancellable`, so
+it needs no `Async`; `Client.cancellable` rewrites each `transmit` and
+`receive` with the performing task's lifetime, read in the clause rather than
+when the wrapper is installed, so every task that inherits it is interrupted
+by its own cancellation. A failed call in a cancelled task checkpoints before
+its error returns, as Net's `Async` helpers do, so the task ends cancelled and
+the request's bracket still releases its lease. Connecting takes no `Cancel`.
+
 The request is written through an unbuffered writer over `transmit`. A
 `Writer.over` buffer would carry a local permission that the caller's body,
 typed before the request runs, cannot accept. The shared chunked and sized
@@ -119,9 +127,20 @@ reader inside `send`'s callback.
 
 ## Mocking through framing
 
-`Client.mock` builds on the sequential `stub` transport. On the first receive,
-it parses the collected request bytes with `Server.serveRequest` and collects
-its serialized response in memory. Later receives reach EOF. The server driver
+`Client.stub` owns a Net provider for the duration of the run, and each
+`connect` mints a `Net.connectionFor` that provider under a fresh key. A
+connection from another runner, from a finished stub, or used after its
+release fails `Net.connectionKey` or finds no exchange, and reports a
+`Transport` error. The open exchanges live in a private
+[`State.runAtomic`](../../stdlib/State.fango) table keyed by connection: a
+write appends to its exchange, and the first receive atomically marks the
+exchange answered and takes its request bytes. `respond` then runs outside any
+update, in the requesting task, so tasks that inherit the stub keep separate
+exchanges and a caller's `respond` effects are never retried.
+
+`Client.mock` builds on `stub`. On the first receive, it parses the collected
+request bytes with `Server.serveRequest` and collects its serialized response
+in memory. Later receives reach EOF. The server driver
 is shared with the socket server, so invalid requests and responses get the
 same error statuses and body failures leave the same incomplete framing.
 Both sides run their real HTTP code; the mock does not construct client
@@ -138,6 +157,6 @@ returned body; narrowing it using only the final action's requirements would
 drop effects that body needs.
 
 The mock buffers whole messages, uses default server framing limits, and
-supports consecutive requests and redirects. Client `configure` overrides work
-normally. Overlapping exchanges, socket timing, TLS verification, and pool reuse
-are not simulated.
+supports consecutive and concurrent requests and redirects. Client `configure`
+overrides work normally. Socket timing, TLS verification, and pool reuse are
+not simulated, and concurrent exchanges have no deterministic order.

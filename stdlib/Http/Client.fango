@@ -9,13 +9,15 @@
 module Http.Client exposing
     ( Config(..), Connection, Error(..), Http, Reply(..), Request(..)
     , Response(..)
-    , compressRequest, configure, defaultConfig, expectSuccess, fetch, get
-    , getBytes, getJson, getText, mock, post, postJson, request, run, send, stub
-    , withBearer, withBody, withHeader, withResponse
+    , cancellable, compressRequest, configure, defaultConfig, expectSuccess
+    , fetch, get, getBytes, getJson, getText, mock, post, postJson, request, run
+    , send, stub, withBearer, withBody, withHeader, withResponse
     )
 
+import Async
 import Basics exposing (..)
 import Bytes exposing (Bytes, Source(..))
+import Dict exposing (Dict)
 import Fail exposing (Fail, attempt, fromResult)
 import Http exposing (Body(..), Header(..), Protocol(..))
 import Http.GZip as GZip
@@ -30,6 +32,7 @@ import Result exposing (Result(..))
 import Runtime.Entry
 import Runtime.Local
 import Runtime.Scope
+import State
 import String
 import Url exposing (Url)
 import Writer exposing (Writer(..))
@@ -164,9 +167,9 @@ defaultConfig = Config
 -- `fresh` asks for a new connection rather than an idle one.
 type Endpoint = { secure : Bool, host : String, port : Int, connectTimeoutMs : Int, caFile : Maybe String, fresh : Bool }
 
--- A transport's handle on one connection; a socket knows whether it was
--- reused from the pool.
-type Connection = Socket Net.Connection Bool | Memory Int
+-- A transport's handle on one connection: a Net connection owned by the
+-- transport's runner, and whether it was reused from a pool.
+type Connection = Connection Net.Connection Bool
 
 -- Sending requests over some transport: `run` for sockets, `stub` for
 -- raw response bytes, and `mock` for server handlers in memory. A `main`
@@ -174,8 +177,8 @@ type Connection = Socket Net.Connection Bool | Memory Int
 #[Runtime.Entry.DefaultHandler `run`]
 effect Http
     connect : Endpoint -> Result Error Connection
-    transmit : Connection -> Bytes -> Int -> Result Error ()
-    receive : Connection -> Int -> Int -> Result Error (Maybe Bytes)
+    transmit : Connection -> Bytes -> Int -> Net.Cancel -> Result Error ()
+    receive : Connection -> Int -> Int -> Net.Cancel -> Result Error (Maybe Bytes)
     release : Connection -> Bool -> Result Error ()
     currentConfig : () -> Config
 
@@ -190,9 +193,6 @@ fromNet result =
         Ok value -> Ok value
         Err error -> Err (netError error)
 
-foreign : Result Error a
-foreign = Err (Protocol (Http.InvalidMessage "connection belongs to another transport"))
-
 dial : Net.Pool -> Endpoint ->{Net.Network} Result Error Connection
 dial pool endpoint =
     target = Net.Endpoint
@@ -202,35 +202,26 @@ dial pool endpoint =
         , security = if endpoint.secure then Net.Tls endpoint.caFile else Net.Plain
         }
     case Net.poolConnect pool target endpoint.fresh of
-        Ok connection -> Ok (Socket connection (Net.connectionReused connection))
+        Ok connection -> Ok (Connection connection (Net.connectionReused connection))
         Err error -> Err (netError error)
 
-socketWrite : Connection -> Bytes -> Int ->{Net.Network} Result Error ()
-socketWrite connection bytes timeout =
-    case connection of
-        Socket socket _ ->
-            case fromNet (Net.setWriteDeadline socket timeout) of
-                Ok _ -> fromNet (Net.writeConnectionBytes socket bytes Net.uncancellable)
-                Err error -> Err error
-        Memory _ -> foreign
+socketWrite : Connection -> Bytes -> Int -> Net.Cancel ->{Net.Network} Result Error ()
+socketWrite (Connection socket _) bytes timeout cancel =
+    case fromNet (Net.setWriteDeadline socket timeout) of
+        Ok _ -> fromNet (Net.writeConnectionBytes socket bytes cancel)
+        Err error -> Err error
 
-socketRead : Connection -> Int -> Int ->{Net.Network} Result Error (Maybe Bytes)
-socketRead connection most timeout =
-    case connection of
-        Socket socket _ ->
-            case fromNet (Net.setReadDeadline socket timeout) of
+socketRead : Connection -> Int -> Int -> Net.Cancel ->{Net.Network} Result Error (Maybe Bytes)
+socketRead (Connection socket _) most timeout cancel =
+    case fromNet (Net.setReadDeadline socket timeout) of
+        Err error -> Err error
+        Ok _ ->
+            case fromNet (Net.readConnectionBytes socket most cancel) of
+                Ok bytes -> Ok (if Bytes.length bytes == 0 then Nothing else Just bytes)
                 Err error -> Err error
-                Ok _ ->
-                    case fromNet (Net.readConnectionBytes socket most Net.uncancellable) of
-                        Ok bytes -> Ok (if Bytes.length bytes == 0 then Nothing else Just bytes)
-                        Err error -> Err error
-        Memory _ -> foreign
 
 socketRelease : Connection -> Bool ->{Net.Network} Result Error ()
-socketRelease connection reusable =
-    case connection of
-        Socket socket _ -> fromNet (Net.poolRelease socket reusable)
-        Memory _ -> foreign
+socketRelease (Connection socket _) reusable = fromNet (Net.poolRelease socket reusable)
 
 -- Runs requests over Net's TCP and TLS connections with `defaultConfig`,
 -- which `configure` adjusts. Idle connections are kept for reuse, up to 8 per
@@ -249,11 +240,37 @@ run action =
     Runtime.Scope.finally {
         handle action() on
             connect endpoint -> resume (dial pool endpoint)
-            transmit connection bytes timeout -> resume (socketWrite connection bytes timeout)
-            receive connection most timeout -> resume (socketRead connection most timeout)
+            transmit connection bytes timeout cancel -> resume (socketWrite connection bytes timeout cancel)
+            receive connection most timeout cancel -> resume (socketRead connection most timeout cancel)
             release connection reusable -> resume (socketRelease connection reusable)
             currentConfig () -> resume defaultConfig
     } { ignore (Net.closePool pool) }
+
+-- Runs `action` so that cancelling a task blocked reading or writing a
+-- request interrupts it: the runner closes that connection and the task
+-- stops as cancelled rather than failing with the interrupted request's
+-- error. Each task that inherits the wrapper is interrupted by its own
+-- cancellation. Connecting, including a TLS handshake, is not interrupted,
+-- and `stub` and `mock` never block.
+cancellable : (() ->{Http | e} a) ->{Http, Async.Async | e} a
+cancellable action =
+    handle action() on
+        connect endpoint -> resume (connect endpoint)
+        transmit connection bytes timeout _ -> resume (interruptible { cancel -> transmit connection bytes timeout cancel })
+        receive connection most timeout _ -> resume (interruptible { cancel -> receive connection most timeout cancel })
+        release connection reusable -> resume (release connection reusable)
+        currentConfig () -> resume currentConfig()
+
+-- Runs a transport call with the performing task's lifetime and stops the
+-- task if it was cancelled when the call failed.
+interruptible : (Net.Cancel ->{Http} Result Error a) ->{Http, Async.Async} Result Error a
+interruptible call =
+    result = call Net.taskCancel()
+    case result of
+        Ok _ -> result
+        Err _ ->
+            Async.checkpoint()
+            result
 
 -- Runs `action` with the configuration adjusted. Overrides nest, and apply
 -- under every transport.
@@ -278,18 +295,29 @@ configure : (Config -> Config) -> (() ->{Http | e} a) ->{Http | e} a
 configure adjust action =
     handle action() on
         connect endpoint -> resume (connect endpoint)
-        transmit connection bytes timeout -> resume (transmit connection bytes timeout)
-        receive connection most timeout -> resume (receive connection most timeout)
+        transmit connection bytes timeout cancel -> resume (transmit connection bytes timeout cancel)
+        receive connection most timeout cancel -> resume (receive connection most timeout cancel)
         release connection reusable -> resume (release connection reusable)
         currentConfig () -> resume (adjust currentConfig())
 
-type Exchange = { request : Bytes, response : Maybe Bytes }
+-- One stubbed connection: the request bytes written so far, and whether
+-- the response was read.
+type Exchange = { request : Bytes, answered : Bool }
+
+-- The next connection key, and the open connections by key.
+type Exchanges = Exchanges Int (Dict Int Exchange)
 
 -- Answers each request without sockets: `respond` receives the request's
 -- bytes exactly as written and answers a response's bytes, or an `Error` to
 -- fail the request with. It may use the caller's effects, for example to
--- record requests. Requests run one at a time, starting from
--- `defaultConfig`.
+-- record requests. Requests start from `defaultConfig`.
+--
+-- Each connection is a Net connection of the stub's own: one from another
+-- runner, or used after its request finished, fails with a `Transport`
+-- error. Tasks that inherit the stub may send requests at the same time;
+-- each gets its own exchange, and `respond` runs in the requesting task, so
+-- it may run concurrently with itself. Record requests with an atomic
+-- update, as under `State.runAtomic`, when tasks share the record.
 --
 -- ```fango
 -- import Bytes exposing (Bytes)
@@ -304,26 +332,76 @@ type Exchange = { request : Bytes, response : Maybe Bytes }
 -- ```
 stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http | e} a) ->{e} a
 stub respond action =
-    handle action() with exchange = Exchange { request = Bytes.empty, response = Nothing } on
-        connect _ -> resume (Ok (Memory 0)) with Exchange { request = Bytes.empty, response = Nothing }
-        transmit _ bytes _ ->
-            resume (Ok ()) with { exchange | request = Bytes.append exchange.request bytes }
-        receive _ _ _ ->
-            case exchange.response of
-                Just _ -> resume (Ok Nothing) with exchange
-                Nothing ->
-                    case respond exchange.request of
-                        Ok bytes -> resume (Ok (if Bytes.length bytes == 0 then Nothing else Just bytes)) with { exchange | response = Just bytes }
-                        Err error -> resume (Err error) with exchange
-        release _ _ -> resume (Ok ()) with exchange
-        currentConfig () -> resume defaultConfig with exchange
+    Net.withProvider { provider ->
+        result = State.runAtomic (Exchanges 0 Dict.empty) {
+            handle action() on
+                connect endpoint ->
+                    key = State.update openExchange
+                    resume (Ok (Connection (Net.connectionFor provider (endpoint.host ++ ":" ++ show endpoint.port) key) False))
+                transmit connection bytes _ _ ->
+                    resume (stubbed provider connection { key -> State.update { exchanges -> appendRequest key bytes exchanges } })
+                receive connection _ _ _ -> resume (stubbed provider connection { key -> answerOnce respond key })
+                release connection _ -> resume (stubbed provider connection { key -> State.update { exchanges -> closeExchange key exchanges } })
+                currentConfig () -> resume defaultConfig
+        }
+        result.value
+    }
+
+-- Runs `call` with the key of one of the stub's connections.
+stubbed : Net.Provider -> Connection -> (Int ->{e} Result Error a) ->{e} Result Error a
+stubbed provider (Connection socket _) call =
+    case Net.connectionKey provider socket of
+        Ok key -> call key
+        Err error -> Err (Transport error)
+
+-- Answers a connection's request once, outside any state update, so a
+-- `respond` with effects never runs twice; later reads reach EOF.
+answerOnce : (Bytes ->{e} Result Error Bytes) -> Int ->{State.State Exchanges | e} Result Error (Maybe Bytes)
+answerOnce respond key =
+    case State.update { exchanges -> takeRequest key exchanges } of
+        Err error -> Err error
+        Ok Nothing -> Ok Nothing
+        Ok (Just written) ->
+            case respond written of
+                Ok bytes -> Ok (if Bytes.length bytes == 0 then Nothing else Just bytes)
+                Err error -> Err error
+
+closedExchange : Result Error a
+closedExchange = Err (Transport (Net.Error { kind = Net.Other, address = "", message = "closed connection" }))
+
+openExchange : Exchanges -> (Int, Exchanges)
+openExchange (Exchanges next open) = (next, Exchanges (next + 1) (Dict.insert next { request = Bytes.empty, answered = False } open))
+
+appendRequest : Int -> Bytes -> Exchanges -> (Result Error (), Exchanges)
+appendRequest key bytes (Exchanges next open) =
+    case Dict.get key open of
+        Nothing -> (closedExchange, Exchanges next open)
+        Just pending -> (Ok (), Exchanges next (Dict.insert key { pending | request = Bytes.append pending.request bytes } open))
+
+-- The request to answer, or Nothing once its response was read.
+takeRequest : Int -> Exchanges -> (Result Error (Maybe Bytes), Exchanges)
+takeRequest key (Exchanges next open) =
+    case Dict.get key open of
+        Nothing -> (closedExchange, Exchanges next open)
+        Just pending ->
+            if pending.answered then
+                (Ok Nothing, Exchanges next open)
+            else (Ok (Just pending.request), Exchanges next (Dict.insert key { pending | answered = True } open))
+
+closeExchange : Int -> Exchanges -> (Result Error (), Exchanges)
+closeExchange key (Exchanges next open) =
+    case Dict.get key open of
+        Nothing -> (closedExchange, Exchanges next open)
+        Just _ -> (Ok (), Exchanges next (Dict.remove key open))
 
 -- Runs `action` against a server handler without sockets or `Network`. The
 -- client writes its real HTTP bytes, the server parses them and serializes
 -- the handler's response, and the client reads that response normally.
--- Requests and responses are buffered in full; requests run one at a time,
--- with no overlapping exchanges. Uses the server's default framing limits
--- and `defaultConfig`, which `configure` adjusts for client requests.
+-- Requests and responses are buffered in full. Tasks that inherit the mock
+-- may send requests at the same time, each in its own exchange, and the
+-- handler runs in the requesting task, as under `stub`. Uses the server's
+-- default framing limits and `defaultConfig`, which `configure` adjusts for
+-- client requests.
 --
 -- The handler may read the request body or return a body that streams from
 -- it, and use the caller's effects to record requests. Server `Protocol`
@@ -576,10 +654,7 @@ retryable outgoing =
     idempotent && replayable outgoing.body
 
 reused : Connection -> Bool
-reused connection =
-    case connection of
-        Socket _ again -> again
-        Memory _ -> False
+reused (Connection _ again) = again
 
 -- Sends one request to `target`. `hops` redirects were followed before it.
 exchange : Config -> Request {Http, Fail Error | e} -> Url -> Bool -> Int -> Bool -> (Response {s | e} ->{s | e} a) ->{Http, Fail Error | e} Step a
@@ -598,7 +673,7 @@ exchange config outgoing target crossOrigin hops fresh action =
         stale = reused connection && retryable outgoing
         written = attempt {
             output = Writer
-                { emit = { bytes -> fromResult (transmit connection bytes config.writeTimeoutMs) }
+                { emit = { bytes -> fromResult (transmit connection bytes config.writeTimeoutMs Net.uncancellable) }
                 , flush = { () }
                 }
             Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (outgoing.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
@@ -613,7 +688,7 @@ exchange config outgoing target crossOrigin hops fresh action =
                         -- captured Fail handler also handles transport errors.
                         Reader.over (Source
                             { pull = {
-                                chunk = fromResult (receive connection 65536 config.readTimeoutMs)
+                                chunk = fromResult (receive connection 65536 config.readTimeoutMs Net.uncancellable)
                                 case chunk of
                                     Just bytes -> if Bytes.length bytes > 0 then started.write True else ()
                                     Nothing -> ()

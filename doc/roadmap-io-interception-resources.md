@@ -12,9 +12,8 @@ Network cancellation is implemented; see
 Implemented: File and Net resources are either provider-owned native objects
 or Fango values naming their provider and a handler key, and Console owns
 standard streams through a closed output choice. Generic code takes
-Source/Sink or Reader/Writer values. Http.Client's `Memory Int` mock
-connection is still not a safe resource-provider model; IOI7 replaces it when
-it routes mocks through the checked Net boundary.
+Source/Sink or Reader/Writer values. Http.Client's stub and mock connections
+are checked Net connections of their own provider.
 
 ## Scoped capabilities remain deferred
 
@@ -37,14 +36,15 @@ Decided: a runner whose operations must stay consistent under tasks keeps
 its mutable state in an enclosing [`State.runAtomic`](../stdlib/State.fango)
 under a private state type, and each clause changes it with one pure
 `State.update`; see [atomic state](design/effects.md#atomic-state).
-`Random.runSeeded` and `Time.Clock.runStepped` do this. Handler `with` cells
+`Random.runSeeded`, `Time.Clock.runStepped`, and `Http.Client.stub` (and so
+`mock`) do this. Handler `with` cells
 keep their per-access synchronization, so `State.run` and user handlers built
 on `with` may still lose concurrent updates, and a sequence such as
 `State.get` followed by `State.put` is never atomic under either runner.
 
-Remaining for IOI7: move `Http.Client.stub` and `mock` state onto this
-mechanism, and decide the operations below whose consistency cannot be a pure
-state step, such as a mock read that must wait for a write.
+Remaining for future fixture runners: operations whose consistency cannot be
+a pure state step, such as a mock read that must wait for another task's
+write.
 
 Each mock must still answer the following questions for its operations:
 

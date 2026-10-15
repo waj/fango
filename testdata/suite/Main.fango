@@ -127,6 +127,7 @@ import HttpBodies
 import HttpClientMock
 import HttpClientRedirects
 import HttpClientStub
+import HttpClientTasks
 import HttpFraming
 import HttpGzip
 import HttpServerApi
@@ -427,6 +428,7 @@ main() =
             , HttpClientMock.tests
             , HttpClientRedirects.tests
             , HttpClientStub.tests
+            , HttpClientTasks.tests
             , HttpFraming.tests
             , HttpGzip.tests
             , HttpServerApi.tests

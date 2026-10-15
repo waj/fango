@@ -35,7 +35,15 @@ effect of their own.
 Network accepts, reads, and writes take a [`Net.Cancel`](../../stdlib/Net.fango).
 Through the `Async` helpers, cancelling the calling task interrupts a blocked
 system socket and ends the task as cancelled; a custom handler can observe the
-same cancellation but does not simulate task scheduling.
+same cancellation but does not simulate task scheduling. HTTP client requests
+are interruptible the same way inside
+[`Http.Client.cancellable`](../../stdlib/Http/Client.fango).
+
+Fixture runners that tasks share keep consistent state per operation:
+`Random.runSeeded`, `Time.Clock.runStepped`, `Http.Client.stub`, and
+`Http.Client.mock` never repeat a draw or reading or mix two requests. Their
+order between tasks follows scheduling. Handlers written with `with` state
+need [`State.runAtomic`](../../stdlib/State.fango) for the same guarantee.
 
 A program's exit status is not a service: `main` returns a `Process.Status`,
 and [`Test.run`](../../stdlib/Test.fango) answers one for it to return.
