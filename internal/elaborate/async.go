@@ -58,7 +58,7 @@ func (el *elab) checkAsyncJob(job ast.Expr) {
 			continue
 		}
 		effect := el.ck.Effects[label.Name]
-		if effect != nil && len(effect.Ops) > 0 && effect.Ops[0].Abort {
+		if effect != nil && effect.HasAbort() {
 			el.errs = append(el.errs, diag.Errorf(job.Span(), "ASYNC BOUNDARY", "A task cannot inherit abort effect %s; handle it inside the task.", label.Name))
 		}
 	}

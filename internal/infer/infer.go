@@ -853,12 +853,17 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 	}
 	seen := map[string]bool{}
 	var errs []diag.Error
-	if len(ed.Ops) > 1 {
-		discipline := ed.Ops[0].Abort
-		for _, op := range ed.Ops[1:] {
-			if op.Abort != discipline {
-				errs = append(errs, diag.Errorf(op.NameSpan, "MIXED EFFECT DISCIPLINE",
-					"Effect `%s` mixes abort-only and resumptive operations; the first abort release requires one discipline per effect.", ed.Name))
+	// Every label of the effect agrees on whether it may abort, whichever
+	// operation introduced it, so a mixed effect's labels are abort labels.
+	effectAborts := false
+	for _, op := range ed.Ops {
+		effectAborts = effectAborts || op.Abort
+	}
+	if effectAborts {
+		for _, op := range ed.Ops {
+			if op.Native != nil && !op.Abort {
+				errs = append(errs, diag.Errorf(op.NameSpan, "MIXED NATIVE EFFECT",
+					"Operation `%s` is native, but effect `%s` also has abort operations; an effect with abort operations must be handled in Fango.", op.Name, ed.Name))
 			}
 		}
 	}
@@ -904,7 +909,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			arrow.Eff = types.Row{Tail: rowVars[i]}
 		}
 		inner := arrows[len(arrows)-1]
-		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: op.Abort}}
+		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: effectAborts}}
 		vars := append([]*types.TVar(nil), info.Params...)
 		vars = append(vars, scope.Minted()...)
 		vars = append(vars, rowVars...)
@@ -2148,7 +2153,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		}
 		if idx < 0 {
 			apps = append(apps, application{owner: op.Owner, signed: true, key: key,
-				label: types.EffLabel{Unique: op.Owner.Unique, Name: op.Owner.Name, Args: args, Abort: op.Abort}})
+				label: types.EffLabel{Unique: op.Owner.Unique, Name: op.Owner.Name, Args: args, Abort: op.Owner.HasAbort()}})
 			idx = len(apps) - 1
 			signedCount[op.Owner]++
 		}
@@ -2168,7 +2173,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 					labelArgs[j] = g.ck.Sup.FreshVar(types.General)
 				}
 				apps = append(apps, application{owner: op.Owner,
-					label: types.EffLabel{Unique: op.Owner.Unique, Name: op.Owner.Name, Args: labelArgs, Abort: op.Abort}})
+					label: types.EffLabel{Unique: op.Owner.Unique, Name: op.Owner.Name, Args: labelArgs, Abort: op.Owner.HasAbort()}})
 				idx = len(apps) - 1
 				inferredApp[op.Owner] = idx
 			}

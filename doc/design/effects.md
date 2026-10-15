@@ -34,7 +34,7 @@ resumptive operations may quantify unconstrained variables independently at
 each call, including variables inside nominal payloads and callbacks. A
 handler clause checks those variables as rigid skolems; they may not escape
 through the handler result, residual effects, state, or outer bindings.
-Abort-only operations retain their caller-selected result-variable rule.
+Abort operations retain their caller-selected result-variable rule.
 Partial operations are pure closures.
 
 The interpreter passes the call's type descriptors into the clause frame. The
@@ -50,7 +50,10 @@ where they are constructed, and generated constructors expose their fields
 independently of instantiation. After `Failure.argument` matches descriptors,
 the reader's rebuilder converts the payload to the reader's representation.
 
-Each source effect is uniformly tail-resumptive or abort-only. Source checking
+Discipline belongs to each operation, so one effect may mix tail-resumptive
+and abort operations. Its labels carry whether any operation aborts, which
+fixes an Exit floor for every arrow performing it and keeps its activations
+out of task inheritance and closure binding. Source checking
 and Core lint separately prove that every normal resumptive-clause path ends
 in exactly one owned tail resume. An abort terminal may discharge that normal
 obligation. Resume ownership survives equation compilation, nested handlers,
@@ -78,9 +81,12 @@ that owns the entry it names. Clauses are found by instance and operation.
 Each instance carries the transport of its own clauses, so a resumptive
 application beside an abort keeps a Direct record when its clauses are
 Direct, while the activation's body runs as an Outcome closure whenever any
-application aborts. Only resumptive instances get a rebuild path and a share
-hook; publishing any of them publishes the shared cell, and an abort instance
-remains uninheritable by tasks.
+clause aborts. An application of a mixed effect is Exit: its record holds
+both the exit target and the resumptive clauses' members, and its Direct
+view checks those members' results as normal. Only instances without abort
+operations get a rebuild path and a share hook; publishing any of them
+publishes the shared cell, and an instance with an abort operation remains
+uninheritable by tasks.
 
 A parameterized handler owns one mutable cell. Its initializer runs once before
 evidence installation. Clauses see immutable snapshots; the body does not. A

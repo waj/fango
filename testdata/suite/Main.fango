@@ -114,6 +114,7 @@ import FloatRuntimeAdd
 import FnBlockParams
 import FnString
 import HandlerMixedAbortState
+import HandlerMixedDiscipline
 import HandlerMixedTwoEffects
 import HandlerScopedBinding
 import HandlerSignatureSingle
@@ -416,6 +417,7 @@ main() =
             , FnBlockParams.tests
             , FnString.tests
             , HandlerMixedAbortState.tests
+            , HandlerMixedDiscipline.tests
             , HandlerMixedTwoEffects.tests
             , HandlerScopedBinding.tests
             , HandlerSignatureSingle.tests

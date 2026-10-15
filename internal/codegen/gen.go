@@ -1804,7 +1804,7 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	// clauses are the ones serving its application.
 	decls := make([]goast.Stmt, 0, 2*len(e.Effects))
 	for label := range e.Effects {
-		decls = append(decls, g.resumptiveRecord(e, label, state)...)
+		decls = append(decls, g.resumptiveRecord(e, label, state, "")...)
 	}
 	body := g.expr(e.Body, 0)
 	for _, inst := range e.Effects {
@@ -1985,11 +1985,18 @@ func (g *gen) cellState(cell, name string) *handlerState {
 
 // resumptiveRecord declares the evidence record of one resumptive application
 // of a handler, in the transport its own clauses need, and installs it as the
-// lexical evidence for the handler's body. The caller pops it.
-func (g *gen) resumptiveRecord(e *core.Handle, label int, state *handlerState) []goast.Stmt {
+// lexical evidence for the handler's body. The caller pops it. A non-empty
+// target names the exit target of an application whose effect also has abort
+// operations; its record carries that target beside the resumptive members.
+func (g *gen) resumptiveRecord(e *core.Handle, label int, state *handlerState, target string) []goast.Stmt {
 	inst := e.Effects[label]
 	mode := inst.Control.Resolve(g.control)
-	st, record := g.forkableHandlerEvidence(e, label, mode, state)
+	var st, record goast.Expr
+	if target == "" {
+		st, record = g.forkableHandlerEvidence(e, label, mode, state)
+	} else {
+		st, record = g.mixedHandlerEvidence(e, label, mode, state, target)
+	}
 	name := fmt.Sprintf("ev%d", g.tmp)
 	g.tmp++
 	evidenceValue := ident(name)
@@ -2007,12 +2014,23 @@ func (g *gen) resumptiveRecord(e *core.Handle, label int, state *handlerState) [
 	return []goast.Stmt{varDeclStmt(name, st, record), assignBlank(evidenceValue)}
 }
 
-// labelAborts reports whether the clauses serving one application of a
-// handler are abort clauses.
+// labelAborts reports whether any clause serving one application of a
+// handler is an abort clause, so the application needs an exit target.
 func labelAborts(e *core.Handle, label int) bool {
 	for _, c := range e.Clauses {
-		if c.Effect == label {
-			return c.Op != nil && c.Op.Abort
+		if c.Effect == label && c.Op != nil && c.Op.Abort {
+			return true
+		}
+	}
+	return false
+}
+
+// labelResumes reports whether any clause serving one application of a
+// handler resumes, so the application needs an evidence record of clauses.
+func labelResumes(e *core.Handle, label int) bool {
+	for _, c := range e.Clauses {
+		if c.Effect == label && c.Op != nil && !c.Op.Abort {
+			return true
 		}
 	}
 	return false
@@ -2034,7 +2052,8 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 		if labelAborts(e, i) {
 			targetNames[i] = fmt.Sprintf("t_target%d", g.tmp)
 			g.tmp++
-		} else {
+		}
+		if labelResumes(e, i) {
 			mixed = true
 		}
 	}
@@ -2068,7 +2087,7 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 	}
 	for i, inst := range e.Effects {
 		if targetNames[i] == "" {
-			stmts = append(stmts, g.resumptiveRecord(e, i, state)...)
+			stmts = append(stmts, g.resumptiveRecord(e, i, state, "")...)
 			continue
 		}
 		target := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitTarget"), Elts: []goast.Expr{
@@ -2076,6 +2095,10 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 			&goast.KeyValueExpr{Key: ident("CaptureTrace"), Value: ident(strconv.FormatBool(e.CaptureTrace))},
 		}}}
 		stmts = append(stmts, varDeclStmt(targetNames[i], &goast.StarExpr{X: selector("fangort", "ExitTarget")}, target))
+		if labelResumes(e, i) {
+			stmts = append(stmts, g.resumptiveRecord(e, i, state, targetNames[i])...)
+			continue
+		}
 		evidenceName := fmt.Sprintf("ev%d", g.tmp)
 		g.tmp++
 		st := g.effectType(inst)
@@ -2229,10 +2252,10 @@ func (s *handlerState) unchanged(next core.Expr) bool {
 func (g *gen) handlerEvidence(e *core.Handle, label int, mode types.Transport, state *handlerState) (goast.Expr, goast.Expr) {
 	var elts []goast.Expr
 	for _, c := range e.Clauses {
-		if c.Effect != label {
+		if c.Effect != label || c.Op.Abort {
 			continue
 		}
-		if len(c.LocalVars) > 0 && !c.Op.Abort && c.Op.Native == nil {
+		if len(c.LocalVars) > 0 && c.Op.Native == nil {
 			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + fangort.LinkName(c.Op.Name)), Value: g.polymorphicHandlerClause(e, c, mode, state)})
 			continue
 		}
@@ -2456,7 +2479,7 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 		return value
 	}
 	effect := g.effects[ev.Unique]
-	abort := effect != nil && len(effect.Ops) > 0 && effect.Ops[0].Abort
+	abort := effect != nil && effect.HasAbort()
 	if actual == types.Direct && want == types.Exit {
 		return &goast.SelectorExpr{X: value, Sel: ident("Exit")}
 	}
@@ -2469,12 +2492,14 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 // rawEvidenceAdapter constructs the other transport once, before publishing
 // the immutable activation family. Ordinary calls only select its pointer.
 func (g *gen) rawEvidenceAdapter(ev core.EffectInstance, value goast.Expr, actual, want types.Transport) goast.Expr {
-	if eff := g.effects[ev.Unique]; actual != want && eff != nil && len(eff.Ops) > 0 && eff.Ops[0].Abort {
+	// An abort-only record has no members to adapt: both views share the
+	// origin and target. A mixed record adapts its resumptive members too.
+	if eff := g.effects[ev.Unique]; actual != want && eff != nil && eff.HasAbort() && !eff.HasResumptive() {
 		desired := ev
 		desired.Control = types.Control{Transport: want}
 		return &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: g.effectTypeMode(desired, want).(*goast.StarExpr).X, Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}, &goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}}}}}
 	}
-	if actual == types.Exit && want == types.Direct && g.canonicalExitEvidence {
+	if eff := g.effects[ev.Unique]; actual == types.Exit && want == types.Direct && (g.canonicalExitEvidence || eff != nil && eff.HasAbort()) {
 		return g.checkedDirectEvidence(ev, value)
 	}
 	if actual == want || want == types.Direct {
@@ -2485,12 +2510,15 @@ func (g *gen) rawEvidenceAdapter(ev core.EffectInstance, value goast.Expr, actua
 		return value
 	}
 
-	if want != types.Exit || actual == types.Exit || (len(eff.Ops) > 0 && eff.Ops[0].Abort) {
+	if want != types.Exit || actual == types.Exit {
 		return value
 	}
 	desired := ev
 	desired.Control = types.Control{Transport: types.Exit}
 	elts := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}}
+	if eff.HasAbort() {
+		elts = append(elts, &goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}})
+	}
 	sub := make(map[int]types.Type, len(eff.Params))
 	for i, p := range eff.Params {
 		if i < len(ev.Args) {
@@ -2498,6 +2526,9 @@ func (g *gen) rawEvidenceAdapter(ev core.EffectInstance, value goast.Expr, actua
 		}
 	}
 	for _, op := range eff.Ops {
+		if op.Abort {
+			continue
+		}
 		if len(op.LocalVars) > 0 && op.Native == nil {
 			request := ident("t_request")
 			call := callExpr(&goast.SelectorExpr{X: value, Sel: ident("Op_" + fangort.LinkName(op.Name))}, request)
@@ -2568,7 +2599,7 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 					g.tyParamNames[v.ID] = "any"
 				}
 			}
-			if len(eff.Ops) > 0 && eff.Ops[0].Abort {
+			if eff.HasAbort() {
 				g.usesFangort = true
 				fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Target")}, Type: &goast.StarExpr{X: selector("fangort", "ExitTarget")}})
 			}

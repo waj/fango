@@ -719,8 +719,8 @@ func PeelFun(t types.Type, n int) ([]types.Type, types.Type) {
 // ClauseEffect is the application a handler clause serves.
 func (h *Handle) ClauseEffect(c *HandlerClause) EffectInstance { return h.Effects[c.Effect] }
 
-// HandlesAbort reports whether any of the handler's applications is
-// abort-only, in which case the activation consumes its body's exits.
+// HandlesAbort reports whether any clause of the handler aborts, in which
+// case the activation consumes its body's exits.
 func (h *Handle) HandlesAbort() bool {
 	for _, c := range h.Clauses {
 		if c.Op != nil && c.Op.Abort {

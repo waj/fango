@@ -182,7 +182,7 @@ func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual 
 	desired.Control = types.Control{Transport: actual}
 	typ := g.effectTypeMode(desired, actual)
 	effect := g.effects[ev.Unique]
-	abort := effect != nil && len(effect.Ops) > 0 && effect.Ops[0].Abort
+	abort := effect != nil && effect.HasAbort()
 	bothViews := actual == types.Direct || abort || g.canonicalExitEvidence
 	// Keep the typed records and binding in one allocation. Interior pointers
 	// retain the same immutable family identity without separate heap objects.
@@ -247,4 +247,18 @@ func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual 
 		body = append(body, &goast.AssignStmt{Lhs: []goast.Expr{&goast.SelectorExpr{X: &goast.SelectorExpr{X: own, Sel: ident(other)}, Sel: ident("Binding")}}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{binding}})
 	}
 	return callExpr(funcLit(typ, append(body, returnStmt(own))))
+}
+
+// mixedHandlerEvidence builds the record of an application whose effect has
+// both resumptive and abort operations: the resumptive clauses' members, the
+// activation's exit target, and an origin with neither a rebuild path nor a
+// fixed family, since an abort cannot be inherited by a task.
+func (g *gen) mixedHandlerEvidence(e *core.Handle, label int, mode types.Transport, state *handlerState, target string) (goast.Expr, goast.Expr) {
+	inst := e.Effects[label]
+	st, record := g.handlerEvidence(e, label, mode, state)
+	literal := record.(*goast.UnaryExpr).X.(*goast.CompositeLit)
+	literal.Elts = append(literal.Elts,
+		&goast.KeyValueExpr{Key: ident("Origin"), Value: g.evidenceOrigin(inst)},
+		&goast.KeyValueExpr{Key: ident("Target"), Value: ident(target)})
+	return st, g.completeEvidence(inst, record, mode)
 }

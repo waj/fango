@@ -1,5 +1,0 @@
-effect Mixed
-    abort stop : String -> value
-    ask : () -> Int
-
-main() = print (0)

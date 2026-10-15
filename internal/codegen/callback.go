@@ -157,7 +157,7 @@ func (g *gen) callbackMinimum(lam *core.Lambda) types.Transport {
 		if len(stack) > 0 && g.outlinedEvidence[stack[len(stack)-1]] != nil {
 			return
 		}
-		if effect := g.effects[ev.Unique]; effect != nil && (len(effect.Ops) > 0 && effect.Ops[0].Abort) {
+		if effect := g.effects[ev.Unique]; effect != nil && effect.HasAbort() {
 			return
 		}
 		if mode := g.currentEvidenceMode(ev.Key()); mode > minimum {

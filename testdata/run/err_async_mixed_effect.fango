@@ -1,0 +1,12 @@
+import Async
+
+effect Cursor
+    next : () -> Int
+    abort stop : () -> value
+
+-- A task cannot inherit an effect with abort operations, even to perform
+-- only its resumptive ones.
+main() =
+    handle ignore (Async.runOutcome ({ _ -> Async.spawn ({ _ -> next() }) })) with count = 0 on
+        next () -> resume count with count + 1
+        stop () -> ()

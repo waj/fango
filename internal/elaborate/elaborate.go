@@ -454,7 +454,7 @@ func rowControl(row types.Row, ck *infer.Checker) types.Control {
 	for _, label := range row.Labels {
 		abort := label.Abort
 		if eff := ck.EffectsByUnique[label.Unique]; eff != nil && len(eff.Ops) > 0 {
-			abort = eff.Ops[0].Abort
+			abort = eff.HasAbort()
 		}
 		if abort {
 			out.Transport = types.Exit
@@ -575,7 +575,7 @@ func (el *elab) bindEffectParams(effects []core.EffectInstance) []core.EffectIns
 	out := make([]core.EffectInstance, len(effects))
 	for i, ev := range effects {
 		ev.Captures = types.VarCapture(el.ck.Sup.FreshCapture())
-		if eff := el.ck.EffectsByUnique[ev.Unique]; eff != nil && len(eff.Ops) > 0 && eff.Ops[0].Abort {
+		if eff := el.ck.EffectsByUnique[ev.Unique]; eff != nil && eff.HasAbort() {
 			ev.Control = types.Control{Transport: types.Exit}
 		} else if ev.Control.Transport != types.Exit {
 			ev.Control.Polymorphic = true

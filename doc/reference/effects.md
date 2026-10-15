@@ -231,21 +231,34 @@ The variable may also occur inside payload or callback types, such as
 that every `a` is `Int` or let `a` escape its handler. Operation-local class
 constraints and native operation signatures are not supported.
 
-## Abort-only effects
+## Abort operations
 
-An abort-only effect marks every operation with `abort`:
+An operation marked `abort` never resumes its caller:
 
 ```fango
 effect Fail error
     abort fail : error -> value
 ```
 
-All operations in one effect must use the same discipline; mixing marked and
-unmarked operations is rejected. An abort operation may introduce exactly one
-operation-local type variable as its whole result, as above. That variable may
-not occur in a payload parameter. Abort operations cannot be `native`. A saturated
-abort never returns normally, while partial application remains a pure function
-value.
+An abort operation may introduce exactly one operation-local type variable as
+its whole result, as above. That variable may not occur in a payload
+parameter. Abort operations cannot be `native`. A saturated abort never
+returns normally, while partial application remains a pure function value.
+
+One effect may mix abort and resumptive operations, each keeping its own
+[clause discipline](#handler-clauses-and-abort-routing):
+
+```fango
+effect Cursor item
+    peek : () -> Maybe item
+    advance : () -> ()
+    abort stop : String -> value
+```
+
+An effect with any abort operation is an abort effect as a whole: performing
+any of its operations may exit, its handler cannot be inherited by a
+[task](#handlers-in-tasks) or [bound by a closure](#closures-and-handler-effects),
+and none of its operations may be `native` (`MIXED NATIVE EFFECT`).
 
 ## Handler clauses and abort routing
 
@@ -309,10 +322,10 @@ load action =
 
 Each application is covered independently: every operation of its effect
 needs a group, exhaustive and non-redundant. Each abort unwinds to the clause
-of its own application; the `return` group is shared. Abort-only and
-resumptive applications may share one handler, each keeping its own
-discipline: resumptive clauses end in `resume`, abort clauses return the
-common answer and bypass `return`. Inside the subject every handled
+of its own application; the `return` group is shared. Clauses keep their
+operation's discipline whichever applications share the handler: resumptive
+clauses end in `resume`, abort clauses return the common answer and bypass
+`return`. Inside the subject every handled
 application is in scope, so an operation whose type does not say which
 application it means is an `AMBIGUOUS EFFECT`; a typed helper names the one
 intended.
@@ -442,7 +455,8 @@ lose updates. A handler whose clauses delegate to an enclosing
 wanted. A parent's handler return clause does not transform task results. When
 one handler covers [several applications](#several-applications-in-one-handler),
 a task inherits its resumptive applications and the one cell they share; its
-abort applications still have to be handled inside the task.
+applications of effects with abort operations, including the resumptive
+operations of such an effect, still have to be handled inside the task.
 
 A directly known escaping abort, including Fail, or a local scoped permission
 is rejected with `ASYNC BOUNDARY`: handle the abort or install the scoped handler
@@ -499,9 +513,9 @@ transferring their local buffers; see [resources](resources.md).
 
 Resumptive handlers are deliberately restricted: every normally completing
 operation-clause path must end in exactly one tail call to `resume`. A
-saturated abort-only call is an exceptional terminal, so a path such as
+saturated abort call is an exceptional terminal, so a path such as
 `if valid then resume answer else fail error` is legal. Non-tail or escaping
-continuations, operation-local class constraints and native operations, mixed-discipline effects,
+continuations, operation-local class constraints and native operations,
 and handlers for builtin `IO` are rejected. Effects other than the handled
 label remain in the surrounding row. A resume in an operand or before another
 expression is a `NON-TAIL RESUME`; a normal clause path without a resume is a
@@ -519,7 +533,7 @@ passed to a callback or record field inside a resumptive handler's subject may
 bind to that activation when the expected row omits the handled label. Calling
 it then requires a fresh local permission and the effects of the handler's
 clauses. The permission cannot leave the handler through its result, residual
-row, or outer storage. Abort-only effects cannot be bound this way.
+row, or outer storage. Effects with abort operations cannot be bound this way.
 
 A scoped runner can pass such a closure to its consumer through a row-indexed
 record. The [scoped binding fixture](../../testdata/suite/HandlerScopedBinding.fango)

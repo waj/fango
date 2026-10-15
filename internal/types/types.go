@@ -495,6 +495,29 @@ type EffectInfo struct {
 
 }
 
+// HasAbort reports whether any operation aborts. Such an effect's evidence
+// carries an exit target, so performing it may exit, and its activation can
+// be neither inherited by a task nor bound by a closure.
+func (e *EffectInfo) HasAbort() bool {
+	for _, op := range e.Ops {
+		if op.Abort {
+			return true
+		}
+	}
+	return false
+}
+
+// HasResumptive reports whether any operation resumes, and so has a member
+// in the effect's evidence record.
+func (e *EffectInfo) HasResumptive() bool {
+	for _, op := range e.Ops {
+		if !op.Abort {
+			return true
+		}
+	}
+	return false
+}
+
 // EffectOp is the runtime-relevant, declaration-ordered description of an
 // operation. Scheme includes effect parameters, operation-local variables,
 // and row variables; Params/Result describe its fully saturated call.

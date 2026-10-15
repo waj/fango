@@ -1,0 +1,64 @@
+module HandlerMixedDiscipline exposing (tests)
+
+import Expect
+import Result exposing (Result(..))
+import Test
+
+-- One effect with resumptive and abort operations. Each clause keeps its own
+-- operation's discipline under one label and one state cell.
+effect Cursor item
+    peek : () -> Maybe item
+    advance : () -> ()
+    abort stop : String -> value
+
+runCursor : List Int -> (() ->{Cursor Int | e} a) ->{e} Result String (a, List Int)
+runCursor input action =
+    handle action() with rest = input on
+        peek () ->
+            case rest of
+                [] -> resume Nothing with rest
+                [x | _] -> resume (Just x) with rest
+        advance () ->
+            case rest of
+                [] -> resume () with rest
+                [_ | xs] -> resume () with xs
+        stop reason -> Err (reason ++ " with " ++ show (List.length rest) ++ " left")
+        return value -> Ok (value, rest)
+
+next : () ->{Cursor item | e} item
+next () =
+    case peek () of
+        Nothing -> stop "end of input"
+        Just x -> advance (); x
+
+sumTwo : () ->{Cursor Int | e} Int
+sumTwo () = next () + next ()
+
+-- A partial abort is a pure value until saturated.
+stopper : () -> (String ->{Cursor Int} Int)
+stopper () = stop
+
+-- A callback forwarding the row through a polymorphic helper.
+twice : (() ->{e} Int) ->{e} Int
+twice f = f () + f ()
+
+-- Nested handlers of the same effect stay distinct: the inner stop is
+-- answered by the inner handler, and the outer cursor keeps its place.
+nested : () ->{Cursor Int} (Int, String, Int)
+nested () =
+    first = next ()
+    inner = runCursor [100] sumTwo
+    case inner of
+        Err message -> (first, message, next ())
+        Ok (value, _) -> (first, show value, next ())
+
+tests : Test.Test {}
+tests = Test.test "handler_mixed_discipline" {
+    Expect.equal (Ok (3, [3])) (runCursor [1, 2, 3] sumTwo)
+    Expect.equal (Err "end of input with 0 left") (runCursor [1] sumTwo)
+    Expect.equal (Err "early with 2 left") (runCursor [5, 6] { (stopper ()) "early" })
+    Expect.equal (Ok (14, [])) (runCursor [3, 4] { twice { next () } * 2 })
+    Expect.equal (Ok ((1, "end of input with 0 left", 2), [])) (runCursor [1, 2] nested)
+}
+
+main() = Test.run tests

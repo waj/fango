@@ -215,14 +215,18 @@ func (g *gen) polyConvertEvidence(value goast.Expr, from, to types.EffLabel, mod
 	param := fmt.Sprintf("t_poly_effect%d", g.tmp)
 	g.tmp++
 	fields := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: ident(param), Sel: ident("Origin")}}}
-	if len(eff.Ops) > 0 && eff.Ops[0].Abort {
+	if eff.HasAbort() {
 		fields = append(fields, &goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: ident(param), Sel: ident("Target")}})
-	} else {
+	}
+	if eff.HasResumptive() {
 		fromSub, toSub := make(map[int]types.Type), make(map[int]types.Type)
 		for i, p := range eff.Params {
 			fromSub[p.ID], toSub[p.ID] = from.Args[i], to.Args[i]
 		}
 		for _, op := range eff.Ops {
+			if op.Abort {
+				continue
+			}
 			field := "Op_" + fangort.LinkName(op.Name)
 			if len(op.LocalVars) > 0 && op.Native == nil {
 				request := fmt.Sprintf("t_poly_request%d", g.tmp)

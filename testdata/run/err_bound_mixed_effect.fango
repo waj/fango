@@ -1,0 +1,18 @@
+-- A closure performing an effect with abort operations cannot be bound to
+-- its handler, even when it only performs the resumptive ones.
+effect Cursor
+    next : () -> Int
+    abort stop : () -> value
+
+type Reader = Reader (() -> Int)
+
+guarded : (Reader -> Int) -> Int
+guarded action =
+    handle action (Reader ({ _ -> next() })) on
+        next () -> resume 1
+        stop () -> 0
+
+main() =
+    print (guarded ({ r ->
+        case r of
+            Reader read -> read() }))

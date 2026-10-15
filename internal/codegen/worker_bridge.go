@@ -86,7 +86,13 @@ func (g *gen) checkedDirectEvidence(ev core.EffectInstance, value goast.Expr) go
 	}
 	ev.Control = types.Control{Transport: types.Direct}
 	elts := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}}
+	if eff.HasAbort() {
+		elts = append(elts, &goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}})
+	}
 	for _, op := range eff.Ops {
+		if op.Abort {
+			continue
+		}
 		var params []paramSpec
 		var args []goast.Expr
 		var result goast.Expr

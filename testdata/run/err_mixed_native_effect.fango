@@ -1,0 +1,7 @@
+-- An effect with abort operations is handled in Fango, so none of its
+-- resumptive operations may be native.
+effect Mixed
+    abort stop : String -> value
+    ask : () -> Int = native
+
+main() = print (0)
