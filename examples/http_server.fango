@@ -46,6 +46,7 @@ route request =
 app : Http.Server.Request {Protocol | e} ->{Protocol | e} Http.Server.Response {Protocol | e}
 app request = Http.GZip.wrap route request
 
+main : () ->{IO, Console, Process.Arguments} ()
 main() =
     case Process.args() of
         [raw] ->

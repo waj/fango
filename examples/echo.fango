@@ -77,14 +77,15 @@ runListener port listener =
 run : Int ->{IO, Console, Fail Net.Error} ()
 run port = Net.withListener port (runListener port)
 
+main : () ->{IO, Console, Process.Arguments} Process.Status
 main() =
     case portFrom Process.args() of
         Nothing ->
             print "Usage: echo [PORT]"
-            Process.exit (Process.status 2)
+            Process.status 2
         Just port ->
             case attempt { run port } of
-                Ok _ -> ()
+                Ok _ -> Process.success
                 Err error ->
                     print ("echo: " ++ error.message)
-                    Process.exit Process.failure
+                    Process.failure

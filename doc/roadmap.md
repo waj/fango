@@ -115,9 +115,9 @@ explicit real and simulated runners for console and standard streams, files,
 networking, and process services, with domain-specific resource handles.
 Console and complete [File](../stdlib/File.fango) interpretation, including
 checked providers and memory streaming, and process arguments and status are
-implemented. Networking, the HTTP transport path, and the migration audit stay
-in the proposal; Clock, Random, and HTTP domain handlers remain their
-implemented foundations.
+implemented, with their [coverage map](reference/services.md). Networking and
+the HTTP transport path stay in the proposal; Clock, Random, and HTTP domain
+handlers remain their implemented foundations.
 
 ## HTTP and a concurrent server
 

@@ -6,6 +6,7 @@ import Time.Date as Date
 import Time.DateTime as DT
 import Time.Zone as Zone
 
+main : () ->{Console} ()
 main() =
     result = Fail.attempt {
         zone = Zone.fixedOffset (-10800)

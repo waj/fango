@@ -37,4 +37,5 @@ playRound() =
                 False -> print "Goodbye!"
 
 -- Swap runSeeded for Random.runSystem to play against real randomness.
+main : () ->{Console} ()
 main() = Random.runSeeded 42 playRound

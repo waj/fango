@@ -150,20 +150,22 @@ dropHeader lines =
         [] -> []
         [_ | rest] -> rest
 
-run : String ->{IO, File.FileSystem, Console} ()
+run : String ->{File.FileSystem, Console} Process.Status
 run path =
     case File.read path of
         Err error ->
             print (IO.describeError error)
-            Process.exit Process.failure
+            Process.failure
         Ok contents ->
             printReport (addRows 2 (dropHeader (String.split "\n" contents)) emptyReport)
+            Process.success
 
-usage : () ->{IO, Console} ()
+usage : () ->{Console} Process.Status
 usage() =
     print "usage: csv FILE"
-    Process.exit Process.failure
+    Process.failure
 
+main : () ->{Console, File.FileSystem, Process.Arguments} Process.Status
 main() =
     case Process.args() of
         [path] -> run path

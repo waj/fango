@@ -138,4 +138,5 @@ convert state =
             writePending [finished.document]
         Just (IO.Line { text = input }) -> convert (step input state)
 
+main : () ->{Console} ()
 main() = convert { block = NoBlock, document = EmptyBuilder }

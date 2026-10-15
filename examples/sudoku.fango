@@ -140,6 +140,7 @@ printRows remaining count row =
             else
                 printRows rest (count + 1) next
 
+main : () ->{IO, Console} ()
 main() =
     case runSolve (digits puzzle) of
         Completed (Just board) -> printBoard board

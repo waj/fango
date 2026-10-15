@@ -97,7 +97,9 @@ and patterns.
 
 ## Entry points
 
-[Entry points](reference/commands.md#entry-points) — The nullary `main` function, its IO row, and its exit status.
+[Entry points](reference/commands.md#entry-points) — The nullary `main` function, its service row, and its exit status.
+
+[Standard services](reference/services.md) — Which library calls go through replaceable effects, their runners, and the direct native boundaries.
 
 ## REPL
 

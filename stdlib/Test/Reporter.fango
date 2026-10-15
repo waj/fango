@@ -16,7 +16,7 @@ import Basics exposing (..)
 import Console exposing (Console, write)
 import Expect exposing (Error)
 import File
-import IO exposing (IO)
+import IO
 import Json exposing (Encode(..))
 import List exposing (List(..), foldl, reverse)
 import Maybe exposing (Maybe(..))
@@ -283,14 +283,15 @@ usage = "Usage: tests [--format console|progress|documentation|silent] [--json P
 --   directory must exist.
 -- - `--help`: prints usage without executing the action.
 --
--- Repeated format or JSON options use the last value. Unknown options,
--- missing values, and invalid formats print a diagnostic and usage, and
--- exit with status 2 before executing the action. JSON encoding or file
--- write errors print a diagnostic and exit with status 2. Diagnostics go
--- to stdout, like the test report. Test failures or incomplete suites exit
--- with status 1, after writing any requested JSON report; passing complete
--- suites return normally. Unhandled effects and crashes propagate without
--- writing a completed report.
+-- The answer is the process status for `main` to return. Repeated format
+-- or JSON options use the last value. Unknown options, missing values, and
+-- invalid formats print a diagnostic and usage, and answer status 2 before
+-- executing the action. JSON encoding or file write errors print a
+-- diagnostic and answer status 2. Diagnostics go to stdout, like the test
+-- report. Test failures or incomplete suites answer status 1, after writing
+-- any requested JSON report; passing complete suites and `--help` answer
+-- success. Unhandled effects and crashes propagate without writing a
+-- completed report.
 --
 -- The JSON document has `schemaVersion: 2`, `cases`, `groupFailures`, and
 -- `summary`. Each case has a `path` array, `outcome` (`passed`, `failed`,
@@ -307,33 +308,35 @@ usage = "Usage: tests [--format console|progress|documentation|silent] [--json P
 -- fango run Tests.fango --format documentation
 -- fango run Tests.fango --format silent --json report.json
 -- ```
-run : (() ->{Reporter | e} Summary) ->{IO, Console, File.FileSystem, Process.Arguments | e} ()
+run : (() ->{Reporter | e} Summary) ->{Console, File.FileSystem, Process.Arguments | e} Process.Status
 run action =
     case parseOptions (Options { format = ConsoleFormat, json = Nothing }) (Process.args ()) of
         Err message ->
             write ("Test.run: " ++ message ++ "\n" ++ usage)
-            Process.exit (Process.status 2)
-        Ok Help -> write usage
+            Process.status 2
+        Ok Help ->
+            write usage
+            Process.success
         Ok (Run options) ->
-            summary =
-                case options.json of
-                    Nothing -> withFormat options.format action
-                    Just path ->
-                        collected = withReport options.format action
-                        document = JsonReport
-                            { schemaVersion = 2
-                            , cases = collected.cases
-                            , groupFailures = collected.groupFailures
-                            , summary = jsonSummary collected.value
-                            }
-                        case Json.stringify document of
-                            Err problem -> outputError ("JSON encoding failed: " ++ problem.message)
-                            Ok text ->
-                                case File.writeAll path (text ++ "\n") of
-                                    Err problem -> outputError ("JSON report: " ++ IO.describeError problem)
-                                    Ok () -> ()
-                        collected.value
-            if summary.verdict == RunPassed then () else Process.exit Process.failure
+            case options.json of
+                Nothing -> verdictStatus (withFormat options.format action)
+                Just path ->
+                    collected = withReport options.format action
+                    document = JsonReport
+                        { schemaVersion = 2
+                        , cases = collected.cases
+                        , groupFailures = collected.groupFailures
+                        , summary = jsonSummary collected.value
+                        }
+                    case Json.stringify document of
+                        Err problem -> outputError ("JSON encoding failed: " ++ problem.message)
+                        Ok text ->
+                            case File.writeAll path (text ++ "\n") of
+                                Err problem -> outputError ("JSON report: " ++ IO.describeError problem)
+                                Ok () -> verdictStatus collected.value
+
+verdictStatus : Summary -> Process.Status
+verdictStatus summary = if summary.verdict == RunPassed then Process.success else Process.failure
 
 type Options = { format : Format, json : Maybe String }
 type Command = Help | Run Options
@@ -365,10 +368,10 @@ parseFormat format =
         "silent" -> Just SilentFormat
         _ -> Nothing
 
-outputError : String ->{IO, Console} ()
+outputError : String ->{Console} Process.Status
 outputError message =
     write ("Test.run: " ++ message ++ "\n")
-    Process.exit (Process.status 2)
+    Process.status 2
 
 withReport : Format -> (() ->{Reporter | e} a) ->{Console | e} Collected a
 withReport format action =

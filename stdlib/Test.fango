@@ -73,7 +73,6 @@ import Basics exposing (..)
 import Console exposing (Console)
 import Expect exposing (Error, Expect)
 import File
-import IO exposing (IO)
 import List exposing (List(..), foldl, reverse)
 import Process
 import Result exposing (Result(..))
@@ -166,13 +165,14 @@ execute suite =
     report (SuiteFinished summary)
     summary
 
--- Runs the suite using command-line output options, and exits with
--- status 1 unless every test passed and the run was complete. Other effects
--- the tests perform pass through to the caller, which handles them around
--- the run. Use `execute` with a reporter handler to choose output and exit
--- policy yourself. Command-line options select progress or documentation
--- output and an optional JSON file; see [`Test.Reporter.run`](Test/Reporter.fango).
-run : Test e ->{IO, Console, File.FileSystem, Process.Arguments | e} ()
+-- Runs the suite using command-line output options and answers the status
+-- for `main` to return: failure unless every test passed and the run was
+-- complete. Other effects the tests perform pass through to the caller,
+-- which handles them around the run. Use `execute` with a reporter handler
+-- to choose output and exit policy yourself. Command-line options select
+-- progress or documentation output and an optional JSON file; see
+-- [`Test.Reporter.run`](Test/Reporter.fango).
+run : Test e ->{Console, File.FileSystem, Process.Arguments | e} Process.Status
 run suite = Reporter.run { execute suite }
 
 -- Whether the tree focuses some tests. An `only` inside a `skip` does not

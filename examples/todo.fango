@@ -140,6 +140,7 @@ command args =
         ["done", raw] -> completeTodo raw
         _ -> Fail.fail Usage
 
+main : () ->{Console, File.FileSystem, Process.Arguments} Process.Status
 main() =
     case Fail.attempt { command Process.args() } of
         Ok () -> Process.success

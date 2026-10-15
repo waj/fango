@@ -30,6 +30,7 @@ count counts =
 render : Counts -> String
 render counts = show counts.lines ++ " " ++ show counts.words ++ " " ++ show counts.bytes
 
+main : () ->{Console} ()
 main() =
     result = count { lines = 0, words = 0, bytes = 0 }
     print (render result)

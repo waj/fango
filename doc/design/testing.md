@@ -33,8 +33,7 @@ effect-row alias is needed.
 
 `Test e` carries the row its bodies perform besides `Expect`, so `Test {}`
 holds pure tests, `Test File.FileSystem` tests that use whole-file services, and
-a caller can handle its own effect around the whole run, as `State.run 0 { Test.run suite }` does in
-the fixtures. `execute : Test e ->{Reporter | e} Summary` installs the
+a caller can handle its own effect around the whole run. `execute : Test e ->{Reporter | e} Summary` installs the
 `Expect` handler around each body and leaves `e` to the caller. Handling
 `Reporter` removes reporting from the row, so a pure suite needs no IO.
 The constructors are private, so fuzz cases or richer `only` semantics can
@@ -90,10 +89,12 @@ and the summary to standard output without exiting. `progress` prints dots,
 and `documentation` prints group headings and indented case outcomes; both
 retain failures until suite completion to print their full details afterward.
 `run` delegates command-line handling to `Test.Reporter.run` around `execute`,
-exposing `Console` for output, `Process.Arguments` for options, `File.FileSystem`
-for optional JSON reports, and IO for process exit. No arguments select the existing console
-report. An optional JSON report collects completed case outcomes and group
-failures and writes them after execution, before setting the exit status.
+exposing `Console` for output, `Process.Arguments` for options, and
+`File.FileSystem` for optional JSON reports. It answers a `Process.Status` for
+`main` to return rather than exiting, so a suite needs no IO of its own and
+cleanup runs before the status applies. No arguments select the existing
+console report. An optional JSON report collects completed case outcomes and
+group failures and writes them after execution, before the status is chosen.
 JSON collection is enabled only when requested; argument parsing happens before
 execution. The module's source comments own the options, diagnostics, and
 versioned JSON schema.

@@ -247,8 +247,9 @@ and cleanup throughout.
 Implemented Console, Process, and File APIs live in their source comments;
 [entry points](reference/commands.md#entry-points) owns the function-only main
 and status contract. [File services](design/effects.md#file-services) owns the
-Source/Sink boundary after shared-handle retirement. Remaining migration work is
-the service-row/entry annotation audit and the deferred Net/HTTP transport path.
+Source/Sink boundary after shared-handle retirement. [Standard services](reference/services.md)
+owns the coverage map. Remaining migration work is the deferred Net/HTTP
+transport path.
 
 The mock fixture specification must match observable semantics rather than
 the physical implementation of the host OS. In particular, define relative
@@ -300,9 +301,10 @@ committed separately.
    [file services](design/effects.md#file-services). File handles, checked
    custom providers, memory streaming and faults are implemented; shared
    `IO.Handle`, standard handles, and generic handle operations are retired.
-7. **IOI8, partially.** Migrate the remaining bundled callers and `{IO}`
-   annotations, and publish the coverage map for what has landed. The parts
-   that depend on IOI6 and IOI7 stay open.
+7. **IOI8, partially.** DONE: see [standard services](reference/services.md).
+   Bundled callers no longer use `IO` for services, every bundled `main`
+   names its services, and `Test.run` returns a status instead of exiting.
+   The parts that depend on IOI6 and IOI7 stay open.
 
 ### IOI1 API and coverage contract
 
@@ -408,12 +410,15 @@ to obey the checked task boundary.
 
 ### IOI8 Migration and completeness audit
 
-Migrate public signatures, bundled callers, Prelude/entry integration, and
-native wrappers according to IOI1, annotating every bundled `main` with the
-services it uses. Publish the exact coverage map, including
-raw sidecar and scheduler exceptions. Move landed contracts to their proper
-design/reference/source homes rather than leaving duplicate API specifications
-in the roadmap.
+Status: partially done. [Standard services](reference/services.md) owns the
+coverage map for Console, File, Process, Random, Clock, and HTTP domain
+handlers, and lists the direct native boundaries. Bundled programs annotate
+`main` with their services and return statuses instead of calling
+`Process.exit`; `Test.run` answers a status rather than exiting.
+
+Remaining: migrate Net and the HTTP transport once IOI6 and IOI7 land, move
+their rows from the direct-boundary table into the interpreted-services table,
+and re-audit bundled callers and native wrappers for the new boundary.
 
 Acceptance: all existing correctness gates remain; missing service handlers
 produce deliberate diagnostics; no real implementation is accidentally selected

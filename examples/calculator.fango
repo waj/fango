@@ -158,4 +158,5 @@ loop env =
                             print ("error: " ++ message)
                             loop env
 
+main : () ->{Console} ()
 main() = loop Dict.empty
