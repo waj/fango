@@ -6,8 +6,9 @@ contract. Source and checks: [runtime](../../runtime/fangort/stm.go),
 [runtime tests](../../runtime/fangort/stm_test.go), and the
 [transaction](../../testdata/suite/STMTransactions.fango),
 [retry](../../testdata/suite/STMRetry.fango),
-[alternatives](../../testdata/suite/STMAlternatives.fango), and
-[MVar](../../testdata/suite/STMMVar.fango) fixtures.
+[alternatives](../../testdata/suite/STMAlternatives.fango),
+[MVar](../../testdata/suite/STMMVar.fango), and
+[queue](../../testdata/suite/STMQueue.fango) fixtures.
 
 ## Sealed effect
 
@@ -71,10 +72,25 @@ to every branch that ran.
 
 ## Derived structures
 
-[`STM.MVar`](../../stdlib/STM/MVar.fango) is ordinary Fango over the public
-`STM` API, a `Var (Maybe a)` whose blocking operations `retry`; it has no
-natives and no access to the sealed operations, so it is also an example of
-what users can build.
+[`STM.MVar`](../../stdlib/STM/MVar.fango) and
+[`STM.Queue`](../../stdlib/STM/Queue.fango) are ordinary Fango over the public
+`STM` API, with no natives and no access to the sealed operations, so they
+are also examples of what users can build. An `MVar` is a `Var (Maybe a)`
+whose blocking operations `retry`.
+
+A `Queue` is the two-list functional queue split across variables: producers
+prepend to `back`, consumers take from `front`, and a consumer touches `back`
+only to move it, reversed, into an empty `front`. A bounded queue splits its
+free-slot count after `TBQueue`: producers decrement `pushRoom` and
+consumers increment `popRoom`, and only a producer that finds `pushRoom`
+exhausted reads `popRoom`, moves it over, and retries if it is zero. The
+`try` operations are `orElse` over the blocking ones.
+
+Measured once with an instrumented runtime, one producer and one consumer
+moving 20,000 values each through a queue kept non-empty conflicted on about
+1.7% of 40,000 commits unbounded and 7% bounded at capacity 1,000, against
+78% for the same traffic on a single `Var (List a)`. The bounded rate is the
+producer collecting freed slots; neither figure is asserted.
 
 ## Runtime
 

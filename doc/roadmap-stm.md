@@ -630,6 +630,9 @@ non-atomic sequence across tasks.
 
 ### STM5 Queue
 
+DONE. See the [Queue module](../stdlib/STM/Queue.fango) and
+[derived structures](design/stm.md#derived-structures).
+
 The `STM.Queue` module, unbounded and bounded.
 
 Acceptance: FIFO order under several producers and consumers; a bounded queue

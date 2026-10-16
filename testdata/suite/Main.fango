@@ -223,6 +223,7 @@ import RowArgumentClosed
 import RowPolymorphicMap
 import STMAlternatives
 import STMMVar
+import STMQueue
 import STMRetry
 import STMTransactions
 import ScopeCallback
@@ -530,6 +531,7 @@ main() =
             , RowPolymorphicMap.tests
             , STMAlternatives.tests
             , STMMVar.tests
+            , STMQueue.tests
             , STMRetry.tests
             , STMTransactions.tests
             , ScopeCallback.tests

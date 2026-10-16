@@ -1,0 +1,255 @@
+{-# no-prelude #-}
+-- A transactional first-in, first-out queue, unbounded or bounded, after
+-- Haskell's `TQueue` and `TBQueue`.
+--
+-- Popping from an empty queue or pushing onto a full bounded one retries, so
+-- these operations block inside `STM.atomically` until another task's commit
+-- makes them possible. They combine with other transactions, and
+-- `STM.orElse` chooses between queues:
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome {
+--     urgent = STM.atomically { Queue.unbounded () }
+--     normal = STM.atomically { Queue.unbounded () }
+--     STM.atomically { Queue.push normal "report"; Queue.push urgent "page" }
+--     next = { _ -> STM.atomically { STM.orElse { Queue.pop urgent } { Queue.pop normal } } }
+--     first = next ()
+--     second = next ()
+--     (first, second)
+--     }
+-- result == Completed ("page", "report")
+-- ```
+--
+-- The queue is two lists in separate variables, so producers and consumers
+-- do not conflict while the front holds values; a bounded queue also splits
+-- its free-slot count between them. A queue cannot be closed: pair it with an
+-- `STM.Var Bool` and `STM.orElse` when consumers must learn that no more
+-- values will come.
+module STM.Queue exposing (Queue, bounded, drain, isEmpty, peek, pop, push, tryPeek, tryPop, tryPush, unbounded)
+
+import Basics exposing (..)
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import STM exposing (STM)
+
+-- A queue of `a` values. It may be shared by any number of tasks and has no
+-- equality or `Show`.
+type Queue a =
+    {
+      -- Oldest first; consumers take from here.
+      front : STM.Var (List a)
+      -- Newest first; producers prepend here.
+    , back : STM.Var (List a)
+      -- The capacity, or 0 for an unbounded queue.
+    , limit : Int
+      -- Free slots known to producers.
+    , pushRoom : STM.Var Int
+      -- Slots freed by consumers and not yet moved to `pushRoom`.
+    , popRoom : STM.Var Int
+    }
+
+-- An empty queue with no capacity limit.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- Async.runOutcome { STM.atomically { Queue.isEmpty (Queue.unbounded ()) } } == Completed True
+-- ```
+unbounded : () ->{STM} Queue a
+unbounded () = create 0
+
+-- An empty queue holding at most `capacity` values; a capacity below 1 is
+-- treated as 1.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome { STM.atomically { queue = Queue.bounded 1; first = Queue.tryPush queue 'a'; (first, Queue.tryPush queue 'b') } }
+-- result == Completed (True, False)
+-- ```
+bounded : Int ->{STM} Queue a
+bounded capacity = create (if capacity < 1 then 1 else capacity)
+
+create : Int ->{STM} Queue a
+create limit =
+    Queue
+        { front = STM.new []
+        , back = STM.new []
+        , limit = limit
+        , pushRoom = STM.new limit
+        , popRoom = STM.new 0
+        }
+
+-- Adds `value` at the back; retries while a bounded queue is full.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome { STM.atomically { queue = Queue.unbounded (); Queue.push queue 1; Queue.push queue 2; Queue.drain queue } }
+-- result == Completed [1, 2]
+-- ```
+push : Queue a -> a ->{STM} ()
+push queue value =
+    if queue.limit > 0 then takeSlot queue else ()
+    STM.modify queue.back { items -> [value | items] }
+
+-- A producer usually decrements its own count. Only when that runs out does
+-- it collect the slots consumers freed, retrying while there are none.
+takeSlot : Queue a ->{STM} ()
+takeSlot queue =
+    room = STM.read queue.pushRoom
+    if room > 0 then
+        STM.write queue.pushRoom (room - 1)
+    else
+        freed = STM.read queue.popRoom
+        STM.check (freed > 0)
+        STM.write queue.popRoom 0
+        STM.write queue.pushRoom (freed - 1)
+
+freeSlots : Queue a -> Int ->{STM} ()
+freeSlots queue count =
+    if queue.limit > 0 && count > 0 then STM.modify queue.popRoom { n -> n + count } else ()
+
+-- Adds `value` at the back unless a bounded queue is full, answering whether
+-- it did, without retrying.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome { STM.atomically { queue = Queue.bounded 2; added = Queue.tryPush queue "x"; (added, Queue.drain queue) } }
+-- result == Completed (True, ["x"])
+-- ```
+tryPush : Queue a -> a ->{STM} Bool
+tryPush queue value = STM.orElse { push queue value; True } { False }
+
+-- The values in order, oldest first, with the front holding at least one
+-- when the queue is not empty. Moving the back to the front is the only step
+-- where consumers touch the producers' variable.
+settle : Queue a ->{STM} List a
+settle queue =
+    case STM.read queue.front of
+        [] ->
+            case STM.read queue.back of
+                [] -> []
+                newest ->
+                    STM.write queue.back []
+                    oldest = List.reverse newest
+                    STM.write queue.front oldest
+                    oldest
+        values -> values
+
+-- Removes and answers the oldest value; retries while the queue is empty.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome { STM.atomically { queue = Queue.unbounded (); Queue.push queue 1; Queue.push queue 2; first = Queue.pop queue; (first, Queue.pop queue) } }
+-- result == Completed (1, 2)
+-- ```
+pop : Queue a ->{STM} a
+pop queue =
+    case settle queue of
+        [] -> STM.retry ()
+        [value | rest] ->
+            STM.write queue.front rest
+            freeSlots queue 1
+            value
+
+-- Removes and answers the oldest value if there is one, without retrying.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Maybe exposing (Maybe(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome { STM.atomically { queue = Queue.unbounded (); Queue.push queue 1; first = Queue.tryPop queue; (first, Queue.tryPop queue) } }
+-- result == Completed (Just 1, Nothing)
+-- ```
+tryPop : Queue a ->{STM} Maybe a
+tryPop queue = STM.orElse { Just (pop queue) } { Nothing }
+
+-- The oldest value, leaving it in the queue; retries while the queue is
+-- empty.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome { STM.atomically { queue = Queue.unbounded (); Queue.push queue "a"; first = Queue.peek queue; (first, Queue.pop queue) } }
+-- result == Completed ("a", "a")
+-- ```
+peek : Queue a ->{STM} a
+peek queue =
+    case settle queue of
+        [] -> STM.retry ()
+        [value | _] -> value
+
+-- The oldest value if there is one, leaving it in the queue, without
+-- retrying.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Maybe exposing (Maybe(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome { STM.atomically { queue = Queue.unbounded (); Queue.push queue 3; Queue.tryPeek queue } }
+-- result == Completed (Just 3)
+-- ```
+tryPeek : Queue a ->{STM} Maybe a
+tryPeek queue = STM.orElse { Just (peek queue) } { Nothing }
+
+-- Removes and answers every value, oldest first, without retrying.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome { STM.atomically { queue = Queue.bounded 3; Queue.push queue 1; Queue.push queue 2; values = Queue.drain queue; (values, Queue.isEmpty queue) } }
+-- result == Completed ([1, 2], True)
+-- ```
+drain : Queue a ->{STM} List a
+drain queue =
+    front = STM.read queue.front
+    back = STM.read queue.back
+    STM.write queue.front []
+    STM.write queue.back []
+    values = List.foldr { value rest -> [value | rest] } (List.reverse back) front
+    freeSlots queue (List.length values)
+    values
+
+-- Whether the queue holds no values.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.Queue as Queue
+--
+-- result = Async.runOutcome { STM.atomically { queue = Queue.unbounded (); Queue.push queue (); Queue.isEmpty queue } }
+-- result == Completed False
+-- ```
+isEmpty : Queue a ->{STM} Bool
+isEmpty queue =
+    case STM.read queue.front of
+        [] ->
+            case STM.read queue.back of
+                [] -> True
+                _ -> False
+        _ -> False
