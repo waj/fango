@@ -8,7 +8,8 @@ contract. Source and checks: [runtime](../../runtime/fangort/stm.go),
 [retry](../../testdata/suite/STMRetry.fango),
 [alternatives](../../testdata/suite/STMAlternatives.fango),
 [MVar](../../testdata/suite/STMMVar.fango), and
-[queue](../../testdata/suite/STMQueue.fango) fixtures.
+[queue](../../testdata/suite/STMQueue.fango) fixtures, and the
+[job pipeline example](../../examples/jobs.fango).
 
 ## Sealed effect
 
@@ -91,6 +92,12 @@ moving 20,000 values each through a queue kept non-empty conflicted on about
 1.7% of 40,000 commits unbounded and 7% bounded at capacity 1,000, against
 78% for the same traffic on a single `Var (List a)`. The bounded rate is the
 producer collecting freed slots; neither figure is asserted.
+
+The [job pipeline example](../../examples/jobs.fango) composes both with a
+worker pool, a counting semaphore, and a timeout. Its semaphore is a `Var Int`
+and `check`, and its timeout a `Var Bool` that a timer task in the caller's
+scope sets, chosen against a result slot with `orElse`; both stay program
+code rather than library API.
 
 ## Runtime
 

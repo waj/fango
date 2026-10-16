@@ -1,0 +1,182 @@
+-- A job pipeline over software transactional memory. A dispatcher feeds
+-- urgent and normal jobs into bounded queues; a pool of workers takes urgent
+-- work first, limits concurrent computations with a semaphore, and delivers
+-- each answer through the job's own result slot. The dispatcher waits for
+-- each answer with a timeout, so a job that never finishes is reported
+-- instead of hanging the pipeline.
+
+import Async
+import Basics exposing (modBy, quotientBy)
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Runtime.Scope
+import STM exposing (STM)
+import STM.MVar as MVar exposing (MVar)
+import STM.Queue as Queue exposing (Queue)
+
+type Priority = Urgent | Normal
+
+-- What a job computes: the Collatz steps of a number, or a wait on an
+-- external event that never happens.
+type Work = Steps Int | Stuck
+
+type Job = { id : Int, priority : Priority, work : Work, result : MVar Int }
+
+type Semaphore = Semaphore (STM.Var Int)
+
+type Pipeline =
+    { urgent : Queue Job
+    , normal : Queue Job
+    -- Set once the dispatcher has queued every job.
+    , closed : STM.Var Bool
+    , permits : Semaphore
+    -- Computations running now, and the most seen at once.
+    , running : STM.Var Int
+    , peak : STM.Var Int
+    -- The event `Stuck` work waits for.
+    , never : STM.Var Bool
+    }
+
+workers = 3
+
+limit = 2
+
+timeoutMilliseconds = 500
+
+-- A variable that becomes `True` after `milliseconds`, set by a timer task
+-- in the caller's scope.
+delay : Int ->{Async.Async} STM.Var Bool
+delay milliseconds =
+    flag = STM.atomically { STM.new False }
+    ignore (Async.spawn { Async.sleep milliseconds; STM.atomically { STM.write flag True } })
+    flag
+
+acquire : Semaphore ->{STM} ()
+acquire (Semaphore permits) =
+    available = STM.read permits
+    STM.check (available > 0)
+    STM.write permits (available - 1)
+
+release : Semaphore ->{STM} ()
+release (Semaphore permits) = STM.modify permits { n -> n + 1 }
+
+-- Runs `action` holding a permit. The release never retries, so it commits
+-- even while a cancelled task cleans up.
+withPermit : Semaphore -> (() ->{Async.Async} a) ->{Async.Async} a
+withPermit semaphore action =
+    Runtime.Scope.bracket
+        { STM.atomically { acquire semaphore } }
+        { _ -> STM.atomically { release semaphore } }
+        { _ -> action () }
+
+collatz : Int -> Int -> Int
+collatz n count =
+    if n == 1 then count
+    else if modBy 2 n == 0 then collatz (quotientBy 2 n) (count + 1)
+    else collatz (3 * n + 1) (count + 1)
+
+compute : Pipeline -> Work ->{Async.Async} Int
+compute pipeline work =
+    withPermit pipeline.permits {
+        STM.atomically {
+            now = STM.read pipeline.running + 1
+            STM.write pipeline.running now
+            STM.modify pipeline.peak { seen -> if now > seen then now else seen }
+        }
+        answer = case work of
+            Steps n -> collatz n 0
+            Stuck ->
+                STM.atomically { STM.check (STM.read pipeline.never) }
+                0
+        STM.atomically { STM.modify pipeline.running { n -> n - 1 } }
+        answer
+    }
+
+-- Urgent work first, then normal work; `Nothing` once both queues are empty
+-- and the dispatcher has closed the pipeline.
+nextJob : Pipeline ->{STM} Maybe Job
+nextJob pipeline =
+    STM.orElse
+        { Just (Queue.pop pipeline.urgent) }
+        {
+            STM.orElse
+                { Just (Queue.pop pipeline.normal) }
+                {
+                    STM.check (STM.read pipeline.closed)
+                    Nothing
+                }
+        }
+
+worker : Pipeline ->{Async.Async} ()
+worker pipeline =
+    case STM.atomically { nextJob pipeline } of
+        Nothing -> ()
+        Just job ->
+            answer = compute pipeline job.work
+            STM.atomically { MVar.put job.result answer }
+            worker pipeline
+
+-- The job's answer, or `Nothing` if none arrives within the timeout.
+answerWithin : Int -> Job ->{Async.Async} Maybe Int
+answerWithin milliseconds job =
+    expired = delay milliseconds
+    STM.atomically {
+        STM.orElse
+            { Just (MVar.read job.result) }
+            {
+                STM.check (STM.read expired)
+                Nothing
+            }
+    }
+
+newJob : Int -> Priority -> Work ->{STM} Job
+newJob id priority work = Job { id = id, priority = priority, work = work, result = MVar.empty () }
+
+describe : Job -> Maybe Int -> String
+describe job answer =
+    label = case job.priority of
+        Urgent -> "urgent"
+        Normal -> "normal"
+    outcome = case answer of
+        Just steps -> "#{steps} steps"
+        Nothing -> "timed out"
+    "job #{job.id} (#{label}): #{outcome}"
+
+main() =
+    Async.run {
+        pipeline = STM.atomically {
+            Pipeline
+                { urgent = Queue.bounded 2
+                , normal = Queue.bounded 4
+                , closed = STM.new False
+                , permits = Semaphore (STM.new limit)
+                , running = STM.new 0
+                , peak = STM.new 0
+                , never = STM.new False
+                }
+        }
+        List.each { _ -> ignore (Async.spawn { worker pipeline }) } (List.range 1 workers)
+        works = [Steps 27, Steps 97, Stuck, Steps 871, Steps 6171, Steps 77031, Steps 837799, Steps 1, Steps 9]
+        jobs = STM.atomically {
+            List.map
+                { (index, work) ->
+                    newJob index (if modBy 3 index == 0 then Urgent else Normal) work
+                }
+                (List.foldr { work rest -> [(List.length works - List.length rest, work) | rest] } [] works)
+        }
+        List.each
+            { job ->
+                queue = case job.priority of
+                    Urgent -> pipeline.urgent
+                    Normal -> pipeline.normal
+                STM.atomically { Queue.push queue job }
+            }
+            jobs
+        STM.atomically { STM.write pipeline.closed True }
+        answers = List.map { job -> (job, answerWithin timeoutMilliseconds job) } jobs
+        List.each { (job, answer) -> print (describe job answer) } answers
+        finished = List.length (List.filter { (_, answer) -> answer /= Nothing } answers)
+        print "#{finished} of #{List.length jobs} jobs finished"
+        peak = STM.atomically { STM.read pipeline.peak }
+        print "at most #{limit} computations at once: #{peak <= limit}"
+    }

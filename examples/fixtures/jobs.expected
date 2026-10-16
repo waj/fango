@@ -1,0 +1,11 @@
+job 1 (normal): 111 steps
+job 2 (normal): 118 steps
+job 3 (urgent): timed out
+job 4 (normal): 178 steps
+job 5 (normal): 261 steps
+job 6 (urgent): 350 steps
+job 7 (normal): 524 steps
+job 8 (normal): 0 steps
+job 9 (urgent): 19 steps
+8 of 9 jobs finished
+at most 2 computations at once: True

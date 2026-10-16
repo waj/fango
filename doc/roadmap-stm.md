@@ -641,6 +641,8 @@ conflict counts on a non-empty queue stay low (measured, not asserted).
 
 ### STM6 Driving example
 
+DONE. See the [job pipeline example](../examples/jobs.fango).
+
 An example program that exercises the library end to end, for instance a job
 pipeline with urgent and normal bounded queues, a worker pool, a result
 `MVar`, and a timeout built from `delay`. It follows the [example-program

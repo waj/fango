@@ -356,6 +356,15 @@ func TestSudokuExample(t *testing.T) {
 	runDifferentialCase(t, path, cliRunner(path))
 }
 
+// The STM job pipeline: bounded queues, a worker pool, result slots, a
+// semaphore, and a timeout. One job never finishes and is reported after the
+// timeout; cancellation then stops its worker.
+func TestJobsExample(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("..", "..", "examples", "jobs.fango")
+	runDifferentialCase(t, path, cliRunner(path))
+}
+
 func TestGuessingGameExample(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "guess.fango")
