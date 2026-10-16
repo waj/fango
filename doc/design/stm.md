@@ -137,6 +137,16 @@ only by a commit publishing it.
   A waiter withdraws from every variable on return, whether woken or
   cancelled. An attempt that read nothing waits for cancellation alone.
 
+## Verification
+
+Fixtures assert final state and invariants, never interleavings or retry
+counts, which depend on scheduling. Waiting fixtures synchronize through
+variables, such as a flag a task sets before it blocks, and never rely on
+timing for their outcome.
+Runtime unit tests cover commit validation, publication order, rollback,
+and waiter registration directly, under the race detector; one counts the
+registrations a cancelled waiter leaves.
+
 The [runtime benchmarks](../../runtime/fangort/stm_test.go) measure commit
 scaling. With one global commit mutex, attempts each writing their own
 variable committed at a flat 215–240 ns per commit from one to eight CPUs,

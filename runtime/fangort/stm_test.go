@@ -226,8 +226,8 @@ func TestSTMRollbackDiscardsWritesAndKeepsReads(t *testing.T) {
 }
 
 // Commits whose read and write sets are disjoint: one variable per goroutine.
-// With a global commit mutex these serialize; scaling with -cpu shows the
-// contention STM7 measures.
+// They share only the clock increment; scaling with -cpu shows how much they
+// still contend.
 func BenchmarkSTMDisjointCommits(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		v := BeginSTM().New(int64(0))

@@ -136,9 +136,30 @@ process-global state.
 
 ## Software transactional memory
 
-[STM](roadmap-stm.md) proposes a sealed `STM` effect with transactional
-variables, blocking `retry`, `orElse`, and derived `MVar` and `Queue`
-modules over [Async](../stdlib/Async.fango) tasks.
+[STM](../stdlib/STM.fango) and its [design](design/stm.md) are implemented.
+Open decisions wait for a consumer or a measurement:
+
+- **Fast paths outside a transaction.** Haskell's `newTVarIO` and
+  `readTVarIO`, as `a ->{Async} Var a` and `Var a ->{Async} a`. A read-only
+  `atomically` is already lock-free, so they need a measurement first.
+- **`retry` with no reads.** It waits until cancellation; a runtime
+  diagnostic, like GHC's "blocked indefinitely", would catch the bug sooner.
+- **Fairness.** A long transaction can keep losing to short ones. A retry
+  budget that falls back to running the attempt with its variables locked
+  would bound it.
+- **Variable identity.** An identity equality on `Var`, which keyed
+  collections of variables need.
+- **Clock contention.** Commits with disjoint write sets now share only the
+  clock increment, which limits scaling past four CPUs in the runtime
+  benchmark. A TL2 clock variant that avoids incrementing on every commit
+  should follow a workload that needs it.
+- **Direct transport.** `retry` makes `STM` an abort effect, so every arrow
+  performing it uses Exit transport, and each `orElse` adds a forwarding hop.
+  Because the effect is sealed, the compiler could know its handlers, treat
+  reads and writes as a resumptive part so helpers that never retry stay
+  Direct, and dispatch operations straight to the log. Stale-read restarts
+  also abort, so this pays off only together with non-aborting reads, such
+  as multi-version snapshots.
 
 ## Addressing a specific handler
 

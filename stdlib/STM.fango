@@ -34,6 +34,43 @@
 --     }
 -- result == Completed (70, 30)
 -- ```
+--
+-- Only `atomically` handles `STM`, so no other module can add a primitive,
+-- such as a commit hook, or interpret `STM` differently; tests run under the
+-- real `atomically`. Everything else is built from the operations here: the
+-- bundled `STM.MVar` and `STM.Queue` are ordinary modules over them.
+-- Granularity is the main choice in such a structure. A `Var (Dict k v)`
+-- makes every update conflict with every other, while a `Dict k (Var v)`
+-- conflicts only per key but needs a fixed key set or a variable for
+-- membership.
+--
+-- A handler whose clauses perform `STM` interprets another effect inside a
+-- transaction. Its writes are logged, so they roll back and replay with the
+-- transaction, and code written against `State` runs atomically against
+-- shared state:
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import State exposing (State)
+-- import STM exposing (STM)
+--
+-- runVar : STM.Var s -> (() ->{State s | e} a) ->{STM | e} a
+-- runVar var action =
+--     handle action() on
+--         State.get () -> resume (STM.read var)
+--         State.put next -> resume (STM.write var next)
+--         State.update step ->
+--             (result, next) = step (STM.read var)
+--             STM.write var next
+--             resume result
+--
+-- result = Async.runOutcome {
+--     counter = STM.atomically { STM.new 1 }
+--     STM.atomically { runVar counter { State.modify { n -> n * 5 } } }
+--     STM.atomically { STM.read counter }
+--     }
+-- result == Completed 5
+-- ```
 module STM exposing (STM, Var, atomically, attempt, check, exchange, modify, new, orElse, read, retry, write)
 
 import Async exposing (Async)
