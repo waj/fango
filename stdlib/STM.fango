@@ -6,7 +6,8 @@
 -- that its reads observe one consistent snapshot and its writes become
 -- visible to other tasks all at once, or not at all. Several variables
 -- therefore change together, and functions performing `STM` combine into
--- larger transactions.
+-- larger transactions. `retry` abandons an attempt until a variable it read
+-- changes, so any condition over shared state becomes a blocking wait.
 --
 -- A transaction may be run more than once: when another task commits to a
 -- variable it read, it is discarded and started again. Its row is closed, so
@@ -31,7 +32,7 @@
 --     }
 -- result == Completed (70, 30)
 -- ```
-module STM exposing (STM, Var, atomically, exchange, modify, new, read, write)
+module STM exposing (STM, Var, atomically, check, exchange, modify, new, read, retry, write)
 
 import Async exposing (Async)
 import Basics exposing (..)
@@ -48,13 +49,14 @@ effect STM
     readVar : Var a -> a
     writeVar : Var a -> a -> ()
     newVar : a -> Var a
+    abort abandon : () -> value
 
 -- Raised by a read that sees a variable published after the attempt began.
 effect Restart
     abort restart : () -> value
 
 -- How one attempt ended.
-type Attempt a = Finished a | Conflicted
+type Attempt a = Finished a | Conflicted | Blocked
 
 {-# resource #-}
 type Log = Log Runtime.Native.Any
@@ -76,6 +78,8 @@ stmNew : Log -> a -> Var a
 stmNew = native
 stmCommit : Log -> Bool
 stmCommit = native
+stmAwait : Runtime.Native.Any -> Log -> Bool
+stmAwait = native
 
 -- Runs `transaction` until it commits and answers its value.
 --
@@ -86,8 +90,10 @@ stmCommit = native
 -- it read in the meantime, the attempt is discarded and the transaction runs
 -- again. Conflict restarts are invisible to the program.
 --
--- A transaction cannot be interrupted, so `atomically` runs to commit even
--- in a cancelled task, including during cancellation cleanup.
+-- A transaction responds to cancellation only while waiting after `retry`.
+-- One that never retries runs to commit even in a cancelled task, so
+-- cancellation cleanup can still release a lock or return a permit with
+-- `atomically`.
 --
 -- ```fango
 -- import Async exposing (Outcome(..))
@@ -96,16 +102,20 @@ stmCommit = native
 -- Async.runOutcome { STM.atomically { STM.read (STM.new 7) } } == Completed 7
 -- ```
 atomically : (() ->{STM} a) ->{Async} a
-atomically transaction =
-    ignore (Async.contextToken ())
-    attemptLoop transaction
+atomically transaction = attemptLoop (Async.contextToken ()) transaction
 
-attemptLoop : (() ->{STM} a) -> a
-attemptLoop transaction =
+attemptLoop : Runtime.Native.Any -> (() ->{STM} a) ->{Async} a
+attemptLoop context transaction =
     log = stmBegin ()
     case runAttempt log transaction of
-        Finished value -> if stmCommit log then value else attemptLoop transaction
-        Conflicted -> attemptLoop transaction
+        Finished value -> if stmCommit log then value else attemptLoop context transaction
+        Conflicted -> attemptLoop context transaction
+        Blocked ->
+            if stmAwait context log then
+                attemptLoop context transaction
+            else
+                Async.checkpoint ()
+                attemptLoop context transaction
 
 runAttempt : Log -> (() ->{STM} a) -> Attempt a
 runAttempt log transaction =
@@ -116,6 +126,7 @@ runAttempt log transaction =
                 if stmFresh result then resume (stmValue result) else restart ()
             writeVar var value -> resume (stmWrite log var value)
             newVar value -> resume (stmNew log value)
+            abandon () -> Blocked
             return value -> Finished value
     on
         restart () -> Conflicted
@@ -187,3 +198,54 @@ exchange var next =
     previous = readVar var
     writeVar var next
     previous
+
+-- Abandons the attempt: its writes are discarded, and the task waits until
+-- another transaction commits a write to a variable the attempt read, then
+-- runs the transaction again from the start. A `retry` that read nothing
+-- waits until the task is cancelled.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Maybe exposing (Maybe(..))
+-- import STM
+--
+-- result = Async.runOutcome {
+--     box = STM.atomically { STM.new Nothing }
+--     consumer = Async.spawn {
+--         STM.atomically {
+--             case STM.read box of
+--                 Just value -> value
+--                 Nothing -> STM.retry ()
+--         }
+--     }
+--     STM.atomically { STM.write box (Just 42) }
+--     Async.await consumer
+--     }
+-- result == Completed 42
+-- ```
+retry : () ->{STM} a
+retry () = abandon ()
+
+-- Does nothing when `condition` holds, and `retry`s otherwise.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+--
+-- result = Async.runOutcome {
+--     permits = STM.atomically { STM.new 0 }
+--     worker = Async.spawn {
+--         STM.atomically {
+--             available = STM.read permits
+--             STM.check (available > 0)
+--             STM.write permits (available - 1)
+--         }
+--         "acquired"
+--     }
+--     STM.atomically { STM.modify permits { n -> n + 1 } }
+--     Async.await worker
+--     }
+-- result == Completed "acquired"
+-- ```
+check : Bool ->{STM} ()
+check condition = if condition then () else abandon ()

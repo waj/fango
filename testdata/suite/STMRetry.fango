@@ -1,0 +1,91 @@
+module STMRetry exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import IO
+import List
+import Maybe exposing (Maybe(..))
+import Runtime.Scope
+import STM exposing (STM)
+import Test
+
+take : STM.Var (Maybe a) ->{STM} a
+take box =
+    case STM.read box of
+        Just value ->
+            STM.write box Nothing
+            value
+        Nothing -> STM.retry ()
+
+-- Consumers block on an empty box until a producer's commit wakes them;
+-- each value is taken exactly once.
+handoff : () ->{IO} Outcome Int
+handoff() =
+    Async.runOutcome {
+        box = STM.atomically { STM.new Nothing }
+        consumers = List.map { _ -> Async.spawn { STM.atomically { take box } } } (List.range 1 4)
+        List.each { n ->
+            Async.sleep 1
+            STM.atomically {
+                STM.check (STM.read box == Nothing)
+                STM.write box (Just n)
+            }
+        } (List.range 1 4)
+        List.foldl { n sum -> sum + n } 0 (Async.awaitAll consumers)
+    }
+
+-- A waiter cancelled while blocked stops, and the variable it waited on
+-- still accepts commits.
+cancelledWaiter : () ->{IO} Outcome (Outcome Int, Outcome Int, Int)
+cancelledWaiter() =
+    Async.runOutcome {
+        gate = STM.atomically { STM.new 0 }
+        started = STM.atomically { STM.new False }
+        blocked = Async.spawn {
+            STM.atomically { STM.write started True }
+            STM.atomically {
+                value = STM.read gate
+                STM.check (value > 0)
+                value
+            }
+        }
+        forever = Async.spawn { STM.atomically { STM.retry () } }
+        STM.atomically { STM.check (STM.read started) }
+        Async.cancel blocked
+        Async.cancel forever
+        first = Async.awaitOutcome blocked
+        second = Async.awaitOutcome forever
+        STM.atomically { STM.write gate 5 }
+        (first, second, STM.atomically { STM.read gate })
+    }
+
+-- Cleanup in a cancelled task still commits a transaction that never
+-- retries.
+cleanupCommit : () ->{IO} Outcome (Outcome (), Bool)
+cleanupCommit() =
+    Async.runOutcome {
+        gate = STM.atomically { STM.new False }
+        started = STM.atomically { STM.new False }
+        released = STM.atomically { STM.new False }
+        task = Async.spawn {
+            Runtime.Scope.finally
+                {
+                    STM.atomically { STM.write started True }
+                    STM.atomically { STM.check (STM.read gate) }
+                }
+                { STM.atomically { STM.write released True } }
+        }
+        STM.atomically { STM.check (STM.read started) }
+        Async.cancel task
+        outcome = Async.awaitOutcome task
+        (outcome, STM.atomically { STM.read released })
+    }
+
+tests : Test.Test IO.IO
+tests = Test.test "stm_retry" {
+    Expect.equal (Completed 10) handoff()
+    Expect.equal (Completed (Cancelled, Cancelled, 5)) cancelledWaiter()
+    Expect.equal (Completed (Cancelled, True)) cleanupCommit()
+}
+
+main() = Test.run tests

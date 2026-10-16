@@ -4,7 +4,8 @@
 contract. Source and checks: [runtime](../../runtime/fangort/stm.go),
 [sidecar](../../stdlib/STM.native.go),
 [runtime tests](../../runtime/fangort/stm_test.go), and the
-[transaction fixture](../../testdata/suite/STMTransactions.fango).
+[transaction](../../testdata/suite/STMTransactions.fango) and
+[retry](../../testdata/suite/STMRetry.fango) fixtures.
 
 ## Sealed effect
 
@@ -26,7 +27,10 @@ that its handler clauses capture lexically, as `State.runAtomic` captures its
 cell, so the handler keeps no `with` state. A read clause that observes a
 conflict cannot abort through its own handler, so it performs the private
 `Restart` abort effect, handled around the `STM` handler, and the attempt ends
-as `Conflicted`. Nothing is locked while the transaction body runs, so an
+as `Conflicted`. `retry` is the abort operation `abandon`, which ends the
+attempt as `Blocked`; `atomically` then waits on the attempt's log and reruns
+the closure. Because `STM` has an abort operation, every arrow performing it
+uses Exit transport. Nothing is locked while the transaction body runs, so an
 attempt abandoned by an outer abort or cancellation needs no cleanup.
 
 The log natives are private and typed pure, reached only through the handler.
@@ -38,6 +42,12 @@ clause's uniform representation, and reads return through the request/reply
 envelope, which adapts the payload back to the caller's representation; the
 transaction fixture round-trips scalars, records, recursive ADTs, functions,
 and Unit written and read at different instantiations.
+
+`atomically` takes the current lifetime's context token when it starts,
+which needs no checkpoint, so a transaction that never retries runs to commit
+even during cancellation cleanup. Only the wait observes cancellation: when it
+reports cancellation, `atomically` calls `Async.checkpoint`, which stops the
+task.
 
 ## Runtime
 
@@ -57,3 +67,14 @@ an immutable node carrying the version of the commit that wrote it.
   version, publishes each variable's final write at the next version, and
   only then advances the clock. An attempt that begins later sees every new
   node; one that began earlier sees old nodes or rejects new ones as stale.
+- **Wait.** A blocked attempt registers one waiter, with a one-slot channel,
+  on every variable it read, then checks those variables again: a version
+  above its read version means a commit raced the registration, and it
+  returns at once. Otherwise it selects on the channel and the scope's
+  cancellation, as `AsyncSleep` does. A writing commit, after releasing the
+  commit mutex, signals and removes the waiters of each variable it wrote
+  under that variable's own mutex. The registration and the commit's waiter
+  scan are ordered by that mutex, and publication precedes the scan, so a
+  waiter either is found by the scan or sees the newer version on its check.
+  A waiter withdraws from every variable on return, whether woken or
+  cancelled. An attempt that read nothing waits for cancellation alone.

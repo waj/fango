@@ -30,7 +30,12 @@ type tvarNode struct {
 // TVar is a transactional variable. Its identity distinguishes it.
 type TVar struct {
 	current atomic.Pointer[tvarNode]
+	mu      sync.Mutex // guards waiters
+	waiters map[*stmWaiter]struct{}
 }
+
+// stmWaiter is one blocked attempt, registered on every variable it read.
+type stmWaiter struct{ ready chan struct{} }
 
 type stmWrite struct {
 	tvar  *TVar
@@ -110,5 +115,61 @@ func (l *STMLog) Commit() bool {
 	}
 	stmClock.Store(version)
 	stmCommit.Unlock()
+	for v := range l.latest {
+		v.wake()
+	}
 	return true
+}
+
+// wake signals and removes every waiter registered on v.
+func (v *TVar) wake() {
+	v.mu.Lock()
+	for w := range v.waiters {
+		select {
+		case w.ready <- struct{}{}:
+		default:
+		}
+	}
+	v.waiters = nil
+	v.mu.Unlock()
+}
+
+// Await blocks a retried attempt until another commit publishes a variable
+// it read, answering true, or until scope is cancelled, answering false. An
+// attempt that read nothing waits for cancellation alone. The waiter is
+// withdrawn from every variable on return, whether woken or cancelled.
+func (l *STMLog) Await(scope *AsyncScope) bool {
+	if scope.Cancelled() {
+		return false
+	}
+	w := &stmWaiter{ready: make(chan struct{}, 1)}
+	for v := range l.reads {
+		v.mu.Lock()
+		if v.waiters == nil {
+			v.waiters = make(map[*stmWaiter]struct{})
+		}
+		v.waiters[w] = struct{}{}
+		v.mu.Unlock()
+	}
+	defer func() {
+		for v := range l.reads {
+			v.mu.Lock()
+			delete(v.waiters, w)
+			v.mu.Unlock()
+		}
+	}()
+	// A commit that published before the registration above woke nobody;
+	// its newer version is visible now. One that publishes later finds the
+	// waiter registered.
+	for v := range l.reads {
+		if v.current.Load().version > l.readVersion {
+			return true
+		}
+	}
+	select {
+	case <-w.ready:
+		return true
+	case <-scope.ctx.Done():
+		return false
+	}
 }

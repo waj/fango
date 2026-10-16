@@ -1,8 +1,10 @@
 package fangort
 
 import (
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 )
 
 // atomicallyGo runs body until it commits, as the STM handler does.
@@ -107,5 +109,94 @@ func TestSTMConcurrentTransfersPreserveTotal(t *testing.T) {
 	}
 	if total != 800 {
 		t.Fatalf("total %d, want 800", total)
+	}
+}
+
+func (v *TVar) waiterCount() int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return len(v.waiters)
+}
+
+func TestSTMAwaitWakesOnCommitToARead(t *testing.T) {
+	setup := BeginSTM()
+	read, unrelated := setup.New(0), setup.New(0)
+	scope := NewAsyncRoot(t.Context())
+	blocked := BeginSTM()
+	blocked.Read(read)
+	woke := make(chan bool)
+	go func() { woke <- blocked.Await(scope) }()
+	for read.waiterCount() == 0 {
+		runtime.Gosched()
+	}
+	other := BeginSTM()
+	other.Write(unrelated, 1)
+	other.Commit()
+	select {
+	case <-woke:
+		t.Fatal("woken by an unrelated commit")
+	case <-time.After(10 * time.Millisecond):
+	}
+	writer := BeginSTM()
+	writer.Write(read, 1)
+	writer.Commit()
+	if !<-woke {
+		t.Fatal("wait reported cancellation")
+	}
+	if n := read.waiterCount(); n != 0 {
+		t.Fatalf("%d waiters left", n)
+	}
+}
+
+// A commit landing between the attempt's read and its registration must
+// still wake it: the registration rechecks versions after registering.
+func TestSTMAwaitDoesNotLoseRacingCommit(t *testing.T) {
+	scope := NewAsyncRoot(t.Context())
+	for range 2000 {
+		v := BeginSTM().New(0)
+		blocked := BeginSTM()
+		blocked.Read(v)
+		done := make(chan bool)
+		go func() { done <- blocked.Await(scope) }()
+		writer := BeginSTM()
+		writer.Write(v, 1)
+		writer.Commit()
+		select {
+		case ok := <-done:
+			if !ok {
+				t.Fatal("wait reported cancellation")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("racing commit lost")
+		}
+	}
+}
+
+func TestSTMCancelledAwaitLeavesNoRegistration(t *testing.T) {
+	setup := BeginSTM()
+	a, b := setup.New(0), setup.New(0)
+	scope := NewAsyncRoot(t.Context())
+	blocked := BeginSTM()
+	blocked.Read(a)
+	blocked.Read(b)
+	done := make(chan bool)
+	go func() { done <- blocked.Await(scope) }()
+	for a.waiterCount() == 0 || b.waiterCount() == 0 {
+		runtime.Gosched()
+	}
+	scope.Cancel()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("cancelled wait reported a wake")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled wait did not return")
+	}
+	if a.waiterCount()+b.waiterCount() != 0 {
+		t.Fatal("cancelled waiter left a registration")
+	}
+	if BeginSTM().Await(scope) {
+		t.Fatal("wait in a cancelled scope reported a wake")
 	}
 }

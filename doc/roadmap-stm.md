@@ -598,6 +598,9 @@ module comments.
 
 ### STM2 Blocking retry
 
+DONE. See [`STM.retry`](../stdlib/STM.fango) and
+[waiting](design/stm.md#runtime).
+
 `retry`, `check`, and waiting on the read set.
 
 Acceptance: a consumer blocked on an empty variable wakes on the producer's
