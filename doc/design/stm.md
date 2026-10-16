@@ -4,8 +4,9 @@
 contract. Source and checks: [runtime](../../runtime/fangort/stm.go),
 [sidecar](../../stdlib/STM.native.go),
 [runtime tests](../../runtime/fangort/stm_test.go), and the
-[transaction](../../testdata/suite/STMTransactions.fango) and
-[retry](../../testdata/suite/STMRetry.fango) fixtures.
+[transaction](../../testdata/suite/STMTransactions.fango),
+[retry](../../testdata/suite/STMRetry.fango), and
+[alternatives](../../testdata/suite/STMAlternatives.fango) fixtures.
 
 ## Sealed effect
 
@@ -48,6 +49,24 @@ which needs no checkpoint, so a transaction that never retries runs to commit
 even during cancellation cleanup. Only the wait observes cancellation: when it
 reports cancellation, `atomically` calls `Async.checkpoint`, which stops the
 task.
+
+## Alternatives and failure
+
+`orElse` and `attempt` are ordinary Fango over two more private operations,
+`savepoint` and `rollback`. `orElse` takes a savepoint and handles its first
+branch with a forwarding handler: clauses run outside their own activation,
+so each forwards its operation to the enclosing `STM` handler, and only
+`abandon` is caught, rolling back to the savepoint and running the second
+branch. A `retry` in the second branch propagates out of that abort clause to
+the enclosing handler; a stale-read restart passes through as the private
+`Restart` effect. Each `orElse` adds one forwarding hop for operations in its
+first branch. `attempt` needs no handler of its own: it takes a savepoint,
+runs `Fail.attempt`, and rolls back on `Err`.
+
+A savepoint is the length of the log's append-only write list; rollback
+truncates it and rebuilds the index of each variable's newest write. Reads are
+never discarded, so they still validate the commit and widen a retry's wait
+to every branch that ran.
 
 ## Runtime
 

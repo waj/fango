@@ -1,0 +1,98 @@
+module STMAlternatives exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import Fail
+import IO
+import List
+import Result exposing (Result(..))
+import STM exposing (STM)
+import Test
+
+-- Nested alternatives roll back exactly the writes of the branch that
+-- retried.
+nested : () ->{IO} Outcome (List Int, List Int)
+nested() =
+    Async.runOutcome {
+        fresh = { _ -> STM.atomically { List.map { _ -> STM.new 0 } (List.range 1 5) } }
+        readAll = { vars -> STM.atomically { List.map STM.read vars } }
+        first = fresh ()
+        second = fresh ()
+        run = { vars outerRetries ->
+            case vars of
+                [a, b, c, d, e] ->
+                    STM.atomically {
+                        STM.write a 1
+                        STM.orElse
+                            {
+                                STM.write b 1
+                                STM.orElse { STM.write c 1; STM.retry () } { STM.write d 1 }
+                                STM.check (outerRetries == False)
+                            }
+                            { STM.write e 1 }
+                    }
+                _ -> ()
+        }
+        run first True
+        run second False
+        (readAll first, readAll second)
+    }
+
+-- A waiter whose both branches retried wakes on a write to either branch's
+-- reads.
+bothBranches : Bool ->{IO} Outcome String
+bothBranches wakeSecond =
+    Async.runOutcome {
+        left = STM.atomically { STM.new False }
+        right = STM.atomically { STM.new False }
+        waiter = Async.spawn {
+            STM.atomically {
+                STM.orElse
+                    { STM.check (STM.read left); "left" }
+                    { STM.check (STM.read right); "right" }
+            }
+        }
+        Async.sleep 1
+        STM.atomically { STM.write (if wakeSecond then right else left) True }
+        Async.await waiter
+    }
+
+-- A failed attempt discards its writes but keeps its reads: the retry that
+-- follows waits on the flag read inside it.
+attemptKeepsReads : () ->{IO} Outcome (Result String Int, Int, Int)
+attemptKeepsReads() =
+    Async.runOutcome {
+        counter = STM.atomically { STM.new 0 }
+        flag = STM.atomically { STM.new False }
+        undone = STM.atomically {
+            STM.attempt {
+                STM.write counter 99
+                Fail.fail "undo"
+            }
+        }
+        waiter = Async.spawn {
+            STM.atomically {
+                result = STM.attempt {
+                    STM.modify counter { n -> n + 1 }
+                    if STM.read flag then 7 else Fail.fail "off"
+                }
+                case result of
+                    Ok n -> n
+                    Err _ -> STM.retry ()
+            }
+        }
+        Async.sleep 1
+        STM.atomically { STM.write flag True }
+        woke = Async.await waiter
+        (undone, woke, STM.atomically { STM.read counter })
+    }
+
+tests : Test.Test IO.IO
+tests = Test.test "stm_alternatives" {
+    Expect.equal (Completed ([1, 0, 0, 0, 1], [1, 1, 0, 1, 0])) nested()
+    Expect.equal (Completed "left") (bothBranches False)
+    Expect.equal (Completed "right") (bothBranches True)
+    Expect.equal (Completed (Err "undo", 7, 1)) attemptKeepsReads()
+}
+
+main() = Test.run tests

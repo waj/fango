@@ -1,0 +1,11 @@
+import Async
+import Fail
+import STM
+
+main() =
+    Async.run {
+        v = STM.atomically { STM.new 1 }
+        STM.atomically {
+            if STM.read v > 0 then Fail.fail "positive" else ()
+        }
+    }

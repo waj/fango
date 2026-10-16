@@ -92,6 +92,19 @@ func (l *STMLog) New(value any) *TVar {
 	return v
 }
 
+// Savepoint marks the attempt's writes so far.
+func (l *STMLog) Savepoint() int64 { return int64(len(l.writes)) }
+
+// Rollback discards the writes made since point. Reads are kept: they still
+// decide whether the attempt commits and what a retry waits on.
+func (l *STMLog) Rollback(point int64) {
+	clear(l.latest)
+	l.writes = l.writes[:point]
+	for index, write := range l.writes {
+		l.latest[write.tvar] = index
+	}
+}
+
 // Commit publishes the attempt's writes, or reports a conflict when a variable
 // it read has been published since it began. An attempt that only read
 // commits at once: its reads already proved the snapshot consistent.

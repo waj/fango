@@ -610,6 +610,9 @@ transaction that never retries commits during cancellation cleanup.
 
 ### STM3 Alternatives and failure
 
+DONE. See [`STM.orElse`](../stdlib/STM.fango) and
+[alternatives and failure](design/stm.md#alternatives-and-failure).
+
 `orElse`, `attempt`, and log savepoints.
 
 Acceptance: nested `orElse` rolls back exactly its branch's writes; when both

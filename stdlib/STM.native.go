@@ -18,3 +18,5 @@ func StmCommit(log any) bool        { return log.(*fangort.STMLog).Commit() }
 func StmAwait(context, log any) bool {
 	return log.(*fangort.STMLog).Await(context.(*fangort.AsyncScope))
 }
+func StmSavepoint(log any) int64       { return log.(*fangort.STMLog).Savepoint() }
+func StmRollback(log any, point int64) { log.(*fangort.STMLog).Rollback(point) }

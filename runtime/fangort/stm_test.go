@@ -200,3 +200,27 @@ func TestSTMCancelledAwaitLeavesNoRegistration(t *testing.T) {
 		t.Fatal("wait in a cancelled scope reported a wake")
 	}
 }
+
+func TestSTMRollbackDiscardsWritesAndKeepsReads(t *testing.T) {
+	setup := BeginSTM()
+	a, b, c := setup.New(0), setup.New(0), setup.New(0)
+	log := BeginSTM()
+	log.Write(a, 1)
+	point := log.Savepoint()
+	log.Write(a, 2)
+	log.Write(b, 2)
+	log.Read(c)
+	log.Rollback(point)
+	if r := log.Read(a); r.Value != 1 {
+		t.Fatalf("rolled-back write still visible: %+v", r)
+	}
+	if r := log.Read(b); r.Value != 0 {
+		t.Fatalf("rolled-back variable read %+v", r)
+	}
+	writer := BeginSTM()
+	writer.Write(c, 5)
+	writer.Commit()
+	if log.Commit() {
+		t.Fatal("a read made before the rollback was not validated")
+	}
+}

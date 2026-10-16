@@ -221,6 +221,7 @@ import ResourceSafeResults
 import ReturnedEffectfulCallback
 import RowArgumentClosed
 import RowPolymorphicMap
+import STMAlternatives
 import STMRetry
 import STMTransactions
 import ScopeCallback
@@ -526,6 +527,7 @@ main() =
             , ReturnedEffectfulCallback.tests
             , RowArgumentClosed.tests
             , RowPolymorphicMap.tests
+            , STMAlternatives.tests
             , STMRetry.tests
             , STMTransactions.tests
             , ScopeCallback.tests

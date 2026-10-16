@@ -8,6 +8,8 @@
 -- therefore change together, and functions performing `STM` combine into
 -- larger transactions. `retry` abandons an attempt until a variable it read
 -- changes, so any condition over shared state becomes a blocking wait.
+-- `orElse` chooses between alternatives that may retry, and `attempt` undoes
+-- the writes of an action that fails.
 --
 -- A transaction may be run more than once: when another task commits to a
 -- variable it read, it is discarded and started again. Its row is closed, so
@@ -32,10 +34,12 @@
 --     }
 -- result == Completed (70, 30)
 -- ```
-module STM exposing (STM, Var, atomically, check, exchange, modify, new, read, retry, write)
+module STM exposing (STM, Var, atomically, attempt, check, exchange, modify, new, orElse, read, retry, write)
 
 import Async exposing (Async)
 import Basics exposing (..)
+import Fail exposing (Fail)
+import Result exposing (Result(..))
 import Runtime.Native
 
 -- A shared mutable variable holding an `a`. Its identity, not its value,
@@ -49,6 +53,8 @@ effect STM
     readVar : Var a -> a
     writeVar : Var a -> a -> ()
     newVar : a -> Var a
+    savepoint : () -> Int
+    rollback : Int -> ()
     abort abandon : () -> value
 
 -- Raised by a read that sees a variable published after the attempt began.
@@ -80,6 +86,10 @@ stmCommit : Log -> Bool
 stmCommit = native
 stmAwait : Runtime.Native.Any -> Log -> Bool
 stmAwait = native
+stmSavepoint : Log -> Int
+stmSavepoint = native
+stmRollback : Log -> Int -> ()
+stmRollback = native
 
 -- Runs `transaction` until it commits and answers its value.
 --
@@ -126,6 +136,8 @@ runAttempt log transaction =
                 if stmFresh result then resume (stmValue result) else restart ()
             writeVar var value -> resume (stmWrite log var value)
             newVar value -> resume (stmNew log value)
+            savepoint () -> resume (stmSavepoint log)
+            rollback point -> resume (stmRollback log point)
             abandon () -> Blocked
             return value -> Finished value
     on
@@ -249,3 +261,73 @@ retry () = abandon ()
 -- ```
 check : Bool ->{STM} ()
 check condition = if condition then () else abandon ()
+
+-- Runs `first`, or `second` if `first` retries. The writes `first` made are
+-- discarded before `second` runs, but its reads are kept: if both retry, the
+-- transaction waits until a variable either of them read changes. A conflict
+-- in `first` restarts the whole transaction rather than choosing `second`.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+--
+-- result = Async.runOutcome {
+--     empty = STM.atomically { STM.new 0 }
+--     full = STM.atomically { STM.new 5 }
+--     takeFrom = { var ->
+--         n = STM.read var
+--         STM.write var 0
+--         STM.check (n > 0)
+--         n
+--     }
+--     STM.atomically {
+--         taken = STM.orElse { takeFrom empty } { takeFrom full }
+--         (taken, STM.read empty, STM.read full)
+--     }
+--     }
+-- result == Completed (5, 0, 0)
+-- ```
+orElse : (() ->{STM} a) -> (() ->{STM} a) ->{STM} a
+orElse first second =
+    point = savepoint ()
+    handle first() on
+        readVar var -> resume (readVar var)
+        writeVar var value -> resume (writeVar var value)
+        newVar value -> resume (newVar value)
+        savepoint () -> resume (savepoint ())
+        rollback p -> resume (rollback p)
+        abandon () ->
+            rollback point
+            second()
+
+-- Runs `action`, answering `Ok` with its value, or `Err` with its failure
+-- after discarding every write it made. Its reads are kept, so they still
+-- decide whether the transaction commits. The transaction itself commits
+-- either way; `Fail.fromResult` raises the error after `atomically`.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Fail
+-- import Result exposing (Result(..))
+-- import STM
+--
+-- result = Async.runOutcome {
+--     account = STM.atomically { STM.new 10 }
+--     withdrawn = STM.atomically {
+--         STM.attempt {
+--             STM.modify account { n -> n - 30 }
+--             if STM.read account < 0 then Fail.fail "overdrawn" else ()
+--         }
+--     }
+--     (withdrawn, STM.atomically { STM.read account })
+--     }
+-- result == Completed (Err "overdrawn", 10)
+-- ```
+attempt : (() ->{STM, Fail error} a) ->{STM} Result error a
+attempt action =
+    point = savepoint ()
+    case Fail.attempt action of
+        Err error ->
+            rollback point
+            Err error
+        success -> success
