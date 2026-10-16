@@ -224,3 +224,35 @@ func TestSTMRollbackDiscardsWritesAndKeepsReads(t *testing.T) {
 		t.Fatal("a read made before the rollback was not validated")
 	}
 }
+
+// Commits whose read and write sets are disjoint: one variable per goroutine.
+// With a global commit mutex these serialize; scaling with -cpu shows the
+// contention STM7 measures.
+func BenchmarkSTMDisjointCommits(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		v := BeginSTM().New(int64(0))
+		for pb.Next() {
+			log := BeginSTM()
+			r := log.Read(v)
+			log.Write(v, r.Value.(int64)+1)
+			if !log.Commit() {
+				b.Fatal("disjoint commit conflicted")
+			}
+		}
+	})
+}
+
+// The same attempts without writes, which commit without the lock: the
+// control for BenchmarkSTMDisjointCommits.
+func BenchmarkSTMReadOnlyCommits(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		v := BeginSTM().New(int64(0))
+		for pb.Next() {
+			log := BeginSTM()
+			log.Read(v)
+			if !log.Commit() {
+				b.Fatal("read-only commit conflicted")
+			}
+		}
+	})
+}

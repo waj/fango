@@ -101,30 +101,45 @@ code rather than library API.
 
 ## Runtime
 
-The runtime follows TL2 with a global version clock. Every published value is
-an immutable node carrying the version of the commit that wrote it.
+The runtime follows TL2 with a global version clock and per-variable locks.
+Every published value is an immutable node carrying the version of the commit
+that wrote it, and every variable has a creation-order number and a lock held
+only by a commit publishing it.
 
 - **Begin** records the clock as the attempt's read version.
-- **Read** answers the attempt's newest buffered write, if any. Otherwise it
-  loads the variable's node; a version above the read version is a conflict,
-  which keeps every attempt on one consistent snapshot (opacity).
+- **Read** answers the attempt's newest buffered write, if any. Otherwise a
+  locked variable is a conflict; an unlocked one answers its node, unless the
+  node's version is above the read version, which is also a conflict. Every
+  attempt therefore reads one consistent snapshot (opacity).
 - **Write** buffers the value. **New** publishes the initial value at version
   0 at once, which is safe because nothing else reaches the variable before
   the attempt commits; a discarded attempt leaves it unreachable.
 - **Commit** of an attempt without writes succeeds at once: its reads already
-  proved the snapshot consistent. A writing commit takes the global commit
-  mutex, checks that no variable it read has a version above its read
-  version, publishes each variable's final write at the next version, and
-  only then advances the clock. An attempt that begins later sees every new
-  node; one that began earlier sees old nodes or rejects new ones as stale.
+  proved the snapshot consistent. A writing commit locks the variables it
+  writes in creation order, so two commits never wait on each other in a
+  cycle, and takes the next clock version only after locking. Unless that
+  version directly follows its read version, it then checks that no variable
+  it read is locked by another commit or has a version above its read
+  version. It publishes each variable's final write at the new version and
+  unlocks. An attempt that begins after the version was taken finds every
+  written variable locked or already published; one that began earlier
+  rejects the new nodes as stale. Commits with disjoint write sets proceed in
+  parallel; the clock increment is the one shared step.
 - **Wait.** A blocked attempt registers one waiter, with a one-slot channel,
   on every variable it read, then checks those variables again: a version
   above its read version means a commit raced the registration, and it
   returns at once. Otherwise it selects on the channel and the scope's
-  cancellation, as `AsyncSleep` does. A writing commit, after releasing the
-  commit mutex, signals and removes the waiters of each variable it wrote
+  cancellation, as `AsyncSleep` does. A writing commit, after unlocking,
+  signals and removes the waiters of each variable it wrote
   under that variable's own mutex. The registration and the commit's waiter
   scan are ordered by that mutex, and publication precedes the scan, so a
   waiter either is found by the scan or sees the newer version on its check.
   A waiter withdraws from every variable on return, whether woken or
   cancelled. An attempt that read nothing waits for cancellation alone.
+
+The [runtime benchmarks](../../runtime/fangort/stm_test.go) measure commit
+scaling. With one global commit mutex, attempts each writing their own
+variable committed at a flat 215–240 ns per commit from one to eight CPUs,
+while read-only attempts scaled from 14 to 1.9 ns. Per-variable locks
+brought the writing commits to 165 ns on one CPU and about 105–120 ns on four
+and eight; past that the shared clock dominates.

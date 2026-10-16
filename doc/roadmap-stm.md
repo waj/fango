@@ -651,6 +651,8 @@ requirements](roadmap-examples.md#delivery-requirements) and may promote
 
 ### STM7 Commit scalability
 
+DONE. See the [STM runtime](design/stm.md#runtime).
+
 Replace the global commit mutex with per-variable versioned locks acquired in
 a fixed order, so commits with disjoint write sets proceed in parallel. Gated
 on a measurement showing commit contention.
