@@ -1,9 +1,9 @@
 # Software transactional memory
 
 [Design index](../design.md). [STM](../../stdlib/STM.fango) owns the public
-contract. Source and checks: [runtime](../../runtime/fangort/stm.go),
-[sidecar](../../stdlib/STM.native.go),
-[runtime tests](../../runtime/fangort/stm_test.go), and the
+contract. Source and checks: the [sidecar](../../stdlib/STM.native.go), which
+holds the whole runtime, its [unit tests](../../stdlib/STM_native_test.go),
+and the
 [transaction](../../testdata/suite/STMTransactions.fango),
 [retry](../../testdata/suite/STMRetry.fango),
 [alternatives](../../testdata/suite/STMAlternatives.fango),
@@ -38,6 +38,8 @@ uses Exit transport. Nothing is locked while the transaction body runs, so an
 attempt abandoned by an outer abort or cancellation needs no cleanup.
 
 The log natives are private and typed pure, reached only through the handler.
+Their Go implementation lives entirely in the module's sidecar; it uses
+`fangort` only for the Async scope it waits on.
 Values cross under the
 [representation-blind storage contract](../reference/native.md#indexed-native-storage):
 the runtime stores and returns payload tokens without inspecting them. Writes
@@ -143,11 +145,11 @@ Fixtures assert final state and invariants, never interleavings or retry
 counts, which depend on scheduling. Waiting fixtures synchronize through
 variables, such as a flag a task sets before it blocks, and never rely on
 timing for their outcome.
-Runtime unit tests cover commit validation, publication order, rollback,
+Sidecar unit tests cover commit validation, publication order, rollback,
 and waiter registration directly, under the race detector; one counts the
 registrations a cancelled waiter leaves.
 
-The [runtime benchmarks](../../runtime/fangort/stm_test.go) measure commit
+The [sidecar benchmarks](../../stdlib/STM_native_test.go) measure commit
 scaling. With one global commit mutex, attempts each writing their own
 variable committed at a flat 215–240 ns per commit from one to eight CPUs,
 while read-only attempts scaled from 14 to 1.9 ns. Per-variable locks
