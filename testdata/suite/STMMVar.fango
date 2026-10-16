@@ -1,0 +1,52 @@
+module STMMVar exposing (tests)
+
+import Async exposing (Outcome(..))
+import Expect
+import IO
+import List
+import Runtime.Scope
+import STM exposing (STM)
+import STM.MVar as MVar exposing (MVar)
+import Test
+
+-- Each worker delivers its result once through its own slot.
+results : () ->{IO} Outcome (List Int)
+results() =
+    Async.runOutcome {
+        slots = STM.atomically { List.map { _ -> MVar.empty () } (List.range 1 4) }
+        List.each { slot -> ignore (Async.spawn { STM.atomically { MVar.put slot 10 } }) } slots
+        List.map { slot -> STM.atomically { MVar.take slot } } slots
+    }
+
+withLock : MVar () -> (() ->{Async.Async} a) ->{Async.Async} a
+withLock lock action =
+    STM.atomically { MVar.take lock }
+    Runtime.Scope.finally action { STM.atomically { MVar.put lock () } }
+
+-- The read and the write are separate transactions, with a yield between
+-- them; only the mutex keeps concurrent increments from being lost.
+increment : MVar () -> STM.Var Int ->{Async.Async} ()
+increment lock counter =
+    withLock lock {
+        current = STM.atomically { STM.read counter }
+        Async.sleep 0
+        STM.atomically { STM.write counter (current + 1) }
+    }
+
+mutex : () ->{IO} Outcome (Int, Bool)
+mutex() =
+    Async.runOutcome {
+        lock = STM.atomically { MVar.new () }
+        counter = STM.atomically { STM.new 0 }
+        workers = List.map { _ -> Async.spawn { List.each { _ -> increment lock counter } (List.range 1 50) } } (List.range 1 8)
+        _ = Async.awaitAll workers
+        STM.atomically { (STM.read counter, MVar.isEmpty lock) }
+    }
+
+tests : Test.Test IO.IO
+tests = Test.test "stm_mvar" {
+    Expect.equal (Completed [10, 10, 10, 10]) results()
+    Expect.equal (Completed (400, False)) mutex()
+}
+
+main() = Test.run tests

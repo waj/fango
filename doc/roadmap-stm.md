@@ -621,6 +621,8 @@ undoes writes and keeps reads; a `Fail` without `attempt` is a type error.
 
 ### STM4 MVar
 
+DONE. See the [MVar module](../stdlib/STM/MVar.fango).
+
 The `STM.MVar` module.
 
 Acceptance: a one-shot result handoff and an `MVar ()` mutex protecting a

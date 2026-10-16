@@ -222,6 +222,7 @@ import ReturnedEffectfulCallback
 import RowArgumentClosed
 import RowPolymorphicMap
 import STMAlternatives
+import STMMVar
 import STMRetry
 import STMTransactions
 import ScopeCallback
@@ -528,6 +529,7 @@ main() =
             , RowArgumentClosed.tests
             , RowPolymorphicMap.tests
             , STMAlternatives.tests
+            , STMMVar.tests
             , STMRetry.tests
             , STMTransactions.tests
             , ScopeCallback.tests

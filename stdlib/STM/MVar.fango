@@ -1,0 +1,190 @@
+{-# no-prelude #-}
+-- A transactional variable that is either full or empty, after Haskell's
+-- `TMVar`.
+--
+-- Taking from an empty `MVar` or putting into a full one retries, so these
+-- operations block inside `STM.atomically` until another task's commit makes
+-- them possible, and they combine with other transactions and `STM.orElse`.
+-- An `MVar a` serves as a one-shot result slot, a handoff between tasks, and,
+-- as `MVar ()`, a mutex.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- result = Async.runOutcome {
+--     slot = STM.atomically { MVar.empty () }
+--     worker = Async.spawn { STM.atomically { MVar.put slot (6 * 7) } }
+--     STM.atomically { MVar.take slot }
+--     }
+-- result == Completed 42
+-- ```
+module STM.MVar exposing (MVar, empty, isEmpty, new, put, read, swap, take, tryPut, tryRead, tryTake)
+
+import Basics exposing (..)
+import Maybe exposing (Maybe(..))
+import STM exposing (STM)
+
+-- A variable holding at most one `a`. Like `STM.Var`, it may be shared by
+-- any number of tasks and has no equality or `Show`.
+type MVar a = MVar (STM.Var (Maybe a))
+
+-- A full variable holding `value`.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- Async.runOutcome { STM.atomically { MVar.read (MVar.new "ready") } } == Completed "ready"
+-- ```
+new : a ->{STM} MVar a
+new value = MVar (STM.new (Just value))
+
+-- An empty variable.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- Async.runOutcome { STM.atomically { MVar.isEmpty (MVar.empty ()) } } == Completed True
+-- ```
+empty : () ->{STM} MVar a
+empty () = MVar (STM.new Nothing)
+
+-- Takes the value, leaving the variable empty; retries while it is empty.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- result = Async.runOutcome { STM.atomically { box = MVar.new 1; value = MVar.take box; (value, MVar.isEmpty box) } }
+-- result == Completed (1, True)
+-- ```
+take : MVar a ->{STM} a
+take (MVar var) =
+    case STM.read var of
+        Just value ->
+            STM.write var Nothing
+            value
+        Nothing -> STM.retry ()
+
+-- Fills the variable with `value`; retries while it is full.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- result = Async.runOutcome { STM.atomically { box = MVar.empty (); MVar.put box "in"; MVar.read box } }
+-- result == Completed "in"
+-- ```
+put : MVar a -> a ->{STM} ()
+put (MVar var) value =
+    case STM.read var of
+        Nothing -> STM.write var (Just value)
+        Just _ -> STM.retry ()
+
+-- The value, leaving the variable full; retries while it is empty.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- result = Async.runOutcome { STM.atomically { box = MVar.new 3; first = MVar.read box; (first, MVar.take box) } }
+-- result == Completed (3, 3)
+-- ```
+read : MVar a ->{STM} a
+read (MVar var) =
+    case STM.read var of
+        Just value -> value
+        Nothing -> STM.retry ()
+
+-- Replaces the value with `next` and answers the one it replaced; retries
+-- while the variable is empty.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- result = Async.runOutcome { STM.atomically { box = MVar.new "old"; previous = MVar.swap box "new"; (previous, MVar.read box) } }
+-- result == Completed ("old", "new")
+-- ```
+swap : MVar a -> a ->{STM} a
+swap (MVar var) next =
+    case STM.read var of
+        Just value ->
+            STM.write var (Just next)
+            value
+        Nothing -> STM.retry ()
+
+-- Takes the value if there is one, leaving the variable empty, without
+-- retrying.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Maybe exposing (Maybe(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- result = Async.runOutcome { STM.atomically { box = MVar.new 5; first = MVar.tryTake box; (first, MVar.tryTake box) } }
+-- result == Completed (Just 5, Nothing)
+-- ```
+tryTake : MVar a ->{STM} Maybe a
+tryTake (MVar var) =
+    current = STM.read var
+    STM.write var Nothing
+    current
+
+-- Fills the variable with `value` if it is empty, answering whether it did,
+-- without retrying.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- result = Async.runOutcome { STM.atomically { box = MVar.empty (); first = MVar.tryPut box 1; second = MVar.tryPut box 2; (first, second, MVar.read box) } }
+-- result == Completed (True, False, 1)
+-- ```
+tryPut : MVar a -> a ->{STM} Bool
+tryPut (MVar var) value =
+    case STM.read var of
+        Nothing ->
+            STM.write var (Just value)
+            True
+        Just _ -> False
+
+-- The value if there is one, leaving the variable as it is, without
+-- retrying.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import Maybe exposing (Maybe(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- Async.runOutcome { STM.atomically { MVar.tryRead (MVar.new 'x') } } == Completed (Just 'x')
+-- ```
+tryRead : MVar a ->{STM} Maybe a
+tryRead (MVar var) = STM.read var
+
+-- Whether the variable is empty.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+-- import STM.MVar as MVar
+--
+-- Async.runOutcome { STM.atomically { MVar.isEmpty (MVar.new 0) } } == Completed False
+-- ```
+isEmpty : MVar a ->{STM} Bool
+isEmpty (MVar var) =
+    case STM.read var of
+        Nothing -> True
+        Just _ -> False

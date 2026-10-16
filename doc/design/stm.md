@@ -5,8 +5,9 @@ contract. Source and checks: [runtime](../../runtime/fangort/stm.go),
 [sidecar](../../stdlib/STM.native.go),
 [runtime tests](../../runtime/fangort/stm_test.go), and the
 [transaction](../../testdata/suite/STMTransactions.fango),
-[retry](../../testdata/suite/STMRetry.fango), and
-[alternatives](../../testdata/suite/STMAlternatives.fango) fixtures.
+[retry](../../testdata/suite/STMRetry.fango),
+[alternatives](../../testdata/suite/STMAlternatives.fango), and
+[MVar](../../testdata/suite/STMMVar.fango) fixtures.
 
 ## Sealed effect
 
@@ -67,6 +68,13 @@ A savepoint is the length of the log's append-only write list; rollback
 truncates it and rebuilds the index of each variable's newest write. Reads are
 never discarded, so they still validate the commit and widen a retry's wait
 to every branch that ran.
+
+## Derived structures
+
+[`STM.MVar`](../../stdlib/STM/MVar.fango) is ordinary Fango over the public
+`STM` API, a `Var (Maybe a)` whose blocking operations `retry`; it has no
+natives and no access to the sealed operations, so it is also an example of
+what users can build.
 
 ## Runtime
 
