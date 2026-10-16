@@ -109,7 +109,7 @@ fixtureBody() = Fail.attempt {
     check "frozen today elsewhere" (Clock.runFixed late { (Clock.todayIn tokyo, Clock.nowIn tokyo) } == (Date.make 2024 11 3, DT.inZone tokyo late))
     check "nested clocks" (Clock.runFixed late { inner = Clock.runFixed before { Clock.now() }; (inner, Clock.now()) } == (before, late))
     check "with zone" (Clock.runFixed late { Clock.withZone tokyo { (Clock.now() == late, Zone.identifier (DT.zone Clock.now()), Clock.today()) } } == (True, "Asia/Tokyo", Date.make 2024 11 3))
-    check "with zone restores" (Clock.runFixed late { Clock.withZone tokyo { () }; Zone.identifier (DT.zone Clock.now()) } == "America/New_York")
+    check "with zone restores" (Clock.runFixed late { Clock.withZone tokyo {}; Zone.identifier (DT.zone Clock.now()) } == "America/New_York")
     inherited = inheritedClock late
     check "task inherits clock" (inherited == Completed late)
     system = Clock.runSystemIn Zone.utc { Clock.now() }

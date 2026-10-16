@@ -46,7 +46,7 @@ report : (() ->{Exception ex | e} ()) -> (() ->{e} ()) ->{IO, Exception ex | e} 
 report risky plain =
     plain()
     risky()
-    Random.runSystem { () }
+    Random.runSystem {}
 
 recordText : String ->{State.State (List String)} ()
 recordText value = State.put [value | State.get()]

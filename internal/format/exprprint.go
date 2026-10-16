@@ -98,6 +98,9 @@ func exprInline(e ast.Expr) (string, bool) {
 		f, ok3 := exprInline(e.Else)
 		return "if " + c + " then " + t + " else " + f, ok1 && ok2 && ok3
 	case *ast.Lambda:
+		if isEmptyLambda(e) {
+			return "{}", true
+		}
 		body, ok2 := exprInline(e.Body)
 		if len(e.Params) == 1 {
 			if _, unit := e.Params[0].(*ast.PUnit); unit {

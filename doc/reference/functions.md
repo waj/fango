@@ -44,8 +44,10 @@ calls. An indented lambda body may contain bindings and Unit statements. A
 complete field list such as `{ x = 1 }` is a record; a sibling statement after
 a binding, as in `{ x = 1; x }`, makes it a Unit lambda.
 `{ expression }` is a function taking Unit; it is equivalent to
-`{ () -> expression }`. The body must end in a result expression, so `{}` is
-invalid. A lambda with explicit parameters needs at least one pattern.
+`{ () -> expression }`. Empty braces `{}` are the Unit callback that does
+nothing, `{ () -> () }`; a record type needs at least one field, so they are
+never a record. Otherwise the body must end in a result expression. A lambda
+with explicit parameters needs at least one pattern.
 
 `value |> function` and `function <| value` are ordinary strict calls to
 operators declared in `Basics` and exposed by `Prelude`. They perform the

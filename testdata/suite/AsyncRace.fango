@@ -20,7 +20,7 @@ type Observation
 
 record : Observation ->{IO, State.State (List Observation)} ()
 record value =
-    Random.runSystem { () }
+    Random.runSystem {}
     State.put [value | State.get()]
 
 recordRaceOutcome : Async.Outcome (Result String Int) ->{IO, State.State (List Observation)} ()

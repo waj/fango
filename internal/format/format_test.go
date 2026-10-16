@@ -106,6 +106,8 @@ func TestLambdaInlineBodyKeepsClosingBraceInline(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
 		{"callback = { x -> foo\n}\n", "callback = { x -> foo }\n"},
 		{"callback = { foo\n}\n", "callback = { foo }\n"},
+		{"callback = { () }\n", "callback = {}\n"},
+		{"callback = {\n}\n", "callback = {}\n"},
 		{"callback = { x ->\n    foo\n}\n", "callback = { x ->\n    foo\n}\n"},
 	} {
 		out, errs := Source(source.NewFile("lambda.fango", []byte(tc.input)))

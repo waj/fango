@@ -19,7 +19,7 @@ type Observation = Trace String | RootResult (Result String ()) deriving (Eq, Sh
 
 record : Observation ->{IO, State.State (List Observation)} ()
 record value =
-    Random.runSystem { () }
+    Random.runSystem {}
     State.put [value | State.get()]
 
 recordTrace : String ->{IO, State.State (List Observation)} ()

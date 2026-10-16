@@ -144,7 +144,7 @@ todo name = Todo name
 --         Test.report event -> resume () with [event | events]
 --         return value -> (value, List.reverse events)
 --
--- collected = collect { Test.execute (Test.test "one" { () }) }
+-- collected = collect { Test.execute (Test.test "one" {}) }
 -- summary = Tuple.first collected
 -- events = Tuple.second collected
 --

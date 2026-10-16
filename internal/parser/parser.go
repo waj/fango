@@ -2623,10 +2623,11 @@ func (p *parser) parseAtom() ast.Expr {
 			return &ast.RecordLit{NameSpan: lb.Span, Fields: fields, Sp: lb.Span.Merge(end)}
 		}
 		if p.at(p.pos+1).Kind == token.RBRACE {
-			// Both record literals and lambdas need contents. Keep the
-			// established empty-record diagnostic for this spelling.
-			p.errorAt(t.Span.Merge(p.at(p.pos+1).Span), "SYNTAX PROBLEM", "A record literal needs at least one field.")
-			return nil
+			// A record type needs at least one field, so `{}` can only be
+			// the Unit callback that does nothing: `{ () -> () }`.
+			lb := p.next()
+			sp := lb.Span.Merge(p.next().Span)
+			return &ast.Lambda{Params: []ast.Pattern{&ast.PUnit{Sp: sp}}, Body: &ast.UnitLit{Sp: sp}, Sp: sp}
 		}
 		if p.braceHasUpdatePipe() {
 			lb := p.next()

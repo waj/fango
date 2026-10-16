@@ -111,7 +111,7 @@ collecting action =
                 built.write (Builder.append text built.read())
                 Ok ()
               }
-            , flush = { () }
+            , flush = {}
             }
         ))
         (result, Builder.toString built.read())

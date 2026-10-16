@@ -63,4 +63,4 @@ bracket = native
 -- log.state == ["cleanup", "body"]
 -- ```
 finally : (() ->{e} result) -> (() ->{e} ()) ->{e} result
-finally action cleanup = bracket { () } { cleanup() } { action() }
+finally action cleanup = bracket {} { cleanup() } { action() }

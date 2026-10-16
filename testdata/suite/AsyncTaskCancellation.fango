@@ -21,7 +21,7 @@ type Observation = TaskOutcome (Async.Outcome Int) deriving (Eq, Show)
 
 record : Observation ->{IO, State.State (List Observation)} ()
 record value =
-    Random.runSystem { () }
+    Random.runSystem {}
     State.put [value | State.get()]
 
 recordTaskOutcome : Async.Outcome Int ->{IO, State.State (List Observation)} ()

@@ -507,7 +507,22 @@ func (p *printer) renderLambda(e *ast.Lambda, ind int) bool {
 	return p.renderLambdaAt(e, ind, p.lineIndent(ind))
 }
 
+// isEmptyLambda recognizes the Unit callback whose body is `()`, which
+// prints as `{}`.
+func isEmptyLambda(e *ast.Lambda) bool {
+	if len(e.Params) != 1 {
+		return false
+	}
+	_, unit := e.Params[0].(*ast.PUnit)
+	_, empty := e.Body.(*ast.UnitLit)
+	return unit && empty
+}
+
 func (p *printer) renderLambdaAt(e *ast.Lambda, ind, closeIndent int) bool {
+	if isEmptyLambda(e) {
+		p.emit("{}")
+		return true
+	}
 	p.emit("{")
 	unit := false
 	if len(e.Params) == 1 {

@@ -1,0 +1,8 @@
+run : (() -> ()) -> ()
+run f = f ()
+
+main() =
+    run {}
+    noop = {}
+    noop ()
+    print "done"

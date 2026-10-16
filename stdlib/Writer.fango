@@ -70,7 +70,7 @@ collecting action =
     Runtime.Local.run [] { parts ->
         result = action
             { emit = { chunk -> parts.write [chunk | parts.read()] }
-            , flush = { () }
+            , flush = {}
             }
         (result, Bytes.concat (List.reverse parts.read()))
     }

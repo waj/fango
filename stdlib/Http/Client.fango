@@ -674,7 +674,7 @@ exchange config outgoing target crossOrigin hops fresh action =
         written = attempt {
             output = Writer
                 { emit = { bytes -> fromResult (transmit connection bytes config.writeTimeoutMs Net.uncancellable) }
-                , flush = { () }
+                , flush = {}
                 }
             Wire.writeCheckedMessage { error -> failWith (Protocol error) } output (outgoing.method ++ " " ++ Url.requestTarget target ++ " HTTP/1.1")
                 wireHeaders outgoing.body framed True

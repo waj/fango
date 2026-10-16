@@ -15,7 +15,7 @@ effect Release
 
 fixtureBody : () -> String
 fixtureBody() =
-    primary = Runtime.Scope.bracket { _ -> Port { emit = { _ -> Random.runSystem { () } } } } { _ -> () } { port ->
+    primary = Runtime.Scope.bracket { _ -> Port { emit = { _ -> Random.runSystem {} } } } { _ -> () } { port ->
         report = handle Fail.attemptReport { _ -> Runtime.Scope.finally { _ -> Fail.fail "body" } { _ -> release port.emit } } on
             release _ -> Ok ()
         case report of

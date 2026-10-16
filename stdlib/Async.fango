@@ -166,7 +166,7 @@ finish owner outcome =
 
 -- Cleanup cancels and drains even when an outer abort leaves the body.
 runIn owner body =
-    Runtime.Scope.bracket { () } { finishScope owner 2 } {
+    Runtime.Scope.bracket {} { finishScope owner 2 } {
         outcome = capture owner body
         finish owner outcome
     }

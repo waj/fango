@@ -64,7 +64,7 @@ func TestParseExprInput(t *testing.T) {
 }
 
 func TestBracedLambdaNeedsBody(t *testing.T) {
-	for _, src := range []string{"apply { x -> }", "apply { }", "[apply { x -> }, 2]"} {
+	for _, src := range []string{"apply { x -> }", "[apply { x -> }, 2]"} {
 		f := source.NewFile("<test>", []byte(src))
 		toks, _ := lexer.Lex(f)
 		_, errs := ParseExprInput(toks, f)
@@ -338,6 +338,9 @@ func TestInferredRecordVersusUpdate(t *testing.T) {
 		// A capitalized name immediately before `{` always names the record.
 		{"Wrap { x = 1 }", "(record Wrap (x (int 1)))"},
 		{"{ foo }", "(lambda (()) (var foo))"},
+		{"{}", "(lambda (()) (unit))"},
+		{"{ }", "(lambda (()) (unit))"},
+		{"apply {}", "(app (var apply) (lambda (()) (unit)))"},
 		{"{ { x = 1 } }", "(lambda (()) (record-inferred (x (int 1))))"},
 		{"{ a b c -> foo a b c }", "(lambda (a b c) (app (app (app (var foo) (var a)) (var b)) (var c)))"},
 		{"{ x = 1; x }", "(lambda (()) (block (bind x (int 1)) (var x)))"},
@@ -413,15 +416,5 @@ func TestBracedLambdaEndsBeforeFollowingOperator(t *testing.T) {
 				t.Fatalf("%s: wanted lambda argument, got %s", tc.src, ast.DumpExpr(e))
 			}
 		}
-	}
-}
-
-// `{}` can never be a literal, because a record type needs at least one field.
-func TestEmptyBracesRejected(t *testing.T) {
-	f := source.NewFile("<test>", []byte("{}"))
-	toks, _ := lexer.Lex(f)
-	_, errs := ParseExprInput(toks, f)
-	if len(errs) == 0 || !strings.Contains(errs[0].Body, "at least one field") {
-		t.Errorf("expected an empty-record error, got %v", errs)
 	}
 }
