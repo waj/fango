@@ -114,17 +114,27 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 			out.AddUses(types.Transport(mode), c.Uses(types.Transport(mode)))
 		}
 	}
-	var visit func(Expr)
-	visit = func(e Expr) {
+	// context maps each worker transport to the control context an
+	// expression is emitted in. Code generation evaluates an abort handler's
+	// subject in Exit and a cleanup scope's children in the scope's own
+	// transport, so uses there resolve against that context instead.
+	var visit func(Expr, [2]types.Transport)
+	visit = func(e Expr, context [2]types.Transport) {
 		InspectPruned(e, func(e Expr) bool {
 			switch e := e.(type) {
 			case *Let:
 				if ref, ok := e.Rhs.(*VarRef); ok && ref.Local && ref.Name == name && !e.Rec {
 					c := callbackUses(e.Body, e.Name, arity, defs)
-					add(c)
-					visit(e.Body)
+					add(c.inContext(context))
+					visit(e.Body, context)
 					return false
 				}
+			case *Bracket:
+				inner := [2]types.Transport{e.Control.Resolve(context[0]), e.Control.Resolve(context[1])}
+				visit(e.Acquire, inner)
+				visit(e.Release, inner)
+				visit(e.Body, inner)
+				return false
 			case *Handle:
 				// Clauses become operation functions, potentially invoked in
 				// another transport context or task. They are escaping uses.
@@ -137,9 +147,13 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 					escapes = true
 				}
 				if e.State != nil {
-					visit(e.State.Initial)
+					visit(e.State.Initial, context)
 				}
-				visit(e.Body)
+				if e.HandlesAbort() {
+					visit(e.Body, [2]types.Transport{types.Exit, types.Exit})
+				} else {
+					visit(e.Body, context)
+				}
 				return false
 			case *Lambda:
 				if Mentions(e.Body, name) {
@@ -160,11 +174,11 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 						last := stages[len(stages)-1]
 						c := CallbackABI{Arity: len(stages)}
 						for mode := range 2 {
-							c.AddUses(types.Transport(mode), 1<<last.Control.Resolve(types.Transport(mode)))
+							c.AddUses(types.Transport(mode), 1<<last.Control.Resolve(context[mode]))
 						}
 						add(c)
 						for _, stage := range stages {
-							visit(stage.Args[0])
+							visit(stage.Args[0], context)
 						}
 						return false
 					}
@@ -175,7 +189,7 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 					for j, arg := range e.Args {
 						v, ok := arg.(*VarRef)
 						if !ok || !v.Local || v.Name != name {
-							visit(arg)
+							visit(arg, context)
 							continue
 						}
 						if target == nil || !target.ABI.Valid || j >= len(target.ABI.Callbacks) {
@@ -185,7 +199,7 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 						want := target.ABI.Callbacks[j]
 						c := CallbackABI{Arity: want.Arity}
 						for mode := range 2 {
-							c.AddUses(types.Transport(mode), want.Uses(e.Control.Resolve(types.Transport(mode))))
+							c.AddUses(types.Transport(mode), want.Uses(e.Control.Resolve(context[mode])))
 						}
 						add(c)
 					}
@@ -195,7 +209,7 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 			return true
 		})
 	}
-	visit(body)
+	visit(body, [2]types.Transport{types.Direct, types.Exit})
 	if escapes || out.DirectUses == 3 || out.ExitUses == 3 || out.DirectUses|out.ExitUses == 0 {
 		return CallbackABI{}
 	}
@@ -206,4 +220,14 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 // binding. It is not serialized: only the enclosing module can use it.
 func LocalCallbackABI(body Expr, name string, t types.Type, defs map[string]*Def) CallbackABI {
 	return callbackUses(body, name, callbackArity(t), defs)
+}
+
+// inContext reads uses summarized for worker transports as uses emitted in
+// the given control context.
+func (c CallbackABI) inContext(context [2]types.Transport) CallbackABI {
+	out := CallbackABI{Arity: c.Arity}
+	for mode := range 2 {
+		out.AddUses(types.Transport(mode), c.Uses(context[mode]))
+	}
+	return out
 }

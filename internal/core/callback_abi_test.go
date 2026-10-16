@@ -91,3 +91,22 @@ func TestCallbackAliasesRetainAllUses(t *testing.T) {
 		}
 	}
 }
+
+// Code generation emits an abort handler's subject in Exit, so a callback
+// invoked there selects Exit even from a Direct worker.
+func TestCallbackContractsResolveAbortHandlerSubjectsInExit(t *testing.T) {
+	supply := &types.Supply{}
+	b := types.NewBuiltins(supply)
+	poly := types.Control{Polymorphic: true}
+	callback := &types.TFun{Arg: b.Int, Ret: b.Int, Control: poly}
+	call := &App{CalleeKind: Value, Callee: &VarRef{Name: "f", Local: true, Ty: callback}, Args: []Expr{&IntLit{Val: 1, Ty: b.Int}}, Ty: b.Int, Control: poly}
+	handle := &Handle{Body: call, Clauses: []HandlerClause{{Op: &types.EffectOp{Abort: true}}}, Ty: b.Int}
+	p := &Prog{Defs: []Def{{Name: "use", Params: []string{"f"}, Type: &types.TFun{Arg: callback, Ret: b.Int}, Body: handle}}}
+	SummarizeABI(p, nil)
+	got := p.Defs[0].ABI.Callbacks[0]
+	for _, context := range []types.Transport{types.Direct, types.Exit} {
+		if mode, ok := got.Mode(context); !ok || mode != types.Exit {
+			t.Fatalf("%v context: contract = %+v", context, got)
+		}
+	}
+}

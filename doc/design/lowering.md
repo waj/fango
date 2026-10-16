@@ -42,6 +42,11 @@ another parameter with a compatible contract. Returning, storing, partially
 applying, capturing in a lambda or handler operation, or selecting mixed modes
 keeps the general callable ABI. Unused parameters also keep that ABI.
 
+A use resolves its transport in the control context it is emitted in, not
+only the worker's: an abort handler's subject runs in Exit, and a cleanup
+scope's children in the scope's own transport, so a callback a Direct worker
+invokes inside an abort handler's subject is an Exit use.
+
 All nonfinal application stages must be fixed Direct, with no evidence or row
 arguments. Later source arguments must already be atoms: even a pure intermediate
 application can compute or diverge, so flattening must preserve evaluation order.
