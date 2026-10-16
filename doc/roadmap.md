@@ -134,6 +134,12 @@ on channels, scopes, and combinators being insufficient; its registration,
 completion, shutdown, and cancellation must follow explicit evidence rather than
 process-global state.
 
+## Software transactional memory
+
+[STM](roadmap-stm.md) proposes a sealed `STM` effect with transactional
+variables, blocking `retry`, `orElse`, and derived `MVar` and `Queue`
+modules over [Async](../stdlib/Async.fango) tasks.
+
 ## Addressing a specific handler
 
 Scoped activation binding is implemented; see the
