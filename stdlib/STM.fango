@@ -1,0 +1,189 @@
+{-# no-prelude #-}
+-- Software transactional memory: shared variables that tasks read and update
+-- in composable atomic transactions.
+--
+-- A transaction is a callback typed `() ->{STM} a`. `atomically` runs it so
+-- that its reads observe one consistent snapshot and its writes become
+-- visible to other tasks all at once, or not at all. Several variables
+-- therefore change together, and functions performing `STM` combine into
+-- larger transactions.
+--
+-- A transaction may be run more than once: when another task commits to a
+-- variable it read, it is discarded and started again. Its row is closed, so
+-- it cannot perform `IO`, `Async`, or any other effect handled outside it,
+-- and replaying it is unobservable. Effects handled inside the transaction,
+-- such as a local `Fail.attempt` or `Runtime.Local.run`, are allowed. Read
+-- outside services before `atomically` and pass the values in; return
+-- side effects that depend on the outcome as data and perform them after it
+-- commits. `atomically` itself needs `Async`, so transactions do not nest.
+--
+-- Only `atomically` handles `STM`; its operations are private to this module.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+--
+-- result = Async.runOutcome {
+--     alice = STM.atomically { STM.new 100 }
+--     bob = STM.atomically { STM.new 0 }
+--     STM.atomically { STM.modify alice { n -> n - 30 }; STM.modify bob { n -> n + 30 } }
+--     STM.atomically { (STM.read alice, STM.read bob) }
+--     }
+-- result == Completed (70, 30)
+-- ```
+module STM exposing (STM, Var, atomically, exchange, modify, new, read, write)
+
+import Async exposing (Async)
+import Basics exposing (..)
+import Runtime.Native
+
+-- A shared mutable variable holding an `a`. Its identity, not its value,
+-- distinguishes it; it may cross task boundaries freely. A variable lives
+-- until it is unreachable, and has no equality or `Show`.
+{-# resource #-}
+type Var a = Var Runtime.Native.Any
+
+-- Running inside a transaction. Only `atomically` handles it.
+effect STM
+    readVar : Var a -> a
+    writeVar : Var a -> a -> ()
+    newVar : a -> Var a
+
+-- Raised by a read that sees a variable published after the attempt began.
+effect Restart
+    abort restart : () -> value
+
+-- How one attempt ended.
+type Attempt a = Finished a | Conflicted
+
+{-# resource #-}
+type Log = Log Runtime.Native.Any
+
+{-# resource #-}
+type ReadResult a = ReadResult Runtime.Native.Any
+
+stmBegin : () -> Log
+stmBegin = native
+stmRead : Log -> Var a -> ReadResult a
+stmRead = native
+stmFresh : ReadResult a -> Bool
+stmFresh = native
+stmValue : ReadResult a -> a
+stmValue = native
+stmWrite : Log -> Var a -> a -> ()
+stmWrite = native
+stmNew : Log -> a -> Var a
+stmNew = native
+stmCommit : Log -> Bool
+stmCommit = native
+
+-- Runs `transaction` until it commits and answers its value.
+--
+-- Every attempt observes one consistent snapshot of the variables it reads;
+-- a read that would see a later commit restarts the attempt at once, so a
+-- transaction never computes on inconsistent values. Its writes become
+-- visible together when it commits. If another task committed to a variable
+-- it read in the meantime, the attempt is discarded and the transaction runs
+-- again. Conflict restarts are invisible to the program.
+--
+-- A transaction cannot be interrupted, so `atomically` runs to commit even
+-- in a cancelled task, including during cancellation cleanup.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+--
+-- Async.runOutcome { STM.atomically { STM.read (STM.new 7) } } == Completed 7
+-- ```
+atomically : (() ->{STM} a) ->{Async} a
+atomically transaction =
+    ignore (Async.contextToken ())
+    attemptLoop transaction
+
+attemptLoop : (() ->{STM} a) -> a
+attemptLoop transaction =
+    log = stmBegin ()
+    case runAttempt log transaction of
+        Finished value -> if stmCommit log then value else attemptLoop transaction
+        Conflicted -> attemptLoop transaction
+
+runAttempt : Log -> (() ->{STM} a) -> Attempt a
+runAttempt log transaction =
+    handle
+        handle transaction() on
+            readVar var ->
+                result = stmRead log var
+                if stmFresh result then resume (stmValue result) else restart ()
+            writeVar var value -> resume (stmWrite log var value)
+            newVar value -> resume (stmNew log value)
+            return value -> Finished value
+    on
+        restart () -> Conflicted
+
+-- A fresh variable holding `value`. Outside a transaction, use
+-- `atomically { STM.new value }`. A variable created by an attempt that is
+-- discarded is never seen by anyone.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+--
+-- Async.runOutcome { STM.atomically { STM.read (STM.new "hi") } } == Completed "hi"
+-- ```
+new : a ->{STM} Var a
+new value = newVar value
+
+-- The variable's value, including the transaction's own earlier writes.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+--
+-- Async.runOutcome { STM.atomically { v = STM.new 1; STM.write v 2; STM.read v } } == Completed 2
+-- ```
+read : Var a ->{STM} a
+read var = readVar var
+
+-- Replaces the variable's value when the transaction commits. Later reads in
+-- the same transaction see it at once.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+--
+-- result = Async.runOutcome {
+--     v = STM.atomically { STM.new [1] }
+--     STM.atomically { STM.write v [2, 3] }
+--     STM.atomically { STM.read v }
+--     }
+-- result == Completed [2, 3]
+-- ```
+write : Var a -> a ->{STM} ()
+write var value = writeVar var value
+
+-- Replaces the variable's value with `f` applied to it.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+--
+-- Async.runOutcome { STM.atomically { v = STM.new 3; STM.modify v { n -> n * 7 }; STM.read v } } == Completed 21
+-- ```
+modify : Var a -> (a -> a) ->{STM} ()
+modify var f = writeVar var (f (readVar var))
+
+-- Replaces the variable's value with `next` and answers the value it
+-- replaced.
+--
+-- ```fango
+-- import Async exposing (Outcome(..))
+-- import STM
+--
+-- result = Async.runOutcome { STM.atomically { v = STM.new "old"; previous = STM.exchange v "new"; (previous, STM.read v) } }
+-- result == Completed ("old", "new")
+-- ```
+exchange : Var a -> a ->{STM} a
+exchange var next =
+    previous = readVar var
+    writeVar var next
+    previous

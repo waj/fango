@@ -1,0 +1,122 @@
+module STMTransactions exposing (tests)
+
+import Async exposing (Outcome(..))
+import Basics exposing (modBy)
+import Expect
+import Fail
+import IO
+import List
+import Result exposing (Result(..))
+import Runtime.Local
+import STM exposing (STM)
+import Test
+
+-- Element `index` of a list that is long enough.
+at : Int -> List a -> a
+at index values =
+    case values of
+        [value | rest] -> if index == 0 then value else at (index - 1) rest
+        [] -> at index values
+
+transfer : STM.Var Int -> STM.Var Int -> Int ->{STM} ()
+transfer from to amount =
+    STM.modify from { n -> n - amount }
+    STM.modify to { n -> n + amount }
+
+-- Eight tasks each make 500 transfers among ten accounts. Every transfer
+-- commits whole, so the total is unchanged and the balances still sum.
+transfers : () ->{IO} Outcome (Int, Int)
+transfers() =
+    Async.runOutcome {
+        accounts = List.map { _ -> STM.atomically { STM.new 100 } } (List.range 0 9)
+        worker = { seed ->
+            List.each { step ->
+                from = at (modBy 10 (seed + step)) accounts
+                to = at (modBy 10 (seed * 3 + step * 7 + 1)) accounts
+                STM.atomically { transfer from to (modBy 13 step) }
+            } (List.range 1 500)
+        }
+        _ = Async.awaitAll (List.map { seed -> Async.spawn { worker seed } } (List.range 1 8))
+        balances = STM.atomically { List.map STM.read accounts }
+        (List.foldl { n sum -> sum + n } 0 balances, List.length balances)
+    }
+
+type Tree = Leaf | Node Tree Int Tree
+    deriving (Eq, Show)
+
+type Point = { x : Float, label : String }
+    deriving (Eq, Show)
+
+-- Written and read through polymorphic helpers, so the value crosses at an
+-- instantiation other than the one the caller sees.
+swapIn : STM.Var a -> a ->{STM} a
+swapIn var next = STM.exchange var next
+
+store : a ->{Async.Async} STM.Var a
+store value = STM.atomically { STM.new value }
+
+load : STM.Var a ->{Async.Async} a
+load var = STM.atomically { STM.read var }
+
+type Values =
+    { int : Int
+    , float : Float
+    , point : Point
+    , tree : Tree
+    , applied : Int
+    , list : List Int
+    , unit : ()
+    }
+    deriving (Eq, Show)
+
+roundTrips : () ->{IO} Outcome Values
+roundTrips() =
+    Async.runOutcome {
+        int = store 1
+        float = store 1.5
+        point = store { x = 2.5, label = "p" }
+        tree = store (Node Leaf 1 Leaf)
+        function = store { n -> n + 1 }
+        list = STM.atomically { STM.new [1, 2] }
+        unit = store ()
+        STM.atomically {
+            ignore (swapIn int 7)
+            ignore (swapIn float 2.25)
+            ignore (swapIn point { x = 3.5, label = "q" })
+            ignore (swapIn tree (Node (Node Leaf 2 Leaf) 3 Leaf))
+            ignore (swapIn function { n -> n * 10 })
+            STM.modify list { values -> [0 | values] }
+            swapIn unit ()
+        }
+        f = load function
+        { int = load int, float = load float, point = load point, tree = load tree, applied = f 4, list = load list, unit = load unit }
+    }
+
+-- Local handlers run inside a transaction and are reinstalled on replay.
+localEffects : () ->{IO} Outcome (Result String Int, Int, Int)
+localEffects() =
+    Async.runOutcome {
+        var = STM.atomically { STM.new 5 }
+        result = STM.atomically {
+            failed = Fail.attempt {
+                STM.write var 6
+                Fail.fail "stop"
+            }
+            counted = Runtime.Local.run 0 { cell ->
+                List.each { n -> cell.write (cell.read () + n + STM.read var) } [1, 2, 3]
+                cell.read ()
+            }
+            (failed, counted)
+        }
+        (failedResult, counted) = result
+        (failedResult, counted, load var)
+    }
+
+tests : Test.Test IO.IO
+tests = Test.test "stm_transactions" {
+    Expect.equal (Completed (1000, 10)) transfers()
+    Expect.equal (Completed (Values { int = 7, float = 2.25, point = Point { x = 3.5, label = "q" }, tree = Node (Node Leaf 2 Leaf) 3 Leaf, applied = 40, list = [0, 1, 2], unit = () })) roundTrips()
+    Expect.equal (Completed (Err "stop", 24, 6)) localEffects()
+}
+
+main() = Test.run tests

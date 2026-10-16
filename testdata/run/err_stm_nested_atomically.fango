@@ -1,0 +1,10 @@
+import Async
+import STM
+
+main() =
+    Async.run {
+        v = STM.atomically { STM.new 1 }
+        STM.atomically {
+            STM.write v (STM.atomically { STM.read v })
+        }
+    }

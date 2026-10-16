@@ -2,8 +2,9 @@
 
 A proposed `STM` library modeled on Haskell's `Control.Concurrent.STM`:
 transactional variables, composable atomic transactions, blocking `retry`,
-alternatives, and the derived `MVar` and `Queue` structures. Nothing here is
-implemented. The [main roadmap](roadmap.md) is the navigation entry point;
+alternatives, and the derived `MVar` and `Queue` structures. Completed
+stages are marked DONE; their contract lives in the
+[STM module](../stdlib/STM.fango) and the [STM design](design/stm.md). The [main roadmap](roadmap.md) is the navigation entry point;
 implemented contracts that this proposal builds on live in
 [effects](reference/effects.md), [effect execution](design/effects.md),
 [native tasks](design/tasks.md), and [native sidecars](reference/native.md).
@@ -582,6 +583,9 @@ type stmLog struct {
 ## Stages
 
 ### STM1 Variables and transactions
+
+DONE. See the [STM module](../stdlib/STM.fango) and the
+[STM design](design/stm.md).
 
 `Var`, `atomically`, `new`, `read`, `write`, `modify`, and `exchange`, with
 stale-read restarts and global-lock commits. No `retry` yet.

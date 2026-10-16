@@ -57,6 +57,8 @@ completion order, stage-only values, evaluator integration, and rollback.
 adapters, specialization, ANF, and independent lint.
 [Native tasks and explicit streams](design/tasks.md) — closure invocation,
 handler inheritance, goroutine scopes, and library traversal.
+[Software transactional memory](design/stm.md) — the sealed STM effect,
+attempt replay, and the versioned commit runtime.
 [Text over byte streams](design/text-io.md) — encoding adapters, character boundaries,
 atomic reads, and text writer lifetimes.
 [Dates and clocks](design/time.md) — checked calendar values, timezone resolution,

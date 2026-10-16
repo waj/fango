@@ -1,0 +1,5 @@
+    {Async, STM | e}
+
+but only these effects are available here:
+
+    {STM}

@@ -1,0 +1,11 @@
+import Async
+import STM
+
+main() =
+    Async.run {
+        v = STM.atomically { STM.new 1 }
+        STM.atomically {
+            print "hello"
+            STM.write v 2
+        }
+    }
