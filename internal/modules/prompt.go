@@ -2,6 +2,7 @@ package modules
 
 import (
 	"maps"
+	"slices"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
@@ -78,6 +79,26 @@ func (p *Prompt) SetValue(name, canonical string, ok bool) {
 	} else {
 		delete(p.r.vals, name)
 	}
+}
+
+// Names lists every name the prompt scope resolves, sorted: the unqualified
+// values, types, constructors, operations, and records, and each imported
+// qualifier's members spelled `Q.member`.
+func (p *Prompt) Names() []string {
+	r := p.r
+	var names []string
+	for _, ns := range []map[string]string{r.vals, r.tys, r.ctors, r.ops, r.records} {
+		names = slices.AppendSeq(names, maps.Keys(ns))
+	}
+	for q, in := range r.quals {
+		for _, ns := range []map[string]string{in.values, in.types, in.ctors, in.ops, in.records} {
+			for member := range ns {
+				names = append(names, q+"."+member)
+			}
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 // Checkpoint returns a function restoring the scope as it is now, so a

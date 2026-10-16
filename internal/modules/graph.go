@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -74,6 +75,17 @@ func NewGraph(root string) (*Graph, *PreludeResult, []diag.Error) {
 
 // Loaded reports whether the graph already holds module name.
 func (g *Graph) Loaded(name string) bool { return g.nodes[name] != nil }
+
+// Modules names every module an import could load, sorted: the bundled
+// library and, for a filesystem source root, the modules under it.
+func (g *Graph) Modules() []string {
+	names, _ := BundledModules()
+	if l, ok := g.local.(interface{ Modules() []string }); ok {
+		names = append(names, l.Modules()...)
+	}
+	sort.Strings(names)
+	return slices.Compact(names)
+}
 
 // Checkpoint returns a function that forgets every module added after this
 // point and restores the operator table, so a failed import leaves the graph

@@ -39,6 +39,8 @@ type editor struct {
 func newEditor(out *tailWriter, cancel func()) *editor {
 	e := &editor{line: liner.NewLiner(), out: out, cancel: cancel}
 	e.line.SetCtrlCAborts(true)
+	// The first Tab completes the common prefix; a second lists candidates.
+	e.line.SetTabCompletionStyle(liner.TabPrints)
 	if home, err := os.UserHomeDir(); err == nil {
 		e.history = filepath.Join(home, historyFile)
 		if f, err := os.Open(e.history); err == nil {
@@ -59,6 +61,7 @@ func (e *editor) readLine(req lineRequest) inputLine {
 			fmt.Fprint(e.out, "\r")
 		}
 	}
+	e.line.SetWordCompleter(req.complete)
 	text, err := e.line.PromptWithSuggestion(prompt, req.suggestion, -1)
 	switch {
 	case err == nil:

@@ -1,6 +1,6 @@
 # REPL
 
-Persistent prompt scope, imports, transactions, redefinition, handler levels, commands, and line editing.
+Persistent prompt scope, imports, transactions, redefinition, handler levels, commands, line editing, and Tab completion.
 
 [Reference index](../reference.md).
 
@@ -277,6 +277,15 @@ per physical line and without an immediate repeat, are kept in
 `~/.fango_history` across sessions; lines a program reads are not. A `| `
 continuation line starts at the previous line's indentation, and a line left
 holding only that indentation submits like a blank one.
+
+Tab completes the word before the cursor: a command after a leading `:`, a
+module path after `import` (the bundled library and modules under the source
+root), and otherwise a keyword or a name the prompt can resolve, imported,
+qualified, or declared at the prompt. A qualified name completes one segment at
+a time, so `Li` offers `List.` and a further `List.ma` offers `List.map`. The
+first Tab inserts the longest common completion; a second lists every
+candidate. Tab on an empty word does nothing, and a program's `readLine` does
+not complete.
 
 A program's `readLine` is edited too. The editor redraws the program's partial
 output line (`Name? `) as that read's prompt unless it is long or holds control

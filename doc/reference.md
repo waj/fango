@@ -103,7 +103,7 @@ and patterns.
 
 ## REPL
 
-[REPL](reference/repl.md) — Prompt scope, imports, redefinition, rollback, commands, and line editing.
+[REPL](reference/repl.md) — Prompt scope, imports, redefinition, rollback, commands, line editing, and Tab completion.
 
 [Debugger commands](reference/debugger-commands.md) — Shared stopped-prompt syntax, structural value previews, and backend capabilities.
 

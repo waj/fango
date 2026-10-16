@@ -80,6 +80,44 @@ func (p FSProvider) Source(module string) (string, []byte, error) {
 	return filepath.ToSlash(rel), b, err
 }
 
+// moduleSegment is one dot-separated part of a module name.
+var moduleSegment = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
+
+// Modules names every module under the source root, sorted: each
+// `Foo/Bar.fango` whose path segments are module names, outside hidden
+// directories.
+func (p FSProvider) Modules() []string {
+	var names []string
+	_ = filepath.WalkDir(p.Root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(p.Root, path)
+		if relErr != nil || rel == "." {
+			return nil
+		}
+		if d.IsDir() {
+			if !moduleSegment.MatchString(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		base, ok := strings.CutSuffix(filepath.ToSlash(rel), ".fango")
+		if !ok {
+			return nil
+		}
+		for _, part := range strings.Split(base, "/") {
+			if !moduleSegment.MatchString(part) {
+				return nil
+			}
+		}
+		names = append(names, strings.ReplaceAll(base, "/", "."))
+		return nil
+	})
+	sort.Strings(names)
+	return names
+}
+
 func readExact(root, rel string) ([]byte, error) {
 	path := filepath.Join(root, rel)
 	absRoot, _ := filepath.Abs(root)

@@ -32,6 +32,8 @@ type lineRequest struct {
 	suggestion string
 	// program marks a read by the evaluated program rather than the prompt.
 	program bool
+	// complete is the Tab completer, nil for reads that complete nothing.
+	complete func(line string, pos int) (head string, items []string, tail string)
 }
 
 // A lineSource is the pump's one reader of the session's input.

@@ -316,7 +316,7 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 			s.endAll()
 			return
 		}
-		req := lineRequest{prompt: "> "}
+		req := lineRequest{prompt: "> ", complete: s.complete}
 		if len(s.levels) > 0 {
 			req.prompt = fmt.Sprintf("%d> ", len(s.levels))
 		}
@@ -423,14 +423,7 @@ func (s *Session) command(cmd string) (quit bool) {
 		if s.debug != nil {
 			s.debugHelp()
 		}
-		fmt.Fprint(s.out, `commands:
-  :type <expr>   show an expression's type without evaluating
-  :reload        refresh imported local modules atomically
-  :uses          list the handler levels installed with `+"`use`"+`
-  :end           end the innermost handler level (also Ctrl-D)
-  :help          this message
-  :quit          end every level and leave the REPL
-`)
+		writeCommandHelp(s.out)
 	case strings.HasPrefix(cmd, ":type "):
 		s.typeOf(strings.TrimPrefix(cmd, ":type "))
 	default:

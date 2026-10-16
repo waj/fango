@@ -69,8 +69,12 @@ func TestEditorPromptsAndHistory(t *testing.T) {
 		t.Fatalf("requests = %+v, want %+v", ed.requests, want)
 	}
 	for i := range want {
-		if ed.requests[i] != want[i] {
-			t.Errorf("request %d = %+v, want %+v", i, ed.requests[i], want[i])
+		got := ed.requests[i]
+		if got.prompt != want[i].prompt || got.suggestion != want[i].suggestion || got.program {
+			t.Errorf("request %d = %+v, want %+v", i, got, want[i])
+		}
+		if got.complete == nil {
+			t.Errorf("prompt request %d has no completer", i)
 		}
 	}
 	if got := strings.Join(ed.history, "|"); got != "double x =|    x * 2|double 21" {
@@ -92,6 +96,11 @@ func TestEditorProgramReadRepaintsPartialLine(t *testing.T) {
 	}
 	if len(ed.tails) != 1 || ed.tails[0] != "Name? " {
 		t.Errorf("program read tails = %q, want the partial output line", ed.tails)
+	}
+	for _, req := range ed.requests {
+		if req.program && req.complete != nil {
+			t.Errorf("a program read completes prompt names")
+		}
 	}
 	if strings.Contains(strings.Join(ed.history, "|"), "Ada") {
 		t.Errorf("program input reached the history: %q", ed.history)
