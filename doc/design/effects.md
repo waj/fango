@@ -258,7 +258,7 @@ chooses the available Exit member.
 ## Service effects
 
 Host services are small domain effects declared in their own modules, such as
-`Console.Console`, `File.FileSystem`, `Net.Network`, and `Process.Arguments`,
+`Console.Console`, `File.FileSystem`, `Net.Network`, and `Process.Environment`,
 beside the older `Time.Clock.Clock`, `Random.Random`, and `Http.Client.Http`.
 Their operations are public so custom handlers name them directly; there are
 no separate driver modules. One effect per service keeps rows short and lets

@@ -18,6 +18,7 @@ type Runtime struct {
 	Host   fangort.SessionHost
 	Writer io.Writer
 	Args   []string
+	Env    []string
 	Dir    string
 
 	// Expand renders a compile-time code value as surface AST. Only the

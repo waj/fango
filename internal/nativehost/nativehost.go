@@ -300,6 +300,8 @@ func (e *Executor) exchange(ctx context.Context, host Host, request message, lab
 			e.reply(errorMessage("host_reply", host.WriteError(m.Data)))
 		case "host_args":
 			e.reply(message{Kind: "host_reply", Values: append([]string(nil), host.Arguments()...)})
+		case "host_env":
+			e.reply(message{Kind: "host_reply", Values: append([]string(nil), host.Environment()...)})
 		case "host_dir":
 			e.reply(message{Kind: "host_reply", Data: []byte(host.WorkingDirectory())})
 		case "host_exit":

@@ -15,6 +15,7 @@ type testHost struct {
 	out    strings.Builder
 	errout strings.Builder
 	args   []string
+	env    []string
 	dir    string
 	exited int
 }
@@ -33,6 +34,7 @@ func (h *testHost) ReadInputBytes(count int64) ([]byte, error) {
 func (h *testHost) WriteError(b []byte) error  { _, err := h.errout.Write(b); return err }
 func (h *testHost) WriteOutput(b []byte) error { _, err := h.out.Write(b); return err }
 func (h *testHost) Arguments() []string        { return h.args }
+func (h *testHost) Environment() []string      { return h.env }
 func (h *testHost) WorkingDirectory() string {
 	if h.dir == "" {
 		return "."

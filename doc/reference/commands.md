@@ -562,7 +562,7 @@ result is `()`.
 `main`'s row may contain `IO` and any effect that declares a default handler
 with a [`Runtime.Entry.DefaultHandler`](../../stdlib/Runtime/Entry.fango)
 attribute, such as `Console`, `File.FileSystem`, `Net.Network`,
-`Process.Arguments`, `Random`, `Time.Clock.Clock`, and `Http.Client.Http`. The program then starts at an entry the compiler
+`Process.Environment`, `Random`, `Time.Clock.Clock`, and `Http.Client.Http`. The program then starts at an entry the compiler
 assembles by splicing `Runtime.Entry.assemble`: `main` runs inside each of
 those defaults, and inside the defaults of the effects those runners perform
 in turn, each runner nested inside the runners it relies on. A default applies
@@ -572,7 +572,7 @@ runner installed inside `main` takes precedence for the code it wraps.
 ```fango
 import Process
 
-main : () ->{Console, Process.Arguments} ()
+main : () ->{Console, Process.Environment} ()
 main() = print (Process.args())
 ```
 

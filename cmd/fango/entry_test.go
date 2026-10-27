@@ -70,8 +70,8 @@ func TestEntryAssemblyAnnotationsAndOverrides(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, main, want string }{
 		{"inferred", "main() = print (Process.args())\n", "[\"a\"]\n"},
-		{"annotated", "main : () ->{Console, Process.Arguments} ()\nmain() = print (Process.args())\n", "[\"a\"]\n"},
-		{"override", "main() =\n    print (Process.withArgs [\"fixed\"] Process.args)\n    print (Process.args())\n", "[\"fixed\"]\n[\"a\"]\n"},
+		{"annotated", "main : () ->{Console, Process.Environment} ()\nmain() = print (Process.args())\n", "[\"a\"]\n"},
+		{"override", "import Dict\n\nmain() =\n    print (Process.runWith [\"fixed\"] Dict.empty Process.args)\n    print (Process.args())\n", "[\"fixed\"]\n[\"a\"]\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

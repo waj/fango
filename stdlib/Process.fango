@@ -1,30 +1,39 @@
 {-# no-prelude #-}
--- The running program's arguments and exit status. The prelude does not
--- expose it; import `Process`.
+-- The running program's arguments, environment variables, and exit status.
+-- The prelude does not expose it; import `Process`.
 --
--- Arguments are the `Arguments` effect: code that reads them performs it, and
--- the program chooses where they come from by running that code under
--- `runSystem`, for the real command line, or `withArgs`, for a fixed list.
--- `runSystem` is its default handler, so `main` can read them directly.
+-- Arguments and variables are the `Environment` effect: code that reads them
+-- performs it, and the program chooses where they come from by running that
+-- code under `runSystem`, for the real process, or `runWith`, for fixed
+-- values. `runSystem` is its default handler, so `main` can read them
+-- directly.
 --
 -- A program ends normally by returning from `main`: `()` is status 0, and a
 -- `Status` is that status, applied after every scope has been released and
 -- every task has finished. `exit` is the drastic alternative that ends the
 -- process at once.
-module Process exposing (Arguments(..), Status, exit, failure, runSystem, status, success, withArgs)
+module Process exposing (Environment(..), Status, exit, failure, runSystem, runWith, status, success)
 
 import Basics exposing (..)
+import Dict exposing (Dict)
 import IO exposing (IO)
 import List exposing (List)
+import Maybe exposing (Maybe(..))
 import Runtime.Entry
 
--- Reading the program's command-line arguments. A `main` that performs it
--- runs under `runSystem` unless it installs another runner.
+-- Reading the environment the program was started with: its command-line
+-- arguments and environment variables. A `main` that performs it runs under
+-- `runSystem` unless it installs another runner.
 #[Runtime.Entry.DefaultHandler `runSystem`]
-effect Arguments
+effect Environment
     -- The arguments, without the program name. `fango run` passes every
     -- argument after the source file.
     args : () -> List String
+    -- The value of the variable with this name, or `Nothing` when it is not
+    -- set. A variable set to the empty string is `Just ""`.
+    env : String -> Maybe String
+    -- Every variable, keyed by name.
+    variables : () -> Dict String String
 
 argCount : () ->{IO} Int
 argCount = native
@@ -39,27 +48,66 @@ argsFrom index count =
     else
         [argAt index | argsFrom (index + 1) count]
 
--- Answers `args` with the real command line.
-runSystem : (() ->{Arguments | e} a) ->{IO | e} a
+envDefined : String ->{IO} Bool
+envDefined = native
+
+envValue : String ->{IO} String
+envValue = native
+
+envCount : () ->{IO} Int
+envCount = native
+
+envNameAt : Int ->{IO} String
+envNameAt = native
+
+envValueAt : Int ->{IO} String
+envValueAt = native
+
+systemEnv : String ->{IO} Maybe String
+systemEnv name =
+    if envDefined name then
+        Just (envValue name)
+    else
+        Nothing
+
+-- A name the host lists twice keeps its last value.
+variablesFrom : Int -> Int -> Dict String String ->{IO} Dict String String
+variablesFrom index count found =
+    if index >= count then
+        found
+    else
+        variablesFrom (index + 1) count (Dict.insert (envNameAt index) (envValueAt index) found)
+
+-- Answers every operation from the real process.
+runSystem : (() ->{Environment | e} a) ->{IO | e} a
 runSystem action =
     handle action() on
         args () -> resume (argsFrom 0 argCount())
+        env name -> resume (systemEnv name)
+        variables () -> resume (variablesFrom 0 envCount() Dict.empty)
 
--- Answers `args` with a fixed list, so code that reads arguments can run
--- without a command line.
+-- Answers every operation from fixed arguments and variables, so code that
+-- reads them can run without a real process.
 --
 -- ```fango
+-- import Dict
 -- import List
+-- import Maybe exposing (Maybe(..))
 -- import Process
 --
--- count = Process.withArgs ["a", "b"] { List.length (Process.args ()) }
+-- home = Dict.fromList [("HOME", "/home/me")]
 --
--- count == 2
+-- Process.runWith ["a", "b"] home { List.length (Process.args ()) } == 2
+-- Process.runWith [] home { Process.env "HOME" } == Just "/home/me"
+-- Process.runWith [] home { Process.env "PATH" } == Nothing
+-- Process.runWith [] home { Dict.size (Process.variables ()) } == 1
 -- ```
-withArgs : List String -> (() ->{Arguments | e} a) ->{e} a
-withArgs given action =
+runWith : List String -> Dict String String -> (() ->{Environment | e} a) ->{e} a
+runWith givenArgs givenVariables action =
     handle action() on
-        args () -> resume given
+        args () -> resume givenArgs
+        env name -> resume (Dict.get name givenVariables)
+        variables () -> resume givenVariables
 
 -- A process exit status, from 0 through 255.
 type Status = Status Int

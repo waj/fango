@@ -169,6 +169,10 @@ func (p *proxy) Arguments() []string {
 	return p.request(nativewire.Message{Kind: "host_args"}).Values
 }
 
+func (p *proxy) Environment() []string {
+	return p.request(nativewire.Message{Kind: "host_env"}).Values
+}
+
 func (p *proxy) WorkingDirectory() string {
 	return string(p.request(nativewire.Message{Kind: "host_dir"}).Data)
 }
@@ -351,6 +355,7 @@ func execute(ctx context.Context, data []byte, env *eval.Env, caller *directCall
 	ioctx.Debug, ioctx.DebugHost = payload.Debug, host
 	ioctx.Levels = &workerLevels{host: host, active: active, outer: ctx}
 	ioctx.Args = host.Arguments()
+	ioctx.Env = host.Environment()
 	ioctx.Dir = host.WorkingDirectory()
 	if payload.Force != "" {
 		_, err = eval.ForceIO(ctx, payload.Force, env, ioctx)

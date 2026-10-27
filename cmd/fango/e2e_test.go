@@ -578,6 +578,7 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 		var printed bytes.Buffer
 		ioctx := eval.NewIOContext(strings.NewReader(in.stdin), &printed)
 		ioctx.Args = in.args
+		ioctx.Env = append(os.Environ(), in.env...)
 		if dir := seedDir(t, in); dir != "" {
 			ioctx.Dir = dir
 		}

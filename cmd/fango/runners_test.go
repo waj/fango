@@ -13,13 +13,15 @@ import (
 
 // fixtureInputs are the optional files beside a fixture's source, or under
 // examples/fixtures for runnable examples: X.stdin is scripted standard input,
-// X.status is the exit status the program must end with (0 when absent), and
+// X.args lists one argument per line, X.env lists NAME=value variables added
+// to the inherited environment, X.status is the exit status the program must end with (0 when absent), and
 // X.files/ is a seed directory copied into a fresh working directory for each
 // leg, so a fixture can read, write, and fail on real files without touching
 // the repository or the other backend's run.
 type fixtureInputs struct {
 	stdin  string
 	args   []string
+	env    []string
 	status int
 	files  string
 }
@@ -33,6 +35,9 @@ func readFixtureInputs(t *testing.T, base string) fixtureInputs {
 	}
 	if data, err := os.ReadFile(base + ".args"); err == nil {
 		in.args = strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	}
+	if data, err := os.ReadFile(base + ".env"); err == nil {
+		in.env = strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	}
 	if data, err := os.ReadFile(base + ".status"); err == nil {
 		status, err := strconv.Atoi(strings.TrimSpace(string(data)))
@@ -76,7 +81,7 @@ type compiledRunner func(t *testing.T, in fixtureInputs, dir string) (string, in
 
 func batchRunner(path string) compiledRunner {
 	return func(t *testing.T, in fixtureInputs, dir string) (string, int) {
-		return runCompiled(t, exec.Command(runFixtureBatch(t).binary(path), in.args...), in.stdin, dir)
+		return runCompiled(t, exec.Command(runFixtureBatch(t).binary(path), in.args...), in, dir)
 	}
 }
 
@@ -92,14 +97,15 @@ func cliRunner(path string) compiledRunner {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return runCompiled(t, exec.Command(buildCLIBinary(t, path, absPath, b), in.args...), in.stdin, dir)
+		return runCompiled(t, exec.Command(buildCLIBinary(t, path, absPath, b), in.args...), in, dir)
 	}
 }
 
-func runCompiled(t *testing.T, cmd *exec.Cmd, stdin, dir string) (string, int) {
+func runCompiled(t *testing.T, cmd *exec.Cmd, in fixtureInputs, dir string) (string, int) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	cmd.Stdin = strings.NewReader(stdin)
+	cmd.Stdin = strings.NewReader(in.stdin)
+	cmd.Env = append(os.Environ(), in.env...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.Dir = dir
 	err := cmd.Run()

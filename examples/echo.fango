@@ -76,7 +76,7 @@ runListener port listener =
 run : Int ->{Net.Network, Console, Fail Net.Error} ()
 run port = Net.withListener port (runListener port)
 
-main : () ->{Console, Net.Network, Process.Arguments} Process.Status
+main : () ->{Console, Net.Network, Process.Environment} Process.Status
 main() =
     case portFrom Process.args() of
         Nothing ->

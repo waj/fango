@@ -89,7 +89,7 @@ and the summary to standard output without exiting. `progress` prints dots,
 and `documentation` prints group headings and indented case outcomes; both
 retain failures until suite completion to print their full details afterward.
 `run` delegates command-line handling to `Test.Reporter.run` around `execute`,
-exposing `Console` for output, `Process.Arguments` for options, and
+exposing `Console` for output, `Process.Environment` for options, and
 `File.FileSystem` for optional JSON reports. It answers a `Process.Status` for
 `main` to return rather than exiting, so a suite needs no IO of its own and
 cleanup runs before the status applies. No arguments select the existing

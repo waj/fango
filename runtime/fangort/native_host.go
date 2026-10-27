@@ -22,6 +22,8 @@ type SessionHost interface {
 	WriteOutput([]byte) error
 	WriteError([]byte) error
 	Arguments() []string
+	// Environment lists variables as os.Environ does, "NAME=value".
+	Environment() []string
 	WorkingDirectory() string
 }
 
@@ -79,6 +81,8 @@ func (h *systemNativeHost) WriteError(b []byte) error {
 }
 
 func (*systemNativeHost) Arguments() []string { return os.Args[1:] }
+
+func (*systemNativeHost) Environment() []string { return os.Environ() }
 
 func (*systemNativeHost) WorkingDirectory() string {
 	dir, err := os.Getwd()

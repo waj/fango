@@ -81,7 +81,7 @@ parseOptions args =
         [pattern | paths] -> withPaths False pattern paths
         [] -> Nothing
 
-main : () ->{Console, File.FileSystem, Process.Arguments} Process.Status
+main : () ->{Console, File.FileSystem, Process.Environment} Process.Status
 main() =
     case parseOptions Process.args() of
         Nothing ->

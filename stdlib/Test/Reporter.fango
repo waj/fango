@@ -308,7 +308,7 @@ usage = "Usage: tests [--format console|progress|documentation|silent] [--json P
 -- fango run Tests.fango --format documentation
 -- fango run Tests.fango --format silent --json report.json
 -- ```
-run : (() ->{Reporter | e} Summary) ->{Console, File.FileSystem, Process.Arguments | e} Process.Status
+run : (() ->{Reporter | e} Summary) ->{Console, File.FileSystem, Process.Environment | e} Process.Status
 run action =
     case parseOptions (Options { format = ConsoleFormat, json = Nothing }) (Process.args ()) of
         Err message ->

@@ -133,8 +133,8 @@ operation.
 
 Every materialized sidecar package receives the reserved process-global
 `FangoHost`. Its `HasInput`, `ReadInputLine`, `ReadInputBytes`, `WriteOutput`,
-`WriteError`, `Arguments`, `WorkingDirectory`, `Exit`, and `ExecutionContext`
-methods expose the surrounding Fango process.
+`WriteError`, `Arguments`, `Environment`, `WorkingDirectory`, `Exit`, and
+`ExecutionContext` methods expose the surrounding Fango process.
 Compiled programs install the system host; the interpreter worker installs a
 proxy to the active interpreter session. Native function signatures never gain
 a hidden context argument. Sidecars may use `FangoHost` only during a native

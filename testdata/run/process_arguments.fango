@@ -1,9 +1,10 @@
+import Dict
 import Process
 import String
 
 -- Arguments are an effect: the same code reads the real command line under
--- the default handler `main` runs with, and a fixed list under `withArgs`.
-describe : () ->{Process.Arguments} String
+-- the default handler `main` runs with, and a fixed list under `runWith`.
+describe : () ->{Process.Environment} String
 describe() =
     case Process.args() of
         [] -> "no arguments"
@@ -11,5 +12,5 @@ describe() =
 
 main() =
     print describe()
-    print (Process.withArgs [] describe)
-    print (Process.withArgs ["x", "y"] describe)
+    print (Process.runWith [] Dict.empty describe)
+    print (Process.runWith ["x", "y"] Dict.empty describe)

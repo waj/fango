@@ -6,7 +6,7 @@
 --
 -- ```text
 -- #[Runtime.Entry.DefaultHandler `runSystem`]
--- effect Arguments
+-- effect Environment
 --     args : () -> List String
 -- ```
 --

@@ -144,6 +144,7 @@ type IOContext struct {
 	// ErrorWriter defaults to os.Stderr when absent, independently of stdout.
 	ErrorWriter io.Writer
 	Args        []string
+	Env         []string
 	Dir         string
 	// Natives selects a sidecar caller for this evaluator. Nil uses the shared
 	// bundled caller lazily.
@@ -284,6 +285,8 @@ func (c *IOContext) Write(data []byte) (int, error) {
 }
 
 func (c *IOContext) Arguments() []string { return c.Args }
+
+func (c *IOContext) Environment() []string { return c.Env }
 
 func (c *IOContext) WorkingDirectory() string { return c.Dir }
 
@@ -1454,7 +1457,7 @@ func cloneEvidence(src map[types.EffectKey]*evidence) map[types.EffectKey]*evide
 }
 
 func (in *interp) nativeRuntime() *natives.Runtime {
-	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Expand: in.env.Expand, Declared: in.env.declared}
+	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx, Args: in.ioctx.Args, Env: in.ioctx.Env, Dir: in.ioctx.Dir, Expand: in.env.Expand, Declared: in.env.declared}
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.

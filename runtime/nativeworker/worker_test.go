@@ -94,7 +94,7 @@ func TestProxy(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		dec, enc := gob.NewDecoder(server), gob.NewEncoder(server)
-		want := []string{"host_has_input", "host_read_line", "host_read_bytes", "host_write", "host_write_error", "host_args", "host_dir", "host_exit"}
+		want := []string{"host_has_input", "host_read_line", "host_read_bytes", "host_write", "host_write_error", "host_args", "host_env", "host_dir", "host_exit"}
 		for _, kind := range want {
 			var request nativewire.Message
 			if err := dec.Decode(&request); err != nil {
@@ -129,6 +129,8 @@ func TestProxy(t *testing.T) {
 				}
 			case "host_args":
 				response.Values = []string{"one", "two"}
+			case "host_env":
+				response.Values = []string{"A=1", "B=2"}
 			case "host_dir":
 				response.Data = []byte("/work")
 			}
@@ -156,6 +158,9 @@ func TestProxy(t *testing.T) {
 	}
 	if got := strings.Join(p.Arguments(), ","); got != "one,two" {
 		t.Fatalf("Arguments = %q", got)
+	}
+	if got := strings.Join(p.Environment(), ","); got != "A=1,B=2" {
+		t.Fatalf("Environment = %q", got)
 	}
 	if got := p.WorkingDirectory(); got != "/work" {
 		t.Fatalf("WorkingDirectory = %q", got)

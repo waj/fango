@@ -193,6 +193,7 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	env := eval.NewEnv()
 	ioctx := eval.NewIOContext(strings.NewReader(""), out)
 	ioctx.ErrorWriter = opts.ErrorWriter
+	ioctx.Env = os.Environ()
 	s := &Session{
 		ck:               ck,
 		env:              env,
@@ -300,7 +301,7 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 	input := newLinePump(source, interrupts)
 	defer input.Close()
 	s.interrupts = interrupts
-	s.ioctx = &eval.IOContext{Reader: reader, Input: input, Writer: out, ErrorWriter: s.ioctx.ErrorWriter, Natives: s.ioctx.Natives, DebugHost: s.ioctx.DebugHost}
+	s.ioctx = &eval.IOContext{Reader: reader, Input: input, Writer: out, ErrorWriter: s.ioctx.ErrorWriter, Env: s.ioctx.Env, Natives: s.ioctx.Natives, DebugHost: s.ioctx.DebugHost}
 	if s.debug != nil {
 		s.debug.input = input
 	}

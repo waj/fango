@@ -1,0 +1,12 @@
+import Dict
+import Process
+
+-- Variables come from the real process under the default handler, and from a
+-- fixed dictionary under `runWith`.
+lookups : () ->{Process.Environment} List (Maybe String)
+lookups() = [Process.env "FANGO_FIXTURE", Process.env "FANGO_FIXTURE_EMPTY", Process.env "FANGO_FIXTURE_UNSET"]
+
+main() =
+    print lookups()
+    print (Dict.get "FANGO_FIXTURE" (Process.variables ()))
+    print (Process.runWith [] (Dict.fromList [("FANGO_FIXTURE", "fixed")]) lookups)

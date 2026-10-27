@@ -113,7 +113,7 @@ main() =
 	if err := build.GoBuild(dir, program); err != nil {
 		t.Fatal(err)
 	}
-	compiled, status := runCompiled(t, exec.Command(build.BinaryPath(dir, program)), "", t.TempDir())
+	compiled, status := runCompiled(t, exec.Command(build.BinaryPath(dir, program)), fixtureInputs{}, t.TempDir())
 	if status != 0 || compiled != want {
 		t.Fatalf("compiled: status %d, %q, want %q", status, compiled, want)
 	}

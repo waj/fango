@@ -1,0 +1,3 @@
+[Just "a=b", Just "", Nothing]
+Just "a=b"
+[Just "fixed", Nothing, Nothing]

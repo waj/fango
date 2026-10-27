@@ -165,7 +165,7 @@ usage() =
     print "usage: csv FILE"
     Process.failure
 
-main : () ->{Console, File.FileSystem, Process.Arguments} Process.Status
+main : () ->{Console, File.FileSystem, Process.Environment} Process.Status
 main() =
     case Process.args() of
         [path] -> run path

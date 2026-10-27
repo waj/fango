@@ -30,7 +30,7 @@
 -- `Reporter` effect. Handle it with `silent` to get only the summary,
 -- `console` for the default output, or a custom handler for other formats.
 -- `run` selects a format from command-line arguments, so it performs
--- `Process.Arguments`, and applies the process exit policy; without options
+-- `Process.Environment`, and applies the process exit policy; without options
 -- it uses `console`. Optional JSON reports perform `File.FileSystem`; a
 -- caller can capture them with `File.runMemory`.
 --
@@ -172,7 +172,7 @@ execute suite =
 -- to choose output and exit policy yourself. Command-line options select
 -- progress or documentation output and an optional JSON file; see
 -- [`Test.Reporter.run`](Test/Reporter.fango).
-run : Test e ->{Console, File.FileSystem, Process.Arguments | e} Process.Status
+run : Test e ->{Console, File.FileSystem, Process.Environment | e} Process.Status
 run suite = Reporter.run { execute suite }
 
 -- Whether the tree focuses some tests. An `only` inside a `skip` does not

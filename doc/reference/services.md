@@ -21,7 +21,7 @@ when nothing else in its row needs `IO`.
 | --- | --- | --- | --- | --- |
 | Standard streams | `Console.Console` | `print`, `write`, `writeTo`, `readLine`, `Console.source`/`sink`, and Prelude helpers over them | `Console.runSystem` | `Console.runTest` |
 | Files and directories | `File.FileSystem` | Scoped and raw handles, line/byte reads and writes, `File.source`/`sink`, whole-file reads and writes, directory tests, sizes, listings | `File.runSystem` | `File.runMemory`, `File.runMemoryWith`, custom handlers through `File.withProvider` |
-| Process arguments | `Process.Arguments` | `Process.args` | `Process.runSystem` | `Process.withArgs` |
+| Process arguments and variables | `Process.Environment` | `Process.args`, `Process.env`, `Process.variables` | `Process.runSystem` | `Process.runWith` |
 | Randomness | `Random.Random` | `Random.int` | `Random.runSystem` | `Random.runSeeded` |
 | Clock | `Time.Clock.Clock` | `now`, `nowIn`, `today`, `todayIn`, `withZone` | `runSystem`, `runSystemIn`, `runOffset` | `runFixed`, `runStepped` |
 | Networking | `Net.Network` | Listeners, accepts, connects, TLS, reads and writes, deadlines, pools, `Net.source`/`sink` and their `Async` variants | `Net.runSystem` | Custom handlers through `Net.withProvider` |

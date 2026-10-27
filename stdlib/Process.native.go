@@ -1,6 +1,10 @@
 package native
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/waj/fango/runtime/fangort"
+)
 
 func ArgCount() int64 { return int64(len(FangoHost.Arguments())) }
 
@@ -21,4 +25,26 @@ func CheckedStatus(code int64) int64 {
 		panic(fmt.Sprintf("exit status %d is out of range 0 through 255", code))
 	}
 	return code
+}
+
+func EnvDefined(name string) bool {
+	_, ok := fangort.LookupEnvironment(FangoHost.Environment(), name)
+	return ok
+}
+
+func EnvValue(name string) string {
+	value, _ := fangort.LookupEnvironment(FangoHost.Environment(), name)
+	return value
+}
+
+func EnvCount() int64 { return int64(len(FangoHost.Environment())) }
+
+func EnvNameAt(index int64) string {
+	name, _ := fangort.EnvironmentEntry(FangoHost.Environment(), index)
+	return name
+}
+
+func EnvValueAt(index int64) string {
+	_, value := fangort.EnvironmentEntry(FangoHost.Environment(), index)
+	return value
 }

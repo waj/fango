@@ -34,6 +34,7 @@ func (h *testHost) ReadInputBytes(count int64) ([]byte, error) {
 func (h *testHost) WriteError(b []byte) error  { return h.WriteOutput(b) }
 func (h *testHost) WriteOutput(b []byte) error { _, err := h.out.Write(b); return err }
 func (*testHost) Arguments() []string          { return []string{"one", "two"} }
+func (*testHost) Environment() []string        { return []string{"FANGO_TEST=yes"} }
 func (*testHost) WorkingDirectory() string     { return "/work" }
 
 func TestWorkerStateScalarsAndHost(t *testing.T) {

@@ -39,6 +39,25 @@ func installHost(t map[string]Spec) {
 		}
 		return rt.Args[index], nil
 	}}
+	t["Process.envDefined"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		_, ok := fangort.LookupEnvironment(rt.Env, args[0].(string))
+		return ok, nil
+	}}
+	t["Process.envValue"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		value, _ := fangort.LookupEnvironment(rt.Env, args[0].(string))
+		return value, nil
+	}}
+	t["Process.envCount"] = Spec{Arity: 1, Eval: func(rt *Runtime, _ []any) (any, error) {
+		return int64(len(rt.Env)), nil
+	}}
+	t["Process.envNameAt"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		name, _ := fangort.EnvironmentEntry(rt.Env, args[0].(int64))
+		return name, nil
+	}}
+	t["Process.envValueAt"] = Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
+		_, value := fangort.EnvironmentEntry(rt.Env, args[0].(int64))
+		return value, nil
+	}}
 	t["Process.exitWith"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return nil, &ExitError{Code: int(args[0].(int64))}
 	}}
