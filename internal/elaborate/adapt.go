@@ -55,6 +55,9 @@ func (el *elab) adaptNominalValue(e core.Expr, want, sourceActual, sourceWant ty
 	if !sourceOK || sourceTo.Unique != to.Unique {
 		sourceTo = to
 	}
+	if app, ok := e.(*core.App); ok && app.CalleeKind == core.Ctor && app.Ctor != nil && len(app.Ctor.Hidden) == 0 && len(app.Args) == len(app.Ctor.Fields) {
+		return el.adaptConstruction(app, to, sourceFrom, sourceTo)
+	}
 	for _, a := range el.valueAdapters {
 		if sameValueABI(a.from, from) && sameValueABI(a.to, to) && types.Equal(a.sourceFrom, sourceFrom) && types.Equal(a.sourceTo, sourceTo) {
 			return el.valueApp(a.ref, e)
@@ -99,4 +102,29 @@ func (el *elab) adaptNominalValue(e core.Expr, want, sourceActual, sourceWant ty
 	body := &core.Case{Scrut: &core.VarRef{Name: param, Local: true, Ty: from}, Bind: matched, Tree: tree, Ty: to}
 	lambda := &core.Lambda{Param: param, Body: body, Ty: fn, ParamCapture: el.ck.Sup.FreshCapture()}
 	return &core.Let{Name: name, Rhs: lambda, Rec: true, Body: el.valueApp(ref, e), Ty: to}
+}
+
+// adaptConstruction rebuilds a constructor literal with each field adapted in
+// place, as a callback argument is. A literal callback then keeps only the
+// rows its body performs, which is what the call site's residual supplies
+// (callbackResidual); a traversal would forward every label of the literal's
+// contextually widened field type through the invocation row.
+func (el *elab) adaptConstruction(app *core.App, to, sourceFrom, sourceTo *types.TCon) core.Expr {
+	ctor := app.Ctor
+	adt := el.ck.ADTs[to.Unique]
+	toSub := adt.ParamSubst(to.Args)
+	sourceFromSub, sourceToSub := adt.ParamSubst(sourceFrom.Args), adt.ParamSubst(sourceTo.Args)
+	args := make([]core.Expr, len(ctor.Fields))
+	fields := make([]types.Type, len(ctor.Fields))
+	for i, field := range ctor.Fields {
+		fields[i] = el.eraseRuntimeKinds(eraseRows(types.SubstRigid(field, toSub)))
+		args[i] = el.adaptFunctionValue(app.Args[i], fields[i], types.SubstRigid(field, sourceFromSub), types.SubstRigid(field, sourceToSub))
+	}
+	var ctorTy types.Type = to
+	for i := len(fields) - 1; i >= 0; i-- {
+		ctorTy = &types.TFun{Arg: fields[i], Ret: ctorTy}
+	}
+	rebuilt := el.ctorCallee(ctor, ctorTy).saturatedApp(args)
+	rebuilt.DebugInfo, rebuilt.Origin, rebuilt.SourceType = app.DebugInfo, app.Origin, app.SourceType
+	return rebuilt
 }

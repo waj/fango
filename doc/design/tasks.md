@@ -108,6 +108,10 @@ the residual row supplied to generic workers. Lists can subtract their element
 callbacks' explicit handled labels while forwarding a shared abstract tail;
 other open or indirect sources retain forwarding.
 This prevents unrelated parent effects from becoming child dependencies.
+Elaboration keeps the narrowed row sufficient by adapting a constructor
+literal field by field, as it adapts a direct callback argument: a literal
+callback reads from its invocation row only the labels its body performs,
+although the list's element type also carries the caller's ambient labels.
 
 The interpreter starts a fresh invocation environment and uses the same scope,
 channel, and evidence-rebuilding runtime as generated Go. Imported capture scopes

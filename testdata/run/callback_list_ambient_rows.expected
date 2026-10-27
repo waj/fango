@@ -1,0 +1,7 @@
+Completed (Ok 42)
+Completed (Ok [1, 2])
+Completed (Err "spawned")
+Ok 3
+performed
+Ok 3
+Completed (Ok 7)

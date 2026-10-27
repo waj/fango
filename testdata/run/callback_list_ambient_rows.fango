@@ -1,0 +1,51 @@
+-- A literal list of callbacks takes the caller's ambient effects (here the
+-- Console that main prints with) into its element type even when no callback
+-- performs them. The call's residual row carries only what the callbacks
+-- perform, so a callback must not read the other ambient labels from it,
+-- including in the tasks race and all start under Fail.attempt.
+import Async exposing (Outcome)
+import Fail exposing (Fail)
+import Result exposing (Result)
+
+effect Stop
+    abort stop : () -> value
+
+sumAll : List (() ->{Fail String | effects} Int) ->{Fail String | effects} Int
+sumAll actions =
+    case actions of
+        [] -> 0
+        [action | rest] -> action() + sumAll rest
+
+main() =
+    raced : Outcome (Result String Int)
+    raced = Async.runOutcome {
+        gate : Async.Channel Int
+        gate = Async.channel 0
+        Fail.attempt {
+            Async.race [ { _ = Async.receive gate; 1 }
+                       , { 42 }
+                       ]
+        }
+    }
+    print raced
+    joined : Outcome (Result String (List Int))
+    joined = Async.runOutcome { Fail.attempt { Async.all [{ 1 }, { 2 }] } }
+    print joined
+    spawned : Outcome (Result String Int)
+    spawned = Async.runOutcome {
+        Fail.attempt {
+            task = Async.spawnAttempt { Fail.fail "spawned"; 1 }
+            Fail.fromResult (Async.await task)
+        }
+    }
+    print spawned
+    print (Fail.attempt { sumAll [{ 1 }, { 2 }] })
+    print (Fail.attempt { sumAll [{ 1 }, { print "performed"; 2 }] })
+    -- An outer abort handler the callbacks never perform is not inherited.
+    handle
+        guarded : Outcome (Result String Int)
+        guarded = Async.runOutcome { Fail.attempt { Async.race [{ 7 }] } }
+        print guarded
+        if False then stop() else ()
+    on
+        stop () -> print "stopped"
