@@ -116,6 +116,7 @@ import FnString
 import HandlerMixedAbortState
 import HandlerMixedDiscipline
 import HandlerMixedTwoEffects
+import HandlerPolymorphicReturn
 import HandlerScopedBinding
 import HandlerSignatureSingle
 import HandlerTwoEffectsSharedState
@@ -424,6 +425,7 @@ main() =
             , HandlerMixedAbortState.tests
             , HandlerMixedDiscipline.tests
             , HandlerMixedTwoEffects.tests
+            , HandlerPolymorphicReturn.tests
             , HandlerScopedBinding.tests
             , HandlerSignatureSingle.tests
             , HandlerTwoEffectsSharedState.tests

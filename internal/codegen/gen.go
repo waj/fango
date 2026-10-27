@@ -1832,7 +1832,10 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 		return callExpr(funcLit(result, stmts))
 	}
 	p := e.Return.Param
-	if g.control == types.Exit && core.ExprControl(e.Body).Resolve(g.control) == types.Exit {
+	// The closure's ABI is the handle expression's own control, which its
+	// consumer expects, not the enclosing function's.
+	overall := core.ExprControl(e).Resolve(g.control)
+	if overall == types.Exit && core.ExprControl(e.Body).Resolve(g.control) == types.Exit {
 		outcome := fmt.Sprintf("t_handle%d", g.tmp)
 		g.tmp++
 		stmts = append(stmts,
@@ -1856,13 +1859,16 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	// The closure declares fangort.Unit, so a Unit body returns the
 	// singleton; only a worker whose Go signature erases the result may
 	// return bare.
-	if g.control != types.Exit && g.isUnit(e.Ty) {
+	oldControl, oldResult := g.control, g.resultType
+	g.control, g.resultType = overall, e.Ty
+	if overall != types.Exit && g.isUnit(e.Ty) {
 		stmts = append(stmts, g.unitValueRetStmts(e.Return.Body)...)
 	} else {
 		stmts = append(stmts, g.retStmtsFor(e.Return.Body, g.isUnit(e.Ty))...)
 	}
+	g.control, g.resultType = oldControl, oldResult
 	result := g.goType(e.Ty)
-	if g.control == types.Exit {
+	if overall == types.Exit {
 		result = g.outcomeType(e.Ty)
 	}
 	return callExpr(funcLit(result, stmts))

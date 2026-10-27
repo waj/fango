@@ -1,0 +1,36 @@
+module HandlerPolymorphicReturn exposing (tests)
+
+import Expect
+import State
+import Test
+
+-- An operation-local type variable is instantiated at two types inside one
+-- handled expression. Under an enclosing effect the function's own result
+-- may carry exits, yet the handle's value keeps its direct type.
+
+effect Echo
+    echo : a -> a
+
+note : String ->{State.State (List String)} ()
+note value = State.put [value | State.get()]
+
+echoed : () ->{State.State (List String)} (Int, String)
+echoed() =
+    note "before"
+    result = handle (echo 7, echo "hello") on
+        echo item -> resume item
+        return pair -> pair
+    note "after"
+    result
+
+observations : () -> ((Int, String), List String)
+observations() =
+    observed = State.run [] echoed
+    (observed.value, List.reverse observed.state)
+
+tests : Test.Test {}
+tests = Test.test "handler_polymorphic_return" {
+    Expect.equal ((7, "hello"), ["before", "after"]) observations()
+}
+
+main() = Test.run tests
