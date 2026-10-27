@@ -124,6 +124,7 @@ import HandlerTwoFailApplications
 import HandlerTwoStateApplications
 import HandlerUnitReturn
 import HandlerUnusedOuterRow
+import HiddenStateNoParams
 import HigherOrder
 import HttpApi
 import HttpBodies
@@ -433,6 +434,7 @@ main() =
             , HandlerTwoStateApplications.tests
             , HandlerUnitReturn.tests
             , HandlerUnusedOuterRow.tests
+            , HiddenStateNoParams.tests
             , HigherOrder.tests
             , HttpApi.tests
             , HttpBodies.tests

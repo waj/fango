@@ -66,13 +66,12 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 				}
 				decls = append(decls, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{Name: ident(name), TypeParams: g.typeParamFields(runtimeParams), Assign: alias, Type: nominal}}})
 				for _, ctor := range adt.Ctors {
-					for _, v := range ctor.Hidden {
-						g.tyParamNames[v.ID] = "any"
-					}
+					restore := g.eraseHidden(ctor.Hidden)
 					var fields []*goast.Field
 					for i, f := range ctor.Fields {
 						fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(fieldName(i))}, Type: g.goType(f)})
 					}
+					restore()
 					for i := range ctor.Hidden {
 						fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(hiddenDescriptorField(i))}, Type: g.descriptorType()})
 					}

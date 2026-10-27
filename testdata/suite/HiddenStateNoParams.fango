@@ -1,0 +1,24 @@
+module HiddenStateNoParams exposing (tests)
+
+import Expect
+import Test
+
+-- Hidden state on a type with no public parameters: the compiled backend
+-- once crashed declaring its constructor.
+type Counter = { count : state, step : state -> state, show : state -> String }
+
+advance : Counter -> Counter
+advance (Counter { count = c, step = s, show = r }) = Counter { count = s c, step = s, show = r }
+
+describe : Counter -> String
+describe (Counter { count = c, show = r }) = r c
+
+numbers = Counter { count = 0, step = { n -> n + 1 }, show = { n -> "#{n}" } }
+letters = Counter { count = "a", step = { t -> t ++ "a" }, show = { t -> t } }
+
+tests : Test.Test {}
+tests = Test.test "hidden_state_no_params" {
+    Expect.equal ["1", "aa"] (List.map { c -> describe (advance c) } [numbers, letters])
+}
+
+main() = Test.run tests
