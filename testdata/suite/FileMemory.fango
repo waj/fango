@@ -21,7 +21,7 @@ fixture() =
         |> Expect.ok
 
 -- A complete custom handler replaces reads and explicitly forwards the rest.
-replaceRead : (() ->{FileSystem | e} a) ->{FileSystem | e} a
+replaceRead : (() ->{FileSystem, e} a) ->{FileSystem, e} a
 replaceRead action =
     handle action() on
         File.openRead path -> resume (File.openRead path)

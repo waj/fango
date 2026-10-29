@@ -25,7 +25,7 @@ b : Int
 1> 5 : Int
 1> 6 : Int
 1> | | Stop : effect
-1> | | | | | runStop : (() ->{Stop | e} a) ->{e} Maybe a
+1> | | | | | runStop : (() ->{Stop, e} a) ->{e} Maybe a
 1> 2> Nothing : Maybe () (left 1 level)
 1> -- NAMING ERROR ----------------------------------------- <repl>
 

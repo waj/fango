@@ -8,13 +8,11 @@ import (
 )
 
 func TestScopedExtensionRoundTrip(t *testing.T) {
-	input := "run : (Reader {s|e} ->{Fail String,s|e} a) ->{e} a\nrun action = action value\n"
-	want := "run : (Reader {s | e} ->{Fail String, s | e} a) ->{e} a\nrun action = action value\n"
+	input := "run : (Reader {#s} ->{Fail String,#s} a) ->{e} a\nrun action = action value\n"
+	want := "run : (Reader {#s} ->{Fail String, #s} a) ->{e} a\nrun action = action value\n"
 	for _, closed := range []bool{false, true} {
 		if closed {
-			input = strings.ReplaceAll(input, "s | e", "s|{}")
 			input = strings.ReplaceAll(input, "->{e}", "->")
-			want = strings.ReplaceAll(want, "s | e", "s | {}")
 			want = strings.ReplaceAll(want, "->{e}", "->")
 		}
 		for range 2 {

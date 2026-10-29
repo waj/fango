@@ -84,7 +84,7 @@ todayIn target = DateTime.date (nowIn target)
 
 -- Answers every reading with the same moment and the value's zone, without
 -- performing IO.
-runFixed : DateTime.DateTime -> (() ->{Clock | e} a) ->{e} a
+runFixed : DateTime.DateTime -> (() ->{Clock, e} a) ->{e} a
 runFixed value action =
     handle action() on
         instant () -> resume (DateTime.toInstant value)
@@ -108,7 +108,7 @@ runFixed value action =
 --     }
 -- result == Ok True
 -- ```
-runOffset : DateTime.DateTime -> (() ->{Clock | e} a) ->{IO | e} a
+runOffset : DateTime.DateTime -> (() ->{Clock, e} a) ->{IO, e} a
 runOffset value action =
     anchor = clockRead()
     initial = DateTime.toInstant value
@@ -148,7 +148,7 @@ runOffset value action =
 --     }
 -- result == Ok ("2026-01-31T23:59:59Z", "2026-02-01T00:00:00Z")
 -- ```
-runStepped : DateTime.DateTime -> Duration.Duration -> (() ->{Clock | e} a) ->{e} a
+runStepped : DateTime.DateTime -> Duration.Duration -> (() ->{Clock, e} a) ->{e} a
 runStepped value step action =
     initial = DateTime.toInstant value
     result = State.runAtomic (Stepped Nothing) {
@@ -171,12 +171,12 @@ stepReading initial step previous =
 
 -- Samples the system clock once per reading, with the machine's zone (see
 -- Time.Zone.system) as the default, detected when the handler is installed.
-runSystem : (() ->{Clock | e} a) ->{IO | e} a
+runSystem : (() ->{Clock, e} a) ->{IO, e} a
 runSystem action = runSystemIn Zone.system() action
 
 -- Samples the system clock once per reading and uses the given default zone.
 -- A host clock outside years 1 through 9999 is a runtime fault, not a value.
-runSystemIn : Zone.Zone -> (() ->{Clock | e} a) ->{IO | e} a
+runSystemIn : Zone.Zone -> (() ->{Clock, e} a) ->{IO, e} a
 runSystemIn target action =
     handle action() on
         instant () ->
@@ -186,7 +186,7 @@ runSystemIn target action =
 
 -- Changes the default zone while readings continue to come from the
 -- enclosing clock.
-withZone : Zone.Zone -> (() ->{Clock | e} a) ->{Clock | e} a
+withZone : Zone.Zone -> (() ->{Clock, e} a) ->{Clock, e} a
 withZone target action =
     handle action() on
         instant () -> resume instant()

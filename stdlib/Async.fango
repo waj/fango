@@ -100,11 +100,11 @@ scopeStatus : Scope -> Int
 scopeStatus = native
 
 -- The checked invocation boundaries retain source rows and sealed result indices.
-launch : Scope -> (Scope ->{IO | effects} Outcome value) ->{effects} RawTask value
+launch : Scope -> (Scope ->{IO, effects} Outcome value) ->{effects} RawTask value
 launch = native
-rebase : (() ->{Async, IO, Cancellation | effects} value) ->{Async, IO, Cancellation | effects} value
+rebase : (() ->{Async, IO, Cancellation, effects} value) ->{Async, IO, Cancellation, effects} value
 rebase = native
-supervise : (() ->{IO | effects} value) ->{IO | effects} value
+supervise : (() ->{IO, effects} value) ->{IO, effects} value
 supervise = native
 
 newCompleted : result -> RawTask result
@@ -184,7 +184,7 @@ runIn owner body =
 --
 -- Async.run { ignore (Async.await (Async.spawn { 7 })) } == ()
 -- ```
-run : (() ->{Async | effects} ()) ->{IO | effects} ()
+run : (() ->{Async, effects} ()) ->{IO, effects} ()
 run body = ignore (runOutcome body)
 
 -- Runs `body` in a new root scope, returning its value or cancellation after
@@ -197,7 +197,7 @@ run body = ignore (runOutcome body)
 --
 -- Async.runOutcome { Async.await (Async.spawn { 42 }) } == Completed 42
 -- ```
-runOutcome : (() ->{Async | effects} value) ->{IO | effects} Outcome value
+runOutcome : (() ->{Async, effects} value) ->{IO, effects} Outcome value
 runOutcome body = supervise { runIn newRoot() body }
 
 -- Runs `body` on the calling task with a shorter lifetime for its children.
@@ -220,7 +220,7 @@ runOutcome body = supervise { runIn newRoot() body }
 --     }
 -- result == Completed 42
 -- ```
-scope : (() ->{Async | effects} value) ->{Async | effects} value
+scope : (() ->{Async, effects} value) ->{Async, effects} value
 scope body =
     owner = active()
     outcome = runIn (childScope owner) body
@@ -250,7 +250,7 @@ scope body =
 --     }
 -- result == Completed [10, 20]
 -- ```
-spawn : (() ->{effects} value) ->{Async | effects} Task value
+spawn : (() ->{effects} value) ->{Async, effects} Task value
 spawn body =
     owner = active()
     Task (launch owner { child -> runIn child { rebase body } })
@@ -266,7 +266,7 @@ spawn body =
 --
 -- Async.runOutcome { Async.await (Async.spawnAttempt { Fail.fail "missing"; 1 }) } == Completed (Err "missing")
 -- ```
-spawnAttempt : (() ->{Fail error | effects} value) ->{Async | effects} Task (Result error value)
+spawnAttempt : (() ->{Fail error, effects} value) ->{Async, effects} Task (Result error value)
 spawnAttempt action = spawn { Fail.attempt action }
 
 -- A task already completed with `value`. An Err is ordinary data.
@@ -408,7 +408,7 @@ removeAt index values =
             if index == 0 then rest
             else [value | removeAt (index - 1) rest]
 
-startActions : Int -> List (() ->{Fail error | effects} value) ->{Async | effects} List (Task (Int, Result error value))
+startActions : Int -> List (() ->{Fail error, effects} value) ->{Async, effects} List (Task (Int, Result error value))
 startActions index actions =
     case actions of
         [] -> []
@@ -416,7 +416,7 @@ startActions index actions =
             task = spawn { (index, Fail.attempt action) }
             [task | startActions (index + 1) rest]
 
-startAttempts : List (() ->{Fail error | effects} value) ->{Async | effects} List (Task (Result error value))
+startAttempts : List (() ->{Fail error, effects} value) ->{Async, effects} List (Task (Result error value))
 startAttempts actions =
     case actions of
         [] -> []
@@ -434,7 +434,7 @@ collectActions tasks values =
                 Just (_, Completed (_, Err error)) -> Err error
                 _ -> cancelCurrent()
 
-allResults : List (() ->{Fail error | effects} value) ->{Async | effects} Result error (List value)
+allResults : List (() ->{Fail error, effects} value) ->{Async, effects} Result error (List value)
 allResults actions = scope { collectActions (startActions 0 actions) Dict.empty }
 
 -- Starts every action concurrently and returns values in input order. Empty
@@ -455,7 +455,7 @@ allResults actions = scope { collectActions (startActions 0 actions) Dict.empty 
 -- result = Async.runOutcome { Fail.attempt { Async.all [{ 1 }, { 2 }] } }
 -- result == Completed (Ok [1, 2])
 -- ```
-all : List (() ->{Fail error | effects} value) ->{Async, Fail error | effects} List value
+all : List (() ->{Fail error, effects} value) ->{Async, Fail error, effects} List value
 all actions = Fail.fromResult (allResults actions)
 
 type BothValue a b = First a | Second b
@@ -473,7 +473,7 @@ type BothValue a b = First a | Second b
 -- result = Async.runOutcome { Fail.attempt { Async.both { 1 } { "two" } } }
 -- result == Completed (Ok (1, "two"))
 -- ```
-both : (() ->{Fail error | effects} a) -> (() ->{Fail error | effects} b) ->{Async, Fail error | effects} (a, b)
+both : (() ->{Fail error, effects} a) -> (() ->{Fail error, effects} b) ->{Async, Fail error, effects} (a, b)
 both left right =
     values = all [{ First left() }, { Second right() }]
     case values of
@@ -511,10 +511,10 @@ both left right =
 --     }
 -- result == Completed (Ok 42)
 -- ```
-race : List (() ->{Fail error | effects} value) ->{Async, Fail error | effects} value
+race : List (() ->{Fail error, effects} value) ->{Async, Fail error, effects} value
 race actions = Fail.fromResult (raceResult actions)
 
-raceResult : List (() ->{Fail error | effects} value) ->{Async | effects} Result error value
+raceResult : List (() ->{Fail error, effects} value) ->{Async, effects} Result error value
 raceResult actions =
     result = scope {
         tasks = startAttempts actions

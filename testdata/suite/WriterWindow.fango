@@ -10,8 +10,7 @@ import Writer exposing (Writer)
 sink : Sink {State.State (List Bytes)}
 sink = Sink { write = { chunk -> State.put [chunk | State.get()] } }
 
-{-# scoped s #-}
-written : Int -> (Writer s ->{s} ()) -> List Bytes
+written : Int -> (Writer {#s} ->{#s} ()) -> List Bytes
 written window action = List.reverse (State.run [] { Writer.over sink window action }).state
 
 tests : Test.Test {}

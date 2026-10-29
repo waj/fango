@@ -47,34 +47,6 @@ main() = ()
 	}
 }
 
-func TestScopedExtensionPreservesGeneratedABI(t *testing.T) {
-	dir := t.TempDir()
-	var previous []byte
-	for _, signature := range []string{
-		"{-# scoped s #-}\nwithText : String -> (Reader.Reader s ->{s} a) ->{e} a",
-		"\nwithText : String -> (Reader.Reader {s | e} ->{s | e} a) ->{e} a",
-	} {
-		writeModuleFile(t, dir, "Cursor.fango", `module Cursor exposing (withText)
-import Bytes
-import Reader
-`+signature+`
-withText text action = Reader.withBytes (Bytes.fromString text) action
-`)
-		path := writeModuleFile(t, dir, "Main.fango", `import Cursor
-import Reader
-import Bytes
-main() = print (Cursor.withText "abc" { reader -> Bytes.length (Reader.readUpTo reader 2) })
-`)
-		got := generatedFile(t, emittedProject(t, path), "modules/Cursor/module.go")
-		if previous != nil && !bytes.Equal(previous, got) {
-			t.Fatalf("row-extension syntax changed generated code:\nold:\n%s\nnew:\n%s", previous, got)
-		}
-		previous = got
-		writeModuleFile(t, dir, "Main.expected", "2\n")
-		runDifferentialCase(t, path, cliRunner(path))
-	}
-}
-
 func TestScopedExtensionExportAndEscape(t *testing.T) {
 	dir := t.TempDir()
 	writeModuleFile(t, dir, "Cursor.fango", `module Cursor exposing (withTextFirst, guarded)
@@ -82,9 +54,9 @@ import Bytes
 import Reader
 import Fail
 import Result
-withTextFirst : (Reader.Reader {s | e} ->{s | e} a) -> String ->{e} a
+withTextFirst : (Reader.Reader {#s} ->{#s} a) -> String ->{e} a
 withTextFirst action text = Reader.withBytes (Bytes.fromString text) action
-guarded : String -> (Reader.Reader {s | e} ->{Fail.Fail String, s | e} a) ->{e} Result.Result String a
+guarded : String -> (Reader.Reader {#s} ->{Fail.Fail String, #s} a) ->{e} Result.Result String a
 guarded text action = Reader.withBytes (Bytes.fromString text) { reader -> Fail.attempt { action reader } }
 `)
 	path := writeModuleFile(t, dir, "Main.fango", `import Cursor
@@ -122,20 +94,16 @@ func TestScopedExportSurvivesCache(t *testing.T) {
 import Bytes
 import Reader
 
-{-# scoped s #-}
-withText : String -> (Reader.Reader s ->{s} a) ->{e} a
+withText : String -> (Reader.Reader {#s} ->{#s} a) ->{e} a
 withText text action = Reader.withBytes (Bytes.fromString text) action
 
-{-# scoped s #-}
-withNumber : (Int ->{s} a) ->{e} a
+withNumber : (Int ->{#s} a) ->{e} a
 withNumber action = action 1
 
-{-# scoped s #-}
-withTextFirst : (Reader.Reader s ->{s} a) -> String ->{e} a
+withTextFirst : (Reader.Reader {#s} ->{#s} a) -> String ->{e} a
 withTextFirst action text = Reader.withBytes (Bytes.fromString text) action
 
-{-# scoped s #-}
-withTextAndAction : String -> (Reader.Reader s ->{s} Int) -> (() ->{e} a) ->{e} (Int, a)
+withTextAndAction : String -> (Reader.Reader {#s} ->{#s} Int) -> (() ->{e} a) ->{e} (Int, a)
 withTextAndAction text callback action =
     value = Reader.withBytes (Bytes.fromString text) callback
     (value, action())
@@ -213,12 +181,10 @@ import Http
 import Http.Client as Client
 import Http.Server as Server
 
-{-# scoped s #-}
-withTextFirst : (Reader.Reader s ->{s} a) -> String ->{e} a
+withTextFirst : (Reader.Reader {#s} ->{#s} a) -> String ->{e} a
 withTextFirst callback text = Reader.withBytes (Bytes.fromString text) callback
 
-{-# scoped s #-}
-withTextAndAction : (Reader.Reader s ->{s} ()) -> (() ->{e} a) ->{e} a
+withTextAndAction : (Reader.Reader {#s} ->{#s} ()) -> (() ->{e} a) ->{e} a
 withTextAndAction callback action =
     Reader.withBytes (Bytes.fromString "abc") callback
     action()

@@ -1,4 +1,4 @@
-type Foo eff = Foo (() ->{IO | eff} ())
+type Foo eff = Foo (() ->{IO, eff} ())
 
 make action = Foo action
 

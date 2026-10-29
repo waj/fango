@@ -86,7 +86,7 @@ func (el *elab) residualArgument(actual, explicit types.Row) *core.RowArgument {
 			continue
 		}
 		// A label an open callee row lists explicitly is still forwarded:
-		// rows hold distinct applications, so `{Out | e}` instantiated where
+		// rows hold distinct applications, so `{Out, e}` instantiated where
 		// e also holds Out shows Out once, and a callback typed with e must
 		// still find it in the forwarded row. The extra binding is the same
 		// evidence the explicit parameter carries.

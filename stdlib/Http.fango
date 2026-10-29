@@ -88,12 +88,12 @@ abortBody reason = invalid (BodyAborted reason)
 -- file is opened only while the body is written; a file that changed size in
 -- between fails the length check. The size query performs `FileSystem`;
 -- writing this streaming body also performs `FileSystem`.
-fileBody : String ->{File.FileSystem, Fail IO.Error} Body {File.FileSystem, Fail IO.Error | e}
+fileBody : String ->{File.FileSystem, Fail IO.Error} Body {File.FileSystem, Fail IO.Error, e}
 fileBody path =
     length = fromResult (File.size path)
     SizedBody length { output -> File.withFile path { file -> copyFile file output } }
 
-copyFile : File.Handle -> Writer {File.FileSystem, Fail IO.Error | e} ->{File.FileSystem, Fail IO.Error | e} ()
+copyFile : File.Handle -> Writer {File.FileSystem, Fail IO.Error, e} ->{File.FileSystem, Fail IO.Error, e} ()
 copyFile file output =
     case File.readBytes file 65536 of
         Just bytes ->

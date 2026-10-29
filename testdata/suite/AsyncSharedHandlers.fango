@@ -20,7 +20,7 @@ withCounter body =
         next () -> resume count with count + 1
         return value -> (value, count)
 
-runStrings : (() ->{Async.Async, IO | e} a) ->{IO | e} Outcome a
+runStrings : (() ->{Async.Async, IO, e} a) ->{IO, e} Outcome a
 runStrings body = Async.runOutcome body
 
 parallel body = Async.await (Async.spawn body)

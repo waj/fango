@@ -35,7 +35,7 @@ alone does not establish covariance. Definition annotations compare the count
 and nominal names of known arrow effects before annotation equality can
 populate inferred rows; type constraints check their arguments.
 
-For `{L | e} ⊆ ρ` with rigid `e` and open `ρ`, include labels immediately but
+For `{L, e} ⊆ ρ` with rigid `e` and open `ρ`, include labels immediately but
 defer the bare tail until another constraint closes `ρ`, or solve it last.
 Binding `ρ` to the rigid tail too early would make statement order decide whether
 later effects fit. Diagnostics retain constraint order, independent of solve order.
@@ -82,15 +82,16 @@ effects' type arguments.
 Recursive scoped runners and first-class runner values are rejected; ordinary
 rank-one schemes cannot preserve this callback contract on those paths.
 
-The source row form `{s | e}` selects this same contract without a pragma.
-The parser records `s` and its ambient name separately from ordinary row tails;
-annotation resolution accepts it only in a named runner's scoped annotation.
-Every occurrence normalizes to the existing aggregate scoped row variable.
-The ambient name must identify the final runner arrow's residual tail; the
-existing lower-bound constraint includes that arrow's fixed effects as well.
-This is a restricted binder, not row-union inference or a rule about arbitrary
-callback-local variables. No additional runtime representation is introduced.
-Legacy pragma declarations remain supported, including closed-row runners.
+In source the binder is the scoped row variable `#s`, the final component of
+an effect row. The parser marks the row's tail as scoped and records the
+declaration's one binder, rejecting a second scoped name or an unprefixed use
+of the same name; annotation resolution accepts the prefix only in a named
+runner's annotation. Every occurrence normalizes to the existing aggregate
+scoped row variable. No ambient row is written beside it: the call's lower
+bound comes from the runner's final arrow, its fixed effects and its tail
+alike. This is a restricted binder, not row-union inference or a rule about
+arbitrary callback-local variables. No additional runtime representation is
+introduced.
 
 Each saturated source call allocates a rigid permission label from the session
 supply and extends the runner's residual row with it. Distinct allocations
@@ -103,7 +104,7 @@ local-state or failure requirement.
 
 In a scoped group the solver applies each scoped callback's upper bound before
 the body's lower bounds, as it does fixed-tail bounds. A use of the residual
-row inside the callback, such as a reader operation's `{s | e}`, is also a
+row inside the callback, such as a reader operation's `{#s}`, is also a
 lower bound of the body row. Solved first, row equality would hand the
 callback's granted labels to the flexible ambient tail, and so to an
 unannotated caller, although the runner handles them.

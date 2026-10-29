@@ -25,7 +25,7 @@ job : Job ->{Database, Http} Int
 job input = case input of
     Fetch number -> lookup number + request number
 
-interpret : Config -> (() ->{Database, Http | e} a) ->{e} a
+interpret : Config -> (() ->{Database, Http, e} a) ->{e} a
 interpret config action =
     handle
         handle action() on
@@ -33,7 +33,7 @@ interpret config action =
     on
         request number -> resume (config.http + number)
 
-serial : Config -> (() ->{Scheduling | e} a) ->{e} a
+serial : Config -> (() ->{Scheduling, e} a) ->{e} a
 serial config action =
     handle action() on
         submit input -> resume (Completed (interpret config { _ -> job input }))
@@ -42,7 +42,7 @@ serial config action =
                 Running _ -> -999
         )
 
-parallel : Config -> (() ->{Scheduling, IO | e} a) ->{IO | e} Async.Outcome a
+parallel : Config -> (() ->{Scheduling, IO, e} a) ->{IO, e} Async.Outcome a
 parallel config action = Async.runOutcome { _ ->
     handle action() on
         submit input -> resume (Running (interpret config { _ -> Async.spawn { _ -> job input } }))

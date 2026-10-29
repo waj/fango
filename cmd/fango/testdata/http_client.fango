@@ -39,10 +39,10 @@ requests file =
             |> Result.map { _ -> "" }
     )
 
-attemptIO : (() ->{Fail IO.Error | e} a) ->{e} Result IO.Error a
+attemptIO : (() ->{Fail IO.Error, e} a) ->{e} Result IO.Error a
 attemptIO action = Fail.attempt action
 
-attemptClient : (() ->{Fail Client.Error | e} a) ->{e} Result Client.Error a
+attemptClient : (() ->{Fail Client.Error, e} a) ->{e} Result Client.Error a
 attemptClient action = Fail.attempt action
 
 main() =

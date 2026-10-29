@@ -6,7 +6,7 @@ pure = Source ({ _ -> "" })
 listed : Source {Console, Fail String}
 listed = Source ({ _ -> "" })
 
-open : Source {Console | e}
+open : Source {Console, e}
 open = Source ({ _ -> "" })
 
 nested : Maybe (Source {Console})

@@ -87,7 +87,7 @@ one top-level name, such as `` `List.map` ``, and
 `Meta.declaredType : Code -> TypeRepr` reflects that declaration's type.
 Its quantified and row variables stay variables: `Meta.isVar` recognizes them
 and `Meta.sameType` relates two occurrences of one variable, so a generator can
-check a shape such as `(() ->{E | e} a) ->{IO | e} a`. Class constraints are
+check a shape such as `(() ->{E, e} a) ->{IO, e} a`. Class constraints are
 not reflected. Schemas and effect attributes in the result are visible as they
 are where the quote was written. `declaredType` reports `COMPILE-TIME FAILURE`
 for code that is not a reference, and for a declaration whose type is still

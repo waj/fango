@@ -7,8 +7,7 @@ import Test
 
 type Reply e = { render : () ->{e} Bytes.Bytes }
 
-{-# scoped s #-}
-run : (Reader.Reader s ->{s} Reply s) -> Bytes.Bytes
+run : (Reader.Reader {#s} ->{#s} Reply {#s}) -> Bytes.Bytes
 run handler =
     Reader.withBytes (Bytes.fromString "abc") { reader ->
         reply = handler reader

@@ -11,7 +11,7 @@ effect Cursor item
     advance : () -> ()
     abort stop : String -> value
 
-runCursor : List Int -> (() ->{Cursor Int | e} a) ->{e} Result String (a, List Int)
+runCursor : List Int -> (() ->{Cursor Int, e} a) ->{e} Result String (a, List Int)
 runCursor input action =
     handle action() with rest = input on
         peek () ->
@@ -25,13 +25,13 @@ runCursor input action =
         stop reason -> Err (reason ++ " with " ++ show (List.length rest) ++ " left")
         return value -> Ok (value, rest)
 
-next : () ->{Cursor item | e} item
+next : () ->{Cursor item, e} item
 next () =
     case peek () of
         Nothing -> stop "end of input"
         Just x -> advance (); x
 
-sumTwo : () ->{Cursor Int | e} Int
+sumTwo : () ->{Cursor Int, e} Int
 sumTwo () = next () + next ()
 
 -- A partial abort is a pure value until saturated.

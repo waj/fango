@@ -79,7 +79,7 @@ variablesFrom index count found =
         variablesFrom (index + 1) count (Dict.insert (envNameAt index) (envValueAt index) found)
 
 -- Answers every operation from the real process.
-runSystem : (() ->{Environment | e} a) ->{IO | e} a
+runSystem : (() ->{Environment, e} a) ->{IO, e} a
 runSystem action =
     handle action() on
         args () -> resume (argsFrom 0 argCount())
@@ -102,7 +102,7 @@ runSystem action =
 -- Process.runWith [] home { Process.env "PATH" } == Nothing
 -- Process.runWith [] home { Dict.size (Process.variables ()) } == 1
 -- ```
-runWith : List String -> Dict String String -> (() ->{Environment | e} a) ->{e} a
+runWith : List String -> Dict String String -> (() ->{Environment, e} a) ->{e} a
 runWith givenArgs givenVariables action =
     handle action() on
         args () -> resume givenArgs

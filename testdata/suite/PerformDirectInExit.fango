@@ -15,7 +15,7 @@ effect Count
     bump : Int -> ()
     readTotal : () -> Int
 
-withValue : Int -> (Int ->{Fail String | e} a) ->{Fail String | e} a
+withValue : Int -> (Int ->{Fail String, e} a) ->{Fail String, e} a
 withValue x action = action x
 
 counted : Int ->{Count, Fail String} Int

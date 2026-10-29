@@ -247,16 +247,16 @@ type TFunExpr struct {
 }
 
 // EffRow is the surface effect row on an arrow: `->{Console}`,
-// `->{Db, Fail String}`, or `->{Console | e}` with an explicit open tail.
+// `->{Db, Fail String}`, or `->{Console, e}` with an explicit open tail.
 type EffRow struct {
 	Labels []EffLabelExpr
 	Tail   string      // "" when closed; a lowercase row variable otherwise
-	TailSp source.Span // zero when Tail is ""
-	// ScopeBase makes Tail a callback-local extension: {Tail | ScopeBase}.
-	// "{}" denotes a closed outer row; otherwise it is the ambient tail name.
-	// It is normalized to the existing scoped row contract during inference.
-	ScopeBase string
-	Sp        source.Span // the `{` through the `}`
+	TailSp source.Span // zero when Tail is ""; covers the `#` of a scoped tail
+	// Scoped marks Tail as written `#s`: the declaration's scoped row
+	// variable, which inference binds as the restricted callback-local row of
+	// a scoped runner. Tail holds the name without the prefix.
+	Scoped bool
+	Sp     source.Span // the `{` through the `}`
 }
 
 // EffLabelExpr is one label in a surface row: an effect name plus type
@@ -617,8 +617,7 @@ func (e *MetaValue) Span() source.Span { return e.Sp }
 type Decl interface{ isDecl() }
 
 type ValueDecl struct {
-	ScopedRow  string // declaration-local scoped callback row binder
-	ScopedBase string // nonempty when the binder comes from {s | e} syntax
+	ScopedRow string // the declaration's scoped row variable, written `#s`
 
 	Name      string
 	NameSpan  source.Span

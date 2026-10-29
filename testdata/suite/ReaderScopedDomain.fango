@@ -33,8 +33,7 @@ outerReader = Reader.withBytes (Bytes.fromString "old") { outer ->
 }
 
 -- A library wrapper preserves the scoped callback contract across calls.
-{-# scoped s #-}
-withText : String -> (Reader.Reader s ->{s} a) ->{e} a
+withText : String -> (Reader.Reader {#s} ->{#s} a) ->{e} a
 withText text action = Reader.withBytes (Bytes.fromString text) action
 
 readAll : Reader.Reader e ->{e} String

@@ -83,9 +83,6 @@ func dumpDecl(d Decl) string {
 	case *ValueDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(def %s", d.Name)
-		if d.ScopedRow != "" && d.ScopedBase == "" {
-			fmt.Fprintf(&b, " (pragma scoped %s)", d.ScopedRow)
-		}
 		if p := dumpPatternParams(d.Params); p != "" && len(d.Equations) == 0 {
 			fmt.Fprintf(&b, " %s", p)
 		}
@@ -298,11 +295,10 @@ func dumpEffRow(r *EffRow) string {
 		}
 		b.WriteString(")")
 	}
-	if r.Tail != "" {
+	if r.Scoped {
+		fmt.Fprintf(&b, " (scoped %s)", r.Tail)
+	} else if r.Tail != "" {
 		fmt.Fprintf(&b, " (tail %s)", r.Tail)
-	}
-	if r.ScopeBase != "" {
-		fmt.Fprintf(&b, " (scope-base %s)", r.ScopeBase)
 	}
 	b.WriteString(")")
 	return b.String()

@@ -35,7 +35,7 @@ Directions the design leaves room for, none committed:
   the `modules.Provider` seam the [tooling roadmap](roadmap-tooling.md)
   already wants for the language server. Tests stay in the same source root
   as the code they import, since there is only one root.
-- **Fuzz tests.** `fuzz : Fuzzer a -> String -> (a ->{Expect | e} ()) -> Test e`
+- **Fuzz tests.** `fuzz : Fuzzer a -> String -> (a ->{Expect, e} ()) -> Test e`
   over generators built on the `Random` effect, with shrinking. The seed
   reported on failure reproduces the run under `Random.runSeeded`. The
   private constructors of `Test` leave room for the case.

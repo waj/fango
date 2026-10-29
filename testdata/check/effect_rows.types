@@ -1,8 +1,8 @@
 delay : (() ->{e} a) -> () ->{e} a
 pure : Num a => () -> a
 map : (a ->{e} b) -> Chain a ->{e} Chain b
-plainFirst : (() ->{e} ()) -> (() ->{Note | e} ()) ->{Note | e} ()
-riskyFirst : (() ->{e} ()) -> (() ->{Note | e} ()) ->{Note | e} ()
+plainFirst : (() ->{e} ()) -> (() ->{Note, e} ()) ->{Note, e} ()
+riskyFirst : (() ->{e} ()) -> (() ->{Note, e} ()) ->{Note, e} ()
 quiet : Source {}
 noted : Source {Note}
-tailed : Source {Note | e}
+tailed : Source {Note, e}

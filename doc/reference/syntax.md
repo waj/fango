@@ -12,8 +12,11 @@ pragma rather than a comment, so a block comment whose first character is `#`
 must be written `{- #`.
 
 `#[` opens a [typed attribute group](metaprogramming.md#attributes), closed by
-`]`. Its contents use ordinary expression tokens; `#` elsewhere remains an
-operator character.
+`]`. Its contents use ordinary expression tokens. Inside an
+[effect row](effects.md), `#` immediately followed by a lowercase name, as in
+`{Console, #s}`, is a [scoped row variable](functions.md#scoped-callbacks); a
+space or a longer operator such as `##` there is a syntax error. `#` elsewhere
+remains an operator character.
 
 Lowercase names identify values, parameters, type variables, operations, and
 effect-row tails. Uppercase names identify types, effects, and constructors.

@@ -13,8 +13,7 @@ failInner () = Fail.fail Inner
 
 -- The callback's row holds `Fail Outer` from the runner and `Fail Inner` from
 -- its body; the inner attempt handles the one its result names.
-{-# scoped s #-}
-serve : (Int ->{s} Int) ->{Fail Outer | e} Int
+serve : (Int ->{#s} Int) ->{Fail Outer, e} Int
 serve handler = handler 1
 
 tests : Test.Test {}

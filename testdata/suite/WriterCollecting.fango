@@ -24,7 +24,7 @@ trace = Sink { write = { chunk -> State.put [chunk | State.get()] } }
 -- A body that aborts never reaches the return clause, so nothing is flushed
 -- and no reader receives a truncated message. A caller that wants that
 -- guarantee for a whole body writes into `collecting` instead.
-partial : Bool -> Writer e ->{Fail String | e} ()
+partial : Bool -> Writer e ->{Fail String, e} ()
 partial ok output =
     Writer.writeString output "head"
     if ok then () else fail "stopped"

@@ -2,7 +2,7 @@ effect Fail error
     abort fail : error -> value
 type Problem = Problem Int
 type Outage = Outage String
-describe : (() ->{Fail Problem, Fail Outage | e} String) ->{e} String
+describe : (() ->{Fail Problem, Fail Outage, e} String) ->{e} String
 describe action =
     handle action() on
         fail : Problem -> a

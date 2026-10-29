@@ -52,7 +52,7 @@ entropySeed = native
 -- roll >= 1 && roll <= 6
 -- Random.runSeeded 7 { Random.int 1 6 } == roll
 -- ```
-runSeeded : Int -> (() ->{Random | e} a) ->{e} a
+runSeeded : Int -> (() ->{Random, e} a) ->{e} a
 runSeeded seed action =
     result = State.runAtomic (Seed seed) {
         handle action() on
@@ -72,5 +72,5 @@ draw state lo hi = case state of
 
 -- `runSeeded` from a seed drawn from system entropy, so every run draws a
 -- fresh sequence.
-runSystem : (() ->{Random | e} a) ->{IO | e} a
+runSystem : (() ->{Random, e} a) ->{IO, e} a
 runSystem action = runSeeded entropySeed() action

@@ -12,12 +12,12 @@ read source = case source of
 withSource : Source a e -> (Source a e ->{e} b) ->{e} b
 withSource source consumer = consumer source
 
-readAndObserve : Source a e ->{State.State (List Observation) | e} a
+readAndObserve : Source a e ->{State.State (List Observation), e} a
 readAndObserve source =
     recordText "read"
     read source
 
-observed : Source a e ->{State.State (List Observation) | e} a
+observed : Source a e ->{State.State (List Observation), e} a
 observed source = withSource source { cursor -> readAndObserve cursor }
 
 type Observation = Text String | Integer Int deriving (Eq, Show)

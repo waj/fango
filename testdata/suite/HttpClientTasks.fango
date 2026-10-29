@@ -56,7 +56,7 @@ waitFor cancel = if Net.isCancelled cancel then Err closedConnection else waitFo
 
 -- A network whose connections accept writes and never answer: a read waits
 -- for its task's cancellation.
-silent : (() ->{Net.Network | e} a) ->{e} a
+silent : (() ->{Net.Network, e} a) ->{e} a
 silent action = Net.withProvider { provider ->
     handle action() on
         Net.listen _ -> resume (Ok (Net.listenerFor provider 0))

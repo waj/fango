@@ -423,22 +423,22 @@ func TestResourceMarkerStaysWithDeclaration(t *testing.T) {
 	}
 }
 
-func TestScopedMarkerStaysWithDeclaration(t *testing.T) {
-	for _, src := range []string{
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action=action 0\n",
-		"{-# scoped s #-}\n-- callback comment\nrun : (Int ->{s} a) ->{e} a\nrun = native\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action =\n    -- body comment\n    action 0\n",
+func TestScopedRowsFormat(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		{"run : (Int ->{#s} a) ->{e} a\nrun action=action 0\n", "run : (Int ->{#s} a) ->{e} a\nrun action = action 0\n"},
+		{"-- callback comment\nrun : (Reader {  #s } ->{Fail String,#s} a) ->{Async ,e} a\nrun = native\n", "-- callback comment\nrun : (Reader {#s} ->{Fail String, #s} a) ->{Async, e} a\nrun = native\n"},
+		{"run : (Reader {#s} ->{State (Source {IO,e}),  #s} a) ->{e} a\nrun action =\n    -- body comment\n    action 0\n", "run : (Reader {#s} ->{State (Source {IO, e}), #s} a) ->{e} a\nrun action =\n    -- body comment\n    action 0\n"},
 	} {
-		out, errs := Source(source.NewFile("scoped.fango", []byte(src)))
+		out, errs := Source(source.NewFile("scoped.fango", []byte(c.src)))
 		if len(errs) > 0 {
 			t.Fatal(errs)
+		}
+		if string(out) != c.want {
+			t.Fatalf("formatted %q, want %q", out, c.want)
 		}
 		again, errs := Source(source.NewFile("scoped.fango", out))
 		if len(errs) > 0 || !bytes.Equal(out, again) {
 			t.Fatalf("not idempotent: %s; %v", out, errs)
-		}
-		if strings.Count(string(out), "{-# scoped s #-}") != 1 {
-			t.Fatalf("marker lost or duplicated: %s", out)
 		}
 	}
 }

@@ -37,14 +37,14 @@ stream _ request = Http.Server.Response
 
 -- A path with a malformed escape raises Protocol, which the server answers
 -- with 400.
-route : Http.Server.Request {Protocol | e} ->{Protocol | e} Http.Server.Response {Protocol | e}
+route : Http.Server.Request {Protocol, e} ->{Protocol, e} Http.Server.Response {Protocol, e}
 route request =
     helloRoute = Route.Route { method = "GET", pattern = "/hello/:name", handler = hello }
     echoRoute = Route.Route { method = "POST", pattern = "/echo", handler = echo }
     streamRoute = Route.Route { method = "POST", pattern = "/stream", handler = stream }
     Route.dispatch [helloRoute, echoRoute, streamRoute] missing request
 
-app : Http.Server.Request {Protocol | e} ->{Protocol | e} Http.Server.Response {Protocol | e}
+app : Http.Server.Request {Protocol, e} ->{Protocol, e} Http.Server.Response {Protocol, e}
 app request = Http.GZip.wrap route request
 
 main : () ->{IO, Console, Net.Network, Process.Environment} ()

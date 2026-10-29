@@ -7,8 +7,14 @@ Per-arrow effects, row compatibility, handlers, aborts, and resume discipline.
 Effects appear on function arrows and, as a type argument, at a
 [row-kinded parameter](functions.md#row-kinded-parameters).
 `A ->{IO} B` applies an `A` argument,
-performs `IO`, and returns a `B`. `{Console, Fail String | e}` is a row with two
-known labels and an open tail; `{e}` is the compact open-tail spelling. Pure
+performs `IO`, and returns a `B`. `{Console, Fail String, e}` is a row with two
+known labels and an open tail; `{e}` is a row that is only a tail. Row
+components are separated by commas: effect labels first, then at most one
+final component, an ordinary tail `e` or a
+[scoped row variable](functions.md#scoped-callbacks) `#s`, which only a
+scoped runner's callback may use. A label's type arguments follow its name, so
+in `{State s, e}` the `s` is an argument of `State` and `e` is the tail.
+Trailing commas and any other order are syntax errors. Pure
 arrows omit a row, so `A ->{} B` is rejected as redundant. The spaced
 `A -> {IO} B` spelling is equivalent to `A ->{IO} B`.
 
@@ -76,7 +82,7 @@ argument, typically a pattern on the payload or a helper whose callback
 parameter names one application:
 
 ```fango
-printStrings : (() ->{Put String, IO | e} a) ->{IO | e} a
+printStrings : (() ->{Put String, IO, e} a) ->{IO, e} a
 printStrings action = handle action() on
     put text -> print text; resume ()
 ```
@@ -95,7 +101,7 @@ A body may call arrows that carry the bare tail alongside arrows that add
 labels to it, in either order:
 
 ```fango
-using : (() ->{e} a) -> (a ->{Fail String | e} ()) ->{Fail String | e} ()
+using : (() ->{e} a) -> (a ->{Fail String, e} ()) ->{Fail String, e} ()
 using acquire action =
     resource = acquire()
     action resource
@@ -105,7 +111,7 @@ Calling `acquire`, whose row is the bare tail `{e}`, does not stop the
 surrounding row from gaining `Fail String` from the later call, and swapping
 two such statements never changes whether a definition is accepted. The
 annotated row may also carry effects a callee does not perform, so a
-`{IO, Fail String | e}` body may call a `{Fail String | e}` argument and
+`{IO, Fail String, e}` body may call a `{Fail String, e}` argument and
 `print` besides.
 
 A shared row variable describes the permitted combined effects. Each callback
@@ -127,7 +133,7 @@ binding or other uses.
 The rule also applies to stored callbacks and covariant effect-indexed values.
 For example, `type Test e = Test (() ->{e} ())` permits pure and IO tests in
 one list, in either order. Reading one back widens the same way: a record
-field declared `() ->{Cell | e} Int` may be projected and called in a body
+field declared `() ->{Cell, e} Int` may be projected and called in a body
 that performs more than that arrow names. Open row parameters can also widen:
 a consumer of an effect-indexed source may add its own effects to the shared
 row. The enclosing annotation must permit those effects.

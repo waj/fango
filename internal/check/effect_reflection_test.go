@@ -13,7 +13,7 @@ func effectLibrary(exposing string) string {
 		"#[Options.Label \"service\"]\n" +
 		"effect Service\n" +
 		"    ask : () -> Int\n" +
-		"runService : (() ->{Service | e} a) ->{e} a\n" +
+		"runService : (() ->{Service, e} a) ->{e} a\n" +
 		"runService action =\n" +
 		"    handle action() on\n" +
 		"        ask () -> resume 7\n"

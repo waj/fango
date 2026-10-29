@@ -1,5 +1,5 @@
 -- A runner whose clause performs an effect its callback performs too. Rows
--- hold distinct applications, so `{Out | e}` with Out also in e shows Out
+-- hold distinct applications, so `{Out, e}` with Out also in e shows Out
 -- once, and the callback still finds Out's evidence through e.
 effect Out
     out : String -> ()
@@ -7,14 +7,14 @@ effect Out
 effect Log
     log : String -> ()
 
-runOut : (() ->{Out | e} a) ->{Console | e} a
+runOut : (() ->{Out, e} a) ->{Console, e} a
 runOut action =
     handle action() on
         out text ->
             print text
             resume ()
 
-runLog : (() ->{Log | e} a) ->{Out | e} a
+runLog : (() ->{Log, e} a) ->{Out, e} a
 runLog action =
     handle action() on
         log line ->

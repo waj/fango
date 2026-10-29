@@ -1,4 +1,4 @@
-    {Fail String, STM | e}
+    {Fail String, STM, e}
 
 but only these effects are available here:
 

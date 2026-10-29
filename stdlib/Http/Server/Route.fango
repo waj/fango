@@ -146,7 +146,7 @@ dispatchHelp routes fallback request actual allowed =
 -- an `Allow` header; when nothing matches, `fallback` answers. Path segments
 -- are percent-decoded first; a malformed escape, invalid UTF-8, or an
 -- encoded `/` or `\` fails with `Malformed`.
-dispatch : List (Route e) -> (Request e ->{e} Response e) -> Request e ->{Protocol | e} Response e
+dispatch : List (Route e) -> (Request e ->{e} Response e) -> Request e ->{Protocol, e} Response e
 dispatch routes fallback request =
     actual = segments (path request.target)
     dispatchHelp routes fallback request actual []

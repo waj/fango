@@ -15,14 +15,14 @@ effect Note
     abort stop : String -> a
 
 -- Statement order must not decide whether the surrounding row can still take
--- a label: both bodies call a `{e}` function and a `{Note | e}` one, and both
+-- a label: both bodies call a `{e}` function and a `{Note, e}` one, and both
 -- infer the same row.
-plainFirst : (() ->{e} ()) -> (() ->{Note | e} ()) ->{Note | e} ()
+plainFirst : (() ->{e} ()) -> (() ->{Note, e} ()) ->{Note, e} ()
 plainFirst plain risky =
     plain()
     risky()
 
-riskyFirst : (() ->{e} ()) -> (() ->{Note | e} ()) ->{Note | e} ()
+riskyFirst : (() ->{e} ()) -> (() ->{Note, e} ()) ->{Note, e} ()
 riskyFirst plain risky =
     risky()
     plain()
@@ -37,5 +37,5 @@ quiet = { pull = { _ -> 0 } }
 noted : Source {Note}
 noted = { pull = { _ -> stop "no" } }
 
-tailed : Source {Note | e}
+tailed : Source {Note, e}
 tailed = { pull = { _ -> stop "no" } }

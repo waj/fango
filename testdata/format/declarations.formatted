@@ -51,5 +51,5 @@ pureFn = Pure Nothing
 listedFn : Fn {Console, Fail String}
 listedFn = Pure Nothing
 
-openFn : Fn {Console | e}
+openFn : Fn {Console, e}
 openFn = Pure Nothing

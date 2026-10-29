@@ -12,7 +12,7 @@ import Url
 import Writer
 
 -- The handler also performs `Fail Net.Error`, so this names the error it takes.
-attemptClient : (() ->{Fail Client.Error | e} a) ->{e} Result Client.Error a
+attemptClient : (() ->{Fail Client.Error, e} a) ->{e} Result Client.Error a
 attemptClient action = Fail.attempt action
 
 -- Forwards each request body to the upstream URL as it arrives, and answers

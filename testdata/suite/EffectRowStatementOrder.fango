@@ -13,7 +13,7 @@ import Test
 effect Exception ex
     abort throw : ex -> a
 
-finally : (() ->{Exception ex | e} a) -> (() ->{e} ()) ->{Exception ex | e} a
+finally : (() ->{Exception ex, e} a) -> (() ->{e} ()) ->{Exception ex, e} a
 finally action cleanup =
     handle action() on
         throw msg ->
@@ -23,12 +23,12 @@ finally action cleanup =
             cleanup()
             result
 
-bracket : (() ->{e} a) -> (a ->{Exception ex | e} b) -> (a ->{e} ()) ->{Exception ex | e} b
+bracket : (() ->{e} a) -> (a ->{Exception ex, e} b) -> (a ->{e} ()) ->{Exception ex, e} b
 bracket acquire action release =
     resource = acquire()
     finally { _ -> action resource } { _ -> release resource }
 
-catch : (() ->{Exception ex | e} a) -> (ex ->{e} a) ->{e} a
+catch : (() ->{Exception ex, e} a) -> (ex ->{e} a) ->{e} a
 catch action handler =
     handle action() on
         throw msg -> handler msg
@@ -41,8 +41,8 @@ open name =
 close name = recordText ("close " ++ name)
 
 -- The surrounding row may also hold more than a callee's: `report` performs
--- `IO` of its own while calling back into a `{Exception ex | e}` function.
-report : (() ->{Exception ex | e} ()) -> (() ->{e} ()) ->{IO, Exception ex | e} ()
+-- `IO` of its own while calling back into a `{Exception ex, e}` function.
+report : (() ->{Exception ex, e} ()) -> (() ->{e} ()) ->{IO, Exception ex, e} ()
 report risky plain =
     plain()
     risky()

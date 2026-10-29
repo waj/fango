@@ -575,7 +575,7 @@ import Runtime.Entry
 effect Greeter
     greet : String -> String
 
-runGreeter : (() ->{Greeter | e} a) ->{e} a
+runGreeter : (() ->{Greeter, e} a) ->{e} a
 runGreeter action =
     handle action() on
         greet name -> resume ("Hello, " ++ name)

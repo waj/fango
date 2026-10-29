@@ -13,7 +13,7 @@ effect Fail error
 
 -- A stateless mixed handler: `emit` resumes after printing through the
 -- enclosing observation effect, `fail` aborts with the common answer.
-logged : (() ->{Emit, Fail String, State.State (List Observation) | e} a) ->{State.State (List Observation) | e} Result String a
+logged : (() ->{Emit, Fail String, State.State (List Observation), e} a) ->{State.State (List Observation), e} Result String a
 logged action =
     handle action() on
         emit text -> recordTrace ("log: " ++ text); resume ()
@@ -24,7 +24,7 @@ logged action =
 
 -- A clause never reaches a sibling application: this `emit` clause's `fail`
 -- goes to the caller's `Fail String` handler, not to the `Fail Int` beside it.
-escalating : (() ->{Emit, Fail Int | e} a) ->{Fail String | e} Result String a
+escalating : (() ->{Emit, Fail Int, e} a) ->{Fail String, e} Result String a
 escalating action =
     handle action() on
         emit text -> if text == "boom" then fail ("escalated " ++ text) else resume ()

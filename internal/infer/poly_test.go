@@ -41,7 +41,7 @@ func checkPoly(t *testing.T, src string) (*infer.Checker, []infer.DeclInfo, []er
 	infos, errs := ck.Module(m)
 	var out []error
 	for _, e := range errs {
-		out = append(out, checkErr{e.Title, e.Span.StartPos().Line})
+		out = append(out, checkErr{e.Title, e.Span.StartPos().Line, e.Body})
 	}
 	return ck, infos, out
 }
@@ -75,10 +75,10 @@ func TestPolyPositive(t *testing.T) {
 		// An arrow sharing its row tail with an effect-indexed type's
 		// argument prints that tail: it is what the value's index makes the
 		// arrow perform, not a row the caller is free to choose.
-		{"type Foo eff = Foo (() ->{IO | eff} ())\nwrap action = Foo action", "wrap : (() ->{IO | e} ()) -> Foo e"},
+		{"type Foo eff = Foo (() ->{IO, eff} ())\nwrap action = Foo action", "wrap : (() ->{IO, e} ()) -> Foo e"},
 		{"type Test eff = TestCase (() ->{eff} ())\nsuite : Test Console\nsuite = TestCase { _ -> print () }", "suite : Test {Console}"},
 		{"type Test eff = Wrap (Test eff) | Bar (() ->{eff} ())\nmake action = Bar action", "make : (() ->{e} ()) -> Test e"},
-		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{Console | eff} ()\nrunHelper (TestCase action) =\n    handle action() on\n        fail msg -> print msg", "runHelper : Test e ->{Console | e} ()"},
+		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation, eff} ())\nrunHelper : Test eff ->{Console, eff} ()\nrunHelper (TestCase action) =\n    handle action() on\n        fail msg -> print msg", "runHelper : Test e ->{Console, e} ()"},
 		// Applied types in annotations.
 		{"type Opt a = None | Some a\nx : Opt Int\nx = Some 1", "x : Opt Int"},
 		{"type Opt a = None | Some a\nf : Opt a -> Opt a\nf m = m", "f : Opt a -> Opt a"},
@@ -91,7 +91,7 @@ func TestPolyPositive(t *testing.T) {
 		// An annotated handler wrapper with an open effect-row tail: the
 		// annotation's rigid row variable unifies with the fresh row a call
 		// site mints, because a label-free open row normalizes to its tail.
-		{"effect Ask\n    ask : () -> String\nrun : (() ->{Ask | e} a) ->{e} a\nrun action =\n    handle action() on\n        ask () -> resume \"yes\"", "run : (() ->{Ask | e} a) ->{e} a"},
+		{"effect Ask\n    ask : () -> String\nrun : (() ->{Ask, e} a) ->{e} a\nrun action =\n    handle action() on\n        ask () -> resume \"yes\"", "run : (() ->{Ask, e} a) ->{e} a"},
 	}
 	for _, c := range cases {
 		ck, infos, errs := checkPoly(t, c.src)
@@ -137,7 +137,7 @@ func TestPolyNegative(t *testing.T) {
 		// Ordinary constructor-local variables are hidden; rows stay explicit.
 		{"type T a = MkT (() ->{eff} a)", "HIDDEN EFFECT ROW", 1},
 		{"type T a a = MkT a", "SHADOWING", 1},
-		{"type Inner eff = Inner (() ->{IO | eff} ())\ntype Bad a = Bad (Inner a) a", "KIND MISMATCH", 2},
+		{"type Inner eff = Inner (() ->{IO, eff} ())\ntype Bad a = Bad (Inner a) a", "KIND MISMATCH", 2},
 		// A row literal fills a row-kinded parameter and nothing else.
 		{"x : Maybe {IO}\nx = Nothing", "KIND MISMATCH", 1},
 		{"type Box a = MkBox a\ntype Bad = MkBad (Box {IO})", "KIND MISMATCH", 2},

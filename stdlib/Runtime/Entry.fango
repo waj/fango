@@ -22,9 +22,9 @@ import IO exposing (IO)
 import Meta exposing (Arrow(..), Attached(..), Code, Effect(..), Items(..), Site, Tail(..), TypeRepr)
 
 -- The runner the program entry installs for the effect this attribute
--- precedes. The quote names a runner of shape `(() ->{E | e} a) ->{r | e} a`,
--- where `E` is the effect and `r` holds only `IO` and effects that declare
--- default handlers themselves. An effect declares at most one.
+-- precedes. The quote names a runner of shape `(() ->{E, e} a) ->{R…, e} a`,
+-- where `E` is the effect and the labels `R…` are only `IO` and effects that
+-- declare default handlers themselves. An effect declares at most one.
 type DefaultHandler
     -- The quoted runner.
     = DefaultHandler Code
@@ -98,7 +98,7 @@ defaultFor need =
 -- The runner's declared type, checked against the shape a default needs.
 checked : Effect -> Code -> Site -> Install
 checked service runner site =
-    shape = "`(() ->{" ++ service.name ++ " | e} a) ->{r | e} a`"
+    shape = "`(() ->{" ++ service.name ++ ", e} a) ->{…, e} a`"
     if Meta.isReference runner then
         declared = Meta.declaredType runner
         bad = "The default handler for `" ++ service.name ++ "` has type `" ++ Meta.typeName declared ++ "`, but it must have the shape " ++ shape ++ "."

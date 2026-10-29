@@ -19,7 +19,7 @@ main() = handle (handle both() on
     put flag -> resume ()
 `,
 		"polymorphic handler": putEffect + `
-drop : (() ->{Put x | e} a) ->{e} a
+drop : (() ->{Put x, e} a) ->{e} a
 drop action = handle action() on
     put _ -> resume ()
 
@@ -41,11 +41,11 @@ main() = drop { drop { both() } }
 func TestEffectApplicationsChosenByType(t *testing.T) {
 	for name, src := range map[string]string{
 		"typed helpers": putEffect + `
-dropStrings : (() ->{Put String | e} a) ->{e} a
+dropStrings : (() ->{Put String, e} a) ->{e} a
 dropStrings action = handle action() on
     put _ -> resume ()
 
-dropBools : (() ->{Put Bool | e} a) ->{e} a
+dropBools : (() ->{Put Bool, e} a) ->{e} a
 dropBools action = handle action() on
     put _ -> resume ()
 

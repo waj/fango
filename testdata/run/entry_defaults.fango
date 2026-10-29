@@ -12,7 +12,7 @@ effect Greeter
 effect Log
     log : String -> ()
 
-runGreeter : (() ->{Greeter | e} a) ->{Log | e} a
+runGreeter : (() ->{Greeter, e} a) ->{Log, e} a
 runGreeter action =
     log "greeter installed"
     handle action() on
@@ -20,7 +20,7 @@ runGreeter action =
             log ("greeting " ++ name)
             resume ("Hello, " ++ name)
 
-runLog : (() ->{Log | e} a) ->{IO, Console | e} a
+runLog : (() ->{Log, e} a) ->{IO, Console, e} a
 runLog action =
     print "log installed"
     handle action() on

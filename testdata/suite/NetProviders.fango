@@ -52,7 +52,7 @@ reading provider state connection count =
 done : Result Net.Error a -> Result Net.Error ()
 done result = Result.map { _ -> () } result
 
-scripted : Bytes -> (() ->{Net.Network | e} a) ->{e} (a, Bytes)
+scripted : Bytes -> (() ->{Net.Network, e} a) ->{e} (a, Bytes)
 scripted reply action = Net.withProvider { provider ->
     handle action() with state = Wire { inbound = Dict.empty, outbound = Bytes.empty, next = 0, reply = reply } on
         Net.listen _ -> resume (Ok (Net.listenerFor provider 0)) with state

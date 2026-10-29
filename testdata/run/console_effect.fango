@@ -14,7 +14,7 @@ greet() =
         Just line -> print ("Hello, " ++ line.text)
 
 -- Silences output and forwards input to the enclosing Console.
-quiet : (() ->{Console | e} a) ->{Console | e} a
+quiet : (() ->{Console, e} a) ->{Console, e} a
 quiet action =
     handle action() on
         Console.writeBytes _ _ -> resume ()

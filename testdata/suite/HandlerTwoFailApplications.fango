@@ -12,7 +12,7 @@ type IoError = IoError String
 
 -- One handler covers both `Fail` applications. Each abort unwinds to the
 -- clause of its own application; the shared `return` runs once on success.
-load : (() ->{Fail ParseError, Fail IoError | e} a) ->{e} Result String a
+load : (() ->{Fail ParseError, Fail IoError, e} a) ->{e} Result String a
 load action =
     handle action() on
         fail : ParseError -> a
@@ -24,7 +24,7 @@ load action =
 
 -- An abort raised inside a clause propagates to an enclosing handler, never
 -- to the sibling application of the same activation.
-escalate : (() ->{Fail ParseError, Fail IoError | e} a) ->{Fail String | e} a
+escalate : (() ->{Fail ParseError, Fail IoError, e} a) ->{Fail String, e} a
 escalate action =
     handle action() on
         fail : ParseError -> a
@@ -33,7 +33,7 @@ escalate action =
         fail : IoError -> a
         fail (IoError reason) -> fail ("io " ++ reason)
 
-catchText : (() ->{Fail String | e} a) ->{e} String
+catchText : (() ->{Fail String, e} a) ->{e} String
 catchText action =
     handle action() on
         fail message -> "escalated: " ++ message

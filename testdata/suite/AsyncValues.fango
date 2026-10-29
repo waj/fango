@@ -10,7 +10,7 @@ import Runtime.Scope
 import State
 import Test
 
-runStrings : (() ->{Async.Async, IO, Fail String | e} a) ->{IO | e} Outcome (Result String a)
+runStrings : (() ->{Async.Async, IO, Fail String, e} a) ->{IO, e} Outcome (Result String a)
 runStrings body = Async.runOutcome { Fail.attempt body }
 
 type Observation

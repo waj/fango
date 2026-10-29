@@ -82,7 +82,7 @@ requestLine bytes =
                     else
                         (Wire.decodeField method, Wire.decodeField target)
 
-readHead : Reader e -> Int -> Int -> Int ->{Protocol | e} Maybe Head
+readHead : Reader e -> Int -> Int -> Int ->{Protocol, e} Maybe Head
 readHead reader lineLimit headersLimit bodyLimit =
     case Reader.readUntil reader (Bytes.fromString "\r\n") lineLimit of
         Ended line ->
@@ -106,7 +106,7 @@ readHead reader lineLimit headersLimit bodyLimit =
 -- count against the header limit, and a fixed-length body that ends early
 -- fails with `Malformed` when the consumer reads past what arrived. A response whose
 -- body reads the request must be written inside `action`.
-withRequest : Int -> Int -> Int -> Reader e -> (Request {s | e} ->{s | e} a) ->{Protocol | e} Maybe (a, Bool)
+withRequest : Int -> Int -> Int -> Reader e -> (Request {#s} ->{#s} a) ->{Protocol, e} Maybe (a, Bool)
 withRequest lineLimit headersLimit bodyLimit input action =
     case readHead input lineLimit headersLimit bodyLimit of
         Nothing -> Nothing
@@ -125,7 +125,7 @@ checkResponse response =
         invalid (InvalidMessage "response status must be a final non-upgrade status")
     else Wire.checkMessage response.headers response.body (framedStatus response.status)
 
-writeChecked : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} ()
+writeChecked : String -> Writer {Protocol, e} -> Response {Protocol, e} ->{Protocol, e} ()
 writeChecked method output response =
     Wire.writeCheckedMessage { error -> invalid error } output ("HTTP/1.1 " ++ show response.status ++ " ") response.headers response.body
         (framedStatus response.status) (method /= "HEAD")
@@ -135,7 +135,7 @@ writeChecked method output response =
 -- chunked encoding for streams; a `HEAD` request gets only the head. Every
 -- check runs before the first byte is written. A `HEAD` response includes a
 -- sized body's length but runs no body.
-writeResponse : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} ()
+writeResponse : String -> Writer {Protocol, e} -> Response {Protocol, e} ->{Protocol, e} ()
 writeResponse method output response =
     checkResponse response
     writeChecked method output response
@@ -216,14 +216,14 @@ validResponse response =
     checkResponse response
     True
 
-writeSuccessful : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} Bool
+writeSuccessful : String -> Writer {Protocol, e} -> Response {Protocol, e} ->{Protocol, e} Bool
 writeSuccessful method output response =
     writeChecked method output response
     True
 
 -- An invalid response gets a 500 before anything is written. A body that fails
 -- afterwards leaves the response truncated, and the connection closes.
-respond : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} Bool
+respond : String -> Writer {Protocol, e} -> Response {Protocol, e} ->{Protocol, e} Bool
 respond method output response =
     valid = handle validResponse response on
         Http.invalid _ -> False
@@ -244,7 +244,7 @@ respond method output response =
 -- Handles `Protocol` like `serve`: failures before a response get their
 -- error status, invalid response declarations get 500, and a body failure
 -- after the head leaves the response incomplete. Other effects propagate.
-serveRequest : Int -> Int -> Int -> Reader e -> Writer e -> (Request {Protocol, s | e} ->{Protocol, s | e} Response {Protocol, s | e}) ->{e} Maybe Bool
+serveRequest : Int -> Int -> Int -> Reader e -> Writer e -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{e} Maybe Bool
 serveRequest lineLimit headersLimit bodyLimit input output handler =
     handle
         exchanged = withRequest lineLimit headersLimit bodyLimit input { request ->
@@ -261,7 +261,7 @@ serveRequest lineLimit headersLimit bodyLimit input output handler =
             sendError output (errorStatus error)
             Just False
 
-serveConnection : Config -> Net.Connection -> (Request {s | e} ->{s | e} Response {s | e}) ->{Async, Net.Network, Fail Net.Error, Protocol | e} ()
+serveConnection : Config -> Net.Connection -> (Request {#s} ->{#s} Response {#s}) ->{Async, Net.Network, Fail Net.Error, Protocol, e} ()
 serveConnection config connection handler =
     source = Net.sourceAsync connection
     sink = Net.sinkAsync connection
@@ -285,7 +285,7 @@ serveConnection config connection handler =
 -- Each worker installs its own connection, buffer, protocol, and Fail
 -- handlers. Only a fatal accept error leaves this runner; its task captures
 -- that error and reports it through the server's shutdown channel.
-worker : Config -> Net.Listener -> (Request {Protocol, s | {}} ->{Protocol, s | {}} Response {Protocol, s | {}}) ->{Async, Net.Network, Fail Net.Error} ()
+worker : Config -> Net.Listener -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{Async, Net.Network, Fail Net.Error} ()
 worker config listener handler =
     loop() =
         outcome = attempt {
@@ -362,7 +362,7 @@ runListener config stop listener startWorkers =
 -- inside workers and do not stop unrelated connections. Fatal accept errors
 -- trigger coordinated shutdown through the server's event channel; `serve`
 -- raises the selected Net error in the caller after its workers are joined.
-serve : Config -> Channel () -> (Request {Protocol, s | {}} ->{Protocol, s | {}} Response {Protocol, s | {}}) ->{Async, Net.Network, Fail Net.Error} ()
+serve : Config -> Channel () -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{Async, Net.Network, Fail Net.Error} ()
 serve config stop handler =
     Net.withListener config.port { listener ->
         startWorkers : Channel (Maybe Net.Error) ->{Async, Net.Network} List (Task ())

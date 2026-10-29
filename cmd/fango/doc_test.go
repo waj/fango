@@ -178,8 +178,10 @@ func TestDocWholeLibrary(t *testing.T) {
 		"method:Basics.Eq.==":       "(==) : Eq a => a -> a -> Bool",
 		"operation:Fail.Fail.fail":  "abort fail : error ->{Fail error} a",
 		"operation:State.State.get": "get : () ->{State s} s",
-		// Scoped runners expose their callback binder and ambient row together.
-		"value:Reader.withBytes": "withBytes : Bytes -> (Reader {s | e} ->{s | e} a) ->{e} a",
+		// Scoped runners mark their callback binder `#s`; the runner's own
+		// row, open or closed, stays on its final arrow.
+		"value:Reader.withBytes":  "withBytes : Bytes -> (Reader {#s} ->{#s} a) ->{e} a",
+		"value:Http.Server.serve": "serve : Config -> Channel () -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{Fail Error, Async, Network} ()",
 		// Opaque types show no representation.
 		"type:Dict.Dict": "type Dict k v",
 		// Two or more members go one to a line, as fango fmt lays them out.

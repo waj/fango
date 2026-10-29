@@ -21,7 +21,7 @@ fetch() = Fail.fail TimedOut
 answer : () ->{Async} Int
 answer() = Async.await (Async.spawn { 42 })
 
-launch : (() ->{e} a) ->{Async | e} Task a
+launch : (() ->{e} a) ->{Async, e} Task a
 launch action = Async.spawn action
 
 type Observation

@@ -127,7 +127,7 @@ headerLine bytes =
 -- Reads a header block up to its empty line, failing with `HeadersTooLarge`
 -- when it exceeds `remaining` bytes, and prepends its fields, in order, to
 -- the reversed list given.
-headerLines : Reader e -> Int -> List Header ->{Protocol | e} List Header
+headerLines : Reader e -> Int -> List Header ->{Protocol, e} List Header
 headerLines reader remaining reversed =
     if remaining < 2 then invalid HeadersTooLarge
     else
@@ -199,13 +199,13 @@ chunkSize line limit =
             if allField extension 0 == False then invalid (Malformed "invalid chunk extension")
             else chunkDigits (Bytes.slice 0 at line) 0 limit 0
 
-chunkTerminator : Reader e ->{Protocol | e} ()
+chunkTerminator : Reader e ->{Protocol, e} ()
 chunkTerminator input =
     case Reader.readExactly input 2 of
         Just bytes -> if bytes == Bytes.fromString "\r\n" then () else invalid (Malformed "invalid chunk terminator")
         Nothing -> invalid (Malformed "incomplete chunk")
 
-chunkPull : Reader e -> ChunkCell e -> Int -> Int ->{Protocol | e} Maybe Bytes
+chunkPull : Reader e -> ChunkCell e -> Int -> Int ->{Protocol, e} Maybe Bytes
 chunkPull input state maxBody headersLimit =
     current = state.read()
     if current.done then Nothing
@@ -233,7 +233,7 @@ chunkPull input state maxBody headersLimit =
             Ended _ -> invalid (Malformed "incomplete chunk size")
             Overflowed -> invalid (Malformed "chunk size line exceeds limit")
 
-withChunked : Reader e -> Int -> Int -> (Reader {s | e} ->{s | e} a) ->{Protocol | e} (a, Bool)
+withChunked : Reader e -> Int -> Int -> (Reader {#s} ->{#s} a) ->{Protocol, e} (a, Bool)
 withChunked input maxBody headersLimit action =
     Runtime.Local.run (ChunkState { remaining = 0, done = False, total = 0 }) { state ->
         cell = ChunkCell { read = state.read, write = state.write }
@@ -254,7 +254,7 @@ emptyBody = Reader
 
 -- Scopes a framed body reader to `action`. The Bool reports whether the consumer
 -- reached the end of the framed body.
-withBody : Framing -> Reader e -> Int -> Int -> (Reader {s | e} ->{s | e} a) ->{Protocol | e} (a, Bool)
+withBody : Framing -> Reader e -> Int -> Int -> (Reader {#s} ->{#s} a) ->{Protocol, e} (a, Bool)
 withBody bodyFraming input bodyLimit headersLimit action =
     case bodyFraming of
         NoBody -> (action emptyBody, True)
@@ -368,7 +368,7 @@ checkMessage headers body framed =
 -- the start line, its headers, and its body framed as `Content-Length` or
 -- chunked. `framed` False marks a message that cannot carry a body;
 -- `sendBody` False writes only the head, as for HEAD.
-writeMessage : Writer {Protocol | e} -> String -> List Header -> Body {Protocol | e} -> Bool -> Bool ->{Protocol | e} ()
+writeMessage : Writer {Protocol, e} -> String -> List Header -> Body {Protocol, e} -> Bool -> Bool ->{Protocol, e} ()
 writeMessage output startLine headers body framed sendBody =
     checkMessage headers body framed
     writeCheckedMessage { error -> invalid error } output startLine headers body framed sendBody

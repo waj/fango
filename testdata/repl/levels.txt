@@ -59,7 +59,7 @@ I don't know a value named `reader`.
 | | skip : (() -> a) -> Int
 5 : Int
 > | | Stop : effect
-> | | | | | runStop : (() ->{Stop | e} a) ->{e} Maybe a
+> | | | | | runStop : (() ->{Stop, e} a) ->{e} Maybe a
 > 1> a : Int
 b : Int
 2> total : Int

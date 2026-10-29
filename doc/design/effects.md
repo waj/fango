@@ -277,7 +277,7 @@ reaches the host: the system runners and the
 annotation never makes a call interceptable, and actions private to a sidecar
 are visible to no handler.
 
-Each service has an explicit system runner, `(() ->{S | e} a) ->{IO | e} a`,
+Each service has an explicit system runner, `(() ->{S, e} a) ->{IO, e} a`,
 declared as its default handler, which [entry assembly](pipeline.md#entry-assembly)
 installs for effects in `main`'s row. Nothing reaches the host implicitly
 anywhere else, so a missing handler is an unhandled-effect diagnostic rather
@@ -318,7 +318,7 @@ so tasks sharing it consume each input line once and capture every write
 whole.
 
 A callee row that lists a label and also has a tail, such as a runner's
-`{Out | e}`, forwards that label's evidence in the residual row too. Rows
+`{Out, e}`, forwards that label's evidence in the residual row too. Rows
 hold distinct applications, so where `e` also holds the label the call site
 sees it once, and a callback typed with `e` finds it only through that row.
 

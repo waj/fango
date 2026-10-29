@@ -100,7 +100,7 @@ read source = case source of
     Source action -> action()
 withSource : Source a e -> (Source a e ->{e} b) ->{e} b
 withSource source consumer = consumer source
-readAndPrint : Source a e ->{Console | e} a
+readAndPrint : Source a e ->{Console, e} a
 readAndPrint source =
     print "read"
     read source
@@ -109,7 +109,7 @@ readAndPrint source =
 		for _, allowIO := range []bool{false, true} {
 			row := "e"
 			if allowIO {
-				row = "Console | e"
+				row = "Console, e"
 			}
 			callback := "readAndPrint"
 			if !named {
@@ -128,11 +128,11 @@ func TestRunnerCallbackCanContributeOuterEffect(t *testing.T) {
 	const prefix = `effect Scheduling a
     start : () -> ()
 
-schedule : (() ->{Scheduling a | e} b) ->{Scheduling a | e} b
+schedule : (() ->{Scheduling a, e} b) ->{Scheduling a, e} b
 schedule body =
     start()
     body()
-run : (() ->{Scheduling a | e} b) ->{Console | e} b
+run : (() ->{Scheduling a, e} b) ->{Console, e} b
 run body =
     print "run"
     handle body() on

@@ -4,9 +4,9 @@
 
 [Constructor-local hidden types](reference/types.md#hidden-state-types),
 [typed storage workers](design/hidden-types.md#typed-storage-workers), and the
-Stream/Iterator migration are implemented. Scoped library runners now use
-[row extensions](reference/functions.md#scoped-callbacks), including closed
-outer rows. Legacy pragmas remain accepted for compatibility.
+Stream/Iterator migration are implemented. Scoped library runners use
+[scoped row variables](reference/functions.md#scoped-callbacks), including
+closed outer rows.
 
 ## Surviving dynamic packages
 

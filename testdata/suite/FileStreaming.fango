@@ -33,10 +33,10 @@ copy input output =
         Writer.write output chunk
         copy input output
 
-copyTo : File.Handle -> Reader.Reader e ->{File.FileSystem, Fail.Fail IO.Error | e} ()
+copyTo : File.Handle -> Reader.Reader e ->{File.FileSystem, Fail.Fail IO.Error, e} ()
 copyTo output reader = Writer.over (File.sink output) 3 (copy reader)
 
-attemptFile : (() ->{Fail.Fail IO.Error | e} a) ->{e} Result IO.Error a
+attemptFile : (() ->{Fail.Fail IO.Error, e} a) ->{e} Result IO.Error a
 attemptFile action = Fail.attempt action
 
 tests : Test.Test {}

@@ -128,7 +128,7 @@ An ADT parameter is inferred as row-kinded when it is used as an open effect-row
 tail. This supports effect-indexed declarations without explicit kind syntax:
 
 ```fango
-type Foo eff = Foo (() ->{IO | eff} ())
+type Foo eff = Foo (() ->{IO, eff} ())
 ```
 
 The row parameter may be used in effect rows, but not as an ordinary value type.
@@ -137,7 +137,7 @@ an effect name is accepted as a singleton row argument, so `Foo IO` means
 `Foo {IO}`; parameterized effects use the corresponding application, such as
 `Foo (State Int)`. A row itself is also accepted there, written exactly as it
 is on an arrow — `Foo {}` for the pure row, `Foo {IO, Fail String}`,
-`Foo {IO | e}` — which is the only spelling for a row of more than one label.
+`Foo {IO, e}` — which is the only spelling for a row of more than one label.
 A row filling a parameter of ordinary kind is a `KIND MISMATCH`, because a row
 has row kind and no other reading. Row-kinded parameters are source-level metadata and are
 erased from Core and generated Go representations; the declaration remains
@@ -145,60 +145,61 @@ available to inference and reflection.
 
 ## Scoped callbacks
 
-A scoped row extension binds a row universally within one selected callback:
+A scoped row variable, written `#` immediately followed by a lowercase name,
+binds a row universally within one selected callback of an annotated runner:
 
 ```fango
-withText : String -> (Reader {s | e} ->{s | e} a) ->{e} a
+withText : String -> (Reader {#s} ->{#s} a) ->{e} a
 withText text action = Reader.withBytes (Bytes.fromString text) action
 ```
 
-Here `s` is the callback-local fragment and `e` is the ambient row variable.
-The ambient name must be the tail of the runner's final arrow. For a closed
-final row, write `{s | {}}`; fixed effects still come from the final arrow. At each call,
-the extension contains a fresh local permission plus the runner's complete
-effect row, including any fixed labels before its tail. The callback may use
-both. The runner discharges its fresh permission; ambient effects remain on
-the runner's final arrow. Nested calls have distinct permissions and can
-use multiple readers together through ordinary row inclusion, as the
+At each call, `#s` stands for a fresh local permission plus the runner's
+complete final-arrow effect row: its fixed labels and, when the arrow is open,
+its tail. Neither is repeated beside `#s`, so a callback row such as `{#s}` is
+not closed. In `withText` the callback may perform its permission and whatever
+`e` is at the call; in a closed runner such as
+`run : (Resource {#s} ->{#s} a) ->{Async} a`, it may perform its permission and
+`Async`. The runner discharges its fresh permission; its own effects remain on
+its final arrow. Nested calls have distinct permissions and can use multiple
+readers together through ordinary row inclusion, as the
 [two-reader fixture](../../testdata/suite/ReaderScopedMemory.fango) does.
 
 The annotated declaration must bind its scoped callback to a name. The callback
-may be in any parameter position; exactly one callback must have the annotated
-scoped extension on its arrow. Every occurrence must use the same fragment and
-ambient name, including row arguments such as `Reader {s | e}`. The binder may
-occur in that callback's argument and result, but not in any other runner
-parameter, the runner result, or the runner's own arrow effects.
+may be in any parameter position; exactly one callback must end its effect row
+with the scoped variable. Every occurrence is written with the prefix,
+including row arguments such as `Reader {#s}`; `#s` is accepted only as the
+final component of an effect row. A runner binds at most one scoped variable,
+and its name may not also name an ordinary type or row variable in the same
+annotation. The variable may occur in that callback's argument and result, but
+not in any other runner parameter, the runner result, or the runner's own
+arrow effects. Ordinary rows elsewhere in the callback's type may still mention
+the runner's tail, for example on a function the callback receives.
 
-Effects listed before the fragment are granted to the callback by the runner, which
+Effects listed before `#s` are granted to the callback by the runner, which
 must handle them:
 
 ```fango
-guarded : String -> (Reader {s | e} ->{Fail String, s | e} a) ->{e} Result String a
+guarded : String -> (Reader {#s} ->{Fail String, #s} a) ->{e} Result String a
 guarded text action = Reader.withBytes (Bytes.fromString text) { reader -> Fail.attempt { action reader } }
 ```
 
 At each call the callback may perform `Fail String` besides its scope's
-permission and the residual row; the runner's caller never sees it. An
+permission and the runner's row; the runner's caller never sees it. An
 unannotated caller whose callback both reads and fails infers no `Fail`:
 `run() = guarded "abc" { reader -> … Fail.fail "stop" … }` is
 `run : () -> Result String Int`. Granted
-effects' type arguments may not mention the binder. A callback
+effects' type arguments may not mention the scoped variable. A callback
 may therefore return a value that uses a scoped reader or writer later in the
 same runner. The runner must consume that value before its scope ends. Within
 the implementation the callback can be instantiated at different rows
-extending the runner's residual row.
+extending the runner's row.
 
-This form is available on annotated named runners, not local annotations,
-record fields, class methods, or arbitrary nested function types. It is not a
-general union of row variables. Different fragments or ambient names, a binder
-outside the selected callback, or an ambient name that does not match the
-runner's final arrow reports `SCOPED CALLBACK`. Ordinary callback signatures
-and their implicit type variables keep their existing meaning.
-
-The legacy spelling `{-# scoped s #-}` followed by
-`withText : String -> (Reader s ->{s} a) ->{e} a` remains accepted with the same
-contract. The standard library uses row extensions, including `{s | {}}` for
-closed outer rows. Do not combine a pragma with the row-extension spelling.
+Scoped variables are available on annotated named runners, not local
+annotations, record fields, effect operations, class methods, or arbitrary
+nested function types. They are not a general union of rows. A second scoped
+variable, a scoped variable outside the selected callback, or a scoped name
+reused unprefixed reports `SCOPED CALLBACK`. A plain lowercase row component
+such as `{s}` is always an ordinary row variable, even on a callback.
 
 A [`use` item](syntax.md#use-items) calls a runner this way, binding the
 callback's parameter for the rest of the block:

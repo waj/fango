@@ -141,7 +141,7 @@ other n = outer n`, "EFFECT MISMATCH"},
     if n == 0 then ask() else go (n - 1)
 other n = outer n`, "TYPE MISMATCH"},
 		{"escaping annotated row", `outer n =
-    go : Int ->{Ask | e} Int
+    go : Int ->{Ask, e} Int
     go x = other x
     if n == 0 then ask() else go (n - 1)
 other n = outer n`, "ANNOTATION TOO GENERAL"},

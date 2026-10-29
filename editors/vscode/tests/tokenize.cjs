@@ -86,43 +86,82 @@ async function main() {
   // A row literal is an effect row wherever it stands: the grammar's row rule
   // is not anchored to an arrow, so a row filling a type argument gets the
   // same scopes as one after `->`.
-  const rowArgument = 'listen : Source {Console, Fail String | e}';
+  const rowArgument = 'listen : Source {Console, Fail String, e}';
   const rowTokens = grammar.tokenizeLine(rowArgument).tokens;
   const rowScopeAt = index => rowTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
   assert(rowScopeAt(rowArgument.indexOf("Source")).includes("entity.name.type.fango"));
   assert(rowScopeAt(rowArgument.indexOf("{")).includes("punctuation.definition.effect-row.begin.fango"));
   assert(rowScopeAt(rowArgument.indexOf("Console")).includes("entity.name.type.effect.fango"));
-  assert(rowScopeAt(rowArgument.indexOf("|")).includes("keyword.operator.pipe.fango"));
+  assert(rowScopeAt(rowArgument.indexOf(", e")).includes("punctuation.separator.comma.fango"));
+  assert(rowScopeAt(rowArgument.lastIndexOf("e}")).includes("variable.other.generic-type.fango"));
   assert(rowScopeAt(rowArgument.indexOf("}")).includes("punctuation.definition.effect-row.end.fango"));
 
-  for (const sample of [
-    'withBytes : Bytes -> (Reader {s | e} ->{s | e} a) ->{e} a',
-    'closed : (Reader {s | {}} ->{s | {}} a) ->{} a',
-    'guarded : (Reader {s | e} ->{Fail String, s | e} a) ->{e} Result String a',
+  // `#` immediately before a lowercase name marks a scoped row variable; a
+  // plain lowercase row component stays an ordinary tail, whatever its name.
+  for (const [sample, scoped, ordinary] of [
+    ['run : (Resource {#s} ->{Foo, #s} a) ->{Async} a', ['#s'], []],
+    ['withBytes : Bytes -> (Reader {#s} ->{#s} a) ->{e} a', ['#s'], ['e']],
+    ['open : (() ->{Foo, e} a) ->{e} a', [], ['e']],
+    ['named : (() ->{State state, #region} a) ->{s} a', ['#region'], ['state', 's']],
+    ['qualified : (() ->{IO.IO, Fail String, #e} a) ->{Net.Network, s} a', ['#e'], ['s']],
   ]) {
     const tokens = grammar.tokenizeLine(sample).tokens;
-    for (const match of sample.matchAll(/s \| (e|\{\})/g)) {
-      const at = index => tokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
-      assert(at(match.index).includes('variable.other.generic-type.scope.fango'));
-      assert(at(match.index + 2).includes('keyword.operator.pipe.fango'));
-      if (match[1] === 'e') assert(at(match.index + 4).includes('variable.other.generic-type.fango'));
-      else assert(at(match.index + 4).some(s => s.includes('effect-row.begin')));
+    const at = index => tokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+    for (const name of scoped) {
+      for (const match of sample.matchAll(new RegExp(name + '\\b', 'g'))) {
+        assert(at(match.index).includes('variable.other.generic-type.scope.fango'), sample);
+        assert(at(match.index + name.length - 1).includes('variable.other.generic-type.scope.fango'), sample);
+      }
     }
+    for (const name of ordinary) {
+      const match = sample.match(new RegExp('[{ ]' + name + '[},]'));
+      assert(match, sample);
+      const scopes = at(match.index + 1);
+      assert(scopes.includes('variable.other.generic-type.fango') && !scopes.includes('variable.other.generic-type.scope.fango'), sample);
+    }
+    assert(tokens.every(t => !t.scopes.includes('keyword.operator.pipe.fango')), sample);
   }
-  assert(grammar.tokenizeLine('read : () ->{State state | e} Int').tokens.every(
+  {
+    let ruleStack = textmate.INITIAL;
+    const scopesOf = [];
+    for (const line of ['run : (Int ->{ Foo,', '    -- the scope', '    #s }', '    a) ->{e} a']) {
+      const result = grammar.tokenizeLine(line, ruleStack);
+      scopesOf.push({ line, tokens: result.tokens });
+      ruleStack = result.ruleStack;
+    }
+    const scopeAt = (n, text) => scopesOf[n].tokens.find(t => t.startIndex <= scopesOf[n].line.indexOf(text) && t.endIndex > scopesOf[n].line.indexOf(text)).scopes;
+    assert(scopeAt(1, 'the scope').some(s => s.startsWith('comment.line')));
+    assert(scopeAt(2, '#s').includes('variable.other.generic-type.scope.fango'));
+    assert(scopeAt(2, '}').includes('punctuation.definition.effect-row.end.fango'));
+  }
+  assert(grammar.tokenizeLine('read : () ->{State state, e} Int').tokens.every(
     t => !t.scopes.includes('variable.other.generic-type.scope.fango')));
+  // `#` keeps its other meanings outside rows: attributes, interpolation,
+  // pragmas, and user operators.
+  for (const [sample, text, scope] of [
+    ['#[derive Show]', '#[', 'punctuation'],
+    ['greeting = "hi #{name}"', '#{', 'interpolation'],
+    ['{-# no-prelude #-}', '{-#', 'preprocessor'],
+    ['x = a #! b', '#!', 'keyword.operator'],
+  ]) {
+    const tokens = grammar.tokenizeLine(sample).tokens;
+    const index = sample.indexOf(text);
+    const scopes = tokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+    assert(scopes.some(s => s.includes(scope)), sample + ' ' + scopes.join(' '));
+    assert(tokens.every(t => !t.scopes.includes('variable.other.generic-type.scope.fango')), sample);
+  }
 
   const pragma = grammar.tokenizeLine('{-# resource #-}').tokens;
   assert(pragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   const scopedPragma = grammar.tokenizeLine('{-# scoped s #-}').tokens;
-  assert(scopedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
+  assert(!scopedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('scoped = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
-  const mockSignature = 'mock : (Server.Request {Protocol | s} ->{Protocol | s} Server.Response {Protocol | s}) -> (() ->{Http | e} a) ->{e} a';
+  const mockSignature = 'mock : (Server.Request {Protocol, #s} ->{Protocol, #s} Server.Response {Protocol, #s}) -> (() ->{Http, e} a) ->{e} a';
   const mockTokens = grammar.tokenizeLine(mockSignature).tokens;
   const mockScopeAt = index => mockTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
   assert(mockScopeAt(0).includes('entity.name.function.fango'));
   assert(mockScopeAt(mockSignature.indexOf('Protocol')).includes('entity.name.type.effect.fango'));
-  assert(mockScopeAt(mockSignature.indexOf('Http | e')).includes('entity.name.type.effect.fango'));
+  assert(mockScopeAt(mockSignature.indexOf('Http, e')).includes('entity.name.type.effect.fango'));
   const mockUse = grammar.tokenizeLine('use Client.mock serverHandler').tokens;
   assert(mockUse.some(t => t.scopes.includes('keyword.control.use.fango')));
   const sharedPragma = grammar.tokenizeLine('{-# shared-resource #-}').tokens;

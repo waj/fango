@@ -84,7 +84,7 @@ import Test.Reporter as Reporter exposing (CaseOutcome(..), Event(..), Reporter(
 -- are private so the tree can grow.
 type Test e
     = Describe String (List (Test e))
-    | Case String (() ->{Expect | e} ())
+    | Case String (() ->{Expect, e} ())
     | Skip (Test e)
     | Only (Test e)
     | Todo String
@@ -96,7 +96,7 @@ describe name tests = Describe name tests
 
 -- A named test. The body's expectations run as statements; the first that
 -- fails ends the body and fails the test.
-test : String -> (() ->{Expect | e} ()) -> Test e
+test : String -> (() ->{Expect, e} ()) -> Test e
 test name body = Case name body
 
 -- A test or group that is not run. Its leaves, including todos, count as
@@ -151,7 +151,7 @@ todo name = Todo name
 -- summary.verdict == Test.RunPassed
 -- events == [ Test.SuiteStarted 1, Test.CaseStarted ["one"], Test.CaseFinished ["one"] Test.CasePassed, Test.SuiteFinished summary ]
 -- ```
-execute : Test e ->{Reporter | e} Summary
+execute : Test e ->{Reporter, e} Summary
 execute suite =
     report (SuiteStarted (size suite))
     focused = hasOnly suite
@@ -172,7 +172,7 @@ execute suite =
 -- to choose output and exit policy yourself. Command-line options select
 -- progress or documentation output and an optional JSON file; see
 -- [`Test.Reporter.run`](Test/Reporter.fango).
-run : Test e ->{Console, File.FileSystem, Process.Environment | e} Process.Status
+run : Test e ->{Console, File.FileSystem, Process.Environment, e} Process.Status
 run suite = Reporter.run { execute suite }
 
 -- Whether the tree focuses some tests. An `only` inside a `skip` does not
@@ -199,7 +199,7 @@ size tree =
 -- Runs a tree. `active` says whether its tests run: it is false outside the
 -- focused subtrees of a suite that contains `only`. `path` holds the
 -- enclosing group names, innermost first.
-runTree : Bool -> Bool -> List String -> Summary -> Test e ->{Reporter | e} Summary
+runTree : Bool -> Bool -> List String -> Summary -> Test e ->{Reporter, e} Summary
 runTree focused active path counts tree =
     case tree of
         Describe name tests ->
@@ -241,7 +241,7 @@ reportSkipped path tree =
 
 -- The result of one body: `Err` with the error of its first failing
 -- expectation, `Ok` when it ran to the end.
-outcome : (() ->{Expect | e} ()) ->{e} Result Error ()
+outcome : (() ->{Expect, e} ()) ->{e} Result Error ()
 outcome body =
     handle body() on
         Expect.fail error -> Err error

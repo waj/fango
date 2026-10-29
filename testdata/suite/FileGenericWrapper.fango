@@ -8,7 +8,7 @@ import Test
 
 -- The wrapper exports the callback lifetime obligation to its callers.
 
-withWrapped : String -> (File.Handle ->{File.FileSystem, Fail Error | e} a) ->{File.FileSystem, Fail Error | e} a
+withWrapped : String -> (File.Handle ->{File.FileSystem, Fail Error, e} a) ->{File.FileSystem, Fail Error, e} a
 withWrapped path action =
     File.withFile path action
 

@@ -92,26 +92,26 @@ type Event
 -- output, preserving `run`'s report format. Start events and non-failing
 -- outcomes are silent. Returns the action's result without exiting;
 -- effects besides `Reporter` pass through.
-console : (() ->{Reporter | e} a) ->{Console | e} a
+console : (() ->{Reporter, e} a) ->{Console, e} a
 console action = withFormat ConsoleFormat action
 
 -- Prints one progress character for each completed leaf: `.` for a pass,
 -- `F` for a failure, and `*` for a skipped leaf or todo. Group validation
 -- failures also print `F`. Full failure messages and the summary follow
 -- the progress line. Returns the action's result without exiting.
-progress : (() ->{Reporter | e} a) ->{Console | e} a
+progress : (() ->{Reporter, e} a) ->{Console, e} a
 progress action = withFormat ProgressFormat action
 
 -- Prints group headings and indented case names with their outcomes as
 -- leaves complete. Full failure messages and the summary follow. Group
 -- names shared by consecutive paths are printed once. Returns the action's
 -- result without exiting.
-documentation : (() ->{Reporter | e} a) ->{Console | e} a
+documentation : (() ->{Reporter, e} a) ->{Console, e} a
 documentation action = withFormat DocumentationFormat action
 
 -- Discards progress events and returns the action's result. Effects besides
 -- `Reporter` pass through, so pure suites can execute without IO.
-silent : (() ->{Reporter | e} a) ->{e} a
+silent : (() ->{Reporter, e} a) ->{e} a
 silent action =
     handle action() on
         report _ -> resume ()
@@ -120,7 +120,7 @@ type Format = ConsoleFormat | ProgressFormat | DocumentationFormat | SilentForma
 
 type OutputState = { failures : List Event, groups : List String }
 
-withFormat : Format -> (() ->{Reporter | e} a) ->{Console | e} a
+withFormat : Format -> (() ->{Reporter, e} a) ->{Console, e} a
 withFormat format action =
     handle action() with state = OutputState { failures = [], groups = [] } on
         report event ->
@@ -308,7 +308,7 @@ usage = "Usage: tests [--format console|progress|documentation|silent] [--json P
 -- fango run Tests.fango --format documentation
 -- fango run Tests.fango --format silent --json report.json
 -- ```
-run : (() ->{Reporter | e} Summary) ->{Console, File.FileSystem, Process.Environment | e} Process.Status
+run : (() ->{Reporter, e} Summary) ->{Console, File.FileSystem, Process.Environment, e} Process.Status
 run action =
     case parseOptions (Options { format = ConsoleFormat, json = Nothing }) (Process.args ()) of
         Err message ->
@@ -373,7 +373,7 @@ outputError message =
     write ("Test.run: " ++ message ++ "\n")
     Process.status 2
 
-withReport : Format -> (() ->{Reporter | e} a) ->{Console | e} Collected a
+withReport : Format -> (() ->{Reporter, e} a) ->{Console, e} Collected a
 withReport format action =
     handle action() with state = CollectionState { output = OutputState { failures = [], groups = [] }, cases = [], groupFailures = [] } on
         report event ->

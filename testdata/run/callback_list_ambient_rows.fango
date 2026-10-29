@@ -10,7 +10,7 @@ import Result exposing (Result)
 effect Stop
     abort stop : () -> value
 
-sumAll : List (() ->{Fail String | effects} Int) ->{Fail String | effects} Int
+sumAll : List (() ->{Fail String, effects} Int) ->{Fail String, effects} Int
 sumAll actions =
     case actions of
         [] -> 0

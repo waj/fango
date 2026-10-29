@@ -86,30 +86,23 @@ func tupleTypeText(t *ast.TApp) (string, bool) {
 }
 
 // effRowText renders a row wherever it stands — on an arrow or as a type
-// argument: `{Console}`, `{Db, Fail String}`, `{Console | e}`.
+// argument: `{Console}`, `{Db, Fail String}`, `{Console, e}`, `{Console, #s}`.
 func effRowText(r *ast.EffRow) string {
-	labels := make([]string, len(r.Labels))
-	for i, l := range r.Labels {
-		parts := append([]string{l.Name}, nil...)
+	parts := make([]string, 0, len(r.Labels)+1)
+	for _, l := range r.Labels {
+		label := append([]string{l.Name}, nil...)
 		for _, a := range l.Args {
-			parts = append(parts, typeArgText(a))
+			label = append(label, typeArgText(a))
 		}
-		labels[i] = strings.Join(parts, " ")
+		parts = append(parts, strings.Join(label, " "))
 	}
-	body := strings.Join(labels, ", ")
-	if r.ScopeBase != "" {
-		if body != "" {
-			body += ", "
-		}
-		return "{" + body + r.Tail + " | " + r.ScopeBase + "}"
+	switch {
+	case r.Scoped:
+		parts = append(parts, "#"+r.Tail)
+	case r.Tail != "":
+		parts = append(parts, r.Tail)
 	}
-	if r.Tail != "" {
-		if body == "" {
-			return "{" + r.Tail + "}"
-		}
-		return "{" + body + " | " + r.Tail + "}"
-	}
-	return "{" + body + "}"
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 // annotationText renders `Preds => Type`, using the parenthesized form only

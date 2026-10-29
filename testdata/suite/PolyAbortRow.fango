@@ -7,7 +7,7 @@ import Result exposing (Result(..))
 import State
 import Test
 
-checkAll : List Int ->{Fail String, State.State (List Int) | e} ()
+checkAll : List Int ->{Fail String, State.State (List Int), e} ()
 checkAll xs = each { x -> if x > 2 then fail "big" else note x } xs
 
 note : Int ->{State.State (List Int)} ()

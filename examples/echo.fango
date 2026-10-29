@@ -47,7 +47,7 @@ echoLines reader writer =
                 writer.flush()
         Overflowed -> ()
 
-echoReader : Net.Connection -> Reader e ->{Net.Network, Fail Net.Error | e} ()
+echoReader : Net.Connection -> Reader e ->{Net.Network, Fail Net.Error, e} ()
 echoReader connection reader = Writer.over (Net.sink connection) 8192 (echoLines reader)
 
 echoConnection : Net.Connection ->{Net.Network, Fail Net.Error} ()

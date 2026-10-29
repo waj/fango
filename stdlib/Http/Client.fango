@@ -234,7 +234,7 @@ socketRelease (Connection socket _) reusable = fromNet (Net.poolRelease socket r
 -- sent `Connection: close`, and the body was framed by length or chunks; an
 -- unread body is drained if at most 64 KiB remain, and otherwise the
 -- connection closes.
-run : (() ->{Http | e} a) ->{Net.Network | e} a
+run : (() ->{Http, e} a) ->{Net.Network, e} a
 run action =
     pool = Net.newPool 8 60000
     Runtime.Scope.finally {
@@ -252,7 +252,7 @@ run action =
 -- error. Each task that inherits the wrapper is interrupted by its own
 -- cancellation. Connecting, including a TLS handshake, is not interrupted,
 -- and `stub` and `mock` never block.
-cancellable : (() ->{Http | e} a) ->{Http, Async.Async | e} a
+cancellable : (() ->{Http, e} a) ->{Http, Async.Async, e} a
 cancellable action =
     handle action() on
         connect endpoint -> resume (connect endpoint)
@@ -291,7 +291,7 @@ interruptible call =
 --
 -- agent == Ok 200
 -- ```
-configure : (Config -> Config) -> (() ->{Http | e} a) ->{Http | e} a
+configure : (Config -> Config) -> (() ->{Http, e} a) ->{Http, e} a
 configure adjust action =
     handle action() on
         connect endpoint -> resume (connect endpoint)
@@ -330,7 +330,7 @@ type Exchanges = Exchanges Int (Dict Int Exchange)
 --
 -- Fail.attempt { Client.stub ok { Client.getText "http://example.com/" } } == Ok "42"
 -- ```
-stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http | e} a) ->{e} a
+stub : (Bytes ->{e} Result Error Bytes) -> (() ->{Http, e} a) ->{e} a
 stub respond action =
     Net.withProvider { provider ->
         result = State.runAtomic (Exchanges 0 Dict.empty) {
@@ -356,7 +356,7 @@ stubbed provider (Connection socket _) call =
 
 -- Answers a connection's request once, outside any state update, so a
 -- `respond` with effects never runs twice; later reads reach EOF.
-answerOnce : (Bytes ->{e} Result Error Bytes) -> Int ->{State.State Exchanges | e} Result Error (Maybe Bytes)
+answerOnce : (Bytes ->{e} Result Error Bytes) -> Int ->{State.State Exchanges, e} Result Error (Maybe Bytes)
 answerOnce respond key =
     case State.update { exchanges -> takeRequest key exchanges } of
         Err error -> Err error
@@ -427,7 +427,7 @@ closeExchange key (Exchanges next open) =
 --
 -- greeting == Ok "hello"
 -- ```
-mock : (Server.Request {Protocol, s | e} ->{Protocol, s | e} Server.Response {Protocol, s | e}) -> (() ->{Http | e} a) ->{e} a
+mock : (Server.Request {Protocol, #s} ->{Protocol, #s} Server.Response {Protocol, #s}) -> (() ->{Http, e} a) ->{e} a
 mock handler action =
     config = Server.defaultConfig 0
     answer bytes =
@@ -503,7 +503,7 @@ framedRequest method body =
         Empty -> List.foldl { other found -> found && other /= method } True ["GET", "HEAD", "OPTIONS", "TRACE", "DELETE"]
         _ -> True
 
-protocol : (() ->{Protocol, Fail Error | e} a) ->{Fail Error | e} a
+protocol : (() ->{Protocol, Fail Error, e} a) ->{Fail Error, e} a
 protocol action =
     handle action() on
         Http.invalid error -> failWith (Protocol error)
@@ -534,7 +534,7 @@ statusLine line =
 type Head = { status : Int, http11 : Bool, headers : List Header }
 
 -- Reads a status line and headers, skipping interim 1xx responses.
-readHead : Reader e -> Int ->{Protocol | e} Head
+readHead : Reader e -> Int ->{Protocol, e} Head
 readHead input limit =
     case Reader.readUntil input (Bytes.fromString "\r\n") limit of
         Reader.Found line ->
@@ -562,14 +562,14 @@ closes headers =
 
 -- Reads what the caller left of a body, up to `most` bytes, so the connection
 -- can serve another request. A failure here only costs the connection.
-drain : Reader {Protocol, Fail Error | e} -> Int ->{Protocol, Fail Error | e} ()
+drain : Reader {Protocol, Fail Error, e} -> Int ->{Protocol, Fail Error, e} ()
 drain body most =
     if most <= 0 then ()
     else
         chunk = Reader.readUpTo body most
         if Bytes.length chunk == 0 then () else drain body (most - Bytes.length chunk)
 
-drainQuietly : Reader {Protocol, Fail Error | e} ->{e} ()
+drainQuietly : Reader {Protocol, Fail Error, e} ->{e} ()
 drainQuietly body =
     ignore (attempt {
             handle drain body 65536 on
@@ -578,7 +578,7 @@ drainQuietly body =
 
 -- Scopes the body of a response whose head was read to `action`, and reports
 -- whether the connection can serve another request.
-responseBody : Url -> Bool -> Bool -> Int -> Head -> Reader {Fail Error | e} -> (Response {s | e} ->{s | e} a) ->{Protocol, Fail Error | e} (a, Bool)
+responseBody : Url -> Bool -> Bool -> Int -> Head -> Reader {Fail Error, e} -> (Response {#s} ->{#s} a) ->{Protocol, Fail Error, e} (a, Bool)
 responseBody target headRequest decode headerLimit head input action =
     bodyFraming =
         if headRequest || head.status == 204 || head.status == 304 then NoBody
@@ -599,7 +599,7 @@ responseBody target headRequest decode headerLimit head input action =
 -- HEAD, and a 204 or 304, has no body; any other is framed by Content-Length,
 -- chunked encoding, or the connection closing. With `decode`, a gzip body is
 -- decompressed and loses the headers that described its encoded form.
-withResponse : Url -> Bool -> Bool -> Int -> Reader {Fail Error | e} -> (Response {s | e} ->{s | e} a) ->{Protocol, Fail Error | e} a
+withResponse : Url -> Bool -> Bool -> Int -> Reader {Fail Error, e} -> (Response {#s} ->{#s} a) ->{Protocol, Fail Error, e} a
 withResponse target headRequest decode headerLimit input action =
     head = readHead input headerLimit
     (value, _) = responseBody target headRequest decode headerLimit head input action
@@ -657,7 +657,7 @@ reused : Connection -> Bool
 reused (Connection _ again) = again
 
 -- Sends one request to `target`. `hops` redirects were followed before it.
-exchange : Config -> Request {Http, Fail Error | e} -> Url -> Bool -> Int -> Bool -> (Response {s | e} ->{s | e} a) ->{Http, Fail Error | e} Step a
+exchange : Config -> Request {Http, Fail Error, e} -> Url -> Bool -> Int -> Bool -> (Response {#s} ->{#s} a) ->{Http, Fail Error, e} Step a
 exchange config outgoing target crossOrigin hops fresh action =
     endpoint = endpointOf config target fresh
     defaults = [Header { name = "User-Agent", value = config.userAgent } | if config.decompress then [Header { name = "Accept-Encoding", value = "gzip" }] else []]
@@ -729,7 +729,7 @@ exchange config outgoing target crossOrigin hops fresh action =
 -- accepted, and a body that ends early fails with `Malformed` when read. A
 -- request body that fails partway closes the connection, and its failure
 -- reaches the caller unchanged. Any status is a normal response.
-send : Request {Http, Fail Error | e} -> (Response {s | e} ->{s | e} a) ->{Http, Fail Error | e} a
+send : Request {Http, Fail Error, e} -> (Response {#s} ->{#s} a) ->{Http, Fail Error, e} a
 send outgoing action =
     config = currentConfig()
     checkHeaders config.headers
@@ -745,7 +745,7 @@ send outgoing action =
                 follow following next (hops + 1) False
     follow outgoing first 0 False
 
-collect : Reader {Fail Error | e} -> Int -> List Bytes -> Int ->{Fail Error | e} Bytes
+collect : Reader {Fail Error, e} -> Int -> List Bytes -> Int ->{Fail Error, e} Bytes
 collect reader limit parts size =
     chunk = Reader.readUpTo reader 65536
     if Bytes.length chunk == 0 then Bytes.concat (List.reverse parts)
@@ -754,7 +754,7 @@ collect reader limit parts size =
 
 -- Sends `request` and reads the whole body, failing with
 -- `Protocol BodyTooLarge` beyond `maxBodyBytes`. Any status is a reply.
-fetch : Request {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
+fetch : Request {Http, Fail Error, e} ->{Http, Fail Error, e} Reply
 fetch outgoing =
     limit = currentConfig().maxBodyBytes
     send outgoing { response ->
@@ -780,7 +780,7 @@ get target = fetch (request "GET" target)
 
 -- Sends a POST with `body` and reads the whole response body; any status is a
 -- reply.
-post : String -> Body {Http, Fail Error | e} ->{Http, Fail Error | e} Reply
+post : String -> Body {Http, Fail Error, e} ->{Http, Fail Error, e} Reply
 post target body = fetch (withBody body (request "POST" target))
 
 -- The request with a header set, replacing any of the same name.
@@ -839,7 +839,7 @@ withDefaultHeader name value outgoing =
 
 -- Decodes a 2xx JSON response as it streams. Another status fails with its
 -- buffered reply.
-decodeReply : Decode a => Type a -> Int -> Response {Fail Error | s} ->{Fail Error | s} a
+decodeReply : Decode a => Type a -> Int -> Response {Fail Error, s} ->{Fail Error, s} a
 decodeReply witness limit response =
     if response.status >= 200 && response.status < 300 then
         (decoded, left, _) = Reader.limitedRemaining response.body limit { body -> Json.read witness body }

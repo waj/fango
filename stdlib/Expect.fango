@@ -216,7 +216,7 @@ failWith message = fail (Error { message = message, location = located () })
 -- message { Expect.onFail "the count" { Expect.equal 1 2 } } == Just "the count\nExpected: 1\nActual:   2"
 -- message { Expect.onFail "the count" { Expect.equal 1 1 } } == Nothing
 -- ```
-onFail : String -> (() ->{Expect | e} value) ->{Expect | e} value
+onFail : String -> (() ->{Expect, e} value) ->{Expect, e} value
 onFail context body =
     handle body() on
         fail error -> fail { error | message = context ++ "\n" ++ error.message }

@@ -9,7 +9,7 @@ import Result exposing (Result(..))
 import State
 import Test
 
-runStrings : (() ->{Async.Async, IO | e} a) ->{IO | e} Outcome a
+runStrings : (() ->{Async.Async, IO, e} a) ->{IO, e} Outcome a
 runStrings body = Async.runOutcome body
 
 type Observation

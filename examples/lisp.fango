@@ -92,7 +92,7 @@ file path =
         Just diagnostic -> Fail.fail diagnostic
 
 -- Prints a failure's diagnostic and reports it in the exit status.
-report : (() ->{Fail String | e} ()) ->{Console | e} Process.Status
+report : (() ->{Fail String, e} ()) ->{Console, e} Process.Status
 report action = case Fail.attempt action of
     Ok () -> Process.success
     Err diagnostic -> print diagnostic; Process.failure

@@ -88,7 +88,7 @@ type Diagnostic error =
 -- Result.mapError { diagnostic -> diagnostic.primary } (Fail.attemptDiagnostic { checked 0 }) == Err "not positive"
 -- Result.mapError { diagnostic -> diagnostic.primary } (Fail.attemptDiagnostic { checked 2 }) == Ok 2
 -- ```
-attemptDiagnostic : (() ->{Fail error | e} value) ->{e} Result (Diagnostic error) value
+attemptDiagnostic : (() ->{Fail error, e} value) ->{e} Result (Diagnostic error) value
 attemptDiagnostic = native
 
 -- Like `attempt`, but an `Err` also reports the secondary failures that
@@ -103,7 +103,7 @@ attemptDiagnostic = native
 --
 -- Result.mapError { report -> report.primary } (Fail.attemptReport { checked 0 }) == Err "not positive"
 -- ```
-attemptReport : (() ->{Fail error | e} value) ->{e} Result (Report error) value
+attemptReport : (() ->{Fail error, e} value) ->{e} Result (Report error) value
 attemptReport = native
 
 -- Runs `action`, answering `Ok` with its value, or `Err` with the error it
@@ -119,7 +119,7 @@ attemptReport = native
 -- Fail.attempt { checked 2 } == Ok 2
 -- Fail.attempt { checked 0 } == Err "not positive"
 -- ```
-attempt : (() ->{Fail error | e} value) ->{e} Result error value
+attempt : (() ->{Fail error, e} value) ->{e} Result error value
 attempt action =
     handle action() on
         fail error -> Err error

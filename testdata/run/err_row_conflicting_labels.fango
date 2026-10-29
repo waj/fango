@@ -4,12 +4,12 @@
 effect Ctx e
     current : () -> e
 
-provide : e -> (() ->{Ctx e | r} a) ->{r} a
+provide : e -> (() ->{Ctx e, r} a) ->{r} a
 provide value body =
     handle body() on
         current () -> resume value
 
-reprovide : (() ->{Ctx e | r} a) -> e ->{Ctx p | r} a
+reprovide : (() ->{Ctx e, r} a) -> e ->{Ctx p, r} a
 reprovide body value =
     ignore (current())
     provide value body

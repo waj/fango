@@ -86,7 +86,7 @@ polymorphism; pure factories do not inherit their returned callbacks' rows.
 At worker uses, value type parameters are instantiated before explicit effect
 applications are selected for erasure or subtracted from callback requirements.
 Thus `Db Production` remains distinct from `Db Staging` when a runner's
-generic callback row is `{Db db | e}`; the other application travels in `e`.
+generic callback row is `{Db db, e}`; the other application travels in `e`.
 Matching also respects known nominal structure before all parameters have been
 assigned: `Fail (Error token)` cannot select an ambient `Fail String`. An
 assigned occurrence variable keeps its rigid identity during that selection.

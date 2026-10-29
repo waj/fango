@@ -47,7 +47,7 @@ grow source pending =
         Just chunk ->
             if Bytes.length chunk == 0 then grow source pending else Bytes.append pending chunk
 
-buffering : Bytes -> Source e -> (Reader {s | e} ->{s | e} a) ->{e} a
+buffering : Bytes -> Source e -> (Reader {#s} ->{#s} a) ->{e} a
 buffering initial source action =
     Runtime.Local.run initial { pending ->
         action
@@ -85,7 +85,7 @@ buffering initial source action =
 --
 -- framed == (Bytes.fromString "abc", Bytes.fromString "def")
 -- ```
-limited : Reader e -> Int -> (Reader {s | e} ->{s | e} a) ->{e} a
+limited : Reader e -> Int -> (Reader {#s} ->{#s} a) ->{e} a
 limited parent allowance action =
     (result, _, _) = limitedRemaining parent allowance action
     result
@@ -94,7 +94,7 @@ limited parent allowance action =
 -- ended before the allowance was used. It does not pull from the parent to
 -- find out, so a framed protocol can decide afterwards whether to reuse a
 -- connection.
-limitedRemaining : Reader e -> Int -> (Reader {s | e} ->{s | e} a) ->{e} (a, Int, Bool)
+limitedRemaining : Reader e -> Int -> (Reader {#s} ->{#s} a) ->{e} (a, Int, Bool)
 limitedRemaining parent allowance action =
     Runtime.Local.run (clamp allowance allowance, False) { state ->
         result = action
@@ -123,12 +123,12 @@ limitedRemaining parent allowance action =
     }
 
 -- Runs `action` with a reader that pulls from `source` as it needs bytes.
-over : Source e -> (Reader {s | e} ->{s | e} a) ->{e} a
+over : Source e -> (Reader {#s} ->{#s} a) ->{e} a
 over source action = buffering Bytes.empty source action
 
 -- Runs `action` with a reader whose buffer starts with `contents`, over a
 -- source that has already ended.
-overBytes : Bytes -> (Reader {s | e} ->{s | e} a) ->{e} a
+overBytes : Bytes -> (Reader {#s} ->{#s} a) ->{e} a
 overBytes contents action = buffering contents { pull = { Nothing } } action
 
 -- Runs `action` with a reader over `contents` in memory. With no other
@@ -141,7 +141,7 @@ overBytes contents action = buffering contents { pull = { Nothing } } action
 --
 -- Reader.withBytes (Bytes.fromString "abcdef") { reader -> Reader.readUpTo reader 4 } == Bytes.fromString "abcd"
 -- ```
-withBytes : Bytes -> (Reader {s | e} ->{s | e} a) ->{e} a
+withBytes : Bytes -> (Reader {#s} ->{#s} a) ->{e} a
 withBytes contents action =
     Runtime.Local.run contents { pending ->
         action

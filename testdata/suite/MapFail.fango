@@ -11,7 +11,7 @@ mapFail f body =
     handle body() on
         fail error -> fail (f error)
 
-mapFailWithEffects : (err1 -> err2) -> (() ->{Fail err1 | e} value) ->{Fail err2 | e} value
+mapFailWithEffects : (err1 -> err2) -> (() ->{Fail err1, e} value) ->{Fail err2, e} value
 mapFailWithEffects f body =
     handle body() on
         fail error -> fail (f error)

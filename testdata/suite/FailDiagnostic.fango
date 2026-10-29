@@ -32,13 +32,13 @@ effect Stop
 effect Opaque
     abort reject : (Int -> Int) -> value
 
-attemptInt : (() ->{Fail Int | e} value) ->{e} Result Int value
+attemptInt : (() ->{Fail Int, e} value) ->{e} Result Int value
 attemptInt = Fail.attempt
 
 raiseNumber : Int ->{Fail Int} Int
 raiseNumber number = fail number
 
-twoApplications : (() ->{Fail String, Fail Int | e} value) ->{e} Result (Fail.Diagnostic String) (Result Int value)
+twoApplications : (() ->{Fail String, Fail Int, e} value) ->{e} Result (Fail.Diagnostic String) (Result Int value)
 twoApplications action = Fail.attemptDiagnostic { attemptInt action }
 
 taskDiagnostic : () ->{IO.IO} Outcome (Result (Fail.Diagnostic String) Int)

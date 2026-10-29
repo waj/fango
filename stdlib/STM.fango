@@ -54,7 +54,7 @@
 -- import State exposing (State)
 -- import STM exposing (STM)
 --
--- runVar : STM.Var s -> (() ->{State s | e} a) ->{STM | e} a
+-- runVar : STM.Var s -> (() ->{State s, e} a) ->{STM, e} a
 -- runVar var action =
 --     handle action() on
 --         State.get () -> resume (STM.read var)

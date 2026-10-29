@@ -60,14 +60,14 @@ func freeGeneral(t types.Type) *types.TVar {
 // Constructor fields extend their declaration parameters with ordinary
 // constructor-local hidden binders.
 type TypeVars struct {
-	hidden                bool
-	scopedRow, scopedBase string
-	open                  bool
-	sup                   *types.Supply
-	vars                  map[string]*types.TVar
-	minted                []*types.TVar // open scopes: skolems in first-use order
-	preds                 []types.Pred
-	native                bool
+	hidden    bool
+	scopedRow string // the declaration's `#s` binder, if any
+	open      bool
+	sup       *types.Supply
+	vars      map[string]*types.TVar
+	minted    []*types.TVar // open scopes: skolems in first-use order
+	preds     []types.Pred
+	native    bool
 	// kinds records the first required kind for each binder in this scope.
 	// ADT parameters start as ordinary variables and are promoted to RowVar
 	// when used as an effect-row tail; a second, incompatible use is a
@@ -92,7 +92,7 @@ func (ck *Checker) NewAnnScope() *TypeVars {
 
 func (ck *Checker) newDeclAnnScope(d *ast.ValueDecl) *TypeVars {
 	tv := ck.NewAnnScope()
-	tv.scopedRow, tv.scopedBase = d.ScopedRow, d.ScopedBase
+	tv.scopedRow = d.ScopedRow
 	return tv
 }
 
@@ -156,9 +156,6 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 		}
 		return t, nil
 	case *ast.TVarName:
-		if tv.scopedBase != "" && te.Name == tv.scopedRow {
-			return nil, []diag.Error{diag.Errorf(te.Sp, "SCOPED CALLBACK", "Write the scoped row as `{%s | %s}` wherever it occurs.", tv.scopedRow, tv.scopedBase)}
-		}
 		if v, ok := tv.vars[te.Name]; ok {
 			if tv.hidden && want == types.RowVar && tv.isMinted(v) {
 				return nil, []diag.Error{diag.Errorf(te.Sp, "HIDDEN EFFECT ROW", "The effect row `%s` must be declared in the type parameters.", te.Name)}
@@ -262,11 +259,8 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 	if row == nil {
 		return types.Row{}, nil
 	}
-	if row.ScopeBase != "" && (row.Tail != tv.scopedRow || row.ScopeBase != tv.scopedBase) {
-		return types.Row{}, []diag.Error{diag.Errorf(row.Span(), "SCOPED CALLBACK", "A scoped row extension belongs to one callback in an annotated runner; it is not a general union of effect rows.")}
-	}
-	if tv.scopedBase != "" && row.Tail == tv.scopedRow && row.ScopeBase == "" {
-		return types.Row{}, []diag.Error{diag.Errorf(row.Span(), "SCOPED CALLBACK", "Write the scoped row as `{%s | %s}` wherever it occurs.", tv.scopedRow, tv.scopedBase)}
+	if row.Scoped && row.Tail != tv.scopedRow {
+		return types.Row{}, []diag.Error{diag.Errorf(row.TailSp, "SCOPED CALLBACK", "A scoped row variable like `#%s` belongs only to the callback of an annotated top-level runner, `run : (Handle {#%s} ->{#%s} a) ->{e} a`; it cannot appear in this type.", row.Tail, row.Tail, row.Tail)}
 	}
 	var result types.Row
 	var errs []diag.Error

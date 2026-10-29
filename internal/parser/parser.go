@@ -120,18 +120,13 @@ func ParseUseInput(toks []token.Token, f *source.File) (*ast.UseSugar, []ast.Pat
 	return w, params, head, p.errs
 }
 
-func isScopedPragma(text string) bool {
-	fields := strings.Fields(text)
-	return len(fields) > 0 && fields[0] == "scoped"
-}
-
 // parsePragmas consumes the `{-# ... #-}` directives that may precede the
 // module header. Declaration-local markers are left for parseDecl.
 func (p *parser) parsePragmas(m *ast.Module) {
-	for p.peek().Kind == token.PRAGMA && p.peek().Text != "resource" && !isScopedPragma(p.peek().Text) {
+	for p.peek().Kind == token.PRAGMA && p.peek().Text != "resource" {
 		t := p.next()
 		if !p.applyPragma(m, t) {
-			p.errorAt(t.Span, "UNKNOWN PRAGMA", "I don't know the pragma `"+t.Text+"`. Use `no-prelude` above the module header, `resource` before a type declaration, or `scoped row` before an annotated function.")
+			p.errorAt(t.Span, "UNKNOWN PRAGMA", "I don't know the pragma `"+t.Text+"`. Use `no-prelude` above the module header or `resource` before a type declaration.")
 		}
 	}
 }
@@ -338,24 +333,8 @@ func (p *parser) parseDecl() ast.Decl {
 	}
 	if t.Kind == token.PRAGMA {
 		p.next()
-
-		if isScopedPragma(t.Text) {
-			fields := strings.Fields(t.Text)
-			if len(fields) != 2 {
-				p.errorAt(t.Span, "SCOPED CALLBACK", "Use `{-# scoped row #-}` before an annotated function.")
-				return nil
-			}
-			d := p.parseDecl()
-			if vd, ok := d.(*ast.ValueDecl); ok && vd.Ann != nil && vd.ScopedRow == "" {
-				vd.ScopedRow = fields[1]
-				vd.Sp = t.Span.Merge(vd.Sp)
-				return vd
-			}
-			p.errorAt(t.Span, "SCOPED CALLBACK", "A scoped row marker must precede one annotated function.")
-			return d
-		}
 		if t.Text != "resource" {
-			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only `resource` and `scoped` pragmas may precede declarations; file pragmas belong above the module header.")
+			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only the `resource` pragma may precede a declaration; file pragmas belong above the module header.")
 			return nil
 		}
 		if p.peek().Kind == token.EOF {
@@ -1699,6 +1678,9 @@ func (p *parser) parseTypeExpr() ast.TypeExpr {
 	return atom
 }
 
+// parseEffRow parses `{}`, or comma-separated effect labels followed by at
+// most one final component: an ordinary row tail `e` or a scoped row
+// variable `#s`.
 func (p *parser) parseEffRow() *ast.EffRow {
 	lb := p.next()
 	r := &ast.EffRow{}
@@ -1709,44 +1691,22 @@ func (p *parser) parseEffRow() *ast.EffRow {
 	}
 	for {
 		t := p.peekInExpr()
-		if t.Kind == token.PIPE {
-			p.next()
-			tail := p.peekInExpr()
-			if tail.Kind != token.LIDENT {
-				p.errorAt(tail.Span, "SYNTAX PROBLEM", "After `|` I expect a lowercase row variable, like `e`.")
+		if t.Kind == token.LIDENT || t.Kind == token.OP && t.Text == "#" {
+			if !p.parseRowTail(r) {
 				return nil
 			}
-			p.next()
-			r.Tail, r.TailSp = tail.Text, tail.Span
 			break
 		}
-		// A lone lowercase name, or one after a comma, is the compact row-tail
-		// spelling: `{e}` / `{Console, e}`.
-		if t.Kind == token.LIDENT {
-			p.next()
-			r.Tail, r.TailSp = t.Text, t.Span
-			if p.peekInExpr().Kind == token.PIPE {
-				p.next()
-				base := p.peekInExpr()
-				if base.Kind == token.LBRACE {
-					p.next()
-					if !p.expect(token.RBRACE, "A closed scoped base is written `{}`.") {
-						return nil
-					}
-					r.ScopeBase = "{}"
-				} else {
-					if base.Kind != token.LIDENT {
-						p.errorAt(base.Span, "SCOPED CALLBACK", "After a scoped row fragment's `|`, write the ambient row variable or `{}` for a closed outer row.")
-						return nil
-					}
-					p.next()
-					r.ScopeBase = base.Text
-				}
-			}
-			break
+		if t.Kind == token.OP && strings.HasPrefix(t.Text, "#") {
+			p.errorAt(t.Span, "SYNTAX PROBLEM", scopePrefixHint)
+			return nil
+		}
+		if t.Kind == token.PIPE {
+			p.errorAt(t.Span, "SYNTAX PROBLEM", rowCommaHint)
+			return nil
 		}
 		if t.Kind != token.UIDENT {
-			p.errorAt(t.Span, "SYNTAX PROBLEM", "I expect a capitalized effect name in this row.")
+			p.errorAt(t.Span, "SYNTAX PROBLEM", "I expect a capitalized effect name, a row variable like `e`, or a scoped row variable like `#s` in this row.")
 			return nil
 		}
 		p.next()
@@ -1764,15 +1724,16 @@ func (p *parser) parseEffRow() *ast.EffRow {
 			label.Args = append(label.Args, arg)
 		}
 		r.Labels = append(r.Labels, label)
-		switch p.peekInExpr().Kind {
-		case token.COMMA:
+		switch next := p.peekInExpr(); {
+		case next.Kind == token.COMMA:
 			p.next()
 			continue
-		case token.PIPE:
-			continue
-		case token.RBRACE:
+		case next.Kind == token.RBRACE:
+		case next.Kind == token.PIPE:
+			p.errorAt(next.Span, "SYNTAX PROBLEM", rowCommaHint)
+			return nil
 		default:
-			p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect `,`, `|`, or `}` after this effect label.")
+			p.errorAt(next.Span, "SYNTAX PROBLEM", "I expect `,` or `}` after this effect label.")
 			return nil
 		}
 		break
@@ -1782,6 +1743,43 @@ func (p *parser) parseEffRow() *ast.EffRow {
 	}
 	r.Sp = lb.Span.Merge(p.prevSpan())
 	return r
+}
+
+const (
+	rowCommaHint    = "Effect-row components are separated by commas, as in `{Console, e}`."
+	scopePrefixHint = "A scoped row variable is written `#` immediately followed by a lowercase name, like `#s`."
+)
+
+// parseRowTail parses a row's final component, `e` or `#s`, and checks that
+// the row closes after it.
+func (p *parser) parseRowTail(r *ast.EffRow) bool {
+	t := p.next()
+	if t.Kind == token.OP {
+		name := p.peekInExpr()
+		if name.Kind != token.LIDENT || name.Span.Start != t.Span.End {
+			p.errorAt(t.Span, "SYNTAX PROBLEM", scopePrefixHint)
+			return false
+		}
+		p.next()
+		r.Tail, r.TailSp, r.Scoped = name.Text, t.Span.Merge(name.Span), true
+	} else {
+		r.Tail, r.TailSp = t.Text, t.Span
+	}
+	switch next := p.peekInExpr(); next.Kind {
+	case token.RBRACE:
+		return true
+	case token.COMMA:
+		if r.Scoped {
+			p.errorAt(next.Span, "SYNTAX PROBLEM", "`#"+r.Tail+"` ends the row: it already includes the runner's effects, so nothing may follow it. Effect labels come before it, as in `{Console, #"+r.Tail+"}`.")
+		} else {
+			p.errorAt(next.Span, "SYNTAX PROBLEM", "The row variable `"+r.Tail+"` ends the row. Effect labels come before it, as in `{Console, "+r.Tail+"}`, and a row has at most one variable.")
+		}
+	case token.PIPE:
+		p.errorAt(next.Span, "SYNTAX PROBLEM", rowCommaHint)
+	default:
+		p.errorAt(next.Span, "SYNTAX PROBLEM", "I expect `}` to close this effect row after its row variable.")
+	}
+	return false
 }
 
 // parseTypeApp parses type application (`Maybe Int`): a named head followed

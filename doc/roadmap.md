@@ -75,8 +75,8 @@ on measurements of the values flowing through hot operations.
 
 [Hidden state types](roadmap-hidden-types.md) tracks further specialization of
 surviving dynamic packages. [Typed storage workers](design/hidden-types.md#typed-storage-workers),
-the Stream/Iterator migration, and the library's [callback row extensions](reference/functions.md#scoped-callbacks)
-are implemented. Legacy scoped pragmas remain accepted.
+the Stream/Iterator migration, and the library's [scoped callback rows](reference/functions.md#scoped-callbacks)
+are implemented.
 
 ## Builder blocks and generators
 

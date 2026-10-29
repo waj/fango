@@ -72,7 +72,7 @@ exchange next = update { previous -> (previous, next) }
 -- result.state == 20
 -- result.value == ()
 -- ```
-run : s -> (() ->{State s | e} a) ->{e} StateResult s a
+run : s -> (() ->{State s, e} a) ->{e} StateResult s a
 run initial action =
     handle action() with current = initial on
         get () -> resume current with current
@@ -124,7 +124,7 @@ storeAtomic = native
 -- result.value == 20
 -- result.state == 3
 -- ```
-runAtomic : s -> (() ->{State s | e} a) ->{e} StateResult s a
+runAtomic : s -> (() ->{State s, e} a) ->{e} StateResult s a
 runAtomic initial action =
     cell = newAtomicCell initial
     handle action() on

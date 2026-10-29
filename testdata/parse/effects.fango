@@ -5,7 +5,7 @@ effect Console
     print : String -> ()
     readLine : () -> String
 
-program : () ->{Console, Fail String | e} String
+program : () ->{Console, Fail String, e} String
 program unit =
     handle readLine True on
         print text -> resume True

@@ -91,14 +91,14 @@ const nullarySchedulingShapes = `
 effect Scheduling
     signal : Int -> ()
 
-type Task a e = { read : () ->{Scheduling | e} a }
+type Task a e = { read : () ->{Scheduling, e} a }
 
-deferWork : (() ->{Scheduling | e} a) ->{Scheduling | e} Task a e
+deferWork : (() ->{Scheduling, e} a) ->{Scheduling, e} Task a e
 deferWork action =
     signal 0
     Task { read = action }
 
-observe : Task a e ->{Scheduling | e} a
+observe : Task a e ->{Scheduling, e} a
 observe task = task.read()
 
 offer : () ->{Scheduling} ()

@@ -13,11 +13,10 @@ import Test
 effect Feed
     next : () -> Maybe Bytes
 
-paced : Source {Feed | e}
+paced : Source {Feed, e}
 paced = Source { pull = { _ -> next() } }
 
-{-# scoped s #-}
-drive : List Bytes -> (Reader s ->{s} a) ->{e} a
+drive : List Bytes -> (Reader {#s} ->{#s} a) ->{e} a
 drive pieces action =
     handle Reader.over paced action with rest = pieces on
         next () ->

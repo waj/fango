@@ -68,7 +68,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.fango",
-          "match": "(?<![\\w-])(?:no-prelude|resource|scoped)(?![\\w-])"
+          "match": "(?<![\\w-])(?:no-prelude|resource)(?![\\w-])"
         }
       ]
     },
@@ -290,7 +290,7 @@
       ]
     },
     "effect_row": {
-      "comment": "A lowercase name immediately before | is a scoped callback fragment; the name or empty row after | is its ambient base.",
+      "comment": "Row components are comma-separated. `#` immediately followed by a lowercase name is a scoped row variable; a plain lowercase name is an ordinary row tail.",
       "begin": "\\{",
       "end": "\\}",
       "beginCaptures": {
@@ -300,13 +300,12 @@
         "0": { "name": "punctuation.definition.effect-row.end.fango" }
       },
       "patterns": [
+        { "include": "#comments" },
         { "include": "#qualified_module" },
         { "include": "#effect_row" },
         {
-          "match": "(?<=[{,])[\\t ]*([a-z][A-Za-z0-9_]*)(?=[\\t ]*\\|)",
-          "captures": {
-            "1": { "name": "variable.other.generic-type.scope.fango" }
-          }
+          "name": "variable.other.generic-type.scope.fango",
+          "match": "#[a-z][A-Za-z0-9_]*\\b"
         },
         {
           "name": "entity.name.type.effect.fango",
@@ -315,10 +314,6 @@
         {
           "name": "variable.other.generic-type.fango",
           "match": "\\b[a-z][A-Za-z0-9_]*\\b"
-        },
-        {
-          "name": "keyword.operator.pipe.fango",
-          "match": "\\|"
         },
         {
           "name": "punctuation.separator.comma.fango",

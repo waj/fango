@@ -20,7 +20,7 @@ effect Stop
     abort stop : () -> value
 effect Database
     lookup : () -> Int
-runStrings : (() ->{Async.Async, IO | e} a) ->{IO | e} Async.Outcome a
+runStrings : (() ->{Async.Async, IO, e} a) ->{IO, e} Async.Outcome a
 runStrings body = Async.runOutcome body
 withDatabase body =
     handle body() on
@@ -102,7 +102,7 @@ func TestAsyncGenericAbortBoundary(t *testing.T) {
 import Fail exposing (Fail)
 effect Stop
     abort stop : () -> value
-submit : (() ->{e} a) ->{Async.Async | e} Async.Task a
+submit : (() ->{e} a) ->{Async.Async, e} Async.Task a
 submit body = Async.spawn body
 job : () ->{Console, Stop} Int
 job() =
@@ -137,7 +137,7 @@ main() =
 func TestAsyncGenericFailBoundary(t *testing.T) {
 	testAsyncRejectedBeforeUserCode(t, `import Async
 import Fail exposing (Fail)
-submit : (() ->{e} a) ->{Async.Async | e} Async.Task a
+submit : (() ->{e} a) ->{Async.Async, e} Async.Task a
 submit body = Async.spawn body
 job : () ->{Console, Fail String} Int
 job() =

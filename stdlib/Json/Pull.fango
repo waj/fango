@@ -186,15 +186,15 @@ errorAt cursor message =
 
 -- Grammar and decoding errors publish only the prefix already consumed by the
 -- scanner. A stale outer cleanup position cannot consume that prefix twice.
-badAt : TextReader.Reader e -> Cursor -> Cursor -> String ->{Fail Error | e} a
+badAt : TextReader.Reader e -> Cursor -> Cursor -> String ->{Fail Error, e} a
 badAt reader site consumed message =
     TextReader.commitWindow reader consumed.window
     Fail.fail (errorAt site message)
 
-bad : TextReader.Reader e -> Cursor -> String ->{Fail Error | e} a
+bad : TextReader.Reader e -> Cursor -> String ->{Fail Error, e} a
 bad reader cursor message = badAt reader cursor cursor message
 
-encodingError : TextReader.Reader e -> Cursor -> Encoding.Error ->{Fail Error | e} a
+encodingError : TextReader.Reader e -> Cursor -> Encoding.Error ->{Fail Error, e} a
 encodingError reader cursor problem =
     bad reader cursor (case problem of
             Encoding.InvalidSequence _ -> "Invalid UTF-8 in JSON input"
@@ -215,7 +215,7 @@ readyCursor reader cursor =
         readyCursor reader { cursor | window = snapshot, ended = grew == False }
     else cursor
 
-peekChar : TextReader.Reader e -> Cursor ->{Fail Error | e} (Maybe Char, Cursor)
+peekChar : TextReader.Reader e -> Cursor ->{Fail Error, e} (Maybe Char, Cursor)
 peekChar reader cursor =
     case TextReader.peekWindow cursor.window of
         Ok Nothing ->
@@ -227,7 +227,7 @@ peekChar reader cursor =
             else peekChar reader (readyCursor reader cursor)
         Err problem -> encodingError reader cursor problem
 
-takeChar : TextReader.Reader e -> Cursor ->{Fail Error | e} (Maybe Char, Cursor)
+takeChar : TextReader.Reader e -> Cursor ->{Fail Error, e} (Maybe Char, Cursor)
 takeChar reader cursor =
     case TextReader.readWindow cursor.window of
         Err (Encoding.IncompleteSequence _) ->
@@ -246,7 +246,7 @@ takeChar reader cursor =
 white : Char -> Bool
 white char = char == ' ' || char == '\t' || char == '\n' || char == '\r'
 
-skipWhite : TextReader.Reader e -> Cursor ->{Fail Error | e} Cursor
+skipWhite : TextReader.Reader e -> Cursor ->{Fail Error, e} Cursor
 skipWhite reader cursor =
     (got, ready) = peekChar reader cursor
     case got of
@@ -257,12 +257,12 @@ skipWhite reader cursor =
             else ready
         Nothing -> ready
 
-expectChar : TextReader.Reader e -> Cursor -> Char ->{Fail Error | e} Cursor
+expectChar : TextReader.Reader e -> Cursor -> Char ->{Fail Error, e} Cursor
 expectChar reader cursor wanted =
     (got, after) = takeChar reader cursor
     if got == Just wanted then after else badAt reader cursor after "Invalid JSON literal"
 
-literal : TextReader.Reader e -> Cursor -> String ->{Fail Error | e} Cursor
+literal : TextReader.Reader e -> Cursor -> String ->{Fail Error, e} Cursor
 literal reader cursor text =
     case literalRun cursor.window text of
         Ok snapshot ->
@@ -283,7 +283,7 @@ hex char =
     else if char >= 'a' && char <= 'f' then code - Char.toCode 'a' + 10
     else -1
 
-readHex : TextReader.Reader e -> Cursor -> Int -> Int ->{Fail Error | e} (Int, Cursor)
+readHex : TextReader.Reader e -> Cursor -> Int -> Int ->{Fail Error, e} (Int, Cursor)
 readHex reader cursor remaining acc =
     if remaining == 0 then (acc, cursor)
     else
@@ -295,13 +295,13 @@ readHex reader cursor remaining acc =
                 if nibble < 0 then badAt reader cursor after "Invalid Unicode escape"
                 else readHex reader after (remaining - 1) (acc * 16 + nibble)
 
-scalar : TextReader.Reader e -> Cursor -> Int ->{Fail Error | e} Char
+scalar : TextReader.Reader e -> Cursor -> Int ->{Fail Error, e} Char
 scalar reader cursor code =
     case Char.fromCode code of
         Just char -> char
         Nothing -> bad reader cursor "Invalid Unicode scalar"
 
-escaped : TextReader.Reader e -> Cursor ->{Fail Error | e} (Char, Cursor)
+escaped : TextReader.Reader e -> Cursor ->{Fail Error, e} (Char, Cursor)
 escaped reader cursor =
     (got, after) = takeChar reader cursor
     case got of
@@ -345,7 +345,7 @@ priorFragment current reverse = if current == "" then reverse else [current | re
 
 -- The builder holds the text decoded so far; it stays empty until a string
 -- needs more than one span.
-scanString : TextReader.Reader e -> Cursor -> Builder ->{Fail Error | e} (String, Cursor)
+scanString : TextReader.Reader e -> Cursor -> Builder ->{Fail Error, e} (String, Cursor)
 scanString reader cursor built =
     case stringRun cursor.window built of
         Ok (text, snapshot) ->
@@ -404,11 +404,11 @@ numberComplete phase = case phase of
     ExponentDigits -> True
     _ -> False
 
-numberWindows : TextReader.Reader e -> TextReader.Window -> Cursor -> NumberPhase -> List String ->{Fail Error | e} (String, Cursor)
+numberWindows : TextReader.Reader e -> TextReader.Window -> Cursor -> NumberPhase -> List String ->{Fail Error, e} (String, Cursor)
 numberWindows reader start cursor phase reverse =
     numberScanned reader start cursor (numberRun cursor.window phase) reverse
 
-numberScanned : TextReader.Reader e -> TextReader.Window -> Cursor -> NumberRun -> List String ->{Fail Error | e} (String, Cursor)
+numberScanned : TextReader.Reader e -> TextReader.Window -> Cursor -> NumberRun -> List String ->{Fail Error, e} (String, Cursor)
 numberScanned reader start cursor scanned reverse =
     base = TextReader.windowPosition cursor.window
     width = TextReader.windowPosition scanned.window - base
@@ -434,7 +434,7 @@ numberScanned reader start cursor scanned reverse =
         site = { cursor | offset = cursor.offset + siteWidth, column = cursor.column + siteWidth }
         badAt reader site after scanned.message
 
-scanNumber : TextReader.Reader e -> TextReader.Window -> Cursor -> Char ->{Fail Error | e} (String, Cursor)
+scanNumber : TextReader.Reader e -> TextReader.Window -> Cursor -> Char ->{Fail Error, e} (String, Cursor)
 scanNumber reader start cursor first =
     phase = if first == '-' then MinusDigit else if first == '0' then ZeroEnd else WholeDigits
     numberWindows reader start cursor phase []
@@ -534,7 +534,7 @@ fastString snapshot built = case stringRun snapshot built of
 
 -- One lexer dispatches the token once. Its scalar loops run purely within
 -- each window and resume their saved phase after source refills.
-lex : TextReader.Reader e -> Cursor ->{Fail Error | e} (Token, Cursor, Cursor)
+lex : TextReader.Reader e -> Cursor ->{Fail Error, e} (Token, Cursor, Cursor)
 lex reader before =
     cursor = case fastWhite before.window before.line before.column of
         Nothing -> skipWhite reader before
@@ -627,7 +627,7 @@ mapScan convert result = case result of
         ScanDone (convert value) rest
     }
 
-tokenDepth : TextReader.Reader e -> Token -> Int -> Cursor -> Cursor ->{Fail Error | e} Int
+tokenDepth : TextReader.Reader e -> Token -> Int -> Cursor -> Cursor ->{Fail Error, e} Int
 tokenDepth reader token depth site consumed =
     case token of
         BeginArray -> if depth >= 256 then badAt reader site consumed "JSON nesting exceeds 256 levels" else depth + 1
@@ -642,7 +642,7 @@ tokenSite state = case state.mark of
     Just start -> { start | path = state.cursor.path }
     Nothing -> state.cursor
 
-badToken : TextReader.Reader e -> PullState -> String ->{Fail Error | e} a
+badToken : TextReader.Reader e -> PullState -> String ->{Fail Error, e} a
 badToken reader state message = badAt reader (tokenSite state) state.cursor message
 
 -- Moving past a token by a route other than reading one forgets its start;
@@ -652,7 +652,7 @@ settled state = case state.pending of
     Nothing -> { state | mark = Nothing }
     Just _ -> state
 
-consumeToken : TextReader.Reader e -> PullState ->{Fail Error | e} (Token, PullState)
+consumeToken : TextReader.Reader e -> PullState ->{Fail Error, e} (Token, PullState)
 consumeToken reader state =
     (token, start, cursor) = case state.pending of
         Just token -> (token, tokenSite state, state.cursor)
@@ -660,7 +660,7 @@ consumeToken reader state =
     depth = tokenDepth reader token state.depth start cursor
     (token, { state | cursor = cursor, pending = Nothing, depth = depth, mark = Just start })
 
-elementStart : TextReader.Reader e -> Bool -> PullState ->{Fail Error | e} (Bool, PullState)
+elementStart : TextReader.Reader e -> Bool -> PullState ->{Fail Error, e} (Bool, PullState)
 elementStart reader trailing state =
     case state.pending of
         Just EndArray ->
@@ -676,7 +676,7 @@ elementStart reader trailing state =
                 if trailing then badAt reader cursor rest "Trailing array comma" else (False, after)
             else (True, { state | cursor = cursor })
 
-elementState : TextReader.Reader e -> Bool -> PullState ->{Fail Error | e} (Bool, PullState)
+elementState : TextReader.Reader e -> Bool -> PullState ->{Fail Error, e} (Bool, PullState)
 elementState reader first state =
     if first then elementStart reader False state
     else
@@ -708,14 +708,14 @@ fastElement snapshot first line column =
             else if code == 44 then fastElementStart (TextReader.skipAscii start) True nextLine (nextColumn + 1)
             else Nothing
 
-colonState : TextReader.Reader e -> String -> PullState ->{Fail Error | e} (Maybe String, PullState)
+colonState : TextReader.Reader e -> String -> PullState ->{Fail Error, e} (Maybe String, PullState)
 colonState reader key state =
     (token, after) = consumeToken reader state
     case token of
         Colon -> (Just key, after)
         _ -> badToken reader after "Expected colon"
 
-keyState : TextReader.Reader e -> Bool -> PullState ->{Fail Error | e} (Maybe String, PullState)
+keyState : TextReader.Reader e -> Bool -> PullState ->{Fail Error, e} (Maybe String, PullState)
 keyState reader first state =
     (token, after) = consumeToken reader state
     case token of
@@ -820,7 +820,7 @@ fastIntegerAt start column =
         Just (scanned, column + TextReader.windowPosition scanned.window - TextReader.windowPosition start)
     else Nothing
 
-integerWindows : TextReader.Reader e -> Cursor -> IntegerRun ->{Fail Error | e} (Result String Int, Cursor)
+integerWindows : TextReader.Reader e -> Cursor -> IntegerRun ->{Fail Error, e} (Result String Int, Cursor)
 integerWindows reader before scanned =
     if scanned.phase == 4 then (Ok scanned.value, before)
     else
@@ -1021,7 +1021,7 @@ scanCursor before scanned =
     width = TextReader.windowPosition scanned.window - TextReader.windowPosition before.window
     { before | window = scanned.window, offset = before.offset + width, line = scanned.line, column = scanned.column }
 
-tokenInteger : TextReader.Reader e -> PullState ->{Fail Error | e} (Result String Int, PullState)
+tokenInteger : TextReader.Reader e -> PullState ->{Fail Error, e} (Result String Int, PullState)
 tokenInteger reader state =
     (token, after) = consumeToken reader state
     value = case token of

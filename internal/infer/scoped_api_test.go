@@ -16,7 +16,7 @@ func TestAnnotatedNestedHandlersRetainOuterEffects(t *testing.T) {
 effect Http
     request : Int -> Int
 
-interpret : (() ->{Database, Http | e} a) ->{e} a
+interpret : (() ->{Database, Http, e} a) ->{e} a
 interpret action =
     handle (handle action() on
         lookup value -> resume (request value)) on
@@ -25,7 +25,7 @@ interpret action =
 		`effect Ask
     ask : () -> Int
 
-interpret : (() ->{Ask | e} a) ->{e} a
+interpret : (() ->{Ask, e} a) ->{e} a
 interpret action =
     handle (handle action() on
         ask () -> resume (ask() + 1)) on
@@ -54,7 +54,7 @@ func TestAnnotatedHandlersDoNotGainAmbientIOOrSelfHandling(t *testing.T) {
 		_, _, errs := check(t, `effect Ask
     ask : () -> Int
 
-interpret : (() ->{Ask | e} a) ->{e} a
+interpret : (() ->{Ask, e} a) ->{e} a
 interpret action =
     handle action() on
         `+clause+"\n")
@@ -113,7 +113,7 @@ both() = ()
 effect Scheduling e
     submit : Job e -> ()
 
-bad : Job e ->{Scheduling e | e} ()
+bad : Job e ->{Scheduling e, e} ()
 bad input = submit input
 `, "KIND MISMATCH"},
 		{"invalid effect argument in row-indexed type", `effect Local s
@@ -148,17 +148,16 @@ bad action = handle action { read = read } on
 
 func TestScopedDeclarationErrors(t *testing.T) {
 	for _, src := range []string{
-		"{-# scoped s #-}\nrun : (Int ->{s} Int) -> (Int ->{s} Int) ->{e} Int\nrun first second = first (second 0)\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} Int) -> Int ->{s} Int\nrun callback n = callback n\n",
-		"{-# scoped missing #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = action 0\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{s} a\nrun action = action 0\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = run action\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = other action\nother action = run action\n",
-		"{-# scoped s #-}\nrun : Show a => (Int ->{s} a) ->{e} a\nrun action = action 0\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun _ = 0\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun = native\n",
-		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun action = action 0\nalias = run\n",
-		"effect Tell a\n    tell : a -> ()\n\n{-# scoped s #-}\nrun : (Int ->{Tell (Int ->{s} Int) | s} a) ->{e} a\nrun action = handle action 0 on\n    tell _ -> resume ()\n",
+		"run : (Int ->{#s} Int) -> (Int ->{#s} Int) ->{e} Int\nrun first second = first (second 0)\n",
+		"run : (Int ->{#s} Int) -> Int ->{#s} Int\nrun callback n = callback n\n",
+		"run : (Int ->{#s} a) ->{#s} a\nrun action = action 0\n",
+		"run : (Int ->{#s} a) ->{e} a\nrun action = run action\n",
+		"run : (Int ->{#s} a) ->{e} a\nrun action = other action\nother action = run action\n",
+		"run : Show a => (Int ->{#s} a) ->{e} a\nrun action = action 0\n",
+		"run : (Int ->{#s} a) ->{e} a\nrun _ = 0\n",
+		"run : (Int ->{#s} a) ->{e} a\nrun = native\n",
+		"run : (Int ->{#s} a) ->{e} a\nrun action = action 0\nalias = run\n",
+		"effect Tell a\n    tell : a -> ()\n\nrun : (Int ->{Tell (Int ->{#s} Int), #s} a) ->{e} a\nrun action = handle action 0 on\n    tell _ -> resume ()\n",
 	} {
 		t.Run(src, func(t *testing.T) {
 			_, _, errs := check(t, src)
@@ -176,8 +175,7 @@ func TestScopedRunnerMustHandleEffectsItGrants(t *testing.T) {
 	_, _, errs := check(t, `effect Tell
     tell : Int -> ()
 
-{-# scoped s #-}
-run : (Int ->{Tell | s} a) ->{e} a
+run : (Int ->{Tell, #s} a) ->{e} a
 run action = action 0
 `)
 	if len(errs) == 0 {
@@ -194,8 +192,7 @@ func TestScopedCallbackBeforeAction(t *testing.T) {
 		src := `effect Tell
     tell : Int -> Int
 
-{-# scoped s #-}
-run : ` + prefix + `(Int ->{Tell | s} Int) -> (() ->{e} a) ->{e} (Int, a)
+run : ` + prefix + `(Int ->{Tell, #s} Int) -> (() ->{e} a) ->{e} (Int, a)
 run ` + params + ` =
     value = handle callback ` + value + ` on
         tell n -> resume (n + 1)

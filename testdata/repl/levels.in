@@ -34,7 +34,7 @@ use skip
 effect Stop
     abort stop : () -> a
 
-runStop : (() ->{Stop | e} a) ->{e} Maybe a
+runStop : (() ->{Stop, e} a) ->{e} Maybe a
 runStop action =
     handle action() on
         stop () -> Nothing

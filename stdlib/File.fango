@@ -198,22 +198,22 @@ systemFileSize = native
 close : Handle ->{FileSystem, Fail Error} ()
 close file = fromResult (closeHandle file)
 
-withOpened : (String ->{FileSystem} Result Error Handle) -> String -> (Handle ->{FileSystem, Fail Error | e} a) ->{FileSystem, Fail Error | e} a
+withOpened : (String ->{FileSystem} Result Error Handle) -> String -> (Handle ->{FileSystem, Fail Error, e} a) ->{FileSystem, Fail Error, e} a
 withOpened open path action = Runtime.Scope.bracket { fromResult (open path) } close action
 
 -- Opens `path` for reading, runs the callback, and closes exactly once on
 -- normal return or a language abort. Failed acquisition releases nothing.
-withFile : String -> (Handle ->{FileSystem, Fail Error | e} a) ->{FileSystem, Fail Error | e} a
+withFile : String -> (Handle ->{FileSystem, Fail Error, e} a) ->{FileSystem, Fail Error, e} a
 withFile path action = withOpened openRead path action
 
 -- Creates or truncates `path`, runs the callback, and closes on every exit.
 -- A close failure after success becomes primary; after a body failure it is
 -- recorded as a suppressed failure.
-withOutput : String -> (Handle ->{FileSystem, Fail Error | e} a) ->{FileSystem, Fail Error | e} a
+withOutput : String -> (Handle ->{FileSystem, Fail Error, e} a) ->{FileSystem, Fail Error, e} a
 withOutput path action = withOpened openWrite path action
 
 -- Opens `path` for append, creating it if necessary, and closes on every exit.
-withAppend : String -> (Handle ->{FileSystem, Fail Error | e} a) ->{FileSystem, Fail Error | e} a
+withAppend : String -> (Handle ->{FileSystem, Fail Error, e} a) ->{FileSystem, Fail Error, e} a
 withAppend path action = withOpened openAppend path action
 
 -- The next line and its exact terminator, or `Nothing` at EOF. Byte and line
@@ -316,7 +316,7 @@ systemBytes provider file count =
 -- close before their callbacks leave; remaining raw handles close and become
 -- invalid at runner exit. Raw acquisition callers must explicitly close their
 -- handles; teardown reports its first native close failure.
-runSystem : (() ->{FileSystem | e} a) ->{IO | e} a
+runSystem : (() ->{FileSystem, e} a) ->{IO, e} a
 runSystem action =
     -- Teardown failures are runtime faults: raw acquisition requires explicit
     -- close, whereas scoped close failures retain the normal Fail contract.
@@ -768,7 +768,7 @@ memoryWriteFile provider path text memory =
 --     Err error -> error.kind == IO.NotFound
 --     Ok _ -> False
 -- ```
-runMemory : Image -> (() ->{FileSystem | e} a) ->{e} Snapshot a
+runMemory : Image -> (() ->{FileSystem, e} a) ->{e} Snapshot a
 runMemory image action = runMemoryWith noFaults image action
 
 -- Interprets FileSystem without OS access, returning an immutable snapshot.
@@ -784,7 +784,7 @@ runMemory image action = runMemoryWith noFaults image action
 -- It models no symlinks or permissions. Directory sizes are zero.
 -- An abort escaping the runner returns no snapshot; put Fail.attempt inside
 -- it to inspect partial progress.
-runMemoryWith : Faults -> Image -> (() ->{FileSystem | e} a) ->{e} Snapshot a
+runMemoryWith : Faults -> Image -> (() ->{FileSystem, e} a) ->{e} Snapshot a
 runMemoryWith faults image action =
     withProvider { provider ->
         result = State.runAtomic (Memory { image = image, faults = faults, handles = Dict.empty, next = 0 }) {

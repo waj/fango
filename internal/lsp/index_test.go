@@ -312,13 +312,13 @@ func TestReferencesKeepProjectIdentity(t *testing.T) {
 }
 
 func TestLeadingCommentsAcrossPragma(t *testing.T) {
-	file := source.NewFile("Docs.fango", []byte("-- First line\n-- Second line\n{-# scoped s #-}\nvalue : Int\nvalue = 1\n\n-- Detached\n\nother = 2\nprior = 1 -- trailing\nnext = 3\n"))
+	file := source.NewFile("Docs.fango", []byte("-- First line\n-- Second line\n{-# resource #-}\ntype Value = Value Int\n\n-- Detached\n\nother = 2\nprior = 1 -- trailing\nnext = 3\n"))
 	_, comments, errs := lexer.LexWithComments(file)
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
 	idx := &index{docs: map[*source.File][]token.Comment{file: comments}}
-	sp := source.Span{File: file, Start: strings.Index(string(file.Content), "value :"), End: strings.Index(string(file.Content), "value :") + 5}
+	sp := source.Span{File: file, Start: strings.Index(string(file.Content), "type Value"), End: strings.Index(string(file.Content), "type Value") + 10}
 	if got := idx.commentBefore(sp); got != "First line\nSecond line" {
 		t.Fatalf("docs = %q", got)
 	}

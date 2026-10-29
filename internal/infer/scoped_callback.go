@@ -24,47 +24,33 @@ func (ck *Checker) checkScopedDeclaration(d *ast.ValueDecl, ty types.Type, tv *T
 	fail := func(message string) []diag.Error {
 		return []diag.Error{diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "%s", message)}
 	}
+	bare := "#" + d.ScopedRow
+	s := "`" + bare + "`"
 	if tv == nil || ty == nil {
 		return fail("A scoped runner needs a valid annotation.")
 	}
 	v := tv.vars[d.ScopedRow]
 	if v == nil || v.Kind != types.RowVar {
-		return fail("The scoped name must be a row variable in the annotation.")
+		return fail("The scoped row variable " + s + " must be an effect row in the annotation.")
 	}
 	arity := len(d.Params)
 	if d.Native != nil {
 		arity = types.IntrinsicArity(d.Name)
 	}
 	if arity == 0 {
-		return fail("A scoped runner must be an annotated function with a scoped callback parameter.")
+		return fail("Only an annotated function with a callback parameter can bind the scoped row variable " + s + ".")
 	}
 	args, result := peelArrows(ty, arity)
 	if len(args) != arity {
 		return fail("The annotation must match the runner's parameter count.")
 	}
-	if d.ScopedBase != "" {
-		outer := ty
-		var final *types.TFun
-		for range arity {
-			final = outer.(*types.TFun)
-			outer = final.Ret
-		}
-		base := tv.vars[d.ScopedBase]
-		if d.ScopedBase == "{}" {
-			if final.Eff.Tail != nil {
-				return fail("The closed scoped base `{}` requires a closed final arrow effect row.")
-			}
-		} else if base == nil || base.Kind != types.RowVar || !types.Equal(final.Eff.Tail, base) {
-			return fail("The ambient row after `|` must be the tail of the runner's final arrow effects.")
-		}
-	}
 	index := types.ScopedParameterIndex(ty, arity, v)
 	if index < 0 {
-		return fail("Exactly one callback must perform the scoped row as its tail.")
+		return fail("Exactly one callback parameter must end its effect row with " + s + ", as in `(Handle {" + bare + "} ->{" + bare + "} a) ->{e} a`.")
 	}
 	fn, ok := args[index].(*types.TFun)
 	if !ok || !types.Equal(fn.Eff.Tail, v) {
-		return fail("The scoped callback must have one argument and perform the scoped row, optionally after effects the runner handles.")
+		return fail("The scoped callback must be a function whose effect row ends with " + s + ", optionally after effects the runner handles, as in `->{Foo, " + bare + "}`.")
 	}
 	outside := append([]types.Type{result}, args[:index]...)
 	outside = append(outside, args[index+1:]...)
@@ -81,7 +67,7 @@ func (ck *Checker) checkScopedDeclaration(d *ast.ValueDecl, ty types.Type, tv *T
 		ids := map[int]bool{}
 		collectVarIDs(t, ids)
 		if ids[v.ID] {
-			return fail("The scoped row may occur only in the scoped callback's argument, effect row tail, and result.")
+			return fail("The scoped row variable " + s + " may occur only in the scoped callback's argument, at the end of its effect row, and in its result.")
 		}
 	}
 	if len(d.Ann.Preds) != 0 {

@@ -16,7 +16,7 @@ import Test
 effect Fail error
     abort fail : error -> value
 
-attempt : (() ->{Fail String | e} Int) ->{e} Result String Int
+attempt : (() ->{Fail String, e} Int) ->{e} Result String Int
 attempt action =
     handle action() on
         fail error -> Err error

@@ -120,12 +120,12 @@ readText _ reader =
 --
 -- Tuple.second written == Bytes.fromString "{\"a\":\"x\"}"
 -- ```
-withWriter : Writer e -> (() ->{Emit, Fail Error | e} a) ->{e} Result Error a
+withWriter : Writer e -> (() ->{Emit, Fail Error, e} a) ->{e} Result Error a
 withWriter writer action = TextWriter.borrow writer { text -> withTextWriter text action }
 
 -- `withWriter` over a text writer, whose encoding the caller chose; a
 -- character it cannot represent fails with an `Error`.
-withTextWriter : TextWriter.Writer e -> (() ->{Emit, Fail Error | e} a) ->{e} Result Error a
+withTextWriter : TextWriter.Writer e -> (() ->{Emit, Fail Error, e} a) ->{e} Result Error a
 withTextWriter writer action =
     Fail.attempt {
         handle action() on
@@ -274,7 +274,7 @@ emitObject entries first =
 --
 -- Tuple.second written == Bytes.fromString "[\"a\",\"b\"]"
 -- ```
-array : Encode a => Stream a {Emit, Fail Error | e} ->{Emit, Fail Error | e} ()
+array : Encode a => Stream a {Emit, Fail Error, e} ->{Emit, Fail Error, e} ()
 array items =
     emit "["
     ignore (Stream.fold { item first ->
@@ -288,13 +288,13 @@ array items =
 -- Emits a JSON object whose field values are emitted in order, each when it
 -- is reached, so an array field can stream before a later field is
 -- computed.
-object : List (String, () ->{Emit, Fail Error | e} ()) ->{Emit, Fail Error | e} ()
+object : List (String, () ->{Emit, Fail Error, e} ()) ->{Emit, Fail Error, e} ()
 object fields =
     emit "{"
     emitFields fields True
     emit "}"
 
-emitFields : List (String, () ->{Emit, Fail Error | e} ()) -> Bool ->{Emit, Fail Error | e} ()
+emitFields : List (String, () ->{Emit, Fail Error, e} ()) -> Bool ->{Emit, Fail Error, e} ()
 emitFields fields first =
     case fields of
         [] -> ()

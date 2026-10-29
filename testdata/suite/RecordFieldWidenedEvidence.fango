@@ -13,9 +13,9 @@ effect Cell
 effect Extra
     bump : Int -> Int
 
-type Ops e = { read : () ->{Cell | e} Int }
+type Ops e = { read : () ->{Cell, e} Int }
 
-withCell : (Ops e ->{Cell | e} a) ->{e} a
+withCell : (Ops e ->{Cell, e} a) ->{e} a
 withCell action =
     handle action (Ops { read = { _ -> get() } }) on
         get () -> resume 7

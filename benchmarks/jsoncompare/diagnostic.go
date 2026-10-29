@@ -34,7 +34,7 @@ reportTyped result =
             total = List.foldl summarize (Totals { records = 0, ids = 0, cents = 0, units = 0, text_bytes = 0 }) orders
             Console.write (show total.records ++ " " ++ show total.ids ++ " " ++ show total.cents ++ " " ++ show total.units ++ " " ++ show total.text_bytes ++ "\n")
 
-runTask : String -> TextReader.Reader e ->{IO.IO | e} ()
+runTask : String -> TextReader.Reader e ->{IO.IO, e} ()
 runTask kind reader =
     Probe.begin()
     case kind of

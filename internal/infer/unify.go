@@ -116,7 +116,7 @@ func unify(a, b types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *m
 
 	// A row with no labels and an open tail is just its tail. Normalizing
 	// here lets a fresh row metavariable wrapped by unifyRows bind against a
-	// rigid annotation tail (e.g. the `e` in `(() ->{Ask | e} a) ->{e} a`)
+	// rigid annotation tail (e.g. the `e` in `(() ->{Ask, e} a) ->{e} a`)
 	// instead of tripping the rigid-vs-structure mismatch below.
 	if ar, ok := a.(types.Row); ok && len(ar.Labels) == 0 && ar.Tail != nil {
 		return unify(ar.Tail, b, sub, bi, sup)

@@ -21,7 +21,7 @@ type Printer struct {
 	general int
 	row     int
 	rows    map[int]int
-	scoped  map[int]*TVar // a scoped row's ambient tail, only while printing its scheme
+	scoped  map[int]bool // the scheme's scoped row variable, only while printing it
 	// bound holds the variables given a name by Bind, and the names they
 	// took, which generated names then avoid.
 	bound map[int]bool
@@ -83,7 +83,7 @@ func (p *Printer) Type(t Type) string {
 func (p *Printer) render(t Type) string {
 	switch t := t.(type) {
 	case *TVar:
-		if p.scoped[t.ID] != nil {
+		if p.scoped[t.ID] {
 			return p.rowText(Row{Tail: t})
 		}
 		return p.varName(t)
@@ -129,24 +129,12 @@ func (p *Printer) rowText(r Row) string {
 	for i, l := range r.Labels {
 		parts[i] = p.label(l)
 	}
-	inside := strings.Join(parts, ", ")
-	if v, ok := r.Tail.(*TVar); ok {
-		if base, scoped := p.scoped[v.ID]; scoped {
-			ambient := "{}"
-			if base != nil {
-				ambient = p.varName(base)
-			}
-			parts = append(parts, p.varName(v))
-			return "{" + strings.Join(parts, ", ") + " | " + ambient + "}"
-		}
+	if v, ok := r.Tail.(*TVar); ok && p.scoped[v.ID] {
+		parts = append(parts, "#"+p.varName(v))
+	} else if r.Tail != nil {
+		parts = append(parts, p.render(r.Tail))
 	}
-	if r.Tail != nil {
-		if inside != "" {
-			inside += " | "
-		}
-		inside += p.render(r.Tail)
-	}
-	return "{" + inside + "}"
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 // A row variable is elided from an arrow that is its only occurrence, since
@@ -248,7 +236,7 @@ func (p *Printer) Scheme(s Scheme) string {
 		base, _ := ambient.Tail.(*TVar)
 		{
 			old := p.scoped
-			p.scoped = map[int]*TVar{s.ScopedRow.ID: base}
+			p.scoped = map[int]bool{s.ScopedRow.ID: true}
 			defer func() { p.scoped = old }()
 			p.Bind(s.ScopedRow, "s")
 			if base != nil {

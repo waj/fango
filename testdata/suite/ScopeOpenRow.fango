@@ -18,7 +18,7 @@ withLog action =
         log line -> resume () with [line | lines]
         return value -> (value, lines)
 
-traced : String -> (() ->{e} a) ->{Log | e} a
+traced : String -> (() ->{e} a) ->{Log, e} a
 traced label action =
     Runtime.Scope.bracket { log ("enter " ++ label) } { log ("leave " ++ label) } { action() }
 

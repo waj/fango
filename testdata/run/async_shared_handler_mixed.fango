@@ -19,7 +19,7 @@ withCounter body =
         stop () -> (Nothing, count)
         return value -> (Just value, count)
 
-runStrings : (() ->{Async.Async, IO | e} a) ->{IO | e} Outcome a
+runStrings : (() ->{Async.Async, IO, e} a) ->{IO, e} Outcome a
 runStrings body = Async.runOutcome body
 
 bump : Int ->{Counter} Int

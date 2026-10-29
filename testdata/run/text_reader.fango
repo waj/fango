@@ -9,8 +9,7 @@ import Stream
 import String
 import Text.Reader as TextReader
 
-{-# scoped s #-}
-drive : List Bytes -> (TextReader.Reader s ->{s} a) ->{Fail.Fail Encoding.Error | e} a
+drive : List Bytes -> (TextReader.Reader {#s} ->{#s} a) ->{Fail.Fail Encoding.Error, e} a
 drive chunks action =
     Runtime.Local.run chunks { remaining ->
         source = Bytes.Source

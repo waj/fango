@@ -65,7 +65,7 @@ checkStatus decoder status =
     else invalid (Malformed ("invalid gzip body: " ++ decoderMessage decoder))
 
 -- Pulls compressed input until the decoder has new output or the input ends.
-refillFrom : Decoder -> Reader {Protocol | e} ->{Protocol | e} Bool
+refillFrom : Decoder -> Reader {Protocol, e} ->{Protocol, e} Bool
 refillFrom decoder input =
     before = Bytes.length (decoderPending decoder)
     chunk = Reader.readUpTo input 65536
@@ -79,7 +79,7 @@ refillFrom decoder input =
 -- A reader of the gzip-decoded content of `input`, reading concatenated gzip
 -- members as one stream. A corrupt or truncated stream raises `Malformed`,
 -- and more than `limit` decoded bytes `BodyTooLarge`.
-decoding : Int -> Reader {Protocol | e} -> Reader {Protocol | e}
+decoding : Int -> Reader {Protocol, e} -> Reader {Protocol, e}
 decoding limit input =
     decoder = newDecoder limit
     Reader
@@ -100,7 +100,7 @@ encoding body =
 -- decoded bytes, before `handler` sees them; the decoded request loses its
 -- `Content-Encoding` and `Content-Length` headers. `identity` passes through
 -- unchanged, and another content coding gets 415.
-decodeRequests : Int -> (Request {Protocol | e} ->{Protocol | e} Response {Protocol | e}) -> Request {Protocol | e} ->{Protocol | e} Response {Protocol | e}
+decodeRequests : Int -> (Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}) -> Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
 decodeRequests limit handler request =
     case Http.getHeader "content-encoding" request.headers of
         Nothing -> handler request

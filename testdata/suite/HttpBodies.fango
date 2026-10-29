@@ -9,13 +9,13 @@ import List
 import Test
 import Writer exposing (Writer)
 
-written : String -> Writer {Protocol | e} -> Http.Server.Response {Protocol | e} ->{Protocol | e} String
+written : String -> Writer {Protocol, e} -> Http.Server.Response {Protocol, e} ->{Protocol, e} String
 written method output response =
     Http.Server.writeResponse method output response
     "ok"
 
 -- Reports a protocol failure after whatever was written before it.
-attempt : String -> Writer {Protocol | e} -> Http.Server.Response {Protocol | e} ->{e} String
+attempt : String -> Writer {Protocol, e} -> Http.Server.Response {Protocol, e} ->{e} String
 attempt method output response =
     handle written method output response on
         Http.invalid error -> show error

@@ -61,7 +61,7 @@ func TestUnifyTConIdentityIsUnique(t *testing.T) {
 }
 
 // Effect inclusion must not depend on the order the constraints arrive in. A
-// body that calls a `{e}` function before an `{A | e}` one produces `{e} ⊆ ρ`
+// body that calls a `{e}` function before an `{A, e}` one produces `{e} ⊆ ρ`
 // first; solving that eagerly would bind ρ := e and leave nowhere to put `A`.
 func TestInclusionIntoOpenRowIsOrderIndependent(t *testing.T) {
 	label := types.EffLabel{Unique: 10, Name: "A"}

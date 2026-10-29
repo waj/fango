@@ -14,7 +14,7 @@ import String
 import Test
 
 -- Runs `count` copies of `action` in tasks and answers their results.
-inTasks : Int -> (Int ->{e} a) ->{Async.Async | e} List a
+inTasks : Int -> (Int ->{e} a) ->{Async.Async, e} List a
 inTasks count action = Async.awaitAll (List.map { n -> Async.spawn { action n } } (List.range 1 count))
 
 repeat : Int -> (() ->{e} ()) ->{e} ()

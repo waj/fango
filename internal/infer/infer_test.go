@@ -40,7 +40,7 @@ func check(t *testing.T, src string) (*infer.Checker, []infer.DeclInfo, []error)
 	infos, errs := ck.Module(m)
 	var out []error
 	for _, e := range errs {
-		out = append(out, checkErr{e.Title, e.Span.StartPos().Line})
+		out = append(out, checkErr{e.Title, e.Span.StartPos().Line, e.Body})
 	}
 	return ck, infos, out
 }
@@ -48,6 +48,7 @@ func check(t *testing.T, src string) (*infer.Checker, []infer.DeclInfo, []error)
 type checkErr struct {
 	title string
 	line  int
+	body  string
 }
 
 func TestMissingBlockResultIsCheckedAfterParsing(t *testing.T) {
@@ -310,7 +311,7 @@ func TestEffectRows(t *testing.T) {
 	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "String ->{Terminal} ()" {
 		t.Fatalf("say type = %s, want String ->{Terminal} ()", got)
 	}
-	_, _, errs = check(t, "effect Terminal\n    emit : String -> ()\n\nsay : String ->{Terminal | e} ()\nsay text = emit text")
+	_, _, errs = check(t, "effect Terminal\n    emit : String -> ()\n\nsay : String ->{Terminal, e} ()\nsay text = emit text")
 	if len(errs) > 0 {
 		t.Fatalf("open effect annotation: %v", errs)
 	}

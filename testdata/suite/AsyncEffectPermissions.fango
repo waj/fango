@@ -12,7 +12,7 @@ import Test
 effect Lookup
     lookup : () -> Int
 
-spawnAny : (() ->{e} a) ->{Async | e} Task a
+spawnAny : (() ->{e} a) ->{Async, e} Task a
 spawnAny body = Async.spawn body
 
 pureParent : () ->{Async} Task Int

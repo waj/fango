@@ -408,7 +408,7 @@ systemPoolConnectTo provider pool target fresh =
 -- close before their callbacks leave; remaining listeners, connections, and
 -- pools close when the runner exits, ignoring close failures. A task that
 -- outlives the runner gets `closed provider` errors rather than OS access.
-runSystem : (() ->{Network | e} a) ->{IO | e} a
+runSystem : (() ->{Network, e} a) ->{IO, e} a
 runSystem action =
     Runtime.Scope.bracket netSystemProvider netRetireSystem { provider ->
         handle action() on
@@ -452,26 +452,26 @@ interrupted result =
 
 -- Listens on `port` at every address, runs `action` with the listener, and
 -- closes it on every exit.
-withListener : Int -> (Listener ->{Network, Fail Error | e} a) ->{Network, Fail Error | e} a
+withListener : Int -> (Listener ->{Network, Fail Error, e} a) ->{Network, Fail Error, e} a
 withListener port action =
     Runtime.Scope.bracket { fromResult (listen port) } closeListenerFail action
 
 -- Waits for one client, runs `action` with its connection, and closes it on
 -- every exit.
-accept : Listener -> (Connection ->{Network, Fail Error | e} a) ->{Network, Fail Error | e} a
+accept : Listener -> (Connection ->{Network, Fail Error, e} a) ->{Network, Fail Error, e} a
 accept listener action =
     Runtime.Scope.bracket { fromResult (acceptConnection listener uncancellable) } closeConnectionFail action
 
 -- `accept` in a task: cancelling the waiting task closes the listener and
 -- stops the task.
-acceptAsync : Listener -> (Connection ->{Network, Fail Error, Async.Async | e} a) ->{Network, Fail Error, Async.Async | e} a
+acceptAsync : Listener -> (Connection ->{Network, Fail Error, Async.Async, e} a) ->{Network, Fail Error, Async.Async, e} a
 acceptAsync listener action =
     cancel = taskCancel()
     Runtime.Scope.bracket { interrupted (acceptConnection listener cancel) } closeConnectionFail action
 
 -- Connects to `host` and `port` over plain TCP, runs `action` with the
 -- connection, and closes it on every exit.
-withClient : String -> Int -> (Connection ->{Network, Fail Error | e} a) ->{Network, Fail Error | e} a
+withClient : String -> Int -> (Connection ->{Network, Fail Error, e} a) ->{Network, Fail Error, e} a
 withClient host port action =
     Runtime.Scope.bracket { fromResult (connect (endpoint host port)) } closeConnectionFail action
 

@@ -26,7 +26,7 @@ type Writer e = Writer (Output e)
 -- Runs `action` with a text writer over `parent` in `encoding`. An
 -- unrepresentable character fails with `Fail Encoding.Error`; handle it
 -- around the scope, or use `tryWrite`.
-overWith : Encoding -> ByteWriter.Writer e -> (Writer {s | e} ->{s | e} a) ->{Fail Encoding.Error | e} a
+overWith : Encoding -> ByteWriter.Writer e -> (Writer {#s} ->{#s} a) ->{Fail Encoding.Error, e} a
 overWith encoding parent action =
     Runtime.Local.run () { local ->
         writer = Writer (Output
@@ -55,7 +55,7 @@ overWith encoding parent action =
 
 -- Runs `action` with a UTF-8 text writer over `parent`, which cannot fail to
 -- encode, and flushes when `action` returns.
-over : ByteWriter.Writer e -> (Writer {s | e} ->{s | e} a) ->{e} a
+over : ByteWriter.Writer e -> (Writer {#s} ->{#s} a) ->{e} a
 over parent action =
     borrow parent { writer ->
         result = action writer
@@ -65,7 +65,7 @@ over parent action =
 
 -- `over` for a nested encoder that leaves the flush boundary to its caller:
 -- it performs no final flush, though `flush` still reaches the parent.
-borrow : ByteWriter.Writer e -> (Writer {s | e} ->{s | e} a) ->{e} a
+borrow : ByteWriter.Writer e -> (Writer {#s} ->{#s} a) ->{e} a
 borrow parent action =
     Runtime.Local.run () { local ->
         writer = Writer (Output
@@ -102,7 +102,7 @@ borrow parent action =
 --
 -- written == ((), "abc")
 -- ```
-collecting : (Writer {s | e} ->{s | e} a) ->{e} (a, String)
+collecting : (Writer {#s} ->{#s} a) ->{e} (a, String)
 collecting action =
     Runtime.Local.run Builder.empty { built ->
         result = action (Writer (Output

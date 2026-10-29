@@ -10,7 +10,7 @@ effect Log
 
 type Cell e = { step : () ->{e} Int }
 
-counter : (Cell e ->{e} a) ->{Log | e} a
+counter : (Cell e ->{e} a) ->{Log, e} a
 counter action =
     handle action { step = { _ -> tick() } } with n = 0 on
         tick () ->

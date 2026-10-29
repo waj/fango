@@ -26,7 +26,7 @@ failing = { pull = { _ ->
     note "failing"
     Fail.fail "empty" } }
 
-open : Source {State.State (List String) | e}
+open : Source {State.State (List String), e}
 open = { pull = { _ ->
     note "open"
     "open" } }

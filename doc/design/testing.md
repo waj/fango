@@ -33,7 +33,7 @@ effect-row alias is needed.
 
 `Test e` carries the row its bodies perform besides `Expect`, so `Test {}`
 holds pure tests, `Test File.FileSystem` tests that use whole-file services, and
-a caller can handle its own effect around the whole run. `execute : Test e ->{Reporter | e} Summary` installs the
+a caller can handle its own effect around the whole run. `execute : Test e ->{Reporter, e} Summary` installs the
 `Expect` handler around each body and leaves `e` to the caller. Handling
 `Reporter` removes reporting from the row, so a pure suite needs no IO.
 The constructors are private, so fuzz cases or richer `only` semantics can

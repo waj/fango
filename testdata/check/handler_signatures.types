@@ -1,3 +1,3 @@
-attemptText : (() ->{Fail String | e} a) ->{e} Outcome a
-simulated : (() ->{Clock Simulation | e} a) ->{e} a
-anyName : (() ->{Fail Int | e} a) ->{e} Int
+attemptText : (() ->{Fail String, e} a) ->{e} Outcome a
+simulated : (() ->{Clock Simulation, e} a) ->{e} a
+anyName : (() ->{Fail Int, e} a) ->{e} Int

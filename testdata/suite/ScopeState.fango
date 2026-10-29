@@ -23,7 +23,7 @@ open label =
 
 close label = note ("close " ++ label)
 
-runCounter : Int -> (() ->{State Int | e} a) ->{e} State.StateResult Int a
+runCounter : Int -> (() ->{State Int, e} a) ->{e} State.StateResult Int a
 runCounter = State.run
 
 bump : () ->{State Int} Int

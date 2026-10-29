@@ -25,7 +25,7 @@ opened provider path state =
     (Ok (File.newHandle provider path state.next), { state | next = state.next + 1, open = Dict.insert state.next path state.open })
 
 -- Answers the action's value and the number of handles left open.
-custom : (() ->{File.FileSystem | e} a) ->{e} (a, Int)
+custom : (() ->{File.FileSystem, e} a) ->{e} (a, Int)
 custom action = File.withProvider { provider ->
     handle action() with state = Opened { next = 0, open = Dict.empty } on
         File.openRead path ->

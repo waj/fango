@@ -135,7 +135,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	// otherwise an inner fresh label can be needlessly assigned to its tail.
 	// A scoped callback's own upper bound goes first too, even though the
 	// runner's ambient tail in it is flexible. A use of that ambient row in
-	// the callback body, such as a reader operation's `{s | e}`, is also an
+	// the callback body, such as a reader operation's `{#s}`, is also an
 	// inclusion into the body's row; solved first, it would equate the two
 	// and hand the callback's explicit labels, which the runner handles, to
 	// the ambient tail and so to the caller.
@@ -285,12 +285,12 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 }
 
 // splitRigidTail decides whether c is an inclusion of the shape
-// `{L | e} ⊆ ρ` — `e` an annotation's rigid tail, ρ a surrounding row that is
+// `{L, e} ⊆ ρ` — `e` an annotation's rigid tail, ρ a surrounding row that is
 // still open — and if so returns the labels to include now and the tail to
 // include later. includeRows answers such a constraint by binding ρ's tail to
 // `e`, and a row that ends in a rigid tail cannot absorb an effect
 // afterwards, so solving it in place would let the order of a body's calls
-// decide whether it checks: an `{e}` call before an `{Exception ex | e}` one
+// decide whether it checks: an `{e}` call before an `{Exception ex, e}` one
 // would close the row against `Exception`. The two halves mean the same thing
 // as the whole — every effect the callee performs is available here — but the
 // label half leaves the surrounding tail open for later constraints.
@@ -325,7 +325,7 @@ func ambiguousError(c Constraint, m *mismatch, sub Subst) diag.Error {
 	p := types.NewPrinter()
 	name := types.SurfaceName(m.ambiguous.Name)
 	return diag.Errorf(c.Span, "AMBIGUOUS EFFECT",
-		"`%s` appears more than once in this row, with different arguments:\n\n    %s\n\nand nothing here says which one is meant. Name it in a type the body can see:\na pattern on its payload, or a helper whose callback parameter lists only\nthat application, such as\n\n    (() ->{%s T | e} a) ->{e} Result T a",
+		"`%s` appears more than once in this row, with different arguments:\n\n    %s\n\nand nothing here says which one is meant. Name it in a type the body can see:\na pattern on its payload, or a helper whose callback parameter lists only\nthat application, such as\n\n    (() ->{%s T, e} a) ->{e} Result T a",
 		name, p.Type(sub.Apply(m.b)), name)
 }
 

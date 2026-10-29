@@ -7,8 +7,7 @@ effect Counter
 
 type CounterHandle e = { next : () ->{e} Int }
 
-{-# scoped s #-}
-counting : (CounterHandle s ->{s} a) ->{e} a
+counting : (CounterHandle {#s} ->{#s} a) ->{e} a
 counting action =
     handle action { next = { _ -> step() } } with n = 0 on
         step () -> resume n with n + 1

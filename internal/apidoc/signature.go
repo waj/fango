@@ -22,7 +22,8 @@ func Typed(name string, t types.Type, p *types.Printer) string {
 	return ast.Spelling(types.SurfaceName(name)) + " : " + p.Type(t)
 }
 
-// ScopedSignature renders the checked callback extension, including a closed base.
+// ScopedSignature renders a scoped runner's checked signature, whose callback
+// row ends in its scoped row variable, `#s`.
 func ScopedSignature(name string, sch types.Scheme, p *types.Printer) string {
 	return Signature(name, sch, p)
 }

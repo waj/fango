@@ -77,7 +77,7 @@ effect Parse token
 
 -- Parses a prefix and returns its value and remaining input. Parse failures
 -- become `Err`; ambient effects pass through without being rolled back.
-run : List token -> (() ->{Parse token, Fail (Error token) | e} value) ->{e} Result (Error token) (Parsed token value)
+run : List token -> (() ->{Parse token, Fail (Error token), e} value) ->{e} Result (Error token) (Parsed token value)
 run input action = Fail.attempt {
     handle action() with cursor = Cursor { remaining = input, offset = 0 } on
         parserCursor () -> resume cursor with cursor
@@ -86,7 +86,7 @@ run input action = Fail.attempt {
 }
 
 -- Parses the complete input, failing if any token remains after `action`.
-runAll : List token -> (() ->{Parse token, Fail (Error token) | e} value) ->{e} Result (Error token) value
+runAll : List token -> (() ->{Parse token, Fail (Error token), e} value) ->{e} Result (Error token) value
 runAll input action =
     case run input { value = action(); end(); value } of
         Ok parsed -> Ok parsed.value
@@ -173,7 +173,7 @@ mergeErrors left right =
 --
 -- Parser.runAll ['a', 'c'] { Parser.orElse { Parser.attempt ab } ac } == Ok 'c'
 -- ```
-orElse : (() ->{Parse token, Fail (Error token) | e} value) -> (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} value
+orElse : (() ->{Parse token, Fail (Error token), e} value) -> (() ->{Parse token, Fail (Error token), e} value) ->{Parse token, Fail (Error token), e} value
 orElse left right =
     start = offset()
     case Fail.attempt left of
@@ -188,7 +188,7 @@ orElse left right =
 -- Restores the cursor on ordinary parse failure, preserving the diagnostic.
 -- Success retains consumption. Other effects are never undone; non-progress
 -- errors propagate without recovery.
-attempt : (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} value
+attempt : (() ->{Parse token, Fail (Error token), e} value) ->{Parse token, Fail (Error token), e} value
 attempt action =
     saved = parserCursor()
     case Fail.attempt action of
@@ -201,7 +201,7 @@ attempt action =
 
 -- Answers `Nothing` on a non-consuming failure, otherwise preserves success
 -- or propagates the failure.
-optional : (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} Maybe value
+optional : (() ->{Parse token, Fail (Error token), e} value) ->{Parse token, Fail (Error token), e} Maybe value
 optional action = orElse { Just action() } { Nothing }
 
 collect action reversed =
@@ -214,11 +214,11 @@ collect action reversed =
 
 -- Repeats until a non-consuming failure, returning values in input order.
 -- Consuming failures propagate. Empty success raises `NonProgress`.
-many : (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} List value
+many : (() ->{Parse token, Fail (Error token), e} value) ->{Parse token, Fail (Error token), e} List value
 many action = collect action []
 
 -- Like `many`, but requires at least one value and progress on every success.
-some : (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} List value
+some : (() ->{Parse token, Fail (Error token), e} value) ->{Parse token, Fail (Error token), e} List value
 some action =
     start = offset()
     first = action()
@@ -227,7 +227,7 @@ some action =
 
 -- Zero or more values separated by a Unit-returning parser. A consumed
 -- separator must be followed by a value; trailing separators are rejected.
-sepBy : (() ->{Parse token, Fail (Error token) | e} value) -> (() ->{Parse token, Fail (Error token) | e} ()) ->{Parse token, Fail (Error token) | e} List value
+sepBy : (() ->{Parse token, Fail (Error token), e} value) -> (() ->{Parse token, Fail (Error token), e} ()) ->{Parse token, Fail (Error token), e} List value
 sepBy action separator = orElse {
     first = action()
     rest = many { separator(); action() }
@@ -235,7 +235,7 @@ sepBy action separator = orElse {
 } { [] }
 
 -- Parses opening and closing delimiters around `action`, returning its value.
-between : (() ->{Parse token, Fail (Error token) | e} ()) -> (() ->{Parse token, Fail (Error token) | e} ()) -> (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} value
+between : (() ->{Parse token, Fail (Error token), e} ()) -> (() ->{Parse token, Fail (Error token), e} ()) -> (() ->{Parse token, Fail (Error token), e} value) ->{Parse token, Fail (Error token), e} value
 between opening closing action =
     opening()
     value = action()
@@ -244,7 +244,7 @@ between opening closing action =
 
 -- Replaces expectations on a non-consuming mismatch at the starting offset.
 -- Deeper errors, custom messages, and non-progress errors retain their detail.
-label : String -> (() ->{Parse token, Fail (Error token) | e} value) ->{Parse token, Fail (Error token) | e} value
+label : String -> (() ->{Parse token, Fail (Error token), e} value) ->{Parse token, Fail (Error token), e} value
 label description action =
     start = offset()
     case Fail.attempt action of

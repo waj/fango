@@ -3,11 +3,11 @@ module Main exposing (main)
 import Applied exposing (Put(..), both)
 
 -- Each handler names the application it takes; label order never decides.
-dropStrings : (() ->{Put String | e} a) ->{e} a
+dropStrings : (() ->{Put String, e} a) ->{e} a
 dropStrings action = handle action() on
     put _ -> resume ()
 
-dropBools : (() ->{Put Bool | e} a) ->{e} a
+dropBools : (() ->{Put Bool, e} a) ->{e} a
 dropBools action = handle action() on
     put _ -> resume ()
 

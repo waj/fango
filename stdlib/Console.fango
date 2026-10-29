@@ -127,7 +127,7 @@ systemWriteBytes output data =
 -- Answers `Console` with the process's standard streams, or the REPL
 -- session's. A stream error ends the program with the error's description
 -- on the host's diagnostic channel.
-runSystem : (() ->{Console | e} a) ->{IO | e} a
+runSystem : (() ->{Console, e} a) ->{IO, e} a
 runSystem action =
     handle action() on
         readLine () -> resume systemReadLine()
@@ -193,7 +193,7 @@ joined chunks = Bytes.concat (List.reverse chunks)
 -- warned.stderr == Bytes.fromString "warning\n"
 -- warned.stdout == Bytes.empty
 -- ```
-runTest : Bytes -> (() ->{Console | e} a) ->{e} Transcript a
+runTest : Bytes -> (() ->{Console, e} a) ->{e} Transcript a
 runTest input action =
     result = State.runAtomic (Capture { input = input, out = [], err = [] }) {
         handle action() on

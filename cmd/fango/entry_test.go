@@ -12,7 +12,7 @@ import (
 // attribute or at `main`.
 func TestEntryAssemblyFailures(t *testing.T) {
 	const runner = `
-run : (() ->{Greeter | e} a) ->{e} a
+run : (() ->{Greeter, e} a) ->{e} a
 run action =
     handle action() on
         greet name -> resume name
@@ -35,11 +35,11 @@ effect A
 #[Runtime.Entry.DefaultHandler ` + "`runB`" + `]
 effect B
     b : () -> Int
-runA : (() ->{A | e} x) ->{B | e} x
+runA : (() ->{A, e} x) ->{B, e} x
 runA action =
     handle action() on
         a () -> resume (b ())
-runB : (() ->{B | e} x) ->{A | e} x
+runB : (() ->{B, e} x) ->{A, e} x
 runB action =
     handle action() on
         b () -> resume (a ())
