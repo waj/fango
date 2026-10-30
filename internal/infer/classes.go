@@ -279,6 +279,7 @@ func (ck *Checker) registerInstance(d *ast.InstanceDecl) (*InstanceInfo, []diag.
 		d.Methods = append(d.Methods, forward)
 		methods[forward.Name] = forward
 	}
+	unknownMethod := false
 	for n, m := range methods {
 		found := false
 		for _, cm := range cl.Methods {
@@ -287,8 +288,26 @@ func (ck *Checker) registerInstance(d *ast.InstanceDecl) (*InstanceInfo, []diag.
 			}
 		}
 		if !found {
-			errs = append(errs, diag.Errorf(m.NameSpan, "UNKNOWN METHOD", "Class `%s` has no method `%s`.", cl.Name, n))
+			err := diag.Errorf(m.NameSpan, "UNKNOWN METHOD", "Class `%s` has no method `%s`.", types.SurfaceName(cl.Name), n)
+			var names []string
+			for _, cm := range cl.Methods {
+				names = append(names, "`"+types.SurfaceName(cm.Name)+"`")
+			}
+			err.Notes = append(err.Notes, fmt.Sprintf("`%s` has: %s.", types.SurfaceName(cl.Name), strings.Join(names, ", ")))
+			errs = append(errs, err)
+			unknownMethod = true
 		}
+	}
+	if unknownMethod {
+		// A misnamed method also looks like a missing one; the reader needs
+		// only the first report, and it lists the methods the class has.
+		kept := errs[:0]
+		for _, e := range errs {
+			if e.Title != "MISSING METHOD" {
+				kept = append(kept, e)
+			}
+		}
+		errs = kept
 	}
 	if len(errs) > 0 {
 		return nil, errs
@@ -439,9 +458,10 @@ func (ck *Checker) NormalizePreds(ps []types.Pred) []types.Pred {
 	return out
 }
 
-func (ck *Checker) reduceObligations(obs []predObligation, given []types.Pred) ([]types.Pred, []diag.Error) {
-	var residual []types.Pred
+func (ck *Checker) reduceObligations(obs []predObligation, given []types.Pred) ([]predObligation, []diag.Error) {
+	var residual []predObligation
 	var errs []diag.Error
+	var failed []failedObligation
 	if in := ck.checkingInstance; in != nil {
 		given = append(append([]types.Pred{}, given...), types.Pred{Class: in.Class.Name, Ty: in.Head})
 	}
@@ -451,31 +471,66 @@ func (ck *Checker) reduceObligations(obs []predObligation, given []types.Pred) (
 			// Evidence for a constructed type is composed from its arguments',
 			// so the arguments' predicates are what a context has to carry.
 			if len(r.Leaves) > 0 {
-				residual = append(residual, r.Leaves...)
+				for _, leaf := range r.Leaves {
+					next := o
+					next.pred = leaf
+					residual = append(residual, next)
+				}
 			} else {
-				residual = append(residual, o.pred)
+				residual = append(residual, o)
 			}
 		}
 		if r.Error != nil {
-			err := *r.Error
-			err.Span = o.span
-			errs = append(errs, err)
+			failed = append(failed, failedObligation{o, r})
 		}
 	}
-	return ck.NormalizePreds(residual), errs
+	errs = append(errs, ck.obligationErrors(failed)...)
+	return ck.normalizeObligations(residual), errs
+}
+
+// normalizeObligations is NormalizePreds keeping each predicate's first origin.
+func (ck *Checker) normalizeObligations(obs []predObligation) []predObligation {
+	var out []predObligation
+	for _, o := range obs {
+		o.pred.Ty = ck.Sub.Apply(o.pred.Ty)
+		dup := false
+		for _, q := range out {
+			if o.pred.Class == q.pred.Class && types.Equal(o.pred.Ty, q.pred.Ty) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, o)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].pred.Class < out[j].pred.Class })
+	return out
+}
+
+func predsOf(obs []predObligation) []types.Pred {
+	out := make([]types.Pred, len(obs))
+	for i, o := range obs {
+		out[i] = o.pred
+	}
+	return out
 }
 
 func (ck *Checker) DefaultPreds(ps []types.Pred, sp source.Span) []diag.Error {
-	for id := range ck.numericDefaults(ps) {
+	obs := make([]predObligation, len(ps))
+	for i, p := range ps {
+		obs[i] = predObligation{pred: p, span: sp}
+	}
+	return ck.defaultObligations(obs)
+}
+
+func (ck *Checker) defaultObligations(obs []predObligation) []diag.Error {
+	for id := range ck.numericDefaults(predsOf(obs)) {
 		ck.Sub[id] = ck.B.Int
 	}
-	var obs []predObligation
-	for _, p := range ps {
-		obs = append(obs, predObligation{pred: p, span: sp})
-	}
 	left, errs := ck.reduceObligations(obs, nil)
-	for _, p := range left {
-		errs = append(errs, diag.Errorf(sp, "AMBIGUOUS CONSTRAINT", "Cannot determine the type for `%s`.", types.ShowPred(p.Class, p.Ty)))
+	for _, o := range left {
+		errs = append(errs, ck.undeterminedError(o))
 	}
 	return errs
 }
@@ -525,25 +580,25 @@ func (ck *Checker) qualify(sch types.Scheme, obs []predObligation, given []types
 	for _, v := range sch.Vars {
 		quant[v.ID] = true
 	}
-	var ground []types.Pred
-	for _, p := range left {
+	var ground []predObligation
+	for _, o := range left {
+		p := o.pred
 		if mentionsAny(p.Ty, quant) {
 			if ck.inferringContext != nil {
 				// A generated instance adopts what its body actually needs
 				// rather than declaring a context up front.
 				*ck.inferringContext = append(*ck.inferringContext, p)
 			} else if annotated {
-				err := diag.Errorf(sp, "MISSING CONSTRAINT", "The annotation requires the additional constraint `%s`.", types.ShowPred(p.Class, p.Ty))
-				errs = append(errs, ck.withBlanketNote(err, p, given))
+				errs = append(errs, ck.missingConstraint(o, sp, given))
 			} else {
 				sch.Preds = append(sch.Preds, p)
 			}
 		} else {
-			ground = append(ground, p)
+			ground = append(ground, o)
 		}
 	}
 	if len(ground) > 0 {
-		errs = append(errs, ck.DefaultPreds(ground, sp)...)
+		errs = append(errs, ck.defaultObligations(ground)...)
 	}
 	if annotated {
 		sch.Preds = given

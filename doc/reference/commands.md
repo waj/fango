@@ -579,12 +579,11 @@ main() = print (Process.args())
 Like any annotation, an annotated row is exact, so it limits which services
 the program reaches; an unannotated `main` is inferred and gets the defaults of
 whatever it performs. Library and program effects declare defaults alike.
-Failures are `COMPILE-TIME FAILURE`, reported at `main` for an effect with no
-default, and at the attribute for an effect with several, a runner whose type
-does not have the shape the attribute's documentation gives, or runners that
-depend on one another in a cycle. When no imported module declares defaults at
-all, an effect besides `IO` in `main`'s row is `UNHANDLED EFFECT`. A `main`
-that performs only `IO` is its own entry.
+An effect in `main`'s row with no default is `UNHANDLED EFFECT`, reported at the
+call that performs it. Failures are `COMPILE-TIME FAILURE`, reported at the
+attribute, for an effect with several defaults, a runner whose type does not
+have the shape the attribute's documentation gives, or runners that depend on
+one another in a cycle. A `main` that performs only `IO` is its own entry.
 
 A `()` result ends the program with status 0. A returned status takes effect
 only after `main` completes normally, so every cleanup scope has released and

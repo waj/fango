@@ -59,6 +59,9 @@ func (ck *Checker) assembleEntry(infos []DeclInfo) ([]DeclInfo, []diag.Error) {
 		return nil, nil
 	}
 	sp := main.NameSpan
+	if label := ck.firstWithoutDefault(fn.Eff); label != nil {
+		return nil, []diag.Error{ck.unhandledEntryEffect(*label, sp)}
+	}
 	if _, ok := ck.Env.Lookup(AssembleName); !ok {
 		// Without Runtime.Entry in the program no effect can declare a
 		// default, so the first one is simply unhandled.
@@ -81,6 +84,55 @@ func (ck *Checker) assembleEntry(infos []DeclInfo) ([]DeclInfo, []diag.Error) {
 	ck.BindDecl(info)
 	ck.RecordChecked([]DeclInfo{info})
 	return []DeclInfo{info}, nil
+}
+
+// firstWithoutDefault returns the first effect of row that declares no default
+// handler. Assembly would reject it too, but as a failure of compile-time code
+// the author never wrote; this is an ordinary missing handler.
+func (ck *Checker) firstWithoutDefault(row types.Row) *types.EffLabel {
+	for i, label := range row.Labels {
+		if ck.IO != nil && label.Unique == ck.IO.Unique {
+			continue
+		}
+		info := ck.Effects[label.Name]
+		if info == nil {
+			continue
+		}
+		declared := false
+		for _, attribute := range info.Attributes {
+			if con, ok := attribute.Type.(*types.TCon); ok && con.Name == DefaultHandlerName {
+				declared = true
+			}
+		}
+		if !declared {
+			return &row.Labels[i]
+		}
+	}
+	return nil
+}
+
+// unhandledEntryEffect points at the call in `main` that performs label.
+func (ck *Checker) unhandledEntryEffect(label types.EffLabel, sp source.Span) diag.Error {
+	if site := firstSite(ck.mainSites, []types.EffLabel{label}, source.Span{}, ck.Sub); site != nil {
+		sp = site.span
+	}
+	name := types.SurfaceName(label.Name)
+	e := diag.Errorf(sp, "UNHANDLED EFFECT", "`main` performs `%s`, but nothing handles it, and `%s` declares no default handler.", name, name)
+	e.Notes = append(e.Notes, runnerHint(label.Name))
+	return e
+}
+
+// runnerHint names the usual way to discharge an effect.
+func runnerHint(effect string) string {
+	switch effect {
+	case "Async.Async":
+		return "Run it inside `Async.run { ... }`."
+	case "STM.STM":
+		return "Run it inside `STM.atomically { ... }`."
+	case "Fail.Fail":
+		return "Catch it with `Fail.attempt { ... }`."
+	}
+	return "Wrap it in `handle ... on`, with a clause for each of its operations."
 }
 
 // assemble splices Runtime.Entry.assemble for a computation of type ty,
@@ -119,6 +171,12 @@ func (ck *Checker) WithDefaults(body ast.Expr, effects []types.EffLabel, result 
 		return body, false, nil
 	}
 	sp := body.Span()
+	if label := ck.firstWithoutDefault(types.Row{Labels: effects}); label != nil {
+		name := types.SurfaceName(label.Name)
+		e := diag.Errorf(sp, "UNHANDLED EFFECT", "This performs `%s`, but nothing handles it, and `%s` declares no default handler.", name, name)
+		e.Notes = append(e.Notes, runnerHint(label.Name))
+		return body, false, []diag.Error{e}
+	}
 	ty := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: effects}, Ret: result}
 	thunk := &ast.Lambda{Params: []ast.Pattern{&ast.PUnit{Sp: sp}}, Body: body, Sp: sp}
 	out, errs = ck.assemble(ty, thunk, sp)

@@ -19,7 +19,7 @@ run action =
 `
 	for _, tc := range []struct{ name, source, title, message, site string }{
 		{"no default", "import Runtime.Entry\neffect Greeter\n    greet : String -> String\nmain() = print (greet \"x\")\n",
-			"COMPILE-TIME FAILURE", "declares no default handler", "main"},
+			"UNHANDLED EFFECT", "declares no default handler", "main"},
 		{"no defaults in the program", "{-# no-prelude #-}\neffect Greeter\n    greet : String -> ()\nmain() = greet \"x\"\n",
 			"UNHANDLED EFFECT", "declares no default handler", "main"},
 		{"two defaults", "import Runtime.Entry\n#[Runtime.Entry.DefaultHandler `run`]\n#[Runtime.Entry.DefaultHandler `run`]\neffect Greeter\n    greet : String -> String\n" + runner + "main() = print (greet \"x\")\n",

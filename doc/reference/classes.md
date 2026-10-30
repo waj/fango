@@ -311,5 +311,8 @@ example above. This does not choose evidence; the original constraints are
 resolved after defaulting, so concrete specializations still win. A custom
 bare constraint without an eligible blanket prevents defaulting.
 Other unresolved constraints, including undetermined phantom types, report
-`AMBIGUOUS CONSTRAINT`. Decimal literals do not default. An unconstrained
-runtime type variable defaults to Unit.
+`AMBIGUOUS CONSTRAINT` at the expression that needs the type. A constraint on a
+function or a type holding one reports `MISSING INSTANCE` instead, since no
+further information could satisfy it. A number literal or `Num` operator at a
+type with no `Num` instance reports `TYPE MISMATCH`. Decimal literals do not
+default. An unconstrained runtime type variable defaults to Unit.

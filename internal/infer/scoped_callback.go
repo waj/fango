@@ -184,7 +184,7 @@ func (g *generator) scopedCall(e *ast.App, name string, sch types.Scheme) types.
 	for i, arg := range args {
 		fn := current.(*types.TFun)
 		at := g.exprWant(arg, fn.Arg)
-		c := g.argument(at, fn.Arg, arg)
+		c := g.argument(at, fn.Arg, arg, Why{Kind: WhyCall, Name: g.ck.calleeName(name)})
 		c.ScopedCallback = i == sch.ScopedParam
 		g.cs = append(g.cs, c)
 		g.performs(fn.Eff, arg.Span(), false)

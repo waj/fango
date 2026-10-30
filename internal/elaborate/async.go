@@ -1,6 +1,8 @@
 package elaborate
 
 import (
+	"fmt"
+
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
@@ -59,7 +61,10 @@ func (el *elab) checkAsyncJob(job ast.Expr) {
 		}
 		effect := el.ck.Effects[label.Name]
 		if effect != nil && effect.HasAbort() {
-			el.errs = append(el.errs, diag.Errorf(job.Span(), "ASYNC BOUNDARY", "A task cannot inherit abort effect %s; handle it inside the task.", label.Name))
+			name := types.SurfaceName(label.Name)
+			err := diag.Errorf(job.Span(), "ASYNC BOUNDARY", "A task cannot inherit the abort effect `%s`; handle it inside the task.", name)
+			err.Notes = append(err.Notes, fmt.Sprintf("If the task already handles `%s`, a handler of the same effect around the task\nstill counts as inherited. Remove that outer handler.", name))
+			el.errs = append(el.errs, err)
 		}
 	}
 }

@@ -1,5 +1,1 @@
-    {Async, STM, e}
-
-but only these effects are available here:
-
-    {STM}
+`STM.atomically` allows only `STM` in this function, but it also performs `Async`.

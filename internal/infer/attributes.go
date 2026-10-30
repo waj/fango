@@ -84,7 +84,7 @@ func (ck *Checker) checkAttributeGroups(groups []ast.AttributeGroup) ([]types.At
 				if len(es) > 0 {
 					return nil, es
 				}
-				ck.PendingPreds = remaining
+				ck.PendingPreds = predsOf(remaining)
 			}
 			ty = ck.Sub.Apply(ty)
 			if !ck.reflectionClosed(ty) || len(ck.PendingPreds) > 0 {

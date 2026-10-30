@@ -1,8 +1,12 @@
 package infer
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
+	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -116,6 +120,42 @@ func newEffectScope(names []string, vars []*types.TVar, sup *types.Supply) *Type
 	return tv
 }
 
+// unknownType reports a name that is no type here, recognizing an effect used
+// as one and a likely misspelling.
+func (ck *Checker) unknownType(sp source.Span, name string) diag.Error {
+	surface := types.SurfaceName(name)
+	if ck.Effects[name] != nil {
+		e := diag.Errorf(sp, "NAMING ERROR", "`%s` is an effect, not a type.", surface)
+		e.Notes = append(e.Notes, fmt.Sprintf("Effects go on an arrow: `A ->{%s} B`.", surface))
+		return e
+	}
+	e := diag.Errorf(sp, "NAMING ERROR", "I don't know a type named `%s`.", surface)
+	if hint := diag.DidYouMean(surface, surfaceKeys(ck.TypeNames)); hint != "" {
+		e.Notes = append(e.Notes, hint)
+	}
+	return e
+}
+
+// unknownEffect reports a name that is no effect here, recognizing one that
+// exists but was not exposed by its import, and a likely misspelling.
+func (ck *Checker) unknownEffect(sp source.Span, name string) diag.Error {
+	e := diag.Errorf(sp, "NAMING ERROR", "I don't know an effect named `%s`.", name)
+	for canonical := range ck.Effects {
+		if module, found := strings.CutSuffix(canonical, "."+name); found {
+			e.Notes = append(e.Notes, fmt.Sprintf("`%s` has one: write `%s`, or `import %s exposing (%s)`.", module, canonical, module, name))
+			return e
+		}
+	}
+	var names []string
+	for canonical := range ck.Effects {
+		names = append(names, types.SurfaceName(canonical))
+	}
+	if hint := diag.DidYouMean(name, names); hint != "" {
+		e.Notes = append(e.Notes, hint)
+	}
+	return e
+}
+
 // Minted returns the skolems an open scope created, in first-use order.
 func (tv *TypeVars) Minted() []*types.TVar { return tv.minted }
 
@@ -150,12 +190,11 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 		}
 		t, ok := ck.TypeNames[te.Name]
 		if !ok {
-			return nil, []diag.Error{diag.Errorf(te.Sp, "NAMING ERROR",
-				"I don't know a type named `%s`.", te.Name)}
+			return nil, []diag.Error{ck.unknownType(te.Sp, te.Name)}
 		}
 		if arity := ck.typeArity(t); arity > 0 {
 			return nil, []diag.Error{diag.Errorf(te.Sp, "TYPE ARITY",
-				"`%s` takes %d type argument(s), but none are given here.", te.Name, arity)}
+				"`%s` takes %d type argument(s), but none are given here.", types.SurfaceName(te.Name), arity)}
 		}
 		return t, nil
 	case *ast.TVarName:
@@ -181,6 +220,7 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 			return nil, []diag.Error{diag.Errorf(te.Sp, "HIDDEN EFFECT ROW", "The effect row `%s` must be declared in the type's parameters. Only ordinary types can be hidden in a constructor.", te.Name)}
 		}
 		v := tv.sup.FreshRigid(types.General)
+		v.Name = te.Name
 		tv.vars[te.Name] = v
 		tv.minted = append(tv.minted, v)
 		if want == kindAny {
@@ -227,14 +267,13 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 		}
 		t, ok := ck.TypeNames[te.Name]
 		if !ok {
-			return nil, []diag.Error{diag.Errorf(te.NameSp, "NAMING ERROR",
-				"I don't know a type named `%s`.", te.Name)}
+			return nil, []diag.Error{ck.unknownType(te.NameSp, te.Name)}
 		}
 		con, ok := t.(*types.TCon)
 		if !ok || ck.typeArity(t) != len(te.Args) {
 			return nil, []diag.Error{diag.Errorf(te.Span(), "TYPE ARITY",
 				"`%s` takes %d type argument(s), but %d are given here.",
-				te.Name, ck.typeArity(t), len(te.Args))}
+				types.SurfaceName(te.Name), ck.typeArity(t), len(te.Args))}
 		}
 		args := make([]types.Type, len(te.Args))
 		var errs []diag.Error
@@ -391,7 +430,7 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 		}
 		info := ck.Effects[l.Name]
 		if info == nil {
-			errs = append(errs, diag.Errorf(l.NameSp, "NAMING ERROR", "I don't know an effect named `%s`.", l.Name))
+			errs = append(errs, ck.unknownEffect(l.NameSp, l.Name))
 			continue
 		}
 		if len(l.Args) != len(info.Params) {
@@ -439,6 +478,7 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 			errs = append(errs, diag.Errorf(row.TailSp, "NAMING ERROR", "The row variable `%s` is not declared here.", row.Tail))
 		} else {
 			v := tv.sup.FreshRigid(types.RowVar)
+			v.Name = row.Tail
 			tv.vars[row.Tail] = v
 			tv.kinds[v.ID] = types.RowVar
 			tv.minted = append(tv.minted, v)

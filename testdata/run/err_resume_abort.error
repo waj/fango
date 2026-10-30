@@ -1,1 +1,1 @@
-An abort-only operation clause cannot resume.
+An abort operation never returns to its caller, so its clause cannot resume.

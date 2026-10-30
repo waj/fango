@@ -28,7 +28,7 @@ func (g *generator) operationSignature(cl *ast.HandleClause, op *types.EffectOp)
 	}
 	// One printer names the declaration, its variables, and the signature's
 	// types consistently across a diagnostic.
-	pr := types.NewPrinter()
+	pr := types.NewPrinter().ForMessage(op.Scheme.Body)
 	declared := pr.Scheme(op.Scheme)
 
 	// The declared operation type with effect parameters as metas to solve,

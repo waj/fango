@@ -9,26 +9,23 @@ Fango 0.1 — :help for commands
 > 3 : Int
 > | | -- EFFECT MISMATCH -------------------------------------- <repl>
 
-The effect row in the annotation for `bad` does not exactly match the effects performed by its body.
+`bad` performs `Console`, which its annotation does not list.
 
 1| bad : () -> Int
        ^^^^^^^^^^^
 
--- EFFECT MISMATCH -------------------------------------- <repl>
-
-The effect row in this annotation does not match the effects performed by its body.
-The annotation says:
-
-    () -> Int
-
-but the body requires:
-
-    () ->{Console} Int
+This performs it:
 
 2| bad() = pair one emit
            ^^^^^^^^^^^^^
 
-Note: a closed effect row cannot absorb additional effects
+The annotation says:
+
+    () -> Int
+
+but the body needs:
+
+    () ->{Console} Int
 > -- NAMING ERROR ----------------------------------------- <repl>
 
 I don't know a value named `bad`.

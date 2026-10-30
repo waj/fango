@@ -2,8 +2,8 @@ Fango 0.1 — :help for commands
 > Point : record
 > -- AMBIGUOUS RECORD ------------------------------------- <repl>
 
-I cannot tell which record this is. Name its type, as in
-`Counts { ... }`, or add an annotation that gives it one. Field
+I cannot tell which record this is. Write its type name before the `{`, as in
+`TypeName { ... }`, or add an annotation that gives it one. Field
 names alone never choose a record type.
 
 1| { x = 1, y = 2 }

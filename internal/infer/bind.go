@@ -1,6 +1,9 @@
 package infer
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/types"
 )
@@ -133,7 +136,7 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 		}
 		if l.Abort {
 			return diag.Errorf(c.Span, "BOUND ABORT OPERATION",
-				"This closure performs `%s`, an abort-only effect, and the position it goes to\ndoes not allow that effect. Binding it to the handler whose subject holds it\nwould be the only way to accept it, and an abort cannot be bound.\n\nAn abort unwinds to its own handler activation, so a bound abort called after\nthat activation finished would unwind to a target nothing awaits. Keep `%s`\nin this arrow's row, or handle it where it is performed.",
+				"This function performs `%s`, an abort effect, and the position it goes to\ndoes not allow that effect. Tying it to the handler around it would be the only\nway to accept it, and an abort effect cannot be tied to a handler.\n\nAn abort unwinds to its own handler, so calling this function after that handler\nfinished would unwind to a target nothing awaits. Keep `%s`\nin this arrow's row, or handle it where it is performed.",
 				types.SurfaceName(l.Name), types.SurfaceName(l.Name)), true
 		}
 		row := info.Permission.Within(clauseRow(info, sub))
@@ -159,8 +162,40 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 	if m == nil {
 		return diag.Error{}, false
 	}
-	p := types.NewPrinter()
-	return diag.Errorf(c.Span, "HANDLER BINDING EFFECTS",
-		"Binding this closure to the handler whose subject holds it makes every call to it\nrequire its scoped permission and run its clauses, which perform:\n\n    %s\n\nbut only these effects are available here:\n\n    %s",
-		p.Type(clauses), p.Type(sub.Apply(c.Right))), true
+	rightRow := sub.Apply(c.Right)
+	p := types.NewPrinter().ForMessage(left, clauses, rightRow)
+	var bound effectDifference
+	for _, l := range left.Labels {
+		if boundHandler(c.Bind, l) != nil && !rowHasApplication(right, l) {
+			bound.labels = append(bound.labels, l)
+		}
+	}
+	who := "The position this function goes to"
+	switch {
+	case c.Why.Kind == WhyField:
+		who = "The field `" + c.Why.Name + "`"
+	case c.Why.Name != "":
+		who = "`" + c.Why.Name + "`"
+	}
+	var e diag.Error
+	if len(right.Labels) == 0 && right.Tail == nil {
+		e = diag.Errorf(c.Span, "HANDLER BINDING EFFECTS", "%s expects a function that performs no effects, but this one performs %s.", who, bound.text(p))
+	} else {
+		e = diag.Errorf(c.Span, "HANDLER BINDING EFFECTS", "%s allows only %s in this function, but it performs %s.", who, showAllowed(right, p), bound.text(p))
+	}
+	// A clause may perform more than the handled effect, and that is then the
+	// actual obstacle: calling this function runs those clauses.
+	var fromClauses effectDifference
+	for _, l := range clauses.Labels {
+		if !l.Scoped && !rowHasApplication(right, l) {
+			fromClauses.labels = append(fromClauses.labels, l)
+		}
+	}
+	if !fromClauses.empty() {
+		e.Notes = append(e.Notes, fmt.Sprintf("Calling it would run the clauses of the handler around it, which perform %s.", fromClauses.text(p)))
+	}
+	if c.Why.Kind != WhyField && c.Why.Name != "" && !strings.Contains(c.Why.Name, ".") {
+		e.Notes = append(e.Notes, fmt.Sprintf("To accept effects, make `%s` generic over them: give this parameter's arrow a\nrow variable, as in `->{e}`, and add `{e}` to the final arrow of `%s`.", c.Why.Name, c.Why.Name))
+	}
+	return e, true
 }

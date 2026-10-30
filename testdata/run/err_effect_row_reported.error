@@ -1,3 +1,3 @@
-but the body requires:
+but the body needs:
 
-    Iterator Int e ->{e} Maybe (Int, Iterator Int {e})
+    Iterator Int e ->{e} Maybe (Int, Iterator Int e)

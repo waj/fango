@@ -134,6 +134,24 @@ validation and erases permission labels from runtime types and evidence. Calls
 under an abstract scoped callback still forward the invocation evidence row: a
 runner may have installed domain handlers hidden behind that callback binder.
 
+## Reports
+
+A report says what went wrong in the terms of the code the author wrote, so a
+constraint carries its origin rather than the solver knowing syntax. `Why` names
+the callee, operator, or field, and the [reports](../../internal/infer/report.go)
+turn it and the failed pair into prose. Numeric literals desugar to
+`Basics.fromInt` and so type as `Num a`; a predicate obligation keeps its span,
+its callee, and where a literal was written, so the failure reports as the
+[mismatch](../../internal/infer/report_preds.go) it is at the expression that
+caused it, even after generalization and defaulting.
+
+`Printer.ForMessage` renders for a diagnostic: written variable names (`TVar.Name`,
+which fingerprints ignore), rigid rows always shown, inference tails hidden, and
+same-named types qualified. Declarations settle their reports last: a failed
+annotation discards what depended on it, an unsolved constraint is dropped beside
+a real error, one annotation's effects report once, and the rest sort by source.
+A second location goes in `diag.Related`.
+
 ## Dependency groups and generalization
 
 Resolved references, including callbacks and nested bodies, determine strongly

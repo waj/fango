@@ -1979,7 +1979,10 @@ func (r *resolver) qualified(name string, ns map[string]string, kind string, sp 
 		}
 	}
 	if in == nil {
-		r.errs = append(r.errs, diag.Errorf(sp, "UNKNOWN QUALIFIER", "I don't know a value named `%s`: no imported module has qualifier `%s`.", name, name[:strings.LastIndex(name, ".")]))
+		qualifier := name[:strings.LastIndex(name, ".")]
+		err := diag.Errorf(sp, "UNKNOWN QUALIFIER", "I don't know a value named `%s`: no imported module has qualifier `%s`.", name, qualifier)
+		err.Notes = append(err.Notes, fmt.Sprintf("If `%s` is a module, add `import %s`.", qualifier, qualifier))
+		r.errs = append(r.errs, err)
 		return name
 	}
 	member := strings.TrimPrefix(name, best+".")
@@ -1997,7 +2000,28 @@ func (r *resolver) qualified(name string, ns map[string]string, kind string, sp 
 		v = in.records[member]
 	}
 	if v == "" {
-		r.errs = append(r.errs, diag.Errorf(sp, "PRIVATE OR UNKNOWN NAME", "Module qualifier `%s` does not publicly expose `%s`.", best, member))
+		err := diag.Errorf(sp, "PRIVATE OR UNKNOWN NAME", "Module qualifier `%s` does not publicly expose `%s`.", best, member)
+		var table map[string]string
+		switch kind {
+		case "value":
+			table = in.values
+		case "type":
+			table = in.types
+		case "ctor":
+			table = in.ctors
+		case "op":
+			table = in.ops
+		case "record":
+			table = in.records
+		}
+		names := make([]string, 0, len(table))
+		for candidate := range table {
+			names = append(names, candidate)
+		}
+		if hint := diag.DidYouMean(member, names); hint != "" {
+			err.Notes = append(err.Notes, hint)
+		}
+		r.errs = append(r.errs, err)
 		return name
 	}
 	return v

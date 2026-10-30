@@ -61,9 +61,13 @@ func (b *moduleCheck) inferGroup(group []int) {
 		if q.annTy == nil {
 			continue
 		}
-		b.errs = append(b.errs, annotationEffectsProblem(ck.Sub.Apply(q.annTy), ck.Sub.Apply(q.ty), q.d.Ann.Sp, q.d.Name)...)
-		sub, _, es := Solve([]Constraint{q.g.annotationBound(q.annTy, q.ty, q.d.NameSpan, q.d.Name)}, nil, ck.Sub, ck.B, ck.Sup)
+		problem := q.g.annotationEffectsProblem(ck.Sub.Apply(q.annTy), ck.Sub.Apply(q.ty), q.d.Ann.Sp, q.d.Name)
+		b.errs = append(b.errs, problem...)
+		sub, _, es := Solve([]Constraint{q.g.annotationBound(q.annTy, q.ty, q.d.NameSpan, q.d.Ann.Sp, q.d.Name)}, nil, ck.Sub, ck.B, ck.Sup)
 		ck.Sub = sub
+		if len(problem) > 0 {
+			es = withoutEffectMismatches(es)
+		}
 		b.errs = append(b.errs, es...)
 	}
 	for {
@@ -99,9 +103,7 @@ func (b *moduleCheck) inferGroup(group []int) {
 			}
 			residual, es := ck.reduceObligations(obs, nil)
 			b.errs = append(b.errs, es...)
-			for _, p := range residual {
-				obligations = append(obligations, predObligation{pred: p, span: q.d.NameSpan})
-			}
+			obligations = append(obligations, residual...)
 		})
 	}
 	for _, q := range qs {

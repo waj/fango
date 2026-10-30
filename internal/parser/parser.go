@@ -1892,6 +1892,10 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 			p.errorAt(p.prevSpan(), "SYNTAX PROBLEM", "This type annotation is unfinished.")
 		}
 		return nil
+	case token.LBRACKET:
+		p.errorAt(t.Span, "SYNTAX PROBLEM",
+			"I was expecting a type here. A list type is written `List Int`, not `[Int]`.")
+		return nil
 	default:
 		p.errorAt(t.Span, "SYNTAX PROBLEM",
 			"I was expecting a type here, like `Int` or `Int -> Float`.")

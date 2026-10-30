@@ -242,25 +242,25 @@ func TestNegative(t *testing.T) {
 		{"x = z + 1\nmain() = print (x)", "NAMING ERROR", 1},
 		// Use-before-define is a naming error: source-order scoping.
 		{"main() = print (x)\nx = 1", "NAMING ERROR", 1},
-		{"x = 1 + \"a\"", "MISSING INSTANCE", 1},                 // WhyOperand
-		{"main() = print (1 2)", "AMBIGUOUS CONSTRAINT", 1},      // A function-shaped numeric obligation cannot default.
-		{"x = if 1 then 2 else 3", "MISSING INSTANCE", 1},        // WhyIfCondition
-		{"x = if True then 1 else \"a\"", "MISSING INSTANCE", 1}, // WhyIfBranches
-		{"x = 1 == \"a\"", "MISSING INSTANCE", 1},                // WhyCompare
-		{"x = -\"a\"", "MISSING INSTANCE", 1},                    // WhyNegate
-		{"x = \"a\" / \"b\"", "TYPE MISMATCH", 1},                // WhyOpRequires
-		{"x = 1 ++ \"a\"", "MISSING INSTANCE", 1},                // WhyOpRequires ++
-		{"x = [1, True]", "MISSING INSTANCE", 1},                 // every list element has one type
-		{"x = [1 | True]", "TYPE MISMATCH", 1},                   // tail must be a List
-		{"x = Absent", "NAMING ERROR", 1},                        // unknown constructor
+		{"x = 1 + \"a\"", "TYPE MISMATCH", 1},                 // (+) on a type that is no number
+		{"main() = print (1 2)", "TYPE MISMATCH", 1},          // A number cannot be called.
+		{"x = if 1 then 2 else 3", "TYPE MISMATCH", 1},        // literal condition
+		{"x = if True then 1 else \"a\"", "TYPE MISMATCH", 1}, // literal branch
+		{"x = 1 == \"a\"", "TYPE MISMATCH", 1},                // literal at a String
+		{"x = -\"a\"", "TYPE MISMATCH", 1},                    // negate on a String
+		{"x = \"a\" / \"b\"", "TYPE MISMATCH", 1},             // WhyOpRequires
+		{"x = 1 ++ \"a\"", "TYPE MISMATCH", 1},                // literal at a String
+		{"x = [1, True]", "TYPE MISMATCH", 1},                 // every list element has one type
+		{"x = [1 | True]", "TYPE MISMATCH", 1},                // tail must be a List
+		{"x = Absent", "NAMING ERROR", 1},                     // unknown constructor
 		{"x = print 1\nmain() = print (x)", "UNHANDLED EFFECT", 1},
 		{"x = 1\ny =\n  x = 2\n  x + 1", "SHADOWING", 3},
 		{"y =\n  a = 1\n  a = 2\n  a", "SHADOWING", 3},
 		{"y =\n  a = b + 1\n  b = 2\n  a", "NAMING ERROR", 2},    // use-before-define in block
-		{"x : String\nx = 1", "MISSING INSTANCE", 2},             // WhyAnnotation
+		{"x : String\nx = 1", "TYPE MISMATCH", 2},                // literal at an annotated String
 		{"x : Foo\nx = 1", "NAMING ERROR", 1},                    // unknown type name
-		{"x : a\nx = 1", "MISSING CONSTRAINT", 1},                // annotation more general than the number body
-		{"f : Int -> Int\nf = 1", "MISSING INSTANCE", 2},         // arrow annotation resolves, body mismatches
+		{"x : a\nx = 1", "MISSING CONSTRAINT", 2},                // annotation more general than the number body
+		{"f : Int -> Int\nf = 1", "TYPE MISMATCH", 2},            // arrow annotation resolves, body mismatches
 		{"saved : String\nsaved = readLine", "TYPE MISMATCH", 2}, // bare Unit function is not forced
 		{"main x = x", "MAIN TAKES NO PARAMETERS", 1},
 		{"f x x = x", "SHADOWING", 1},               // duplicate params

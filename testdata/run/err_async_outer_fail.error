@@ -1,1 +1,1 @@
-A task cannot inherit abort effect Fail.Fail; handle it inside the task.
+A task cannot inherit the abort effect `Fail`; handle it inside the task.

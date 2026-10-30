@@ -13,7 +13,7 @@ type localAnnotation struct {
 }
 
 func (g *generator) deferLocalAnnotation(ann, shape types.Type, vars []*types.TVar, bind *ast.LocalBind) {
-	pending := localAnnotation{Constraint: g.annotationBound(ann, shape, bind.Ann.Sp, bind.Name), vars: vars}
+	pending := localAnnotation{Constraint: g.annotationBound(ann, shape, bind.Ann.Sp, bind.Ann.Sp, bind.Name), vars: vars}
 	// Retain the enclosing types, not the mutable block scope: the annotated
 	// binding itself will be installed in that scope after this check point.
 	for s := g.locals; s != nil; s = s.parent {
@@ -57,7 +57,7 @@ func (g *generator) annotationShape(ann, body types.Type, avoid map[int]bool, bi
 	if tail, ok := b.Eff.Tail.(*types.TVar); ok && !tail.Rigid && avoid[tail.ID] {
 		eff = types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
 	} else {
-		g.errs = append(g.errs, annotationRowProblem(a.Eff, b.Eff, bind.Ann.Sp, bind.Name)...)
+		g.errs = append(g.errs, g.annotationRowProblem(a.Eff, b.Eff, bind.Ann.Sp, bind.Name)...)
 	}
 	return &types.TFun{Arg: a.Arg, Eff: eff, Ret: g.annotationShape(a.Ret, b.Ret, avoid, bind)}
 }
@@ -65,7 +65,7 @@ func (g *generator) annotationShape(ann, body types.Type, avoid map[int]bool, bi
 func (g *generator) checkLocalAnnotations() []diag.Error {
 	var errs []diag.Error
 	for _, c := range g.localAnnotations {
-		errs = append(errs, annotationEffectsProblem(g.ck.Sub.Apply(c.Right), g.ck.Sub.Apply(c.Left), c.Span, c.Why.Name)...)
+		errs = append(errs, g.annotationEffectsProblem(g.ck.Sub.Apply(c.Right), g.ck.Sub.Apply(c.Left), c.Span, c.Why.Name)...)
 	}
 	return errs
 }

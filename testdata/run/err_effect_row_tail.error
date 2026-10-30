@@ -1,1 +1,1 @@
-performs effects the surrounding function does not allow
+but the annotation for `run` allows only the effects of `e` here.

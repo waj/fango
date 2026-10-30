@@ -102,8 +102,8 @@ func (s *ScopeBoundary) check(sub Subst, sp source.Span) []diag.Error {
 		resolved := sub.Apply(root.ty)
 		if s.Effect.label.Unique != 0 && types.ContainsScopedEffect(resolved, s.Effect.label.Unique) {
 			errs = append(errs, diag.Errorf(sp, "SCOPE ESCAPE",
-				"The local effect `%s` occurs in the scope's %s. Keep values and callbacks that require it inside the scope.",
-				s.Effect.label.Name, root.name))
+				"Something that only works inside this scope reaches the scope's %s, so it would outlive the scope.\nKeep values and callbacks that need the scope inside it, and return what you get from them instead.",
+				root.name))
 		}
 		if len(s.LocalVars) != 0 {
 			used := types.RigidVarsIn(resolved)

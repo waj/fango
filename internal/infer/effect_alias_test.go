@@ -51,7 +51,7 @@ func TestEffectAliasRejected(t *testing.T) {
 		"tail only":     {"f : (() ->{e} a) ->{App, e} a\nf g = g()", "`f` declares `App`, but"},
 		"one of two":    {"alias Ops = {Clock}\nf : () ->{App, Ops} Int\nf() = query \"x\"", "`f` declares `Ops`, but"},
 		"outside":       {"f : () ->{App} Int\nf() = now()", "EFFECT MISMATCH"},
-		"unused label":  {"f : () ->{App, Clock} Int\nf() = query \"x\"", "does not exactly match"},
+		"unused label":  {"f : () ->{App, Clock} Int\nf() = query \"x\"", "lists `Clock`, which its body does not perform"},
 		"narrow caller": {"f : () ->{App} Int\nf() = query \"x\"\ng : () ->{Db} Int\ng() = f()", "EFFECT MISMATCH"},
 		"wide callback": {"run : (() ->{App} Int) -> Int\nrun g = 0\nx = run { now() }", "EFFECT MISMATCH"},
 		"label after":   {"f : () ->{App, Log} Int\nf() = query \"x\"", "DUPLICATE EFFECT"},

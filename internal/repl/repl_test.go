@@ -286,7 +286,7 @@ forward True
 :quit
 `), &out)
 	got := out.String()
-	for _, want := range []string{"MISSING INSTANCE", "OVERLAPPING INSTANCE", "Inspect a => a -> String"} {
+	for _, want := range []string{"This is a number", "OVERLAPPING INSTANCE", "Inspect a => a -> String"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q:\n%s", want, got)
 		}

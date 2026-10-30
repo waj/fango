@@ -1,1 +1,1 @@
-the same open row cannot contain conflicting effect labels
+`reprovide` performs `Ctx e`, which its annotation does not list.

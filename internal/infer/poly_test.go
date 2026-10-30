@@ -120,7 +120,7 @@ func TestPolyNegative(t *testing.T) {
 		{"f : a -> b\nf x = x", "TYPE MISMATCH", 2},
 		{"f : a -> Int\nf x = x", "TYPE MISMATCH", 2},
 		// A Number obligation cannot narrow a General annotation variable.
-		{"f : a -> a\nf x = x + 1", "MISSING CONSTRAINT", 1},
+		{"f : a -> a\nf x = x + 1", "MISSING CONSTRAINT", 2},
 		// Polymorphic recursion is rejected by construction: the recursive
 		// occurrence is the pre-bound monomorphic self, so nesting occurs.
 		{"type Box a = MkBox a\nf b = f (MkBox b)", "TYPE MISMATCH", 2},

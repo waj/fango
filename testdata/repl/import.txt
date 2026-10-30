@@ -22,6 +22,8 @@ I don't know a value named `Dict.empty`: no imported module has qualifier `Dict`
 
 1| Dict.empty
    ^^^^^^^^^^
+
+If `Dict` is a module, add `import Dict`.
 > loaded Dict
 loaded Geometry.Shape
 > 6 : Int
@@ -31,6 +33,8 @@ I don't know a value named `Dict.size`: no imported module has qualifier `Dict`.
 
 1| Dict.size Geometry.Shape.named
    ^^^^^^^^^
+
+If `Dict` is a module, add `import Dict`.
 > > 1 : Int
 > Just (Box (Point 0 0) (Point 1 1)) : Maybe Shape
 > -- UNKNOWN IMPORT --------------------------------------- <repl>
@@ -69,7 +73,7 @@ The value `origin` collides with an exposed import or operation.
 > 2 : Int
 > -- TYPE MISMATCH ---------------------------------- Broken.fango
 
-The type annotation for `Broken.bad` says it is:
+The type annotation for `bad` says it is:
 
     Int
 
@@ -81,7 +85,7 @@ but the body I found is:
          ^^^^
 > -- TYPE MISMATCH ---------------------------------- Broken.fango
 
-The type annotation for `Broken.bad` says it is:
+The type annotation for `bad` says it is:
 
     Int
 

@@ -156,24 +156,29 @@ contributes. Exactness covers only the annotation's own arrows: a row inside a
 value's type may be wider than the body's, so a `Source {}` satisfies an
 annotation of `Source {Note}`.
 
-An effect outside the permitted row reports `EFFECT MISMATCH`, naming the
-performed and available effects. A report prints an arrow's row whenever the
-row variable ending it appears anywhere else in the same type, an
-effect-indexed value's row argument included, so two types that differ only in
-such a tail are never shown as one:
+An effect outside the permitted row reports `EFFECT MISMATCH`, naming the effects
+that differ. An annotation that omits an effect, or lists one its body does not
+perform, gets one report at the annotation, with the call responsible when there
+is one. A callback or field that performs more than its position allows is
+reported at the callback, naming the callee or field that sets the limit.
+
+Reports print types with the names the annotation gave its variables, and a
+row variable an annotation wrote always shows, so two types that differ only in
+a tail are never shown as one:
 
 ```
 The annotation says:
 
-    Iterator Int e -> Maybe Int
+    (() ->{e} a) ->{f} a
 
-but the body requires:
+but the body needs:
 
-    Iterator Int e ->{e} Maybe Int
+    (() ->{e} a) ->{e} a
 ```
 
-A row variable an arrow alone carries says only that the caller chooses, and
-stays elided.
+Row variables inference introduced say only that the caller chooses, and stay
+out of reports. Signatures elsewhere, such as in `fango doc`, also elide a row
+variable that an arrow alone carries.
 
 ## Effect aliases
 

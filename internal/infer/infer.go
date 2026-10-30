@@ -9,11 +9,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/meta"
+	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
@@ -24,15 +26,18 @@ import (
 type WhyKind int
 
 const (
-	WhyOperand          WhyKind = iota // operands of a numeric operator must agree
-	WhyDeclBody                        // a declaration body must match its (future) annotation
+	WhyStatement        WhyKind = iota // a block statement's value is discarded, so it must be ()
 	WhyCall                            // a callee must be a function accepting the argument
 	WhyIfCondition                     // an if condition must be Bool
 	WhyIfBranches                      // then/else branches must agree
-	WhyCompare                         // both sides of a comparison must agree
 	WhyBoolOperand                     // both sides of && / || must be Bool
-	WhyNegate                          // a negated operand must be a number
 	WhyOpRequires                      // an operator fixes its operand type (/, ++)
+	WhyField                           // a record field's value must fit its declaration
+	WhyListElement                     // list elements must share a type
+	WhyResume                          // resume's argument is the operation's result
+	WhyNextState                       // a handler's next state must keep its type
+	WhyHandlerClause                   // a handler's clauses must produce one type
+	WhyHandlerSubject                  // handled code without a return clause must produce the clauses' type
 	WhyAnnotation                      // a definition must match its type annotation
 	WhyRecursion                       // recursive uses must match the definition
 	WhyPattern                         // a pattern must match the scrutinee's type
@@ -47,8 +52,18 @@ const (
 type Why struct {
 	Kind WhyKind
 	Op   string // operator text for operator-related kinds
-	Want string // required type name for WhyOpRequires
-	Name string // annotated name for WhyAnnotation
+	// Name is the annotated definition for WhyAnnotation and for an effect a
+	// body performs, the callee for WhyCall, and the field for WhyField.
+	Name string
+	// Args counts the arguments a WhyCall callee is applied to, including this one.
+	Args int
+	// Arg marks a value passed to Name, rather than a call it makes itself.
+	Arg bool
+	// Resume marks the row of a resume call, which is the handled code's.
+	Resume bool
+	// TupleArg and UnitArg mark an argument written as a tuple or a spaced `()`,
+	// which are how another language's call syntax reads here.
+	TupleArg, UnitArg bool
 }
 
 type Constraint struct {
@@ -75,8 +90,17 @@ type Constraint struct {
 
 	// Declared and Inferred are the whole types of an annotation bound. Its
 	// row bounds compare single rows, and a report still tells the story of
-	// the annotation against the body.
+	// the annotation against the body. AnnSpan is the annotation, where an
+	// effect disagreement gets fixed.
 	Declared, Inferred types.Type
+	AnnSpan            source.Span
+
+	// Sites points at the enclosing body's perform sites, for a report to
+	// name the call behind a row.
+	Sites *[]performSite
+	// Signature is an argument's callee as declared, for a report about a
+	// function passed in the wrong shape or the wrong place.
+	Signature types.Type
 }
 
 // Env maps top-level names to schemes; block scopes and function parameters
@@ -111,6 +135,9 @@ func (e *Env) Names() []string {
 // supply, the accumulated substitution, and per-node solved types. The REPL
 // keeps one Checker across many inputs; batch compilation uses one per run.
 type Checker struct {
+	// mainSites are the perform sites of the entry declaration, for a report that
+	// its row holds something entry assembly cannot run.
+	mainSites []performSite
 	// RuntimeDebug retains source inspection metadata during runtime elaboration.
 	RuntimeDebug bool
 	moduleCheck  *moduleCheck
@@ -855,6 +882,7 @@ func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Er
 		}
 		seen[p.Name] = true
 		params[i] = ck.Sup.FreshRigid(types.General)
+		params[i].Name = p.Name
 	}
 	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params, AttributesPending: len(ed.Attributes) > 0}
 	ck.Effects[ed.Name], ck.EffectsByUnique[info.Unique] = info, info
@@ -1174,15 +1202,18 @@ func (ck *Checker) SetCaptureSummary(name string, vars []types.CaptureVar, captu
 }
 
 type declInference struct {
-	originalAnn types.Type
-	d           *ast.ValueDecl
-	g           *generator
-	ty, annTy   types.Type
-	given       []types.Pred
-	errs        []diag.Error
-	mode        DeclEffects
-	isMain      bool
-	info        DeclInfo
+	// annotationFailed marks an annotation that did not resolve, so nothing
+	// can be compared against it.
+	annotationFailed bool
+	originalAnn      types.Type
+	d                *ast.ValueDecl
+	g                *generator
+	ty, annTy        types.Type
+	given            []types.Pred
+	errs             []diag.Error
+	mode             DeclEffects
+	isMain           bool
+	info             DeclInfo
 }
 
 // DeclEffects says what a declaration's ambient effect row may hold: the
@@ -1236,13 +1267,16 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, mode DeclEffects) *declInferenc
 
 	var annTy types.Type
 	var annScope *TypeVars
+	annotationFailed := false
 	if d.Ann != nil {
 		annScope = ck.newDeclAnnScope(d)
 		var annErrs []diag.Error
 		annTy, annErrs = ck.ResolveTypeExpr(d.Ann.Type, annScope)
 		errs = append(errs, annErrs...)
+		annotationFailed = len(annErrs) > 0
 		given, annErrs = ck.ResolvePreds(d.Ann.Preds, annScope)
 		errs = append(errs, annErrs...)
+		annotationFailed = annotationFailed || len(annErrs) > 0
 	}
 	if d.ScopedRow != "" {
 		errs = append(errs, ck.checkScopedDeclaration(d, annTy, annScope)...)
@@ -1256,7 +1290,7 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, mode DeclEffects) *declInferenc
 		annTy = types.SubstRigid(annTy, replacements)
 		given = types.SubstPreds(given, replacements)
 	}
-	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
+	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}, declName: types.SurfaceName(d.Name)}
 	if d.ScopedRow != "" && annScope != nil {
 		g.scopedParameter = annScope.vars[d.ScopedRow]
 		g.scopedDefinition = d.Name
@@ -1279,10 +1313,18 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, mode DeclEffects) *declInferenc
 			g.cs = append(g.cs, ck.mainShape(ty, d.Body.Span()))
 		}
 	}
-	return &declInference{originalAnn: originalAnn, d: d, g: g, ty: ty, annTy: annTy, given: given, errs: errs, mode: mode, isMain: isMain}
+	return &declInference{originalAnn: originalAnn, d: d, g: g, ty: ty, annTy: annTy, given: given, errs: errs, mode: mode, isMain: isMain, annotationFailed: annotationFailed}
 }
 
 func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
+	info, errs := ck.finishDeclBody(q)
+	if q.isMain {
+		ck.mainSites = q.g.sites
+	}
+	return info, settleErrors(errs, q.annotationFailed)
+}
+
+func (ck *Checker) finishDeclBody(q *declInference) (DeclInfo, []diag.Error) {
 	d, g, ty, annTy, given, errs, mode, isMain := q.d, q.g, q.ty, q.annTy, q.given, q.errs, q.mode, q.isMain
 
 	// An inferred record literal takes its nominal type from context, and a
@@ -1300,9 +1342,12 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 		// Capture the effect comparison against the pre-unification zonk: after
 		// the solve the two sides are equal by construction, so an annotation
 		// could otherwise claim effects the body never performs.
-		effectsProblem = annotationEffectsProblem(ck.Sub.Apply(annTy), ck.Sub.Apply(ty), d.Ann.Sp, d.Name)
-		sub, _, solveErrs := Solve([]Constraint{g.annotationBound(annTy, ty, d.Body.Span(), d.Name)}, nil, ck.Sub, ck.B, ck.Sup)
+		effectsProblem = g.annotationEffectsProblem(ck.Sub.Apply(annTy), ck.Sub.Apply(ty), d.Ann.Sp, d.Name)
+		sub, _, solveErrs := Solve([]Constraint{g.annotationBound(annTy, ty, resultSpan(d.Body), d.Ann.Sp, d.Name)}, nil, ck.Sub, ck.B, ck.Sup)
 		ck.Sub = sub
+		if len(effectsProblem) > 0 {
+			solveErrs = withoutEffectMismatches(solveErrs)
+		}
 		errs = append(errs, solveErrs...)
 		annPreSolved = true
 	}
@@ -1323,10 +1368,18 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 		// fresh rigid skolems, atomic in unification, so an annotation
 		// claiming more polymorphism than the body delivers errors here.
 		if !annPreSolved {
-			errs = append(errs, annotationEffectsProblem(ck.Sub.Apply(annTy), ck.Sub.Apply(ty), d.Ann.Sp, d.Name)...)
-			c := g.annotationBound(annTy, ty, d.Body.Span(), d.Name)
+			// A row error from the body has already named these effects.
+			var problem []diag.Error
+			if !hasEffectMismatch(errs) {
+				problem = g.annotationEffectsProblem(ck.Sub.Apply(annTy), ck.Sub.Apply(ty), d.Ann.Sp, d.Name)
+			}
+			errs = append(errs, problem...)
+			c := g.annotationBound(annTy, ty, resultSpan(d.Body), d.Ann.Sp, d.Name)
 			sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B, ck.Sup)
 			ck.Sub = sub
+			if len(problem) > 0 || hasEffectMismatch(errs) {
+				solveErrs = withoutEffectMismatches(solveErrs)
+			}
 			errs = append(errs, solveErrs...)
 		} else {
 			errs = append(errs, effectsProblem...)
@@ -1420,39 +1473,76 @@ const StatusTypeName = "Process.Status"
 // effects on the annotation's arrows are compared separately, before this can
 // fill the inferred rows, so the bound only has to admit a body whose row, or
 // a row inside its type, is narrower than the one the annotation declares.
-func (g *generator) annotationBound(ann, body types.Type, span source.Span, name string) Constraint {
+func (g *generator) annotationBound(ann, body types.Type, span, annSpan source.Span, name string) Constraint {
 	var invariant []types.Type
 	for _, p := range g.preds {
 		invariant = append(invariant, p.pred.Ty)
 	}
-	return Constraint{Left: body, Right: ann, Span: span, Why: Why{Kind: WhyAnnotation, Name: name},
-		Subsume: true, ADTs: g.ck.ADTs, Invariant: invariant, Declared: ann, Inferred: body}
+	return Constraint{Left: body, Right: ann, Span: span, Why: Why{Kind: WhyAnnotation, Name: types.SurfaceName(name)},
+		Subsume: true, ADTs: g.ck.ADTs, Invariant: invariant, Declared: ann, Inferred: body, AnnSpan: annSpan, Sites: &g.sites}
+}
+
+// resultSpan is the expression that produces e's value, which is what a report
+// about that value should underline: the last line of a block, not its first.
+func resultSpan(e ast.Expr) source.Span {
+	if b, ok := e.(*ast.Block); ok && b.Result != nil {
+		return resultSpan(b.Result)
+	}
+	return e.Span()
 }
 
 // annotationEffectsProblem compares the known effects on an annotation's arrows
 // with what the body performs, before the annotation can populate the body's
-// inferred rows.
-func annotationEffectsProblem(ann, body types.Type, sp source.Span, name string) []diag.Error {
-	af, aok := ann.(*types.TFun)
-	bf, bok := body.(*types.TFun)
-	if !aok || !bok {
+// inferred rows. One report covers every arrow, printing the whole types so the
+// reader can see which arrow each effect belongs to.
+func (g *generator) annotationEffectsProblem(ann, body types.Type, sp source.Span, name string) []diag.Error {
+	var errs []diag.Error
+	for a, b := ann, body; ; {
+		af, aok := a.(*types.TFun)
+		bf, bok := b.(*types.TFun)
+		if !aok || !bok {
+			break
+		}
+		errs = append(errs, g.annotationRowProblem(af.Eff, bf.Eff, sp, name)...)
+		a, b = af.Ret, bf.Ret
+	}
+	if len(errs) == 0 {
 		return nil
 	}
-	return append(annotationRowProblem(af.Eff, bf.Eff, sp, name), annotationEffectsProblem(af.Ret, bf.Ret, sp, name)...)
+	// One annotation gets one report: an effect on the wrong arrow is the same
+	// mistake seen from both arrows.
+	merged := errs[0]
+	for _, e := range errs[1:] {
+		if !strings.Contains(merged.Body, e.Body) {
+			merged.Body += "\n" + e.Body
+		}
+		merged.Related = append(merged.Related, e.Related...)
+		merged.Notes = append(merged.Notes, e.Notes...)
+	}
+	// An effect the annotation omits has to be added somewhere, so show where.
+	// One it merely over-claims is already fully named.
+	if strings.Contains(merged.Body, "does not list") {
+		p := types.NewPrinter().ForMessage(ann, body)
+		merged.Notes = append(merged.Notes, fmt.Sprintf("The annotation says:\n\n    %s\n\nbut the body needs:\n\n    %s", p.Type(ann), p.Type(body)))
+		merged.Notes = append(merged.Notes, p.AliasNotes()...)
+	}
+	return []diag.Error{merged}
 }
 
 // annotationRowProblem applies the rule for one arrow: a label written on its
 // own must be performed, an alias needs one of its members performed, and the
 // body performs nothing else.
-func annotationRowProblem(ann, body types.Row, sp source.Span, name string) []diag.Error {
+func (g *generator) annotationRowProblem(ann, body types.Row, sp source.Span, name string) []diag.Error {
 	performed := map[int]int{}
 	for _, l := range body.Labels {
 		performed[l.Unique]++
 	}
-	exact := true
+	var extra effectDifference
 	for _, l := range ann.Labels {
 		if len(l.Via) == 0 {
-			exact = exact && performed[l.Unique] > 0
+			if performed[l.Unique] <= 0 {
+				extra.labels = append(extra.labels, l)
+			}
 			performed[l.Unique]--
 		}
 	}
@@ -1465,11 +1555,28 @@ func annotationRowProblem(ann, body types.Row, sp source.Span, name string) []di
 			}
 		}
 	}
-	for _, n := range performed {
-		exact = exact && n <= 0
+	var missing effectDifference
+	for _, l := range body.Labels {
+		if performed[l.Unique] > 0 {
+			missing.labels = append(missing.labels, l)
+			performed[l.Unique] = 0
+		}
 	}
-	if !exact {
-		return []diag.Error{diag.Errorf(sp, "EFFECT MISMATCH", "The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", name)}
+	if !extra.empty() || !missing.empty() {
+		pr := types.NewPrinter()
+		surface := types.SurfaceName(name)
+		var sentences []string
+		if !missing.empty() {
+			sentences = append(sentences, fmt.Sprintf("`%s` performs %s, which its annotation does not list.", surface, missing.text(pr)))
+		}
+		if !extra.empty() {
+			sentences = append(sentences, fmt.Sprintf("The annotation for `%s` lists %s, which its body does not perform.", surface, extra.text(pr)))
+		}
+		e := diag.Errorf(sp, "EFFECT MISMATCH", "%s", strings.Join(sentences, "\n"))
+		if site := firstSite(g.sites, missing.labels, source.Span{}, g.ck.Sub); site != nil {
+			e.Related = append(e.Related, diag.Related{Label: "This performs it:", Span: site.span})
+		}
+		return []diag.Error{e}
 	}
 	var errs []diag.Error
 	seen := map[string]bool{}
@@ -1576,7 +1683,7 @@ func (ck *Checker) exprWhere(e ast.Expr, allowEffects bool) (types.Type, types.T
 	ids := map[int]bool{}
 	collectVarIDs(ck.Sub.Apply(ty), ids)
 	var ambiguous, visible []types.Pred
-	for _, p := range left {
+	for _, p := range predsOf(left) {
 		if !mentionsAny(p.Ty, ids) {
 			ambiguous = append(ambiguous, p)
 		} else {
@@ -1590,9 +1697,9 @@ func (ck *Checker) exprWhere(e ast.Expr, allowEffects bool) (types.Type, types.T
 	for _, p := range visible {
 		vobs = append(vobs, predObligation{pred: p, span: e.Span()})
 	}
-	visible, ves := ck.reduceObligations(vobs, nil)
+	stillVisible, ves := ck.reduceObligations(vobs, nil)
 	es = append(es, ves...)
-	ck.PendingPreds = ck.NormalizePreds(visible)
+	ck.PendingPreds = ck.NormalizePreds(predsOf(stillVisible))
 	if !allowEffects {
 		if row, ok := ck.Sub.Apply(g.ambient).(types.Row); ok && len(row.Labels) > 0 {
 			es = append(es, diag.Errorf(e.Span(), "COMPILE-TIME EFFECT",
@@ -1606,6 +1713,8 @@ type predObligation struct {
 	pred types.Pred
 	span source.Span
 	op   string
+	// context is where a number literal was written; see literalOp.
+	context literalContext
 }
 
 // recordKind says what a deferred obligation becomes once its receiver names a
@@ -1637,6 +1746,7 @@ type recordObligation struct {
 type recordUpdateObligation struct {
 	name       string
 	span       source.Span
+	valueSpan  source.Span // the value written for the field, when there is one
 	ty         types.Type
 	candidates []string
 	// bind carries the handler activations a lambda written in this field may
@@ -1672,6 +1782,21 @@ type generator struct {
 	clauseEffects     *[]types.Type
 	localAnnotations  []localAnnotation
 	operationUses     []operationUse
+	// declName is the surface name of the declaration being checked, and
+	// sites what its body performs, in source order.
+	declName string
+	sites    []performSite
+	// operatorApps holds the applications an operator desugared to, by operator.
+	operatorApps map[*ast.App]string
+	// resumeSubject is the code the innermost handler being checked handles.
+	resumeSubject source.Span
+	nextStates    []Constraint
+	// recordArguments are the spans of inferred record literals passed as
+	// arguments, where a brace may have been meant as a function.
+	recordArguments map[source.Span]bool
+	// subjectStates are the state binders of handlers whose subject is being
+	// checked; a name there is in scope only in the clauses.
+	subjectStates []string
 	// Keep package row provenance before a local binding can solve/generalize
 	// a partial application; whole-definition flow adds imported obligations.
 
@@ -1690,17 +1815,139 @@ type operationUse struct {
 // residual row of its own handler, which the continuation performs at the
 // perform site, so it is not something the clause itself performs.
 func (g *generator) performs(eff types.Type, span source.Span, resume bool) {
-	g.cs = append(g.cs, Constraint{Left: eff, Right: g.ambient, Span: span, Why: Why{Kind: WhyCall}, Include: true})
+	if resume && g.resumeSubject.File != nil {
+		span = g.resumeSubject
+	}
+	g.cs = append(g.cs, Constraint{Left: eff, Right: g.ambient, Span: span, Why: Why{Kind: WhyCall, Name: g.declName, Resume: resume}, Include: true, Sites: &g.sites})
+	if !resume {
+		var handled []int
+		for _, h := range g.subjectHandlers {
+			for _, l := range h.Effects {
+				handled = append(handled, l.Unique)
+			}
+		}
+		g.sites = append(g.sites, performSite{row: eff, span: span, handled: handled})
+	}
 	if g.clauseEffects != nil && !resume {
 		*g.clauseEffects = append(*g.clauseEffects, eff)
 	}
 }
 
+// callWhy says what a failure in application e is about, in source terms.
+func (g *generator) callWhy(e *ast.App) Why {
+	if op, ok := g.operatorApps[e]; ok {
+		return Why{Kind: WhyOpRequires, Op: types.SurfaceName(op)}
+	}
+	_, unit := e.Arg.(*ast.UnitLit)
+	why := Why{Kind: WhyCall, Args: len(appArgs(e)), UnitArg: unit && len(appArgs(e)) > 1}
+	switch head := appHead(e).(type) {
+	case *ast.Resume:
+		why.Kind = WhyResume
+	case *ast.Var:
+		why.Name = g.ck.calleeName(head.Name)
+	case *ast.Ctor:
+		if !head.Sugared {
+			why.Name = types.SurfaceName(head.Name)
+		}
+	}
+	return why
+}
+
+// calleeName spells a value the way a reader of this module would: bare when
+// the Prelude or an exposing import provides it, and qualified otherwise.
+func (ck *Checker) calleeName(name string) string {
+	surface := types.SurfaceName(name)
+	if !isIdentifier(surface) || preludeSpellings()[name] {
+		return surface
+	}
+	return name
+}
+
+// preludeSpellings holds the canonical names every module can write bare.
+var preludeSpellings = sync.OnceValue(func() map[string]bool {
+	out := map[string]bool{}
+	if p, errs := modules.Prelude(); len(errs) == 0 {
+		for _, canonical := range p.Scope.Values {
+			out[canonical] = true
+		}
+	}
+	return out
+})
+
+func isIdentifier(name string) bool {
+	return name != "" && (name[0] == '_' || name[0] >= 'a' && name[0] <= 'z' || name[0] >= 'A' && name[0] <= 'Z')
+}
+
+// tagLiteral records where a number literal was written, for the report if
+// the literal turns out to need a type that is not a number.
+func (g *generator) tagLiteral(e ast.Expr, context literalContext) {
+	lit, ok := e.(*ast.IntLit)
+	if !ok || lit.Raw {
+		return
+	}
+	for i := len(g.preds) - 1; i >= 0; i-- {
+		if g.preds[i].op == literalOp && g.preds[i].span == lit.Sp {
+			g.preds[i].context = context
+			return
+		}
+	}
+}
+
 // argument builds the compatibility constraint for an argument or record
 // field, carrying the handler activations a lambda written there may bind to.
-func (g *generator) argument(actual, want types.Type, e ast.Expr) Constraint {
-	return Constraint{Left: actual, Right: want, Span: e.Span(), Why: Why{Kind: WhyCall},
-		Subsume: true, ADTs: g.ck.ADTs, Bind: g.lambdaBinders[e]}
+func (g *generator) argument(actual, want types.Type, e ast.Expr, why Why) Constraint {
+	why.Arg = true
+	_, why.TupleArg = tupleExpr(e)
+	if lit, ok := e.(*ast.RecordLit); ok && lit.Name == "" {
+		if g.recordArguments == nil {
+			g.recordArguments = map[source.Span]bool{}
+		}
+		g.recordArguments[lit.Span()] = true
+	}
+	return Constraint{Left: actual, Right: want, Span: e.Span(), Why: why,
+		Subsume: true, ADTs: g.ck.ADTs, Bind: g.lambdaBinders[e], Sites: &g.sites}
+}
+
+// tupleExpr recognizes the parser's tuple form, a saturated sugared constructor.
+func tupleExpr(e ast.Expr) (*ast.Ctor, bool) {
+	a, ok := e.(*ast.App)
+	if !ok {
+		return nil, false
+	}
+	head, ok := appHead(a).(*ast.Ctor)
+	if !ok || !head.Sugared || !types.IsTupleName(head.Name) {
+		return nil, false
+	}
+	return head, true
+}
+
+// listCons recognizes the parser's list form, returning the element and the
+// rest of the list of a sugared `Cons`.
+func listCons(e ast.Expr) (head, tail ast.Expr, ok bool) {
+	a, isApp := e.(*ast.App)
+	if !isApp {
+		return nil, nil, false
+	}
+	inner, isApp := a.Fn.(*ast.App)
+	if !isApp {
+		return nil, nil, false
+	}
+	ctor, isCtor := inner.Fn.(*ast.Ctor)
+	if !isCtor || !ctor.Sugared || ctor.Name != ListConsName {
+		return nil, nil, false
+	}
+	return inner.Arg, a.Arg, true
+}
+
+// tagCallLiteral records a literal argument of e, except an operator's: there
+// the operator's own requirement makes the better report.
+func (g *generator) tagCallLiteral(e *ast.App, why Why) {
+	switch why.Kind {
+	case WhyResume:
+		g.tagLiteral(e.Arg, literalContext{kind: literalResume})
+	case WhyCall:
+		g.tagLiteral(e.Arg, literalContext{kind: literalArgument, name: why.Name})
+	}
 }
 
 func (g *generator) enterAmbient(row types.Row) (types.Row, *[]types.Type) {
@@ -1780,8 +2027,18 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		} else {
 			scheme, ok := g.ck.Env.Lookup(e.Name)
 			if !ok || !g.ck.valueVisible(e.Name) {
-				g.errs = append(g.errs, diag.Errorf(e.Sp, "NAMING ERROR",
-					"I don't know a value named `%s`.", e.Name))
+				err := diag.Errorf(e.Sp, "NAMING ERROR", "I don't know a value named `%s`.", e.Name)
+				for _, state := range g.subjectStates {
+					if state == e.Name {
+						err.Notes = append(err.Notes, "A handler's state is visible in its clauses, not in the code it handles.")
+					}
+				}
+				if len(err.Notes) == 0 {
+					if hint := diag.DidYouMean(e.Name, g.visibleValueNames()); hint != "" {
+						err.Notes = append(err.Notes, hint)
+					}
+				}
+				g.errs = append(g.errs, err)
 				ty = g.ck.Sup.FreshVar(types.General) // recover with a hole
 				break
 			}
@@ -1802,8 +2059,11 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 	case *ast.Ctor:
 		info, ok := g.ck.Ctors[e.Name]
 		if !ok {
-			g.errs = append(g.errs, diag.Errorf(e.Sp, "NAMING ERROR",
-				"I don't know a constructor named `%s`.", e.Name))
+			err := diag.Errorf(e.Sp, "NAMING ERROR", "I don't know a constructor named `%s`.", e.Name)
+			if hint := diag.DidYouMean(e.Name, surfaceKeys(g.ck.Ctors)); hint != "" {
+				err.Notes = append(err.Notes, hint)
+			}
+			g.errs = append(g.errs, err)
 			ty = g.ck.Sup.FreshVar(types.General)
 			break
 		}
@@ -1863,9 +2123,10 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			ft := g.expr(f.Value)
 			idx, _ := adt.RecordField(f.Name)
 			if idx < 0 {
-				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), f.Name))
+				g.errs = append(g.errs, unknownField(f.NameSpan, adt, f.Name))
 			} else {
-				g.cs = append(g.cs, g.argument(ft, fieldTys[idx], f.Value))
+				g.cs = append(g.cs, g.argument(ft, fieldTys[idx], f.Value, Why{Kind: WhyField, Name: f.Name}))
+				g.tagLiteral(f.Value, literalContext{kind: literalField, name: f.Name})
 			}
 		}
 		for _, f := range adt.RecordFields {
@@ -1913,7 +2174,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			}
 			seen[f.Name] = true
 			fieldTy := g.expr(f.Value)
-			ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: fieldTy, candidates: f.Records, bind: g.lambdaBinders[f.Value]})
+			ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, valueSpan: f.Value.Span(), ty: fieldTy, candidates: f.Records, bind: g.lambdaBinders[f.Value]})
 		}
 		if len(e.Fields) == 0 {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "RECORD FIELDS", "A record update needs at least one replacement field."))
@@ -1941,7 +2202,8 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			args := appArgs(e)
 			for i, a := range args {
 				at := g.exprWant(a, params[i])
-				g.cs = append(g.cs, g.argument(at, params[i], a))
+				g.cs = append(g.cs, g.argument(at, params[i], a, Why{Kind: WhyCall, Name: g.ck.calleeName(op.Name)}))
+				g.tagLiteral(a, literalContext{kind: literalArgument, name: g.ck.calleeName(op.Name)})
 			}
 			cur := inst
 			var last *types.TFun
@@ -1963,13 +2225,35 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		paramTy := g.ck.Sup.FreshVar(types.General)
 		r := g.ck.Sup.FreshVar(types.General)
 		callEff := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
+		why := g.callWhy(e)
+		calleeWhy := why
+		calleeWhy.Kind = WhyCall
 		g.cs = append(g.cs, Constraint{
 			Left:  fnTy,
 			Right: &types.TFun{Arg: paramTy, Eff: callEff, Ret: r},
 			Span:  e.Fn.Span(),
-			Why:   Why{Kind: WhyCall},
+			Why:   calleeWhy,
 		})
-		g.cs = append(g.cs, g.argument(argTy, paramTy, e.Arg))
+		argument := g.argument(argTy, paramTy, e.Arg, why)
+		if head, isVar := appHead(e).(*ast.Var); isVar {
+			if sch, known := g.ck.ExprSchemes[head]; known {
+				argument.Signature = sch.Body
+			}
+		}
+		if head, tail, ok := listCons(e); ok {
+			g.tagLiteral(head, literalContext{kind: literalListElement})
+			if first, _, more := listCons(tail); more {
+				argument.Why.Kind = WhyListElement
+				argument.Span = first.Span()
+			}
+		} else if inner, isApp := e.Fn.(*ast.App); isApp {
+			if ctor, isCtor := inner.Fn.(*ast.Ctor); !isCtor || !ctor.Sugared {
+				g.tagCallLiteral(e, why)
+			}
+		} else {
+			g.tagCallLiteral(e, why)
+		}
+		g.cs = append(g.cs, argument)
 		_, isResume := e.Fn.(*ast.Resume)
 		g.performs(callEff, e.Span(), isResume)
 		// Preserve a known callee's own row in dependency summaries. The
@@ -1991,11 +2275,14 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		ty = g.expr(app)
 	case *ast.If:
 		condTy := g.expr(e.Cond)
+		g.tagLiteral(e.Cond, literalContext{kind: literalCondition})
 		g.cs = append(g.cs, Constraint{
 			Left: condTy, Right: g.ck.B.Bool, Span: e.Cond.Span(), Why: Why{Kind: WhyIfCondition},
 		})
 		thenTy := g.expr(e.Then)
+		g.tagLiteral(e.Then, literalContext{kind: literalIfBranch})
 		elseTy := g.expr(e.Else)
+		g.tagLiteral(e.Else, literalContext{kind: literalIfBranch})
 		ty = g.ck.Sup.FreshVar(types.General)
 		g.cs = append(g.cs,
 			Constraint{Left: thenTy, Right: ty, Span: e.Then.Span(), Why: Why{Kind: WhyIfBranches}, Subsume: true, ADTs: g.ck.ADTs},
@@ -2066,7 +2353,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 	case *ast.Resume:
 		if g.resumeType == nil {
 			if g.abortClause {
-				g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME IN ABORT CLAUSE", "An abort-only operation clause cannot resume."))
+				g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME IN ABORT CLAUSE", "An abort operation never returns to its caller, so its clause cannot resume.\nThe clause's value is the handler's result: return it directly."))
 			} else {
 				g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME OUTSIDE A HANDLER", "`resume` is only available inside an operation clause."))
 			}
@@ -2074,11 +2361,16 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		} else {
 			if e.NextState != nil {
 				if g.resumeState == nil {
-					g.errs = append(g.errs, diag.Errorf(e.NextState.Span(), "STATELESS RESUME", "`resume value with nextState` is only available in a parameterized handler."))
+					err := diag.Errorf(e.NextState.Span(), "STATELESS RESUME", "`resume value with nextState` is only available in a parameterized handler.")
+					err.Notes = append(err.Notes, "Give the handler a state with `with state = initial` before `on`, or remove `with` here.")
+					g.errs = append(g.errs, err)
 					g.expr(e.NextState)
 				} else {
 					nextTy := g.exprWant(e.NextState, g.resumeState)
-					g.cs = append(g.cs, Constraint{Left: nextTy, Right: g.resumeState, Span: e.NextState.Span(), Why: Why{Kind: WhyCall}})
+					// Solved after the clause, so a next state of the wrong type
+					// is what gets blamed rather than the resumed value that
+					// agrees with the state.
+					g.nextStates = append(g.nextStates, Constraint{Left: nextTy, Right: g.resumeState, Span: e.NextState.Span(), Why: Why{Kind: WhyNextState}})
 				}
 			} else if g.resumeState != nil {
 				g.errs = append(g.errs, diag.Errorf(e.Sp, "MISSING NEXT STATE", "A parameterized handler must resume with its next state, like `resume value with current`."))
@@ -2165,6 +2457,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	var stateTy types.Type
 	if e.State != nil {
 		stateTy = g.expr(e.State.Initial)
+		g.tagLiteral(e.State.Initial, literalContext{kind: literalState})
 	}
 
 	// Group the clauses into the applications one activation handles. A
@@ -2191,7 +2484,11 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		clauseApp[i] = -1
 		op := g.ck.Operations[cl.Op]
 		if op == nil {
-			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "UNKNOWN OPERATION", "I don't know an operation named `%s`.", cl.Op))
+			err := diag.Errorf(cl.OpSpan, "UNKNOWN OPERATION", "I don't know an operation named `%s`.", cl.Op)
+			if hint := diag.DidYouMean(cl.Op, surfaceKeys(g.ck.Operations)); hint != "" {
+				err.Notes = append(err.Notes, hint)
+			}
+			g.errs = append(g.errs, err)
 			broken = true
 			continue
 		}
@@ -2298,7 +2595,16 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		bodyAnnotation = info.Permission.Within(bodyAnnotation)
 		g.annotationAmbient = &bodyAnnotation
 	}
+	if e.State != nil {
+		g.subjectStates = append(g.subjectStates, e.State.Name)
+	}
 	bodyTy := g.expr(e.Body)
+	if e.State != nil {
+		g.subjectStates = g.subjectStates[:len(g.subjectStates)-1]
+	}
+	savedSubject := g.resumeSubject
+	g.resumeSubject = e.Body.Span()
+	defer func() { g.resumeSubject = savedSubject }()
 	g.annotationAmbient = savedAnnotation
 	g.subjectHandlers = g.subjectHandlers[:len(g.subjectHandlers)-1]
 	g.clauseEffects = &info.ClauseEffects
@@ -2397,17 +2703,20 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.resumeID = resumeID
 			g.resumeState = stateTy
 			clTy := g.expr(eq.Body)
+			g.cs = append(g.cs, g.nextStates...)
+			g.nextStates = nil
 			g.resumeType = oldResume
 			g.resumeID = oldResumeID
 			g.resumeState = oldResumeState
 			g.abortClause = oldAbortClause
 			g.locals = scope.parent
-			g.cs = append(g.cs, Constraint{Left: clTy, Right: result, Span: eq.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
+			g.tagLiteral(eq.Body, literalContext{kind: literalClause})
+			g.cs = append(g.cs, Constraint{Left: clTy, Right: result, Span: eq.Body.Span(), Why: Why{Kind: WhyHandlerClause}})
 			if !op.Abort {
 				if failure := g.tailResume(resumeID, eq.Body, true); failure != nil {
 					pos := cl.OpSpan.StartPos()
 					g.errs = append(g.errs, diag.Errorf(failure.span, failure.kind,
-						"%s The owning operation clause starts at %d:%d.", failure.message, pos.Line, pos.Col))
+						"%s This clause starts at %d:%d.", failure.message, pos.Line, pos.Col))
 				}
 			}
 		}
@@ -2460,10 +2769,11 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.cs = append(g.cs, Constraint{Left: patTy, Right: bodyTy, Span: eq.Params[0].Span(), Why: Why{Kind: WhyPattern}})
 			rt := g.expr(eq.Body)
 			g.locals = scope.parent
-			g.cs = append(g.cs, Constraint{Left: rt, Right: result, Span: eq.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
+			g.tagLiteral(eq.Body, literalContext{kind: literalClause})
+			g.cs = append(g.cs, Constraint{Left: rt, Right: result, Span: eq.Body.Span(), Why: Why{Kind: WhyHandlerClause}})
 		}
 	} else {
-		g.cs = append(g.cs, Constraint{Left: bodyTy, Right: result, Span: e.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
+		g.cs = append(g.cs, Constraint{Left: bodyTy, Right: result, Span: e.Body.Span(), Why: Why{Kind: WhyHandlerSubject}})
 	}
 	// Only the handled labels are removed. Any residual effects from the body,
 	// clauses, or return clause compose into the surrounding expression.
@@ -2554,7 +2864,7 @@ func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *res
 				}
 			}
 			if !tail {
-				return &resumeFailure{"NON-TAIL RESUME", "`resume` must be the final action on every reachable clause path.", a.Span()}
+				return &resumeFailure{"NON-TAIL RESUME", "`resume` must be the last thing this clause does, on every path through it. To change what the handled code produces, use a `return` clause.", a.Span()}
 			}
 			return nil
 		}
@@ -2719,7 +3029,7 @@ func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *res
 		return &resumeFailure{"RESUME CHECK ERROR", fmt.Sprintf("The resume checker does not know expression %T.", e), e.Span()}
 	}
 	if tail {
-		return &resumeFailure{"MISSING RESUME", "Every operation-clause path must end with exactly one call to `resume`.", e.Span()}
+		return &resumeFailure{"MISSING RESUME", "Every path through this clause must end by calling `resume` once. If the operation is meant to stop the computation, declare it `abort` in its effect.", e.Span()}
 	}
 	return nil
 }
@@ -2782,7 +3092,7 @@ func (g *generator) intrinsicCall(e *ast.App, name string) types.Type {
 			break
 		}
 		at := g.exprWant(arg, params[i])
-		g.cs = append(g.cs, g.argument(at, params[i], arg))
+		g.cs = append(g.cs, g.argument(at, params[i], arg, Why{Kind: WhyCall, Name: g.ck.calleeName(name)}))
 	}
 
 	g.performs(last.Eff, e.Span(), false)
@@ -2934,7 +3244,7 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 	for _, item := range items {
 		if item.Expr != nil {
 			st := g.expr(item.Expr)
-			g.cs = append(g.cs, Constraint{Left: st, Right: g.ck.B.Unit, Span: item.Expr.Span(), Why: Why{Kind: WhyDeclBody}})
+			g.cs = append(g.cs, Constraint{Left: st, Right: g.ck.B.Unit, Span: item.Expr.Span(), Why: Why{Kind: WhyStatement}})
 			continue
 		}
 		bind := &e.Binds[item.BindIndex]
@@ -3001,10 +3311,10 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 				g.deferLocalAnnotation(annTy, shape, annVars, bind)
 				annTy = shape
 			} else {
-				g.errs = append(g.errs, annotationEffectsProblem(g.ck.Sub.Apply(annTy), g.ck.Sub.Apply(ty), bind.Ann.Sp, bind.Name)...)
+				g.errs = append(g.errs, g.annotationEffectsProblem(g.ck.Sub.Apply(annTy), g.ck.Sub.Apply(ty), bind.Ann.Sp, bind.Name)...)
 			}
 			// Skolemize and bound the body, as at the top level.
-			g.cs = append(g.cs, g.annotationBound(annTy, ty, bind.Body.Span(), bind.Name))
+			g.cs = append(g.cs, g.annotationBound(annTy, ty, resultSpan(bind.Body), bind.Ann.Sp, bind.Name))
 			ty = annTy
 		}
 		scheme := types.Scheme{Body: ty}
@@ -3052,16 +3362,16 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			left, es := g.ck.reduceObligations(g.preds[predStart:], given)
 			g.errs = append(g.errs, es...)
 			g.preds = g.preds[:predStart]
-			for _, p := range left {
+			for _, ob := range left {
+				p := ob.pred
 				if mentionsAny(p.Ty, quant) {
 					if bind.Ann != nil {
-						err := diag.Errorf(bind.NameSpan, "MISSING CONSTRAINT", "Add `%s` to the annotation.", types.ShowPred(p.Class, p.Ty))
-						g.errs = append(g.errs, g.ck.withBlanketNote(err, p, given))
+						g.errs = append(g.errs, g.ck.missingConstraint(ob, bind.NameSpan, given))
 					} else {
 						scheme.Preds = append(scheme.Preds, p)
 					}
 				} else {
-					g.preds = append(g.preds, predObligation{pred: p, span: bind.NameSpan})
+					g.preds = append(g.preds, ob)
 				}
 			}
 			if bind.Ann != nil {
@@ -3074,7 +3384,13 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 		g.locals.names[bind.Name] = scheme
 	}
 	if e.MissingResultAt.File != nil {
-		g.errs = append(g.errs, diag.Errorf(e.MissingResultAt, "BLOCK RESULT", "This block ends with a binding. Add an expression whose value the block should return."))
+		// The parser found this by reading past the block, so its position
+		// is whatever comes next. The binding itself is what needs following.
+		at := e.MissingResultAt
+		if n := len(e.Binds); n > 0 {
+			at = e.Binds[n-1].NameSpan
+		}
+		g.errs = append(g.errs, diag.Errorf(at, "BLOCK RESULT", "This block ends with a binding. Add an expression whose value the block should return."))
 		return g.ck.Sup.FreshVar(types.General)
 	}
 	return g.exprWant(e.Result, want)
@@ -3122,7 +3438,7 @@ func (g *generator) inferredRecord(e *ast.RecordLit, want types.Type) types.Type
 		}
 		seen[f.Name] = true
 		fieldTy := g.expr(f.Value)
-		ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: fieldTy, candidates: f.Records, bind: g.lambdaBinders[f.Value]})
+		ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, valueSpan: f.Value.Span(), ty: fieldTy, candidates: f.Records, bind: g.lambdaBinders[f.Value]})
 	}
 	g.records = append(g.records, ob)
 	return recv
@@ -3200,9 +3516,13 @@ func (g *generator) recordPass(final bool, from int) int {
 		if !ok {
 			if report {
 				if ob.kind == recordAccess {
-					g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "AMBIGUOUS FIELD", "The record type is not known here; add a type annotation or provide a contextual record type."))
+					g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "AMBIGUOUS FIELD", "I don't know which record this value is, so I cannot look up this field here.\nAdd a type annotation that says which, for example on the function's parameter."))
 				} else {
-					g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "AMBIGUOUS RECORD", "I cannot tell which record this is. Name its type, as in\n`Counts { ... }`, or add an annotation that gives it one. Field\nnames alone never choose a record type."))
+					err := diag.Errorf(ob.fieldSpan, "AMBIGUOUS RECORD", "I cannot tell which record this is. Write its type name before the `{`, as in\n`TypeName { ... }`, or add an annotation that gives it one. Field\nnames alone never choose a record type.")
+					if g.recordArguments[ob.fieldSpan] {
+						err.Notes = append(err.Notes, "If you meant a function, `{ x = 1 }` is a record: a function that produces a value is `{ value }`.")
+					}
+					g.errs = append(g.errs, err)
 				}
 				ob.resolved = true
 				resolved++
@@ -3258,7 +3578,7 @@ func (g *generator) recordPass(final bool, from int) int {
 			// whatever the module boundary says, and reporting it as private
 			// would describe a field that does not exist.
 			case idx < 0:
-				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), ob.field))
+				g.errs = append(g.errs, unknownField(ob.fieldSpan, adt, ob.field))
 			case !visible(ob.candidates):
 				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
 			case hiddenField(adt.Ctors[0], idx):
@@ -3279,13 +3599,17 @@ func (g *generator) recordPass(final bool, from int) int {
 			idx, _ := adt.RecordField(u.name)
 			switch {
 			case idx < 0:
-				g.errs = append(g.errs, diag.Errorf(u.span, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), u.name))
+				g.errs = append(g.errs, unknownField(u.span, adt, u.name))
 			case !visible(u.candidates):
 				g.errs = append(g.errs, diag.Errorf(u.span, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
 			case ob.kind == recordAccess && hiddenField(adt.Ctors[0], idx):
 				g.errs = append(g.errs, hiddenProjection(u.span, u.name))
 			default:
-				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}, Subsume: ob.kind != recordMatch, ADTs: g.ck.ADTs, Bind: u.bind})
+				span := u.span
+				if u.valueSpan.File != nil {
+					span = u.valueSpan
+				}
+				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: span, Why: Why{Kind: WhyField, Name: u.name, Arg: true}, Subsume: ob.kind != recordMatch, ADTs: g.ck.ADTs, Bind: u.bind, Sites: &g.sites})
 			}
 		}
 		if ob.kind == recordBuild {
@@ -3350,8 +3674,9 @@ func (g *generator) caseExpr(e *ast.Case) types.Type {
 		})
 		bodyTy := g.expr(br.Body)
 		g.locals = scope.parent
+		g.tagLiteral(br.Body, literalContext{kind: literalCaseBranch})
 		g.cs = append(g.cs, Constraint{
-			Left: bodyTy, Right: resultTy, Span: br.Body.Span(), Why: Why{Kind: WhyCaseBranches}, Subsume: true, ADTs: g.ck.ADTs,
+			Left: bodyTy, Right: resultTy, Span: br.Body.Span(), Why: Why{Kind: WhyCaseBranches}, Subsume: true, ADTs: g.ck.ADTs, Sites: &g.sites,
 		})
 	}
 	return resultTy
@@ -3390,7 +3715,7 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 		return pv
 	case *ast.PInt:
 		v := g.ck.Sup.FreshVar(types.General)
-		g.preds = append(g.preds, predObligation{pred: g.ck.StandardPred("Num", v), span: p.Sp}, predObligation{pred: g.ck.StandardPred("Eq", v), span: p.Sp})
+		g.preds = append(g.preds, predObligation{pred: g.ck.StandardPred("Num", v), span: p.Sp, op: literalOp, context: literalContext{kind: literalPattern}}, predObligation{pred: g.ck.StandardPred("Eq", v), span: p.Sp})
 		return v
 	case *ast.PFloat:
 		return g.ck.B.Float
@@ -3446,7 +3771,7 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 			ft := g.pattern(f.Pattern, scope)
 			idx, _ := adt.RecordField(f.Name)
 			if idx < 0 {
-				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), f.Name))
+				g.errs = append(g.errs, unknownField(f.NameSpan, adt, f.Name))
 			} else {
 				g.cs = append(g.cs, Constraint{Left: ft, Right: fieldTys[idx], Span: f.Pattern.Span(), Why: Why{Kind: WhyPattern}})
 			}
@@ -3509,8 +3834,13 @@ func (g *generator) binOp(e *ast.BinOp) types.Type {
 		}
 		return g.ck.B.Bool
 	}
-	app := &ast.App{Fn: &ast.App{Fn: &ast.Var{Name: e.Op, Sp: e.OpSpan}, Arg: e.L}, Arg: e.R}
+	inner := &ast.App{Fn: &ast.Var{Name: e.Op, Sp: e.OpSpan}, Arg: e.L}
+	app := &ast.App{Fn: inner, Arg: e.R}
 	g.ck.Desugared[e] = app
+	if g.operatorApps == nil {
+		g.operatorApps = map[*ast.App]string{}
+	}
+	g.operatorApps[inner], g.operatorApps[app] = e.Op, e.Op
 	return g.expr(app)
 }
 

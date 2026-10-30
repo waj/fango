@@ -221,8 +221,7 @@ contract. Remaining:
 
 ## Product polish
 
-- Improve diagnostic specificity/source presentation, particularly row inclusion;
-  add introductory and task-oriented docs without repeating the reference.
+- Add introductory and task-oriented docs without repeating the reference.
 - Make performance baselines reproducible under host variation/load before making
   timing gates unattended. Same-host ratios still move with contention.
 - Record pure and Fail.attempt capture-diamond cold/warm baselines on an idle

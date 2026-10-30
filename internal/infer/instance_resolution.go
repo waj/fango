@@ -20,6 +20,9 @@ type InstanceResolution struct {
 	Blocked  bool
 	Leaves   []types.Pred
 	Error    *diag.Error
+	// Missing is the constraint nothing provides when Error reports one, which
+	// may be an argument's rather than the one asked about.
+	Missing *types.Pred
 }
 
 // ResolveInstance selects evidence in a frozen source-order environment.
@@ -116,6 +119,7 @@ func (ck *Checker) selectInstance(p types.Pred, owner string, limit int, given [
 	candidates := ck.matchingInstances(p, owner, limit)
 	var applicable []instanceCandidate
 	var missing *diag.Error
+	var missingPred *types.Pred
 	for _, candidate := range candidates {
 		valid := true
 		for _, q := range types.SubstPreds(candidate.in.Preds, candidate.bindings) {
@@ -128,7 +132,7 @@ func (ck *Checker) selectInstance(p types.Pred, owner string, limit int, given [
 					return r
 				}
 				if missing == nil {
-					missing = r.Error
+					missing, missingPred = r.Error, r.Missing
 				}
 				valid = false
 				break
@@ -142,8 +146,9 @@ func (ck *Checker) selectInstance(p types.Pred, owner string, limit int, given [
 		if missing == nil {
 			err := diag.Errorf(source.Span{}, "MISSING INSTANCE", "No instance provides `%s`.", types.ShowPred(p.Class, p.Ty))
 			missing = &err
+			missingPred = &p
 		}
-		return InstanceResolution{Error: missing}
+		return InstanceResolution{Error: missing, Missing: missingPred}
 	}
 	// Context inclusion is a partial order. First remove every dominated
 	// candidate; mixing pairwise inclusion and declaration order in a sort
