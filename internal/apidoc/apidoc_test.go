@@ -21,7 +21,7 @@ const shapes = `{-# no-prelude #-}
 -- area (Square 2.0)
 --     |> ignore
 -- ` + "```" + `
-module Shapes exposing (Shape(..), Point(..), Pair(..), Hidden, Measure(..), Log(..), area, describe, logged, grouped, (<+>))
+module Shapes exposing (Measuring, Shape(..), Point(..), Pair(..), Hidden, Measure(..), Log(..), area, describe, logged, grouped, (<+>))
 
 import Basics exposing (..)
 
@@ -90,6 +90,9 @@ grouped = 1
 infixl 6 (<+>)
 
 secret = Private
+
+-- What a measurement may do.
+alias Measuring = {Log}
 `
 
 const facade = `-- Re-exports.
@@ -143,7 +146,7 @@ func TestExtractDeclarations(t *testing.T) {
 	}
 	want := []string{
 		"class:Shapes.Measure", "constructor:Shapes.Circle", "constructor:Shapes.Square",
-		"effect:Shapes.Log", "field:Shapes.Pair.first", "field:Shapes.Pair.second",
+		"effect:Shapes.Log", "effect:Shapes.Measuring", "field:Shapes.Pair.first", "field:Shapes.Pair.second",
 		"field:Shapes.Point.x", "field:Shapes.Point.y", "method:Shapes.Measure.size",
 		"operation:Shapes.Log.log", "type:Shapes.Hidden", "type:Shapes.Pair", "type:Shapes.Point",
 		"type:Shapes.Shape", "value:Shapes.<+>", "value:Shapes.area", "value:Shapes.describe",
@@ -194,6 +197,17 @@ func TestExtractDeclarations(t *testing.T) {
 	// another loaded type (Meta.Shape here) is qualified.
 	if d := find(t, doc, "class:Shapes.Measure"); !slices.Equal(d.Instances, []string{"Measure Shapes.Shape"}) {
 		t.Errorf("Measure instances = %v", d.Instances)
+	}
+}
+
+func TestExtractEffectAlias(t *testing.T) {
+	doc, _ := extract(t)
+	alias := find(t, doc, "effect:Shapes.Measuring")
+	if alias.Documentation != "What a measurement may do." {
+		t.Fatalf("documentation = %q", alias.Documentation)
+	}
+	if !strings.HasPrefix(alias.Signature, "alias Measuring = {") {
+		t.Fatalf("signature = %q", alias.Signature)
 	}
 }
 

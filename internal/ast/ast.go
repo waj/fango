@@ -702,6 +702,14 @@ type EffectDecl struct {
 	Sp         source.Span
 }
 
+// EffectAliasDecl names a closed set of effects: `alias App = {Log, Db}`.
+type EffectAliasDecl struct {
+	Name     string
+	NameSpan source.Span
+	Row      *EffRow
+	Sp       source.Span
+}
+
 // OpSig is one operation signature line inside an `effect` declaration.
 type OpSig struct {
 	Name     string
@@ -754,6 +762,8 @@ type FixityDecl struct {
 func (*FixityDecl) isDecl() {}
 
 func (*EffectDecl) isDecl() {}
+
+func (*EffectAliasDecl) isDecl() {}
 
 type ModuleHeader struct {
 	Name     string
@@ -844,6 +854,8 @@ func DeclSpan(d Decl) source.Span {
 	case *TypeDecl:
 		return d.Sp
 	case *EffectDecl:
+		return d.Sp
+	case *EffectAliasDecl:
 		return d.Sp
 	case *ClassDecl:
 		return d.Sp

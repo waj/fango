@@ -136,6 +136,8 @@ func (r *resolver) decl(d ast.Decl) {
 				group.Exprs[i] = r.expr(e)
 			}
 		}
+	case *ast.EffectAliasDecl:
+		// An effect alias holds no expressions.
 	case *ast.FixityDecl:
 		// A fixity declaration holds no expressions.
 	default:

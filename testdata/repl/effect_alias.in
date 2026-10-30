@@ -1,0 +1,35 @@
+effect Log
+    info : String -> ()
+
+effect Db
+    query : String -> Int
+
+alias App = {Log, Db}
+fetch : () ->{App} Int
+fetch() = query "x"
+
+:type fetch
+caller() = fetch()
+:type caller
+mixed() =
+    info "first"
+    fetch()
+
+:type mixed
+spelled : () ->{Log, Db} Int
+spelled() = fetch()
+
+:type spelled
+partly() = handle fetch() on
+    info _ -> resume ()
+
+:type partly
+bare : () ->{App} ()
+bare() = ()
+
+alias App = {Log}
+narrowed : () ->{App} ()
+narrowed() = info "x"
+
+:type narrowed
+:q

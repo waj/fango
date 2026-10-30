@@ -1,0 +1,3 @@
+alias App a = {Fail a}
+
+main() = print "unreached"

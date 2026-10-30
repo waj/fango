@@ -1,0 +1,26 @@
+Fango 0.1 — :help for commands
+> | | Log : effect
+> | | Db : effect
+> App : effect alias
+> | | fetch : () ->{App} Int
+> () ->{App} Int
+> caller : () ->{App} Int
+> () ->{App} Int
+> | | | mixed : () ->{App} Int
+> () ->{App} Int
+> | | spelled : () ->{Log, Db} Int
+> () ->{Log, Db} Int
+> | | partly : () ->{Db} Int
+> () ->{Db} Int
+> | | -- EFFECT MISMATCH -------------------------------------- <repl>
+
+`bare` declares `App`, but its body performs none of its effects.
+Remove `App` from the annotation; a function that performs fewer effects can
+still be passed wherever a `{App}` callback is expected.
+
+1| bare : () ->{App} ()
+        ^^^^^^^^^^^^^^^
+> App : effect alias
+> | | narrowed : () ->{App} ()
+> () ->{App} ()
+> 

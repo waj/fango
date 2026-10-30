@@ -20,6 +20,7 @@ func (ck *Checker) Checkpoint() func() {
 	// when a prompt declares an effect or imports a module graph; a failed
 	// input must leave none of it behind.
 	aliases, effects, effectsByUnique := maps.Clone(ck.Aliases), maps.Clone(ck.Effects), maps.Clone(ck.EffectsByUnique)
+	effectAliases := maps.Clone(ck.EffectAliases)
 	operations, natives, intrinsics, fixity := maps.Clone(ck.Operations), maps.Clone(ck.Natives), maps.Clone(ck.Intrinsics), maps.Clone(ck.Fixity)
 	io := ck.IO
 	instanceImports := make(map[string]map[string]bool, len(ck.InstanceImports))
@@ -35,6 +36,7 @@ func (ck *Checker) Checkpoint() func() {
 		ck.CaptureSummaries = captures
 		ck.ScopeSpans = scopeSpans
 		ck.Aliases, ck.Effects, ck.EffectsByUnique = aliases, effects, effectsByUnique
+		ck.EffectAliases = effectAliases
 		ck.Operations, ck.Natives, ck.Intrinsics, ck.IO = operations, natives, intrinsics, io
 		ck.Templates.Truncate(templateCount)
 		// The fixity table is shared with the session's module graph by

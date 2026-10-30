@@ -14,8 +14,8 @@ sum : Iterator Int e ->{e} Int
 sum cursor = foldCursor ({ element acc -> element + acc }) 0 cursor
 
 twice cursor =
-    alias = cursor
-    first = sum alias
+    held = cursor
+    first = sum held
     second = sum cursor
     first + second
 

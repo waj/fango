@@ -31,7 +31,10 @@ constructors and `Effect(..)` all operations. `Class` exposes a class name;
 `Class(..)` also exposes all its methods. Individual methods can be exposed as
 lowercase values. Declaring an instance requires access to all class methods
 (qualified access counts). Constructors cannot be selected
-individually, and member lists cannot be partial. Qualified names are accepted
+individually, and member lists cannot be partial. An
+[effect alias](effects.md#effect-aliases) is exposed by name and has no members,
+so `Alias(..)` is rejected. Exposing one does not expose its effects: an importer
+can pass the alias along but handles only the members it can name. Qualified names are accepted
 for values, operations, constructors, patterns, types, effect rows, and handler
 clauses.
 

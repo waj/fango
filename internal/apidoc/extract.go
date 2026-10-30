@@ -324,6 +324,9 @@ func (x *extractor) collect(m modules.ResolvedModule) {
 				x.values[method.Name] = &owned{id: KindMethod + ":" + d.Name + "." + types.SurfaceName(method.Name), parent: d.Name, Declaration: Declaration{Kind: KindMethod, Name: ast.Spelling(types.SurfaceName(method.Name)),
 					Signature: sig, Documentation: x.leading(method.NameSpan), Source: x.location(method.NameSpan), Fixity: x.fixity(method.Name)}}
 			}
+		case *ast.EffectAliasDecl:
+			x.types[d.Name] = &owned{id: KindEffect + ":" + d.Name, Declaration: Declaration{Kind: KindEffect, Name: types.SurfaceName(d.Name),
+				Signature: EffectAliasHead(ck.EffectAliases[d.Name], x.printer()), Documentation: x.leading(d.NameSpan), Source: x.location(d.NameSpan)}}
 		case *ast.EffectDecl:
 			x.types[d.Name] = &owned{id: KindEffect + ":" + d.Name, Declaration: Declaration{Kind: KindEffect, Name: types.SurfaceName(d.Name),
 				Signature: Head("effect", d.Name, d.Params), Documentation: x.leading(d.NameSpan, d.Attributes...), Source: x.location(d.NameSpan)}}

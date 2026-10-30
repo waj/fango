@@ -431,3 +431,29 @@ func TestReexportDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+func TestEffectAliasExposure(t *testing.T) {
+	for _, tt := range []struct {
+		name, base, main, title, body string
+	}{
+		{"exposed with members", "module Base exposing (App(..))\neffect Log\nalias App = {Log}\n",
+			"module Main exposing (main)\nmain() = print (0)\n", "INVALID EXPORT", "has no members"},
+		{"imported with members", "module Base exposing (App)\neffect Log\nalias App = {Log}\n",
+			"module Main exposing (main)\nimport Base exposing (App(..))\nmain() = print (0)\n", "NON-PUBLIC IMPORT", "`App`"},
+		{"not exposed", "module Base exposing (Log)\neffect Log\nalias App = {Log}\n",
+			"module Main exposing (main)\nimport Base exposing (App)\nmain() = print (0)\n", "UNKNOWN IMPORT", "`App`"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := t.TempDir()
+			entry := write(t, d, "Main.fango", tt.main)
+			if !strings.Contains(tt.main, "import Base") {
+				write(t, d, "Main.fango", "module Main exposing (main)\nimport Base\nmain() = print (0)\n")
+			}
+			write(t, d, "Base.fango", tt.base)
+			_, errs := Load(entry)
+			if len(errs) == 0 || errs[0].Title != tt.title || !strings.Contains(errs[0].Body, tt.body) {
+				t.Fatalf("errors: %#v", errs)
+			}
+		})
+	}
+}

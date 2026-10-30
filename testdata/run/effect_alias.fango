@@ -1,0 +1,69 @@
+-- An alias's effects are ordinary row labels: a definition may use any of
+-- them, handlers discharge them one at a time, and callbacks fit as usual.
+effect Log
+    info : String -> ()
+
+effect Db
+    query : String -> Int
+
+effect Stop
+    abort stop : String -> a
+
+alias App = {Log, Db, Stop}
+
+onlyDb : () ->{App} Int
+onlyDb() = query "one"
+
+aborting : Int ->{App} Int
+aborting n = if n > 0 then stop "too big" else n
+
+allOfThem : () ->{App} Int
+allOfThem() =
+    info "both"
+    query "two" + aborting 0
+
+viaCallee : () ->{App} Int
+viaCallee() = onlyDb() + 1
+
+narrow : () ->{Db} Int
+narrow() = query "narrow"
+
+pointFree : () ->{App} Int
+pointFree = narrow
+
+withLog : (() ->{e} a) ->{App, e} a
+withLog action =
+    info "wrapped"
+    action()
+
+run : (() ->{App} Int) ->{Console} Int
+run action =
+    handle (handle (handle action() on
+        info text -> print text; resume ()) on
+        query _ -> resume 41) on
+        stop _ -> -1
+
+-- Handling a member leaves the others in the row.
+quietly : (() ->{App} a) ->{Db, Stop} a
+quietly action = handle action() on
+    info _ -> resume ()
+
+type Action = Action (() ->{App} Int)
+
+type Job e = Job (() ->{e} Int)
+
+jobValue : Job App ->{Console} Int
+jobValue (Job action) = run action
+
+pureOne() = 1
+
+actions = [Action pureOne, Action onlyDb, Action { aborting 1 }, Action { query "lit" + 1 }]
+
+go (Action action) = run action
+
+main() =
+    print "#{run onlyDb} #{run pureOne} #{run allOfThem} #{run viaCallee}"
+    print "#{run pointFree} #{run { aborting 2 }} #{run { withLog pureOne }}"
+    print "#{List.map go actions}"
+    print "#{jobValue (Job { 7 })} #{jobValue (Job onlyDb)}"
+    print "#{run { quietly allOfThem }}"

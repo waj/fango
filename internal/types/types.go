@@ -7,7 +7,9 @@ package types
 
 import (
 	"github.com/waj/fango/internal/source"
+	"slices"
 	"sort"
+	"strings"
 )
 
 // ResumeID identifies one source handler operation clause. It is compiler-only
@@ -135,6 +137,57 @@ type EffLabel struct {
 	Args   []Type
 	Abort  bool // every operation in this (uniform-discipline) effect aborts
 
+	// Via names the effect aliases this label came from. It only decides how
+	// a row reads and whether an annotation's alias was used; row matching
+	// never looks at it, so losing it can only print a row expanded.
+	Via []EffectVia
+}
+
+// EffectVia is one alias a label came from. Members are the alias's labels in
+// LabelText form, so a printer can tell the alias is whole without a table.
+type EffectVia struct {
+	Name    string
+	Members []string
+}
+
+// EffectAlias is a checked `alias` declaration: a closed set of labels.
+type EffectAlias struct {
+	Name   string
+	Labels []EffLabel
+}
+
+// Via is the provenance every label of the alias carries when it is expanded.
+func (a *EffectAlias) Via() EffectVia {
+	members := make([]string, len(a.Labels))
+	for i, l := range a.Labels {
+		members[i] = LabelText(l)
+	}
+	return EffectVia{Name: a.Name, Members: members}
+}
+
+// LabelText is a label's identity as source can spell it, which unlike its
+// Unique is the same in every session that installs a module.
+func LabelText(l EffLabel) string {
+	text := l.Name
+	for _, a := range l.Args {
+		text += " " + NewPrinter().Atom(a)
+	}
+	return text
+}
+
+// MergeVia is the union of two provenance lists, in name order.
+func MergeVia(a, b []EffectVia) []EffectVia {
+	if len(b) == 0 {
+		return a
+	}
+	out := append([]EffectVia(nil), a...)
+	for _, via := range b {
+		if !slices.ContainsFunc(out, func(have EffectVia) bool { return have.Name == via.Name }) {
+			out = append(out, via)
+		}
+	}
+	slices.SortFunc(out, func(x, y EffectVia) int { return strings.Compare(x.Name, y.Name) })
+	return out
 }
 
 func (r Row) Empty() bool { return len(r.Labels) == 0 && r.Tail == nil }
@@ -280,7 +333,7 @@ func substRigidRow(r Row, m map[int]Type) Row {
 		for j, a := range l.Args {
 			args[j] = SubstRigid(a, m)
 		}
-		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped, Binding: l.Binding}
+		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped, Binding: l.Binding, Via: l.Via}
 	}
 	var tail Type
 	if r.Tail != nil {

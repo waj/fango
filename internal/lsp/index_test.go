@@ -63,6 +63,38 @@ func TestIndexAcrossModulesAndRecordFields(t *testing.T) {
 	}
 }
 
+func TestEffectAliasNavigation(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "Main.fango")
+	data := "module Main exposing (main)\neffect Log\n    info : String -> ()\nalias App = {Log}\nfetch : () ->{App} ()\nfetch() = info \"x\"\nmain() = ()\n"
+	if err := os.WriteFile(entry, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, errs, internal := (&check.Session{DisableObjectCache: true}).Compile(entry)
+	if internal != nil || len(errs) > 0 {
+		t.Fatalf("%v %v", internal, errs)
+	}
+	idx := newIndex(root, result)
+	var definition, use string
+	for _, u := range idx.documents[entry].uses {
+		if string(u.span.File.Content[u.span.Start:u.span.End]) != "App" {
+			continue
+		}
+		switch u.span.StartPos().Line {
+		case 4:
+			definition = u.target
+		case 5:
+			use = u.target
+		}
+	}
+	if definition == "" || use != definition {
+		t.Fatalf("definition %q, use %q", definition, use)
+	}
+	if sym := idx.symbols[use]; sym.typeText != "alias App = {Log}" {
+		t.Fatalf("hover: %#v", sym)
+	}
+}
+
 func TestReexportNavigation(t *testing.T) {
 	root := t.TempDir()
 	base := "module Base exposing (Box(..), mk)\n\ntype Box = Box Int\n\nmk : Box\nmk = Box 1\n"

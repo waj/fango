@@ -486,7 +486,7 @@ func (s *Session) input(text string, force bool) inputResult {
 // An operator declaration opens with `(op)`, which also opens the
 // expression `(+) 1 2`; the `=` scan below is what separates them.
 func isDecl(toks []token.Token) bool {
-	if len(toks) >= 1 && (toks[0].Kind == token.ATTRIBUTE || toks[0].Kind == token.PRAGMA || toks[0].Kind == token.KwImport || toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect || toks[0].Kind == token.KwClass || toks[0].Kind == token.KwInstance || toks[0].Kind == token.KwDeriver) {
+	if len(toks) >= 1 && (toks[0].Kind == token.ATTRIBUTE || toks[0].Kind == token.PRAGMA || toks[0].Kind == token.KwImport || toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect || toks[0].Kind == token.KwAlias || toks[0].Kind == token.KwClass || toks[0].Kind == token.KwInstance || toks[0].Kind == token.KwDeriver) {
 		return true
 	}
 	if len(toks) >= 1 && (toks[0].Kind == token.KwInfix || toks[0].Kind == token.KwInfixL || toks[0].Kind == token.KwInfixR) {
@@ -655,6 +655,15 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 			diag.Render(s.out, errs)
 		} else {
 			fmt.Fprintf(s.out, "%s : effect\n", ed.Name)
+		}
+		return inputDone
+	}
+	if ad, ok := m.Decls[0].(*ast.EffectAliasDecl); ok {
+		if errs := s.ck.EffectAliasDecl(ad); len(errs) > 0 {
+			restore()
+			diag.Render(s.out, errs)
+		} else {
+			fmt.Fprintf(s.out, "%s : effect alias\n", ad.Name)
 		}
 		return inputDone
 	}

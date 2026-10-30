@@ -56,8 +56,8 @@ func (g *generator) annotationShape(ann, body types.Type, avoid map[int]bool, bi
 	eff := a.Eff
 	if tail, ok := b.Eff.Tail.(*types.TVar); ok && !tail.Rigid && avoid[tail.ID] {
 		eff = types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
-	} else if !sameKnownRowEffects(a.Eff, b.Eff) {
-		g.errs = append(g.errs, diag.Errorf(bind.Ann.Sp, "EFFECT MISMATCH", "The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", bind.Name))
+	} else {
+		g.errs = append(g.errs, annotationRowProblem(a.Eff, b.Eff, bind.Ann.Sp, bind.Name)...)
 	}
 	return &types.TFun{Arg: a.Arg, Eff: eff, Ret: g.annotationShape(a.Ret, b.Ret, avoid, bind)}
 }
@@ -65,9 +65,7 @@ func (g *generator) annotationShape(ann, body types.Type, avoid map[int]bool, bi
 func (g *generator) checkLocalAnnotations() []diag.Error {
 	var errs []diag.Error
 	for _, c := range g.localAnnotations {
-		if !sameKnownEffects(g.ck.Sub.Apply(c.Right), g.ck.Sub.Apply(c.Left)) {
-			errs = append(errs, diag.Errorf(c.Span, "EFFECT MISMATCH", "The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", c.Why.Name))
-		}
+		errs = append(errs, annotationEffectsProblem(g.ck.Sub.Apply(c.Right), g.ck.Sub.Apply(c.Left), c.Span, c.Why.Name)...)
 	}
 	return errs
 }

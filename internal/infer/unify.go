@@ -60,7 +60,7 @@ func (s Subst) applyRow(r types.Row) types.Row {
 		for j, a := range l.Args {
 			args[j] = s.Apply(a)
 		}
-		labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped, Binding: l.Binding}
+		labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped, Binding: l.Binding, Via: l.Via}
 	}
 	var tail types.Type
 	if r.Tail != nil {
@@ -77,6 +77,8 @@ func (s Subst) applyRow(r types.Row) types.Row {
 	canonical := sorted.Labels[:0]
 	for _, label := range sorted.Labels {
 		if len(canonical) > 0 && equalEffLabel(canonical[len(canonical)-1], label) {
+			last := &canonical[len(canonical)-1]
+			last.Via = types.MergeVia(last.Via, label.Via)
 			continue
 		}
 		canonical = append(canonical, label)

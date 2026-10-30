@@ -532,6 +532,8 @@ func firstDeclFile(decls []ast.Decl) *source.File {
 			sp = d.Sp
 		case *ast.EffectDecl:
 			sp = d.Sp
+		case *ast.EffectAliasDecl:
+			sp = d.Sp
 		case *ast.FixityDecl:
 			sp = d.Sp
 		case *ast.ClassDecl:
@@ -1233,6 +1235,7 @@ func buildInterface(n *node, nodes map[string]*node, errs []diag.Error) (*iface,
 		return newIface(), errs
 	}
 	all := newIface()
+	aliases := map[string]bool{}
 	for _, d := range n.mod.Decls {
 		switch d := d.(type) {
 		case *ast.ClassDecl:
@@ -1259,6 +1262,9 @@ func buildInterface(n *node, nodes map[string]*node, errs []diag.Error) (*iface,
 				all.typeMembers[d.Name] = append(all.typeMembers[d.Name], c.Name)
 				all.ctors[c.Name] = canonical(n.name, c.Name)
 			}
+		case *ast.EffectAliasDecl:
+			all.types[d.Name] = canonical(n.name, d.Name)
+			aliases[d.Name] = true
 		case *ast.EffectDecl:
 			all.types[d.Name] = canonical(n.name, d.Name)
 			for _, op := range d.Ops {
@@ -1324,6 +1330,10 @@ func buildInterface(n *node, nodes map[string]*node, errs []diag.Error) (*iface,
 			if op := all.ops[item.Name]; op != "" {
 				pub.ops[item.Name] = op
 			}
+			continue
+		}
+		if aliases[item.Name] && item.All {
+			errs = append(errs, diag.Errorf(item.Sp, "INVALID EXPORT", "`%s` is an effect alias and has no members; expose it without `(..)`.", item.Name))
 			continue
 		}
 		if v, ok := all.types[item.Name]; ok {
@@ -1710,6 +1720,9 @@ func (r *resolver) declareHeaders(decls []ast.Decl) {
 			for _, c := range d.Ctors {
 				r.add(r.ctors, c.Name, r.canon(c.Name), c.NameSpan)
 			}
+		case *ast.EffectAliasDecl:
+			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
+			r.schemas[r.canon(d.Name)] = true
 		case *ast.EffectDecl:
 			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
 			r.schemas[r.canon(d.Name)] = true
@@ -1835,6 +1848,10 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 				r.typ(d.RecordFields[i].Type)
 
 			}
+			out = append(out, d)
+		case *ast.EffectAliasDecl:
+			d.Name = r.canon(d.Name)
+			r.effRow(d.Row)
 			out = append(out, d)
 		case *ast.EffectDecl:
 			d.Name = r.canon(d.Name)

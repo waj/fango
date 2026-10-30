@@ -61,9 +61,7 @@ func (b *moduleCheck) inferGroup(group []int) {
 		if q.annTy == nil {
 			continue
 		}
-		if !sameKnownEffects(ck.Sub.Apply(q.annTy), ck.Sub.Apply(q.ty)) {
-			b.errs = append(b.errs, diag.Errorf(q.d.Ann.Sp, "EFFECT MISMATCH", "The annotation for %s does not match its body's effects.", q.d.Name))
-		}
+		b.errs = append(b.errs, annotationEffectsProblem(ck.Sub.Apply(q.annTy), ck.Sub.Apply(q.ty), q.d.Ann.Sp, q.d.Name)...)
 		sub, _, es := Solve([]Constraint{q.g.annotationBound(q.annTy, q.ty, q.d.NameSpan, q.d.Name)}, nil, ck.Sub, ck.B, ck.Sup)
 		ck.Sub = sub
 		b.errs = append(b.errs, es...)

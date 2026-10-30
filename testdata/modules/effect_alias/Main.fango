@@ -1,0 +1,17 @@
+import Server exposing (App, Action(..), Log(..), serve)
+
+logged : () ->{App} Int
+logged() =
+    info "logged"
+    1
+
+pureAction() = 2
+
+fromImport : Action
+fromImport = Action logged
+
+run (Action action) = serve action
+
+main() =
+    print (run fromImport)
+    print (run (Action pureAction))

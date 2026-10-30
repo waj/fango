@@ -156,7 +156,7 @@ func TestScopedDeclarationErrors(t *testing.T) {
 		"run : Show a => (Int ->{#s} a) ->{e} a\nrun action = action 0\n",
 		"run : (Int ->{#s} a) ->{e} a\nrun _ = 0\n",
 		"run : (Int ->{#s} a) ->{e} a\nrun = native\n",
-		"run : (Int ->{#s} a) ->{e} a\nrun action = action 0\nalias = run\n",
+		"run : (Int ->{#s} a) ->{e} a\nrun action = action 0\nsecond = run\n",
 		"effect Tell a\n    tell : a -> ()\n\nrun : (Int ->{Tell (Int ->{#s} Int), #s} a) ->{e} a\nrun action = handle action 0 on\n    tell _ -> resume ()\n",
 	} {
 		t.Run(src, func(t *testing.T) {

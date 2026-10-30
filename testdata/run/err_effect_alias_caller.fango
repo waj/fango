@@ -1,0 +1,17 @@
+-- A caller answers for the alias its callee declares, not for the members the
+-- callee's body happens to use.
+effect Log
+    info : String -> ()
+
+effect Db
+    query : String -> Int
+
+alias App = {Log, Db}
+
+fetch : () ->{App} Int
+fetch() = query "x"
+
+caller : () ->{Db} Int
+caller() = fetch()
+
+main() = print "unreached"

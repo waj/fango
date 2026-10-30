@@ -163,6 +163,7 @@ type Checker struct {
 	// TCon Unique underneath.
 	TypeNames       map[string]types.Type
 	Effects         map[string]*types.EffectInfo
+	EffectAliases   map[string]*types.EffectAlias
 	EffectsByUnique map[int]*types.EffectInfo
 	Operations      map[string]*types.EffectOp
 	// IO is the ambient IO effect, and is nil when the bundled IO module is
@@ -348,6 +349,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		ExprCaptures:      map[ast.Expr]types.CaptureSet{},
 		Desugared:         map[ast.Expr]ast.Expr{},
 		Aliases:           map[string]string{},
+		EffectAliases:     map[string]*types.EffectAlias{},
 		Sup:               sup,
 		B:                 b,
 		Env:               env,
@@ -488,6 +490,10 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 				errs = append(errs, diag.Errorf(td.NameSpan, "MULTIPLE DEFINITIONS",
 					"The type `%s` collides with an effect of the same name.", td.Name))
 			}
+			if _, clash := ck.EffectAliases[td.Name]; clash {
+				errs = append(errs, diag.Errorf(td.NameSpan, "MULTIPLE DEFINITIONS",
+					"The type `%s` collides with an effect alias of the same name.", td.Name))
+			}
 			// Duplicate types are a batch-compilation error only: the REPL
 			// redefines types freely (generational uniques).
 			if _, dup := ck.TypeNames[td.Name]; dup {
@@ -501,6 +507,13 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			}
 		}
 	}
+	var aliasDecls []*ast.EffectAliasDecl
+	for _, d := range m.Decls {
+		if ad, ok := d.(*ast.EffectAliasDecl); ok {
+			aliasDecls = append(aliasDecls, ad)
+		}
+	}
+	errs = append(errs, ck.declareEffectAliases(aliasDecls, true)...)
 	for _, d := range m.Decls {
 		if ed, ok := d.(*ast.EffectDecl); ok {
 			errs = append(errs, ck.declareEffectOps(ed, true)...)
@@ -829,6 +842,10 @@ func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Er
 	if _, exists := ck.Effects[ed.Name]; exists && batch {
 		errs = append(errs, diag.Errorf(ed.NameSpan, "MULTIPLE DEFINITIONS",
 			"The effect `%s` is defined more than once.", ed.Name))
+	}
+	if _, exists := ck.EffectAliases[ed.Name]; exists {
+		errs = append(errs, diag.Errorf(ed.NameSpan, "MULTIPLE DEFINITIONS",
+			"The effect `%s` collides with an effect alias of the same name.", ed.Name))
 	}
 	seen := map[string]bool{}
 	params := make([]*types.TVar, len(ed.Params))
@@ -1277,12 +1294,13 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	// literal can sit in — a list element, a branch, a nested field — uniformly.
 	// The gate keeps declarations that use no inferred record on exactly the
 	// path they were on before.
-	annPreSolved, effectsAgree := false, true
+	annPreSolved := false
+	var effectsProblem []diag.Error
 	if d.Ann != nil && annTy != nil && g.hasPendingInferredRecord() {
 		// Capture the effect comparison against the pre-unification zonk: after
 		// the solve the two sides are equal by construction, so an annotation
 		// could otherwise claim effects the body never performs.
-		effectsAgree = sameKnownEffects(ck.Sub.Apply(annTy), ck.Sub.Apply(ty))
+		effectsProblem = annotationEffectsProblem(ck.Sub.Apply(annTy), ck.Sub.Apply(ty), d.Ann.Sp, d.Name)
 		sub, _, solveErrs := Solve([]Constraint{g.annotationBound(annTy, ty, d.Body.Span(), d.Name)}, nil, ck.Sub, ck.B, ck.Sup)
 		ck.Sub = sub
 		errs = append(errs, solveErrs...)
@@ -1305,17 +1323,13 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 		// fresh rigid skolems, atomic in unification, so an annotation
 		// claiming more polymorphism than the body delivers errors here.
 		if !annPreSolved {
-			if !sameKnownEffects(ck.Sub.Apply(annTy), ck.Sub.Apply(ty)) {
-				errs = append(errs, diag.Errorf(d.Ann.Sp, "EFFECT MISMATCH",
-					"The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", d.Name))
-			}
+			errs = append(errs, annotationEffectsProblem(ck.Sub.Apply(annTy), ck.Sub.Apply(ty), d.Ann.Sp, d.Name)...)
 			c := g.annotationBound(annTy, ty, d.Body.Span(), d.Name)
 			sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B, ck.Sup)
 			ck.Sub = sub
 			errs = append(errs, solveErrs...)
-		} else if !effectsAgree {
-			errs = append(errs, diag.Errorf(d.Ann.Sp, "EFFECT MISMATCH",
-				"The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", d.Name))
+		} else {
+			errs = append(errs, effectsProblem...)
 		}
 		ty = annTy
 	}
@@ -1415,26 +1429,60 @@ func (g *generator) annotationBound(ann, body types.Type, span source.Span, name
 		Subsume: true, ADTs: g.ck.ADTs, Invariant: invariant, Declared: ann, Inferred: body}
 }
 
-func sameKnownEffects(a, b types.Type) bool {
-	af, aok := a.(*types.TFun)
-	bf, bok := b.(*types.TFun)
+// annotationEffectsProblem compares the known effects on an annotation's arrows
+// with what the body performs, before the annotation can populate the body's
+// inferred rows.
+func annotationEffectsProblem(ann, body types.Type, sp source.Span, name string) []diag.Error {
+	af, aok := ann.(*types.TFun)
+	bf, bok := body.(*types.TFun)
 	if !aok || !bok {
-		return true
+		return nil
 	}
-	return sameKnownRowEffects(af.Eff, bf.Eff) && sameKnownEffects(af.Ret, bf.Ret)
+	return append(annotationRowProblem(af.Eff, bf.Eff, sp, name), annotationEffectsProblem(af.Ret, bf.Ret, sp, name)...)
 }
 
-func sameKnownRowEffects(a, b types.Row) bool {
-	al, bl := types.SortedRow(a).Labels, types.SortedRow(b).Labels
-	if len(al) != len(bl) {
-		return false
+// annotationRowProblem applies the rule for one arrow: a label written on its
+// own must be performed, an alias needs one of its members performed, and the
+// body performs nothing else.
+func annotationRowProblem(ann, body types.Row, sp source.Span, name string) []diag.Error {
+	performed := map[int]int{}
+	for _, l := range body.Labels {
+		performed[l.Unique]++
 	}
-	for i := range al {
-		if al[i].Unique != bl[i].Unique {
-			return false
+	exact := true
+	for _, l := range ann.Labels {
+		if len(l.Via) == 0 {
+			exact = exact && performed[l.Unique] > 0
+			performed[l.Unique]--
 		}
 	}
-	return true
+	used := map[string]bool{}
+	for _, l := range ann.Labels {
+		if len(l.Via) > 0 && performed[l.Unique] > 0 {
+			performed[l.Unique]--
+			for _, via := range l.Via {
+				used[via.Name] = true
+			}
+		}
+	}
+	for _, n := range performed {
+		exact = exact && n <= 0
+	}
+	if !exact {
+		return []diag.Error{diag.Errorf(sp, "EFFECT MISMATCH", "The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", name)}
+	}
+	var errs []diag.Error
+	seen := map[string]bool{}
+	for _, l := range ann.Labels {
+		for _, via := range l.Via {
+			if !used[via.Name] && !seen[via.Name] {
+				seen[via.Name] = true
+				alias := types.SurfaceName(via.Name)
+				errs = append(errs, diag.Errorf(sp, "EFFECT MISMATCH", "`%s` declares `%s`, but its body performs none of its effects.\nRemove `%s` from the annotation; a function that performs fewer effects can\nstill be passed wherever a `{%s}` callback is expected.", types.SurfaceName(name), alias, alias, alias))
+			}
+		}
+	}
+	return errs
 }
 
 // closeSingleRows makes an inferred arrow pure when its open row occurs only
@@ -2929,8 +2977,8 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 				shape := g.annotationShape(annTy, ty, g.scopeFreeIDs(), bind)
 				g.deferLocalAnnotation(annTy, shape, annVars, bind)
 				annTy = shape
-			} else if !sameKnownEffects(g.ck.Sub.Apply(annTy), g.ck.Sub.Apply(ty)) {
-				g.errs = append(g.errs, diag.Errorf(bind.Ann.Sp, "EFFECT MISMATCH", "The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", bind.Name))
+			} else {
+				g.errs = append(g.errs, annotationEffectsProblem(g.ck.Sub.Apply(annTy), g.ck.Sub.Apply(ty), bind.Ann.Sp, bind.Name)...)
 			}
 			// Skolemize and bound the body, as at the top level.
 			g.cs = append(g.cs, g.annotationBound(annTy, ty, bind.Body.Span(), bind.Name))

@@ -74,7 +74,7 @@ and patterns.
 
 ## Effectful function types
 
-[Effectful function types](reference/effects.md) — Per-arrow rows, callback inclusion, and exact annotations.
+[Effectful function types](reference/effects.md) — Per-arrow rows, callback inclusion, exact annotations, and effect aliases.
 
 ## Effects and handlers
 

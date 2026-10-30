@@ -189,6 +189,12 @@ async function main() {
   const attributedEffect = grammar.tokenizeLine('effect Console', effectAttribute.ruleStack).tokens;
   assert(attributedEffect.some(t => t.scopes.includes('keyword.other.effect.fango')));
   assert(attributedEffect.some(t => t.scopes.includes('entity.name.type.effect.fango')));
+  const aliasLine = 'alias App = {Log, Fail String}';
+  const aliasTokens = grammar.tokenizeLine(aliasLine).tokens;
+  const aliasScopeAt = index => aliasTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+  assert(aliasScopeAt(aliasLine.indexOf('alias')).includes('keyword.other.alias.fango'));
+  assert(aliasScopeAt(aliasLine.indexOf('App')).includes('entity.name.type.effect.fango'));
+  assert(aliasScopeAt(aliasLine.indexOf('Log')).includes('entity.name.type.effect.fango'));
   const inlineEffect = '#[Default `runSystem`] effect Console';
   const inlineEffectTokens = grammar.tokenizeLine(inlineEffect).tokens;
   const inlineEffectScopeAt = index => inlineEffectTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;

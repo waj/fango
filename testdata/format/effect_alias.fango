@@ -1,0 +1,6 @@
+effect Log
+    info : String -> ()
+
+alias   App   =   { Log,Fail String }
+
+alias Web = {App}

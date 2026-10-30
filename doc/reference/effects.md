@@ -151,7 +151,10 @@ A pure body annotated `() ->{IO} Int` is rejected, at top level or in a local
 definition. This differs deliberately from argument compatibility: a named pure
 function can be passed to a parameter permitting IO without claiming that its
 own definition performs IO. Annotation type variables and residual row tails
-remain rigid.
+remain rigid. An [effect alias](#effect-aliases) relaxes this for the effects it
+contributes. Exactness covers only the annotation's own arrows: a row inside a
+value's type may be wider than the body's, so a `Source {}` satisfies an
+annotation of `Source {Note}`.
 
 An effect outside the permitted row reports `EFFECT MISMATCH`, naming the
 performed and available effects. A report prints an arrow's row whenever the
@@ -171,6 +174,56 @@ but the body requires:
 
 A row variable an arrow alone carries says only that the caller chooses, and
 stays elided.
+
+## Effect aliases
+
+An `alias` declaration names a closed set of effects:
+
+```fango
+alias App = {Log, Db, Fail String}
+```
+
+Use the name wherever a row label goes, including as a
+[row-kinded type argument](functions.md#row-kinded-parameters), as in `Job App`
+or `Job {App, Clock}`. An alias may include other aliases, which flatten, and
+may be declared after its uses. It takes no type parameters and cannot hold a
+tail or a scoped row variable; `BAD EFFECT ALIAS` reports an empty alias, one
+with a tail, and one that includes itself.
+
+A row holds the alias's effects, not a separate effect. Handlers discharge them
+one at a time, so handling `Log` under `{App}` leaves `{Db, Fail String}`, and a
+function declared `{Log, Db, Fail String}` may call one declared `{App}`.
+
+An alias differs from writing its effects out in two ways. A definition
+annotation needs only one of its effects to be performed:
+
+```fango
+fetch : Key ->{App} Row        -- accepted when the body only queries
+fetch key = query key
+
+health : () ->{App} Int        -- rejected: the body performs none of them
+health() = 200
+```
+
+A definition that performs none should not claim the alias. `health : () -> Int`
+can still be passed wherever a `{App}` callback is expected, since callbacks
+follow the [usual compatibility rules](#row-inclusion-and-callback-compatibility).
+Labels written beside an alias stay exact: `{App, Clock}` must perform `Clock`
+and one of `App`'s effects. Repeating a member, as in `{App, Log}`, reports
+`DUPLICATE EFFECT`; two aliases may overlap, and an effect both contain counts
+for both.
+
+Types and errors also show the alias, when a row holds all of its effects and at
+least one of them came from it. A row written out in full prints as written, and
+one with a member handled prints expanded. A mismatch explains each alias it
+shows:
+
+```
+Note: `App` is an alias for {Log, Db, Fail String}
+```
+
+A caller answers for the alias its callee declares, whichever members that
+callee's body uses. Runtime evidence and `Meta.arrow` see only the real effects.
 
 ## Effects and handlers
 

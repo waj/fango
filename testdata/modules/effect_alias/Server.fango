@@ -1,0 +1,20 @@
+module Server exposing (App, Action(..), Log(..), serve)
+
+-- Db stays private: importers pass `App` along without being able to name it.
+effect Log
+    info : String -> ()
+
+effect Db
+    query : String -> Int
+
+alias App = {Log, Db}
+
+type Action = Action (() ->{App} Int)
+
+lookup : () ->{App} Int
+lookup() = query "row"
+
+serve : (() ->{App} Int) ->{Console} Int
+serve action = handle (handle (lookup() + action()) on
+        info text -> print text; resume ()) on
+    query _ -> resume 40

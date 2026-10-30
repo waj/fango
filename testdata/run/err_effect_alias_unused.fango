@@ -1,0 +1,12 @@
+effect Log
+    info : String -> ()
+
+effect Db
+    query : String -> Int
+
+alias App = {Log, Db}
+
+health : () ->{App} Int
+health() = 200
+
+main() = print "unreached"

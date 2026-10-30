@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -32,6 +33,8 @@ type Printer struct {
 	// Ref, when set, receives each type, class, and effect name as printed,
 	// with its canonical name, and returns the text to print instead.
 	Ref func(canonical, text string) string
+
+	aliases map[string]string // each alias shown so far, with its effects
 }
 
 func (p *Printer) ref(canonical, text string) string {
@@ -125,16 +128,66 @@ func (p *Printer) render(t Type) string {
 }
 
 func (p *Printer) rowText(r Row) string {
-	parts := make([]string, len(r.Labels))
-	for i, l := range r.Labels {
-		parts[i] = p.label(l)
-	}
+	parts := p.foldedLabels(r.Labels)
 	if v, ok := r.Tail.(*TVar); ok && p.scoped[v.ID] {
 		parts = append(parts, "#"+p.varName(v))
 	} else if r.Tail != nil {
 		parts = append(parts, p.render(r.Tail))
 	}
 	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// foldedLabels prints a row's labels, showing an alias in place of its members
+// when a label came from it and all of its members are present.
+func (p *Printer) foldedLabels(labels []EffLabel) []string {
+	present := map[string]int{}
+	for i, l := range labels {
+		present[LabelText(l)] = i
+	}
+	folded := map[int]bool{}
+	shown := map[string]bool{}
+	var parts []string
+	for _, l := range labels {
+		for _, via := range l.Via {
+			missing := func(m string) bool { _, ok := present[m]; return !ok }
+			if shown[via.Name] || slices.ContainsFunc(via.Members, missing) {
+				continue
+			}
+			shown[via.Name] = true
+			members := make([]string, len(via.Members))
+			for i, m := range via.Members {
+				folded[present[m]] = true
+				members[i] = p.label(labels[present[m]])
+			}
+			text := p.ref(via.Name, SurfaceName(via.Name))
+			parts = append(parts, text)
+			if p.aliases == nil {
+				p.aliases = map[string]string{}
+			}
+			p.aliases[text] = "{" + strings.Join(members, ", ") + "}"
+		}
+	}
+	for i, l := range labels {
+		if !folded[i] {
+			parts = append(parts, p.label(l))
+		}
+	}
+	return parts
+}
+
+// AliasNotes explains each alias this printer has shown in place of its
+// effects, for a report that printed types with it.
+func (p *Printer) AliasNotes() []string {
+	names := make([]string, 0, len(p.aliases))
+	for name := range p.aliases {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	notes := make([]string, len(names))
+	for i, name := range names {
+		notes[i] = "Note: `" + name + "` is an alias for " + p.aliases[name]
+	}
+	return notes
 }
 
 // A row variable is elided from an arrow that is its only occurrence, since

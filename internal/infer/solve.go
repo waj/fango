@@ -425,6 +425,7 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 	if m.note != "" {
 		e.Notes = append(e.Notes, "Note: "+m.note)
 	}
+	e.Notes = append(e.Notes, p.AliasNotes()...)
 	return e
 }
 

@@ -143,6 +143,9 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 			if effect := ck.Effects[te.Name]; effect != nil && len(effect.Params) == 0 {
 				return types.Row{Labels: []types.EffLabel{{Unique: effect.Unique, Name: effect.Name}}}, nil
 			}
+			if alias := ck.EffectAliases[te.Name]; alias != nil {
+				return types.Row{Labels: ck.expandEffectAlias(alias)}, nil
+			}
 			return nil, []diag.Error{diag.Errorf(te.Sp, "KIND MISMATCH", "A row-kinded parameter must be an effect-row variable or effect label, not the type `%s`.", te.Name)}
 		}
 		t, ok := ck.TypeNames[te.Name]
@@ -255,6 +258,105 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 	}
 }
 
+// expandEffectAlias is the alias's labels as a row holds them. A label's Abort
+// flag is read here because an alias resolves before effect operations do.
+func (ck *Checker) expandEffectAlias(alias *types.EffectAlias) []types.EffLabel {
+	via := []types.EffectVia{alias.Via()}
+	labels := make([]types.EffLabel, len(alias.Labels))
+	for i, l := range alias.Labels {
+		l.Via = via
+		if info := ck.EffectsByUnique[l.Unique]; info != nil {
+			l.Abort = info.HasAbort()
+		}
+		labels[i] = l
+	}
+	return labels
+}
+
+// declareEffectAliases resolves `alias` declarations, each after the aliases
+// it names. It runs once type and effect names exist, before anything that can
+// mention an alias: operation signatures, constructor fields, and annotations.
+func (ck *Checker) declareEffectAliases(decls []*ast.EffectAliasDecl, batch bool) []diag.Error {
+	var errs []diag.Error
+	pending := map[string]*ast.EffectAliasDecl{}
+	for _, d := range decls {
+		_, exists := ck.EffectAliases[d.Name]
+		if exists && batch || pending[d.Name] != nil {
+			errs = append(errs, diag.Errorf(d.NameSpan, "MULTIPLE DEFINITIONS", "The effect alias `%s` is defined more than once.", types.SurfaceName(d.Name)))
+		}
+		pending[d.Name] = d
+	}
+	const visiting, done, failed = 1, 2, 3
+	state := map[string]int{}
+	var visit func(d *ast.EffectAliasDecl)
+	visit = func(d *ast.EffectAliasDecl) {
+		state[d.Name] = visiting
+		ok := false
+		defer func() {
+			state[d.Name] = failed
+			if ok {
+				state[d.Name] = done
+			}
+		}()
+		surface := types.SurfaceName(d.Name)
+		if _, clash := ck.Effects[d.Name]; clash {
+			errs = append(errs, diag.Errorf(d.NameSpan, "MULTIPLE DEFINITIONS", "The effect alias `%s` collides with an effect of the same name.", surface))
+			return
+		}
+		if _, clash := ck.TypeNames[d.Name]; clash {
+			errs = append(errs, diag.Errorf(d.NameSpan, "MULTIPLE DEFINITIONS", "The effect alias `%s` collides with a type of the same name.", surface))
+			return
+		}
+		if d.Row.Tail != "" {
+			errs = append(errs, diag.Errorf(d.Row.TailSp, "BAD EFFECT ALIAS", "The effect alias `%s` must be a closed row; it cannot end in the row variable `%s`.", surface, d.Row.Tail))
+			return
+		}
+		if len(d.Row.Labels) == 0 {
+			errs = append(errs, diag.Errorf(d.Row.Sp, "BAD EFFECT ALIAS", "The effect alias `%s` must name at least one effect.", surface))
+			return
+		}
+		for _, l := range d.Row.Labels {
+			dep := pending[l.Name]
+			if dep == nil {
+				continue
+			}
+			if state[l.Name] == visiting {
+				errs = append(errs, diag.Errorf(l.NameSp, "BAD EFFECT ALIAS", "The effect alias `%s` cannot include itself, directly or through another alias.", surface))
+				return
+			}
+			if state[l.Name] == 0 {
+				visit(dep)
+			}
+			if state[l.Name] == failed {
+				return // already reported at its own declaration
+			}
+		}
+		row, rowErrs := ck.resolveEffRow(d.Row, &TypeVars{vars: map[string]*types.TVar{}, sup: ck.Sup})
+		errs = append(errs, rowErrs...)
+		if len(rowErrs) > 0 {
+			return
+		}
+		labels := make([]types.EffLabel, len(row.Labels))
+		for i, l := range row.Labels {
+			l.Via = nil
+			labels[i] = l
+		}
+		ck.EffectAliases[d.Name] = &types.EffectAlias{Name: d.Name, Labels: labels}
+		ok = true
+	}
+	for _, d := range decls {
+		if state[d.Name] == 0 {
+			visit(d)
+		}
+	}
+	return errs
+}
+
+// EffectAliasDecl declares one alias at the prompt, replacing an earlier one.
+func (ck *Checker) EffectAliasDecl(d *ast.EffectAliasDecl) []diag.Error {
+	return ck.declareEffectAliases([]*ast.EffectAliasDecl{d}, false)
+}
+
 func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []diag.Error) {
 	if row == nil {
 		return types.Row{}, nil
@@ -264,8 +366,29 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 	}
 	var result types.Row
 	var errs []diag.Error
-	seen := map[types.EffectKey]bool{}
+	seen := map[types.EffectKey]int{}
 	for _, l := range row.Labels {
+		if alias := ck.EffectAliases[l.Name]; alias != nil {
+			if len(l.Args) > 0 {
+				errs = append(errs, diag.Errorf(l.NameSp, "EFFECT ARITY", "The effect alias `%s` takes no type arguments.", types.SurfaceName(l.Name)))
+				continue
+			}
+			for _, label := range ck.expandEffectAlias(alias) {
+				key := types.EffectLabelKey(label)
+				at, dup := seen[key]
+				switch {
+				case !dup:
+					seen[key] = len(result.Labels)
+					result.Labels = append(result.Labels, label)
+				case len(result.Labels[at].Via) == 0:
+					errs = append(errs, diag.Errorf(l.NameSp, "DUPLICATE EFFECT", "The effect application `%s` is already in this row, through the alias `%s`.", types.SurfaceName(label.Name), types.SurfaceName(l.Name)))
+					result.Labels[at].Via = label.Via // the report is enough; the row need not also be exact
+				default:
+					result.Labels[at].Via = types.MergeVia(result.Labels[at].Via, label.Via)
+				}
+			}
+			continue
+		}
 		info := ck.Effects[l.Name]
 		if info == nil {
 			errs = append(errs, diag.Errorf(l.NameSp, "NAMING ERROR", "I don't know an effect named `%s`.", l.Name))
@@ -287,11 +410,15 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 			continue
 		}
 		key := types.AppliedEffectKey(info.Unique, args)
-		if seen[key] {
-			errs = append(errs, diag.Errorf(l.NameSp, "DUPLICATE EFFECT", "The effect application `%s` appears twice in this row.", l.Name))
+		if at, dup := seen[key]; dup {
+			if via := result.Labels[at].Via; len(via) > 0 {
+				errs = append(errs, diag.Errorf(l.NameSp, "DUPLICATE EFFECT", "The effect application `%s` is already in this row, through the alias `%s`.", l.Name, types.SurfaceName(via[0].Name)))
+			} else {
+				errs = append(errs, diag.Errorf(l.NameSp, "DUPLICATE EFFECT", "The effect application `%s` appears twice in this row.", l.Name))
+			}
 			continue
 		}
-		seen[key] = true
+		seen[key] = len(result.Labels)
 		result.Labels = append(result.Labels, types.EffLabel{Unique: info.Unique, Name: info.Name, Args: args, Abort: info.HasAbort()})
 	}
 	if row.Tail != "" {

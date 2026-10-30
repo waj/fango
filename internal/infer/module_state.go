@@ -70,25 +70,26 @@ type DeclRef struct {
 // one module. AST-keyed inference workspaces and the current substitution are
 // deliberately absent.
 type ModuleState struct {
-	Name       string
-	Role       ModuleRole
-	Entry      string
-	Schemes    map[string]types.Scheme
-	Types      map[string]types.Type
-	Aliases    map[string]string
-	Ctors      map[string]*types.CtorInfo
-	ADTs       []*types.ADTInfo
-	Effects    map[string]*types.EffectInfo
-	Operations map[string]*types.EffectOp
-	Classes    map[string]*types.ClassInfo
-	Methods    map[string]*types.MethodInfo
-	Instances  []*InstanceInfo
-	Workers    map[string]int
-	Natives    map[string]*types.NativeInfo
-	Intrinsics map[string]types.Scheme
-	Derivers   map[string]*DeriverInfo
-	Captures   map[string]types.CaptureSummary
-	Visibility map[string]bool
+	Name          string
+	Role          ModuleRole
+	Entry         string
+	Schemes       map[string]types.Scheme
+	Types         map[string]types.Type
+	Aliases       map[string]string
+	Ctors         map[string]*types.CtorInfo
+	ADTs          []*types.ADTInfo
+	Effects       map[string]*types.EffectInfo
+	EffectAliases map[string]*types.EffectAlias
+	Operations    map[string]*types.EffectOp
+	Classes       map[string]*types.ClassInfo
+	Methods       map[string]*types.MethodInfo
+	Instances     []*InstanceInfo
+	Workers       map[string]int
+	Natives       map[string]*types.NativeInfo
+	Intrinsics    map[string]types.Scheme
+	Derivers      map[string]*DeriverInfo
+	Captures      map[string]types.CaptureSummary
+	Visibility    map[string]bool
 }
 
 // CheckedModule keeps the transient typed-AST handoff separate from the
@@ -103,6 +104,7 @@ type moduleSnapshot struct {
 	env, types, aliases, ctors, effects, operations, classes, methods map[string]bool
 	workers, natives, intrinsics, derivers, captures                  map[string]bool
 	adts, instances                                                   int
+	effectAliases                                                     map[string]bool
 }
 
 func keys[T any](m map[string]T) map[string]bool {
@@ -114,7 +116,7 @@ func keys[T any](m map[string]T) map[string]bool {
 }
 
 func (ck *Checker) moduleSnapshot() moduleSnapshot {
-	return moduleSnapshot{keys(ck.Env.vars), keys(ck.TypeNames), keys(ck.Aliases), keys(ck.Ctors), keys(ck.Effects), keys(ck.Operations), keys(ck.Classes), keys(ck.Methods), keys(ck.Workers), keys(ck.Natives), keys(ck.Intrinsics), keys(ck.Derivers), keys(ck.CaptureSummaries), len(ck.ADTOrder), len(ck.Instances)}
+	return moduleSnapshot{keys(ck.Env.vars), keys(ck.TypeNames), keys(ck.Aliases), keys(ck.Ctors), keys(ck.Effects), keys(ck.Operations), keys(ck.Classes), keys(ck.Methods), keys(ck.Workers), keys(ck.Natives), keys(ck.Intrinsics), keys(ck.Derivers), keys(ck.CaptureSummaries), len(ck.ADTOrder), len(ck.Instances), keys(ck.EffectAliases)}
 }
 
 func delta[T any](m map[string]T, before map[string]bool) map[string]T {
@@ -166,7 +168,7 @@ func (ck *Checker) CheckModule(m *ast.Module, options ModuleOptions) (*CheckedMo
 		Name: options.Name, Role: options.Role, Entry: options.Entry,
 		Schemes: schemes, Types: delta(ck.TypeNames, before.types), Aliases: delta(ck.Aliases, before.aliases),
 		Ctors: delta(ck.Ctors, before.ctors), ADTs: append([]*types.ADTInfo(nil), ck.ADTOrder[before.adts:]...),
-		Effects: delta(ck.Effects, before.effects), Operations: delta(ck.Operations, before.operations),
+		Effects: delta(ck.Effects, before.effects), EffectAliases: delta(ck.EffectAliases, before.effectAliases), Operations: delta(ck.Operations, before.operations),
 		Classes: delta(ck.Classes, before.classes), Methods: delta(ck.Methods, before.methods),
 		Instances: instances, Workers: delta(ck.Workers, before.workers),
 		Natives: delta(ck.Natives, before.natives), Intrinsics: delta(ck.Intrinsics, before.intrinsics),

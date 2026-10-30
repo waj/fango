@@ -29,6 +29,14 @@ func ScopedSignature(name string, sch types.Scheme, p *types.Printer) string {
 }
 
 // Head renders a declaration head such as `type Result error value`.
+// EffectAliasHead is an alias's declaration, listing the effects it stands for.
+func EffectAliasHead(alias *types.EffectAlias, p *types.Printer) string {
+	if alias == nil {
+		return ""
+	}
+	return "alias " + types.SurfaceName(alias.Name) + " = " + p.Type(types.Row{Labels: alias.Labels})
+}
+
 func Head(keyword, name string, params []ast.Param) string {
 	text := keyword + " " + types.SurfaceName(name)
 	for _, p := range params {

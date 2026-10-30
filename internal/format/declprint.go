@@ -20,6 +20,9 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span) bool {
 	case *ast.TypeDecl:
 		p.typeDeclLines(d, sp)
 		return true
+	case *ast.EffectAliasDecl:
+		p.line(0, "alias "+d.Name+" = "+effRowText(d.Row))
+		return true
 	case *ast.EffectDecl:
 		for _, group := range d.Attributes {
 			p.attributeGroupLine(group, 0, "")

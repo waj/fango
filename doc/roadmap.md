@@ -281,7 +281,8 @@ These are directions, not commitments or an ordering:
   removed so the language keeps one backend whose compile speed it can rely on;
   its last implementation, with C sidecars and a BDWGC runtime, is at `2de4f1f`.
 - Richer safe sidecar types and panic/error translation, driven by concrete APIs.
-- Transparent aliases, including effect-row aliases.
+- Transparent type aliases. [Effect aliases](reference/effects.md#effect-aliases)
+  exist, and do not take type parameters.
 - Inline record variant payloads: settle construction, matching, and visibility.
   Also decide whether resolution should disambiguate `Wrap { x = 1 }` as a
   constructor call; today inferred record arguments require parentheses.

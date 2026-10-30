@@ -1,0 +1,19 @@
+-- The spawn boundary answers to the declared row: `job` never aborts, but the
+-- alias it claims includes an abort effect.
+import Async exposing (Async)
+
+effect Stop
+    abort stop : String -> a
+
+effect Log
+    info : String -> ()
+
+alias App = {Log, Stop}
+
+job : () ->{App} ()
+job() = info "x"
+
+submit : () ->{Async, App} ()
+submit() = ignore (Async.spawn job)
+
+main() = print "unreached"

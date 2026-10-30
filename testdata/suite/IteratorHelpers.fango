@@ -24,8 +24,8 @@ sumCursor cursor = foldCursor { element acc -> element + acc } 0 cursor
 sumHeld (Held cursor) = sumCursor cursor
 
 twice cursor =
-    alias = cursor
-    read() = sumHeld (Held alias)
+    held = cursor
+    read() = sumHeld (Held held)
     first = read()
     second = sumCursor cursor
     first + second
