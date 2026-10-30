@@ -35,6 +35,14 @@ type Printer struct {
 	Ref func(canonical, text string) string
 
 	aliases map[string]string // each alias shown so far, with its effects
+
+	// message, set by ForMessage, renders for a diagnostic: variables an
+	// annotation named keep their names, rows on rigid variables always show,
+	// and inference's own row variables stay out of sight.
+	message bool
+	// clashing holds surface names that stand for several types in the
+	// message, which print fully qualified so the two cannot look alike.
+	clashing map[string]bool
 }
 
 func (p *Printer) ref(canonical, text string) string {
@@ -45,7 +53,7 @@ func (p *Printer) ref(canonical, text string) string {
 }
 
 func (p *Printer) label(l EffLabel) string {
-	text := p.ref(l.Name, SurfaceName(l.Name))
+	text := p.ref(l.Name, p.surface(l.Name))
 	for _, a := range l.Args {
 		text += " " + p.atom(a)
 	}
@@ -56,7 +64,71 @@ func (p *Printer) typeName(name string) string {
 	if p.TypeName != nil {
 		return p.ref(name, p.TypeName(name))
 	}
-	return p.ref(name, SurfaceName(name))
+	return p.ref(name, p.surface(name))
+}
+
+// surface spells a canonical name, qualified only when its short name would
+// read the same as a different type in this message.
+func (p *Printer) surface(name string) string {
+	if p.clashing[SurfaceName(name)] {
+		return name
+	}
+	return SurfaceName(name)
+}
+
+// ForMessage prepares a printer for a diagnostic about ts, which must include
+// every type the message will print. See the message field.
+func (p *Printer) ForMessage(ts ...Type) *Printer {
+	p.message = true
+	canonical := map[string]string{}
+	p.clashing = map[string]bool{}
+	note := func(name string) {
+		short := SurfaceName(name)
+		if seen, ok := canonical[short]; ok && seen != name {
+			p.clashing[short] = true
+		}
+		canonical[short] = name
+	}
+	var walk func(Type)
+	walk = func(t Type) {
+		switch t := t.(type) {
+		case *TVar:
+			// A written name is claimed before any variable prints, so a
+			// generated name never reuses a letter the author chose.
+			if t.Name != "" {
+				if p.taken == nil {
+					p.taken = map[string]bool{}
+				}
+				p.names[t.ID] = t.Name
+				p.taken[t.Name] = true
+			}
+		case *TCon:
+			note(t.Name)
+			for _, a := range t.Args {
+				walk(a)
+			}
+		case *TFun:
+			walk(t.Arg)
+			walk(t.Eff)
+			walk(t.Ret)
+		case Row:
+			for _, l := range t.Labels {
+				note(l.Name)
+				for _, a := range l.Args {
+					walk(a)
+				}
+			}
+			if t.Tail != nil {
+				walk(t.Tail)
+			}
+		}
+	}
+	for _, t := range ts {
+		if t != nil {
+			walk(t)
+		}
+	}
+	return p
 }
 
 func NewPrinter() *Printer {
@@ -75,7 +147,12 @@ func (p *Printer) Bind(v *TVar, name string) {
 	p.taken[name] = true
 }
 
-func (p *Printer) shownRow(v *TVar) bool { return p.rows[v.ID] > 1 || p.bound[v.ID] }
+func (p *Printer) shownRow(v *TVar) bool {
+	if p.message && v.Name != "" {
+		return true
+	}
+	return p.rows[v.ID] > 1 || p.bound[v.ID]
+}
 
 func (p *Printer) Type(t Type) string {
 	p.rows = map[int]int{}
@@ -121,6 +198,11 @@ func (p *Printer) render(t Type) string {
 		}
 		return fmt.Sprintf("%s %s %s", p.funArg(t.Arg), arrow, p.render(t.Ret))
 	case Row:
+		if p.message && len(t.Labels) == 0 {
+			if v, ok := t.Tail.(*TVar); ok && v.Rigid {
+				return p.varName(v)
+			}
+		}
 		return p.rowText(t)
 	default:
 		panic(fmt.Sprintf("types.Printer: unhandled %T", t))
@@ -131,6 +213,8 @@ func (p *Printer) rowText(r Row) string {
 	parts := p.foldedLabels(r.Labels)
 	if v, ok := r.Tail.(*TVar); ok && p.scoped[v.ID] {
 		parts = append(parts, "#"+p.varName(v))
+	} else if v, ok := r.Tail.(*TVar); ok && p.message && !v.Rigid {
+		// Inference's own tail is an implementation detail of a message.
 	} else if r.Tail != nil {
 		parts = append(parts, p.render(r.Tail))
 	}
@@ -317,6 +401,9 @@ func ShowScheme(s Scheme) string { return NewPrinter().Scheme(s) }
 // tupleArity reports the element count of a bundled tuple type, whose surface
 // spelling is `(a, b)` rather than its constructor name. The parser writes
 // these same names when it lowers tuple syntax.
+// IsTupleName reports whether name is the bundled tuple constructor or type.
+func IsTupleName(name string) bool { return tupleArity(name) != 0 }
+
 func tupleArity(name string) int {
 	switch name {
 	case "Tuple.Pair":

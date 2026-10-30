@@ -94,6 +94,9 @@ type TVar struct {
 	ID    int
 	Kind  VarKind
 	Rigid bool
+	// Name is the spelling an annotation gave a rigid variable, or empty.
+	// Only diagnostics read it; identity is the ID.
+	Name string
 }
 
 // TCon is a type constructor application: Int, Shape, Maybe a. Identity is

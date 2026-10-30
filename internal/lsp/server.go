@@ -5,6 +5,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/url"
 	"path/filepath"
@@ -481,12 +482,19 @@ func (s *server) analyzeGeneration(gen uint64) {
 		if internal != nil {
 			errs = append(errs, diag.Error{Title: "INTERNAL COMPILER ERROR", Body: internal.Error()})
 		}
-		for _, e := range errs {
+		for _, e := range diag.Dedup(errs) {
 			path := entry
 			if e.Span.File != nil {
 				path = sourcePath(root, e.Span.File.Name)
 			}
 			message := e.Body
+			for _, r := range e.Related {
+				message += "\n\n" + r.Label
+				if r.Span.File != nil {
+					pos := r.Span.StartPos()
+					message += fmt.Sprintf(" %s:%d:%d", r.Span.File.Name, pos.Line, pos.Col)
+				}
+			}
 			if len(e.Notes) > 0 {
 				message += "\n\n" + strings.Join(e.Notes, "\n")
 			}

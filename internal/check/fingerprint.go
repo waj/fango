@@ -236,6 +236,10 @@ func (w *canonicalWriter) write(v reflect.Value, field string) {
 				w.token("no-args")
 				continue
 			}
+			if v.Type() == tvarReflectType && f.Name == "Name" {
+				// A variable's spelling reaches only diagnostics.
+				continue
+			}
 			if v.Type() == tvarReflectType && f.Name == "ID" {
 				w.token(strconv.Itoa(w.logicalID(typeParamReflectType, v.Field(i).Int())))
 				continue
