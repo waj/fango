@@ -181,7 +181,7 @@ func TestDocWholeLibrary(t *testing.T) {
 		// Scoped runners mark their callback binder `#s`; the runner's own
 		// row, open or closed, stays on its final arrow.
 		"value:Reader.withBytes":  "withBytes : Bytes -> (Reader {#s} ->{#s} a) ->{e} a",
-		"value:Http.Server.serve": "serve : Config -> Channel () -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{Fail Error, Async, Network} ()",
+		"value:Http.Server.serve": "serve : Config -> Channel () -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{Async, Fail Error, Network} ()",
 		// Opaque types show no representation.
 		"type:Dict.Dict": "type Dict k v",
 		// Two or more members go one to a line, as fango fmt lays them out.

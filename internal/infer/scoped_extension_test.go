@@ -138,7 +138,7 @@ caller() = run { more ->
 	if again := checkedScheme(reparsed, reinfos[0]); again.ScopedRow == nil || types.ShowScheme(again) != got["run"] {
 		t.Errorf("reparsed run : %s", types.ShowScheme(again))
 	}
-	if got["caller"] != "() ->{Outer, Extra} Int" {
+	if got["caller"] != "() ->{Extra, Outer} Int" {
 		t.Errorf("caller : %s", got["caller"])
 	}
 	p, es := elaborate.Module(infos, ck)

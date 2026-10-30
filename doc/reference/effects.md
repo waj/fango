@@ -219,7 +219,7 @@ one with a member handled prints expanded. A mismatch explains each alias it
 shows:
 
 ```
-Note: `App` is an alias for {Log, Db, Fail String}
+Note: `App` is an alias for {Db, Fail String, Log}
 ```
 
 A caller answers for the alias its callee declares, whichever members that

@@ -192,10 +192,10 @@ func MergeVia(a, b []EffectVia) []EffectVia {
 
 func (r Row) Empty() bool { return len(r.Labels) == 0 && r.Tail == nil }
 
-// SortedRow returns a deterministic copy ordered by effect identity.
+// SortedRow returns a deterministic copy in EffectOrder.
 func SortedRow(r Row) Row {
 	labels := append([]EffLabel(nil), r.Labels...)
-	sort.Slice(labels, func(i, j int) bool { return EffectLabelKey(labels[i]) < EffectLabelKey(labels[j]) })
+	sort.Slice(labels, func(i, j int) bool { return EffectLabelOrder(labels[i]) < EffectLabelOrder(labels[j]) })
 	return Row{Labels: labels, Tail: r.Tail}
 }
 

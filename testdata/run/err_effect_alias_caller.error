@@ -1,1 +1,1 @@
-Note: `App` is an alias for {Log, Db}
+Note: `App` is an alias for {Db, Log}

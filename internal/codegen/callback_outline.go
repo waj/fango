@@ -187,15 +187,10 @@ func (g *gen) outlinedLambda(lam *core.Lambda, mode types.Transport) goast.Expr 
 		typeFields = nil
 	}
 
-	evidenceKeys := slices.Sorted(maps.Keys(freeEvidence))
-	// Use nominal names and the same applied-evidence order as handler forks.
-	// EffectKey's length-prefixed numbers preserve that order on cache rebasing.
-	sort.SliceStable(evidenceKeys, func(i, j int) bool {
-		a, b := freeEvidence[evidenceKeys[i]], freeEvidence[evidenceKeys[j]]
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return evidenceKeys[i] < evidenceKeys[j]
+	evidenceKeys := slices.Collect(maps.Keys(freeEvidence))
+	// The same applied-evidence order as handler forks.
+	sort.Slice(evidenceKeys, func(i, j int) bool {
+		return freeEvidence[evidenceKeys[i]].Order() < freeEvidence[evidenceKeys[j]].Order()
 	})
 	oldEvidence := g.outlinedEvidence
 	g.outlinedEvidence = maps.Clone(oldEvidence)

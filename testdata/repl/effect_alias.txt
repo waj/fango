@@ -8,8 +8,8 @@ Fango 0.1 — :help for commands
 > () ->{App} Int
 > | | | mixed : () ->{App} Int
 > () ->{App} Int
-> | | spelled : () ->{Log, Db} Int
-> () ->{Log, Db} Int
+> | | spelled : () ->{Db, Log} Int
+> () ->{Db, Log} Int
 > | | partly : () ->{Db} Int
 > () ->{Db} Int
 > | | -- EFFECT MISMATCH -------------------------------------- <repl>

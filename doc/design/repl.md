@@ -261,6 +261,11 @@ means a native now mentions a retired declaration, even when its printed
 signature is unchanged. The worker holds values of the old declaration, so that
 difference requires a new session.
 
+Retaining an identity beside a fresh one reorders allocation numbers, whatever
+the prompt's import order was. Reconciled Core still needs no re-sorting, and its
+evidence agrees with definitions already installed, because
+[effect order](core.md#residual-evidence-rows) is led by canonical names.
+
 Runtime module definitions have session-only generation names. All module calls
 inside accepted prompt Core are frozen to those names before installation;
 direct expressions use the current mapping. Changed modules and their transitive

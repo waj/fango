@@ -39,12 +39,7 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, label int, mode types.Tran
 	for id := range free {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool {
-		if free[ids[i]].Name != free[ids[j]].Name {
-			return free[ids[i]].Name < free[ids[j]].Name
-		}
-		return ids[i] < ids[j]
-	})
+	sort.Slice(ids, func(i, j int) bool { return free[ids[i]].Order() < free[ids[j]].Order() })
 	rowIDs := make([]types.CaptureVar, 0, len(rows))
 	for id := range rows {
 		rowIDs = append(rowIDs, id)

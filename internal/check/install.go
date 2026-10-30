@@ -228,8 +228,8 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 			}
 		}
 	}
-	// Preserve the defining session's effect order: evidence parameter slices
-	// are positional ABI, even though their identities are freshly allocated.
+	// Evidence is ordered by name first, so this only keeps same-named
+	// effects, and so generated names, in the defining session's order.
 	sort.Slice(effects, func(i, j int) bool { return effects[i].Unique < effects[j].Unique })
 	for _, effect := range effects {
 		r.effect[effect.Unique] = ck.Sup.NextUnique()

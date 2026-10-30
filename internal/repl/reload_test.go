@@ -448,6 +448,106 @@ func TestReloadEffectGeneration(t *testing.T) {
 	}
 }
 
+// evidenceOrderModules writes two effects, each with a handler, and a module
+// performing both. Its result tells the handlers' answers apart.
+func evidenceOrderModules(write func(string, string)) {
+	effectModule := func(module, effect, op, answer string) {
+		write(module+".fango", "module "+module+" exposing ("+effect+"(..), run)\neffect "+effect+"\n    "+op+" : () -> Int\nrun : (() ->{"+effect+", e} Int) ->{e} Int\nrun action =\n    handle action() on\n        "+op+" () -> resume "+answer+"\n")
+	}
+	effectModule("A", "EA", "ea", "1")
+	effectModule("B", "EB", "eb", "2")
+	write("C.fango", "module C exposing (both)\nimport A\nimport B\nboth : () ->{A.EA, B.EB} Int\nboth () = A.ea () * 100 + B.eb ()\n")
+	write("Lib.fango", "module Lib exposing (x)\nx = 1\n")
+}
+
+// Evidence is positional, and the prompt's import order allocates identities
+// in a different order than the reload graph installs modules. Retained
+// declarations keep the session's identities, so an order following allocation
+// would not survive their reuse.
+func TestReloadEvidenceOrder(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "uncached", true: "cached"}[cached], func(t *testing.T) {
+			s, out, write := reloadSession(t, cached)
+			evidenceOrderModules(write)
+			for _, module := range []string{"Lib", "B", "A", "C"} {
+				s.submit("import " + module)
+			}
+			s.submit("old () = A.run { B.run { C.both () } }")
+			write("Lib.fango", "module Lib exposing (x)\nx = 2\n")
+			out.Reset()
+			s.command(":reload")
+			s.submit("A.run { B.run { C.both () } }")
+			s.submit("old ()")
+			got := out.String()
+			if !strings.Contains(got, "reloaded Lib") || strings.Count(got, "102 : Int") != 2 {
+				t.Fatalf("reordered imports:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestReloadEvidenceOrderBundled(t *testing.T) {
+	s, out, write := reloadSession(t, false)
+	write("Lib.fango", "module Lib exposing (x)\nx = 1\n")
+	for _, module := range []string{"Lib", "Process", "File", "Test.Reporter"} {
+		s.submit("import " + module)
+	}
+	write("Lib.fango", "module Lib exposing (x)\nx = 2\n")
+	out.Reset()
+	s.command(":reload")
+	if got := out.String(); !strings.Contains(got, "reloaded Lib") {
+		t.Fatalf("bundled imports:\n%s", got)
+	}
+}
+
+// A changed effect takes a fresh identity above every retained one, which
+// reorders it against an unchanged effect declared after it.
+func TestReloadEvidenceOrderChangedEffect(t *testing.T) {
+	s, out, write := reloadSession(t, false)
+	evidenceOrderModules(write)
+	s.submit("import C")
+	s.submit("import A")
+	s.submit("import B")
+	s.submit("old () = A.run { B.run { C.both () } }")
+	write("A.fango", "module A exposing (EA(..), run, extra)\neffect EA\n    ea : () -> Int\n    extra : () -> Int\nrun : (() ->{EA, e} Int) ->{e} Int\nrun action =\n    handle action() on\n        ea () -> resume 3\n        extra () -> resume 0\n")
+	out.Reset()
+	s.command(":reload")
+	s.submit("A.run { B.run { C.both () } }")
+	s.submit("old ()")
+	got := out.String()
+	if !strings.Contains(got, "reloaded A") || !strings.Contains(got, "302 : Int") || !strings.Contains(got, "102 : Int") {
+		t.Fatalf("changed effect:\n%s", got)
+	}
+}
+
+// An object carries its evidence order to a session that allocated the same
+// declarations in another order.
+func TestCachedObjectEvidenceOrder(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evidenceOrderModules(write)
+	cache := newObjectCache()
+	var out strings.Builder
+	first := NewSessionWith(&out, Options{Root: root, Cache: cache})
+	t.Cleanup(first.Close)
+	first.submit("import C")
+	second := NewSessionWith(&out, Options{Root: root, Cache: cache})
+	t.Cleanup(second.Close)
+	for _, module := range []string{"B", "A", "C"} {
+		second.submit("import " + module)
+	}
+	out.Reset()
+	second.submit("A.run { B.run { C.both () } }")
+	if got := out.String(); !strings.Contains(got, "102 : Int") {
+		t.Fatalf("cached object:\n%s", got)
+	}
+}
+
 func TestReloadReflectedTypes(t *testing.T) {
 	s, out, write := reloadSession(t, true)
 	module := func(ctor string) {

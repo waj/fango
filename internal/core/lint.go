@@ -115,13 +115,13 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 			}
 			l.captureVars[v] = true
 		}
-		var lastEffect types.EffectKey
+		var lastEffect types.EffectOrder
 		for _, ev := range d.EffectParams {
 			l.effectInstance(ev, where)
-			if ev.Key() <= lastEffect {
+			if ev.Order() <= lastEffect {
 				l.errorf("%s: evidence parameters are not in increasing effect-application order", where)
 			}
-			lastEffect = ev.Key()
+			lastEffect = ev.Order()
 			l.evidence[ev.Key()]++
 			l.bindEvidenceCaptures(ev, where)
 		}

@@ -93,6 +93,14 @@ assigned occurrence variable keeps its rigid identity during that selection.
 Substitution, field instantiation, adapters, and synchronous lowering preserve
 this metadata recursively through returned arrows and nominal arguments.
 
+Rows and evidence slices are sorted by `types.EffectOrder`: an effect's canonical
+name, then its arguments, by the names of their nominal types, with identities
+only separating generations of one name. Evidence is positional between a worker
+and its callers, so this order must not depend on allocation, which follows a
+session's import order and is rewritten by [cached installation](pipeline.md) and
+[reload](repl.md#transactional-reload). `EffectKey` remains the identity of an
+application and carries no order.
+
 Core names row binders and explicit arguments, including lexical overlays and
 deferred callback evidence. Its verifier checks binder scope, arrow agreement,
 and exact activation identities. Rewrites, capture reconstruction, and free-row

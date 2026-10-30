@@ -1,1 +1,1 @@
-->{IO, Async, e} Task a
+->{Async, IO, e} Task a

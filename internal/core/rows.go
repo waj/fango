@@ -191,12 +191,12 @@ func CheckRowEvidence(p *Prog) []error {
 			if row.From != 0 && !rows[row.From] {
 				report("%s: residual argument references unavailable row %d", where, row.From)
 			}
-			var last types.EffectKey
+			var last types.EffectOrder
 			for _, ev := range row.Effects {
-				if ev.Key() <= last {
+				if ev.Order() <= last {
 					report("%s: residual evidence is duplicated or unordered", where)
 				}
-				last = ev.Key()
+				last = ev.Order()
 				actual, ok := effects[ev.Key()]
 				if !ok || !sameRowEffect(actual, ev) {
 					report("%s: residual evidence has no matching lexical activation", where)
