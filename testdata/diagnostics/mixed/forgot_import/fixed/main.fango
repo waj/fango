@@ -1,0 +1,2 @@
+import String
+main() = print (String.length "x")

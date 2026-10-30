@@ -1,0 +1,19 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`run` performs `Log`, which its annotation does not list.
+
+3| run : () -> ()
+       ^^^^^^^^^^
+
+This performs it:
+
+4| run() = Lib.record "x"
+           ^^^^^^^^^^^^^^
+
+The annotation says:
+
+    () -> ()
+
+but the body needs:
+
+    () ->{Log} ()

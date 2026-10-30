@@ -1,0 +1,8 @@
+-- UNKNOWN METHOD ----------------------------------- main.fango
+
+Class `Eq` has no method `equals`.
+
+4|     equals a b = True
+       ^^^^^^
+
+`Eq` has: `==`.

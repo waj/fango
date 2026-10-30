@@ -1,0 +1,7 @@
+compute : Int ->{Console} Int
+compute n =
+    result = n * 2
+    print result
+    result
+
+main() = print (compute 1)

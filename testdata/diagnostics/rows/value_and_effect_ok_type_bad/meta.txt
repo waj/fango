@@ -1,0 +1,2 @@
+Mistake: annotation row is right, value type wrong
+Fix: annotate the Int result

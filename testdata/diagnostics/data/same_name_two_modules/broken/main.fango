@@ -1,0 +1,7 @@
+import Geo
+import Draw
+
+origin : Draw.Point
+origin = Draw.Point 0 0
+
+main() = print (Geo.norm origin)

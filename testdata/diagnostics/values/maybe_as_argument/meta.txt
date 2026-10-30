@@ -1,0 +1,2 @@
+Mistake: passes Maybe Int to a function that takes Int
+Fix: unwrap with Maybe.withDefault

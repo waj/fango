@@ -1,0 +1,2 @@
+Mistake: operation called with the wrong argument type
+Fix: pass a String

@@ -1,0 +1,2 @@
+Mistake: clause for a nullary operation has no () pattern
+Fix: write ask ()

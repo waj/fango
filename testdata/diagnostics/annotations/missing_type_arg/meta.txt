@@ -1,0 +1,2 @@
+Mistake: type constructor without its argument
+Fix: write Maybe Int

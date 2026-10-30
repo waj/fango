@@ -1,0 +1,8 @@
+import List
+
+effect Ask
+    ask : () -> Int
+
+main() =
+    print (handle ask() on
+        ask () -> resume (List.foldl { x acc -> x } 0 [1]))

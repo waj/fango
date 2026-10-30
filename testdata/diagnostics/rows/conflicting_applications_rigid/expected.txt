@@ -1,0 +1,14 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`bump` performs `Cell Int`, which its annotation does not list.
+
+4| bump : () ->{Cell String} Int
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+The annotation says:
+
+    () ->{Cell String} Int
+
+but the body needs:
+
+    () ->{Cell Int} Int

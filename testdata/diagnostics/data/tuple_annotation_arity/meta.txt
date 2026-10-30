@@ -1,0 +1,2 @@
+Mistake: returns a pair where a triple is declared
+Fix: return three elements

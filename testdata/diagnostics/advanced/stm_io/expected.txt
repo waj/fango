@@ -1,0 +1,6 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`STM.atomically` allows only `STM` in this function, but it also performs `Console`.
+
+8|             print "x"
+               ^^^^^^^^^

@@ -1,0 +1,11 @@
+-- MISSING PATTERNS --------------------------------- main.fango
+
+This `case` does not cover every possible value. For example, it
+does not handle:
+
+    Circle _
+
+Add a branch for it (or a catch-all `_` branch).
+
+5|     case shape of
+       ^^^^

@@ -1,0 +1,3 @@
+module Draw exposing (Point(..))
+
+type Point = Point Int Int

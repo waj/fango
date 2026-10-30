@@ -1,0 +1,16 @@
+effect Put a
+    put : a -> ()
+
+both : () ->{Put Bool, Put String} ()
+both() =
+    put True
+    put "x"
+
+main() =
+    handle
+        handle both() on
+            put : String -> ()
+            put _ -> resume ()
+    on
+        put : Bool -> ()
+        put _ -> resume ()

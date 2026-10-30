@@ -1,0 +1,4 @@
+say : Console -> String -> ()
+say text = print text
+
+main() = say "hi"

@@ -1,0 +1,2 @@
+Mistake: C-style call syntax with a tuple
+Fix: use whitespace application

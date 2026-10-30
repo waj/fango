@@ -1,0 +1,2 @@
+Mistake: unnamed record literal with no expected type
+Fix: name the record type

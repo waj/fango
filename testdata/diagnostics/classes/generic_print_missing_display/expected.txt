@@ -1,0 +1,8 @@
+-- MISSING CONSTRAINT ------------------------------- main.fango
+
+This needs `Display a`, which the annotation does not list.
+
+2| say x = print x
+           ^^^^^
+
+Add `Display a =>` to the annotation.

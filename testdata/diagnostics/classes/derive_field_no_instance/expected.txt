@@ -1,0 +1,10 @@
+-- MISSING INSTANCE --------------------------------- main.fango
+
+No instance provides `Show Inner`.
+
+2| type Outer = Outer Inner deriving (Show)
+                                      ^^^^
+
+Add `deriving (Show)` to the declaration of `Inner`, or write an `instance Show` for it.
+
+`deriving (Show)` generates code that needs this.

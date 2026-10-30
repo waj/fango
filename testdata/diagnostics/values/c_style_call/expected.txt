@@ -1,0 +1,14 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    (a, b)
+
+but `add` expects:
+
+    Int
+
+4| main() = print (add(1, 2))
+                      ^^^^^^
+
+Arguments are separated by spaces, as in `f 1 2`. `f(1, 2)` passes one tuple.

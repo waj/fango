@@ -1,0 +1,2 @@
+Mistake: list mixes typed variables
+Fix: make all elements the same type

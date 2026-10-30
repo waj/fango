@@ -1,0 +1,2 @@
+Mistake: higher-order function takes only pure callbacks; caller passes an effectful one
+Fix: make the callback row polymorphic in twice's annotation

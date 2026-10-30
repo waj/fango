@@ -1,0 +1,2 @@
+Mistake: uses bracket syntax for a list type
+Fix: write List Int

@@ -1,0 +1,6 @@
+type Person = { name : String, age : Int }
+
+who : Person -> String
+who person = person.name
+
+main() = print (who (Person { name = "Ana", age = 1 }))

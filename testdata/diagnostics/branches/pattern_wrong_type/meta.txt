@@ -1,0 +1,2 @@
+Mistake: matches a Maybe with a Result constructor
+Fix: use Just

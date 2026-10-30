@@ -1,0 +1,10 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(+) works on numbers, but here it is used on:
+
+    String
+
+3|         Just n -> n + 1
+                       ^
+
+To join text use `++`. To turn a number into text use `show`, or interpolation: `"#{value}"`.

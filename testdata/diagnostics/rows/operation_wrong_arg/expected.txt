@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument is a number, but `note` expects:
+
+    String
+
+5|     handle note 42 on
+                   ^^

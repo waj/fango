@@ -1,0 +1,2 @@
+Mistake: type argument to a non-generic type
+Fix: remove the argument

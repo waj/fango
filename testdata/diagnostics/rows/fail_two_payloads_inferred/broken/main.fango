@@ -1,0 +1,10 @@
+import Fail
+import Result exposing (Result(..))
+
+check n =
+    if n > 0 then Fail.fail "bad" else ()
+    Fail.fail True
+
+main() = print (case Fail.attempt { check 1 } of
+    Ok _ -> "ok"
+    Err _ -> "err")

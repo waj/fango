@@ -1,0 +1,32 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`compute` performs `Console`, which its annotation does not list.
+
+1| compute : Int -> String
+           ^^^^^^^^^^^^^^^
+
+This performs it:
+
+3|     print n
+       ^^^^^^^
+
+The annotation says:
+
+    Int -> String
+
+but the body needs:
+
+    Int ->{Console} Int
+
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The annotation for `compute` says it returns:
+
+    String
+
+but its body returns:
+
+    Int
+
+4|     n
+       ^

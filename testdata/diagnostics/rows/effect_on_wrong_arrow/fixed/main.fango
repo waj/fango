@@ -1,0 +1,4 @@
+say : String -> String ->{Console} ()
+say a b = print (a ++ b)
+
+main() = say "a" "b"

@@ -1,0 +1,14 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+The effects in the annotation for `actions` do not match its body.
+
+1| actions : List (() -> ())
+           ^^^^^^^^^^^^^^^^
+
+The annotation says:
+
+    List (() -> ())
+
+but the body needs:
+
+    List (() ->{Console} ())

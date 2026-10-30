@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The annotation for `compute` says it returns:
+
+    String
+
+but its body returns:
+
+    Int
+
+4|     n + 1
+       ^^^^^

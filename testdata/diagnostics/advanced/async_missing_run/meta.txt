@@ -1,0 +1,2 @@
+Mistake: spawns without an Async runner
+Fix: wrap in Async.run

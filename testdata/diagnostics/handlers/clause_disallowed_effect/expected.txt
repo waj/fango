@@ -1,0 +1,6 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+This performs `Console`, but the annotation for `run` allows no effects here.
+
+8|             print "asked"
+               ^^^^^^^^^^^^^

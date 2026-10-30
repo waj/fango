@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+`add` is given too many arguments here. It works with numbers, so its result cannot be a function like:
+
+    Int ->{Console} a
+
+3| main() = print (add 1 2 3)
+                   ^^^

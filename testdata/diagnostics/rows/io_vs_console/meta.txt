@@ -1,0 +1,2 @@
+Mistake: annotates {IO} on a function that only prints; a natural assumption
+Fix: annotate {Console}

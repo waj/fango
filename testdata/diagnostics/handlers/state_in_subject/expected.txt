@@ -1,0 +1,8 @@
+-- NAMING ERROR ------------------------------------- main.fango
+
+I don't know a value named `n`.
+
+5|     print (handle tick() + n with n = 0 on
+                              ^
+
+A handler's state is visible in its clauses, not in the code it handles.

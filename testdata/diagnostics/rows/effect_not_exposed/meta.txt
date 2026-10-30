@@ -1,0 +1,2 @@
+Mistake: imports the Fail module but writes the effect unqualified
+Fix: expose the effect from the import

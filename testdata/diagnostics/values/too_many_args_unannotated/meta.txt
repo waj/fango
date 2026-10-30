@@ -1,0 +1,2 @@
+Mistake: one extra argument to an inferred function
+Fix: remove the third argument

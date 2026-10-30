@@ -1,0 +1,3 @@
+loop x = x
+
+main() = print (loop 1)

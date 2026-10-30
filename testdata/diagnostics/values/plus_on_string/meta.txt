@@ -1,0 +1,2 @@
+Mistake: uses + to join a String and a number
+Fix: use ++ and show

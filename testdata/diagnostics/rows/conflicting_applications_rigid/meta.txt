@@ -1,0 +1,2 @@
+Mistake: a function's row names State String while the body uses State Int
+Fix: annotate with State Int

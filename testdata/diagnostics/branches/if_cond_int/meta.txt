@@ -1,0 +1,2 @@
+Mistake: uses an Int as a condition
+Fix: compare it, count > 0

@@ -1,0 +1,10 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(+) works on numbers, but here it is used on:
+
+    String
+
+1| main() = print ("total: " + 5)
+                             ^
+
+To join text use `++`. To turn a number into text use `show`, or interpolation: `"#{value}"`.

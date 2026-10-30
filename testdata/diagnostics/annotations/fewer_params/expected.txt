@@ -1,0 +1,6 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The annotation for `add` has fewer function parameters than its definition.
+
+1| add : Int -> Int
+   ^^^

@@ -1,0 +1,2 @@
+Mistake: return clause returns a different type from the abort clause
+Fix: return the same type

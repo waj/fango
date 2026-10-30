@@ -1,0 +1,35 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    List c
+
+but `List.map` expects:
+
+    d -> f
+
+6| main() = print (List.map [1, 2, 3] double)
+                            ^^^^^^^^^
+
+`List.map` has type:
+
+    (a ->{e} b) -> List a ->{e} List b
+
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    Int -> Int
+
+but `List.map` expects:
+
+    List c
+
+6| main() = print (List.map [1, 2, 3] double)
+                                      ^^^^^^
+
+`List.map` has type:
+
+    (a ->{e} b) -> List a ->{e} List b
+
+This is a function still waiting for an argument. Did you leave one out?

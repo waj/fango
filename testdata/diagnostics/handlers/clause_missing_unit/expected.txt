@@ -1,0 +1,6 @@
+-- HANDLER ARITY ------------------------------------ main.fango
+
+The operation `ask` takes 1 argument(s), but this clause has 0.
+
+6|         ask -> resume "x")
+           ^^^

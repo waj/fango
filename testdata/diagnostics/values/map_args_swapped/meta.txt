@@ -1,0 +1,2 @@
+Mistake: passes the list before the function
+Fix: swap the arguments

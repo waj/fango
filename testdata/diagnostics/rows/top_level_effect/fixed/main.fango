@@ -1,0 +1,3 @@
+greeting() = print "hi"
+
+main() = greeting()

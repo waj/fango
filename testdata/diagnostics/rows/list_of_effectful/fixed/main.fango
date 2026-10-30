@@ -1,0 +1,4 @@
+actions : List (() ->{Console} ())
+actions = [{ print "hi" }]
+
+main() = print "x"

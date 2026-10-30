@@ -1,0 +1,6 @@
+type Money = Money Int
+
+total : Money -> Money -> Money
+total (Money a) (Money b) = Money (a + b)
+
+main() = ignore (total (Money 1) (Money 2))

@@ -1,0 +1,13 @@
+effect Ask
+    ask : () -> String
+
+effect Log
+    note : String -> ()
+
+run : (() ->{Ask, Log} a) -> a
+run action =
+    handle action() on
+        note _ -> resume ()
+        ask () -> resume "x"
+
+main() = print (run { ask() })

@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The annotation for `inc` says it returns:
+
+    String
+
+but its body returns:
+
+    Int
+
+2| inc x = x + 1
+           ^^^^^

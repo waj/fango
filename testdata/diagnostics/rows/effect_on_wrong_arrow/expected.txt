@@ -1,0 +1,20 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+The annotation for `say` lists `Console`, which its body does not perform.
+`say` performs `Console`, which its annotation does not list.
+
+1| say : String ->{Console} String -> ()
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This performs it:
+
+2| say a b = print (a ++ b)
+             ^^^^^^^^^^^^^
+
+The annotation says:
+
+    String ->{Console} String -> ()
+
+but the body needs:
+
+    String -> String ->{Console} ()

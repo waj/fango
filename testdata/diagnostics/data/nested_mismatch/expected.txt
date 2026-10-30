@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The annotation for `load` says it returns:
+
+    List (String, Maybe (Result String Int))
+
+but its body returns:
+
+    List (String, Maybe (Result String String))
+
+4| load n = [("a", Just (Ok "ok"))]
+            ^^^^^^^^^^^^^^^^^^^^^^^

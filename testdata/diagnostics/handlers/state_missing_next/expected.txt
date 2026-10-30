@@ -1,0 +1,6 @@
+-- MISSING NEXT STATE ------------------------------- main.fango
+
+A parameterized handler must resume with its next state, like `resume value with current`.
+
+6|         tick () -> resume n)
+                      ^^^^^^

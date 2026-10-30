@@ -1,0 +1,6 @@
+-- SCOPED CALLBACK ---------------------------------- main.fango
+
+The scoped row variable `#s` may occur only in the scoped callback's argument, at the end of its effect row, and in its result.
+
+4| withText : String -> (Reader {#s} ->{#s} a) ->{#s} a
+   ^^^^^^^^

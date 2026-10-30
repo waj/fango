@@ -1,0 +1,9 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This is not a function, so I cannot give it an argument.
+It has type:
+
+    Int
+
+4| main() = print (count 3)
+                   ^^^^^

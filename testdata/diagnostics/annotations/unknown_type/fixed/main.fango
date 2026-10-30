@@ -1,0 +1,4 @@
+name : String
+name = "Ana"
+
+main() = print name

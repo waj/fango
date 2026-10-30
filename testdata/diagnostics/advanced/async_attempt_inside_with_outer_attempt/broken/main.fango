@@ -1,0 +1,13 @@
+import Async
+import Fail
+import Result exposing (Result(..))
+
+runIt : (() ->{e} a) ->{e} a
+runIt action = action()
+
+main() =
+    ignore (Fail.attempt {
+        Async.run {
+            ignore (Async.spawn { Fail.attempt { Fail.fail "bad" } })
+        }
+    })

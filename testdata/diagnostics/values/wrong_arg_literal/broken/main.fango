@@ -1,0 +1,4 @@
+greet : String -> Int -> String
+greet name age = name ++ " is " ++ show age
+
+main() = print (greet "Ana" "thirty")

@@ -1,0 +1,2 @@
+Mistake: discards a non-Unit statement in a block
+Fix: wrap in ignore

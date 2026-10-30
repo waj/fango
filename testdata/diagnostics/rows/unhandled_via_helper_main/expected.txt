@@ -1,0 +1,8 @@
+-- UNHANDLED EFFECT --------------------------------- main.fango
+
+`main` performs `Log`, but nothing handles it, and `Log` declares no default handler.
+
+9| main() = print (work 1)
+                   ^^^^^^
+
+Wrap it in `handle ... on`, with a clause for each of its operations.

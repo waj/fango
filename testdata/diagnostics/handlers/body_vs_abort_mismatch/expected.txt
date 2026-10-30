@@ -1,0 +1,14 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The handled code produces:
+
+    Int
+
+but the handler's clauses produce:
+
+    String
+
+8|     print (handle work() on
+                     ^^^^^^
+
+A `return value -> ...` clause can convert what the handled code produces.

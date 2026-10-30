@@ -1,0 +1,6 @@
+-- INCOMPLETE HANDLER ------------------------------- main.fango
+
+The handler is missing a clause for `save`.
+
+6|     print (handle load() on
+              ^^^^^^

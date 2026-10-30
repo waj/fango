@@ -1,0 +1,2 @@
+Mistake: passes an Int variable to a Float parameter
+Fix: convert with Basics.fromInt

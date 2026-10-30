@@ -1,0 +1,8 @@
+-- MISSING INSTANCE --------------------------------- main.fango
+
+No instance provides `Eq Color`. (==) needs it.
+
+3| main() = print (Red == Green)
+                       ^^
+
+Add `deriving (Eq)` to the declaration of `Color`, or write an `instance Eq` for it.

@@ -1,0 +1,9 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+The handled code still performs `Ask`, which this handler does not handle.
+`run` does not allow it either.
+
+9|     handle action() on
+              ^^^^^^^^
+
+Add a clause for each of its operations, or let it through by listing it in the annotation.

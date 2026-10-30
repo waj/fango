@@ -1,0 +1,2 @@
+Mistake: wrong argument type to a function from another module
+Fix: pass a String

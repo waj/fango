@@ -1,0 +1,4 @@
+apply : (a ->{e} b) -> a ->{e} b
+apply f x = f x
+
+main() = print (apply { n -> print n; n + 1 } 1)

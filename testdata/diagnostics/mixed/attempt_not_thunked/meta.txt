@@ -1,0 +1,2 @@
+Mistake: calls the action eagerly instead of passing a thunk
+Fix: use a lambda

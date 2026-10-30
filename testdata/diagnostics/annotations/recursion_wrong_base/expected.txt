@@ -1,0 +1,10 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+`upTo` uses numbers, but here it would need a number to be:
+
+    List Int
+
+4| main() = print (upTo 3)
+                   ^^^^
+
+Check the number literals and arithmetic in `upTo` and what is passed to it.

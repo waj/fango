@@ -1,0 +1,2 @@
+Mistake: resumes with a typed variable of the wrong type
+Fix: resume with show count

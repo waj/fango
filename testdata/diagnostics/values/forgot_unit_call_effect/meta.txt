@@ -1,0 +1,2 @@
+Mistake: binds readLine without calling it, then prints the binding
+Fix: write readLine()

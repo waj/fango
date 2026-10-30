@@ -1,0 +1,7 @@
+describe : Maybe String -> String
+describe value =
+    case value of
+        Just text -> text
+        Nothing -> 0
+
+main() = print (describe Nothing)

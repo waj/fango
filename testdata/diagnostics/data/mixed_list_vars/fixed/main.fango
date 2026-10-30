@@ -1,0 +1,7 @@
+count : Int
+count = 4
+
+label : String
+label = "x"
+
+main() = print [show count, label]

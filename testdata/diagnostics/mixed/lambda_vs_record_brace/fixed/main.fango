@@ -1,0 +1,6 @@
+type Point = { x : Int }
+
+run : (() -> Int) -> Int
+run action = action()
+
+main() = print (run { 1 })

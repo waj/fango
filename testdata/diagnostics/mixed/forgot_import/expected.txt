@@ -1,0 +1,8 @@
+-- UNKNOWN QUALIFIER -------------------------------- main.fango
+
+I don't know a value named `String.length`: no imported module has qualifier `String`.
+
+1| main() = print (String.length "x")
+                   ^^^^^^^^^^^^^
+
+If `String` is a module, add `import String`.

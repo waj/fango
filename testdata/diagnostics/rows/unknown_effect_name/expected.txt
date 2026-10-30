@@ -1,0 +1,8 @@
+-- NAMING ERROR ------------------------------------- main.fango
+
+I don't know an effect named `Consol`.
+
+1| say : String ->{Consol} ()
+                   ^^^^^^
+
+Did you mean `Console`?

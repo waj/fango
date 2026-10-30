@@ -1,0 +1,6 @@
+type Person = { name : String, age : Int }
+
+older : Person -> Person
+older person = { person | age = 2 }
+
+main() = print (older (Person { name = "Ana", age = 1 })).name

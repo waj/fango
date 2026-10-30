@@ -1,0 +1,2 @@
+Mistake: applies an Int variable as if it were a function
+Fix: use an operator, count * 3

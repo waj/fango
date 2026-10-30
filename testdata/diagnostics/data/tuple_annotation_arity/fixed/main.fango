@@ -1,0 +1,4 @@
+triple : (Int, Int, Int)
+triple = (1, 2, 3)
+
+main() = print triple

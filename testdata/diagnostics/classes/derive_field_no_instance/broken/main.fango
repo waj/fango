@@ -1,0 +1,4 @@
+type Inner = Inner Int
+type Outer = Outer Inner deriving (Show)
+
+main() = print (Outer (Inner 1))

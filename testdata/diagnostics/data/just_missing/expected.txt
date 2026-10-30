@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The annotation for `first` says it returns:
+
+    Maybe Int
+
+but its body returns:
+
+    Int
+
+2| first n = n
+             ^

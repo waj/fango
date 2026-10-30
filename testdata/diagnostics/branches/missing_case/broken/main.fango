@@ -1,0 +1,8 @@
+type Shape = Rect Int Int | Circle Int
+
+area : Shape -> Int
+area shape =
+    case shape of
+        Rect w h -> w * h
+
+main() = print (area (Circle 1))

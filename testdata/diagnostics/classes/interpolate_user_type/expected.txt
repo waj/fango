@@ -1,0 +1,8 @@
+-- MISSING INSTANCE --------------------------------- main.fango
+
+No instance provides `Show Color`. String interpolation needs it.
+
+3| main() = print "Color: #{Red}"
+                            ^^^
+
+Add `deriving (Show)` to the declaration of `Color`, or write an `instance Show` for it.

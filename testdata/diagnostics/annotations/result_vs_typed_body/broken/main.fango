@@ -1,0 +1,4 @@
+identity2 : Int -> String
+identity2 x = x
+
+main() = print (identity2 1)

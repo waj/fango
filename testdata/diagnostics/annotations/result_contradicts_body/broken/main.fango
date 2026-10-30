@@ -1,0 +1,4 @@
+inc : Int -> String
+inc x = x + 1
+
+main() = print (inc 1)

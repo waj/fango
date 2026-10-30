@@ -15,7 +15,7 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 | make test-debug-native | Opt-in native source-stepping integration with Delve; requires host debugger access |
 | make check-files | Reject executable or oversized files in the Git index |
 | make ci | Indexed-file check, Go/Fango formatting, go vet, Go unit tests, and full interpreter/compiler differential checks |
-| make update-goldens | Intentional lexer/parser/infer/elaborate/REPL/formatter golden updates |
+| make update-goldens | Intentional lexer/parser/infer/elaborate/REPL/formatter/diagnostic golden updates |
 | go vet ./benchmarks | Build-check benchmarks without timing them |
 | go test -race ./runtime/fangort ./runtime/nativeworker ./internal/eval ./internal/nativehost ./stdlib/... | Race checks for shared storage, callback drain, native hosts, and bundled adapters |
 | go test -race ./cmd/fango -run TestConcurrentSharedListBackends | Interpreter and emitted Direct shared-List race fixture |

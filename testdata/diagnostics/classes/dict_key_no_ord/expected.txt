@@ -1,0 +1,8 @@
+-- MISSING INSTANCE --------------------------------- main.fango
+
+No instance provides `Ord Color`. `Dict.insert` needs it.
+
+5| main() = print (Dict.size (Dict.insert Red 1 Dict.empty))
+                              ^^^^^^^^^^^
+
+Add `deriving (Ord)` to the declaration of `Color`, or write an `instance Ord` for it.

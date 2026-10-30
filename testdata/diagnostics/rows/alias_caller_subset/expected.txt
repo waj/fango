@@ -1,0 +1,21 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`caller` performs `Log`, which its annotation does not list.
+
+12| caller : () ->{Db} Int
+           ^^^^^^^^^^^^^^^
+
+This performs it:
+
+13| caller() = fetch()
+               ^^^^^^^
+
+The annotation says:
+
+    () ->{Db} Int
+
+but the body needs:
+
+    () ->{App} Int
+
+Note: `App` is an alias for {Db, Log}

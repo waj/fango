@@ -1,0 +1,19 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`traced` performs `Console`, which its annotation does not list.
+
+1| traced : (() ->{e} a) ->{e} a
+          ^^^^^^^^^^^^^^^^^^^^^^
+
+This performs it:
+
+3|     print "start"
+       ^^^^^^^^^^^^^
+
+The annotation says:
+
+    (() ->{e} a) ->{e} a
+
+but the body needs:
+
+    (() ->{e} a) ->{Console, e} a

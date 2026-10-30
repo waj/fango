@@ -1,0 +1,2 @@
+Mistake: generic function uses == without a constraint
+Fix: add Eq a =>

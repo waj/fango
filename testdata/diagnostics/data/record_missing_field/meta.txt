@@ -1,0 +1,2 @@
+Mistake: record literal omits a field
+Fix: add age

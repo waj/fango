@@ -1,0 +1,6 @@
+-- SYNTAX PROBLEM ----------------------------------- main.fango
+
+I was expecting a type here. A list type is written `List Int`, not `[Int]`.
+
+1| values : [Int]
+            ^

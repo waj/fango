@@ -1,0 +1,2 @@
+Mistake: returns a scoped reader out of its runner
+Fix: consume it inside the callback

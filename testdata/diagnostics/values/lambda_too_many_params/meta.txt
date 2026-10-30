@@ -1,0 +1,2 @@
+Mistake: a two-parameter lambda given to List.map
+Fix: use one parameter

@@ -1,0 +1,2 @@
+Mistake: callback row is polymorphic, but the outer arrow omits e
+Fix: add {e} to the outer arrow

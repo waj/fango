@@ -1,0 +1,14 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(++) needs:
+
+    String
+
+but this operand is:
+
+    Int -> String
+
+4| main() = print ("Hello " ++ greet "Ana")
+                               ^^^^^^^^^^^
+
+This is a function still waiting for an argument. Did you leave one out?

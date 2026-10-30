@@ -1,0 +1,2 @@
+Mistake: compares a user type with no Eq
+Fix: derive Eq

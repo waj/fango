@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This pattern matches values of type:
+
+    Result a b
+
+but it needs to match:
+
+    Maybe Int
+
+6|         Ok n -> n
+           ^^^^

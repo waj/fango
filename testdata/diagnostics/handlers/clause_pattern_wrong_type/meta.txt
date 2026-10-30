@@ -1,0 +1,2 @@
+Mistake: clause pattern does not match the operation's parameter
+Fix: match a String

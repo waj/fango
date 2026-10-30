@@ -1,0 +1,4 @@
+upTo n =
+    if n == 0 then [] else [n | upTo (n - 1)]
+
+main() = print (upTo 3)

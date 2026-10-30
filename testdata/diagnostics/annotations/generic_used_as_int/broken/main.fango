@@ -1,0 +1,4 @@
+next : a -> a
+next x = x + 1
+
+main() = print (next 1)

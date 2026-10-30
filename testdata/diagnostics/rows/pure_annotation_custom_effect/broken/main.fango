@@ -1,0 +1,10 @@
+effect Log
+    note : String -> ()
+
+work : Int -> Int
+work n =
+    note "working"
+    n + 1
+
+main() = print (handle work 1 on
+    note _ -> resume ())

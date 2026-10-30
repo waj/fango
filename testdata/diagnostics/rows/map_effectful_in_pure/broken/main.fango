@@ -1,0 +1,6 @@
+import List
+
+logAll : List String -> List ()
+logAll items = List.map { item -> print item } items
+
+main() = ignore (logAll ["a"])

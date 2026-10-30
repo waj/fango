@@ -1,0 +1,2 @@
+Mistake: passes a non-function to Fail.attempt
+Fix: wrap it in a lambda

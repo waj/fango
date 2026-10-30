@@ -1,0 +1,7 @@
+-- RESUME IN ABORT CLAUSE --------------------------- main.fango
+
+An abort operation never returns to its caller, so its clause cannot resume.
+The clause's value is the handler's result: return it directly.
+
+6|         stop () -> resume 1)
+                      ^^^^^^

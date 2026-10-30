@@ -1,0 +1,2 @@
+Mistake: pure-annotated caller uses an effectful imported function
+Fix: add the effect to the annotation

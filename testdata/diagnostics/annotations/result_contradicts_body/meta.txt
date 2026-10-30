@@ -1,0 +1,2 @@
+Mistake: annotation says String but the body computes a number
+Fix: annotate Int -> Int

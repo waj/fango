@@ -1,0 +1,2 @@
+Mistake: derives Show on a type with a field that has no Show
+Fix: derive Show on the inner type too

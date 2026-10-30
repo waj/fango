@@ -1,0 +1,2 @@
+Mistake: constructor given the wrong field type
+Fix: pass an Int

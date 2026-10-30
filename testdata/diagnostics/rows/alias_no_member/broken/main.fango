@@ -1,0 +1,9 @@
+effect Log
+    info : String -> ()
+
+alias App = {Log}
+
+health : () ->{App} Int
+health() = 200
+
+main() = print (health())

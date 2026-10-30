@@ -1,0 +1,8 @@
+import Async
+import STM
+
+main() =
+    Async.run {
+        cell = STM.new 0
+        ignore cell
+    }

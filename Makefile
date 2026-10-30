@@ -79,6 +79,7 @@ test-short:
 # diff before committing.
 update-goldens:
 	go test ./internal/lexer ./internal/parser ./internal/infer ./internal/elaborate ./internal/repl ./internal/format -update
+	go test ./cmd/fango -run '^TestDiagnostics$$' -update
 
 # Re-record compile-latency baselines (machine-specific).
 update-baselines:

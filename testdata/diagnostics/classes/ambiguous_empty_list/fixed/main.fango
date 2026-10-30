@@ -1,0 +1,4 @@
+nothing : List Int
+nothing = []
+
+main() = print nothing

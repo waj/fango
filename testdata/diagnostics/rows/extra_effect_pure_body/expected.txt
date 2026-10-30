@@ -1,0 +1,6 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+The annotation for `answer` lists `Console`, which its body does not perform.
+
+1| answer : () ->{Console} Int
+          ^^^^^^^^^^^^^^^^^^^^

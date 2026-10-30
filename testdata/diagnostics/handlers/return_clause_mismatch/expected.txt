@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The clauses of a handler must produce the same type. This one is a number, but the others produce:
+
+    String
+
+7|         return value -> 0)
+                           ^

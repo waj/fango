@@ -1,0 +1,2 @@
+Mistake: base case returns a different type from the recursive case
+Fix: return an empty list

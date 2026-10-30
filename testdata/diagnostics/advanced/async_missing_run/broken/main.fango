@@ -1,0 +1,4 @@
+import Async
+
+main() =
+    ignore (Async.spawn { 1 })

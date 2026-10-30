@@ -1,0 +1,7 @@
+-- AMBIGUOUS FIELD ---------------------------------- main.fango
+
+I don't know which record this value is, so I cannot look up this field here.
+Add a type annotation that says which, for example on the function's parameter.
+
+3| who person = person.name
+                       ^^^^

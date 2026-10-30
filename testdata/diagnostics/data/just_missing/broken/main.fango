@@ -1,0 +1,4 @@
+first : Int -> Maybe Int
+first n = n
+
+main() = print (first 1)

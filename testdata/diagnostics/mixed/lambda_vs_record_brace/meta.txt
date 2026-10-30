@@ -1,0 +1,2 @@
+Mistake: writes a brace lambda body that parses as a record
+Fix: use a Unit lambda

@@ -1,0 +1,23 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(+) needs:
+
+    Int
+
+but this operand is:
+
+    Int -> Int
+
+4| main() = print (double 1 + 2 * double)
+                              ^^^^^^^^^^
+
+This is a function still waiting for an argument. Did you leave one out?
+
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(*) works on numbers, but here it is used on:
+
+    Int -> Int
+
+4| main() = print (double 1 + 2 * double)
+                                ^

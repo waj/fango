@@ -1,0 +1,8 @@
+-- UNKNOWN FIELD ------------------------------------ main.fango
+
+Record `Person` has no field named `nmae`.
+
+4| who person = person.nmae
+                       ^^^^
+
+Did you mean `name`?

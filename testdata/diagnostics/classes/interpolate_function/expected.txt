@@ -1,0 +1,10 @@
+-- MISSING INSTANCE --------------------------------- main.fango
+
+String interpolation needs `Show`, which functions do not have, but this is a function:
+
+    () -> String
+
+4| main() = print "Hello #{userName}"
+                           ^^^^^^^^
+
+Did you forget to call it, or to pass all its arguments?

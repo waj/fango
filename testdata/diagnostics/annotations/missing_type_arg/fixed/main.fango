@@ -1,0 +1,4 @@
+first : Maybe Int
+first = Just 1
+
+main() = print first

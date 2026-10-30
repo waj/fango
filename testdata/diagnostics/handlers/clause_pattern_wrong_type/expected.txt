@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This pattern is a number, but it needs to match:
+
+    String
+
+6|         note 0 -> resume ()
+                ^

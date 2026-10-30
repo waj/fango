@@ -1,0 +1,6 @@
+traced : (() ->{e} a) ->{Console, e} a
+traced action =
+    print "start"
+    action()
+
+main() = print (traced { 1 })

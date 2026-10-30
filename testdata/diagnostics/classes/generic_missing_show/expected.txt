@@ -1,0 +1,8 @@
+-- MISSING CONSTRAINT ------------------------------- main.fango
+
+This needs `Show a`, which the annotation does not list.
+
+2| label x = "<" ++ show x ++ ">"
+                    ^^^^
+
+Add `Show a =>` to the annotation.

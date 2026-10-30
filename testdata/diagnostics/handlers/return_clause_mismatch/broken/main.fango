@@ -1,0 +1,7 @@
+effect Stop
+    abort stop : () -> value
+
+main() =
+    print (handle stop() on
+        stop () -> "stopped"
+        return value -> 0)

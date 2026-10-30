@@ -1,0 +1,4 @@
+values : List Int
+values = [1, 2]
+
+main() = print values

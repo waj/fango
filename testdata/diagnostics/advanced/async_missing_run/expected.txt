@@ -1,0 +1,8 @@
+-- UNHANDLED EFFECT --------------------------------- main.fango
+
+`main` performs `Async`, but nothing handles it, and `Async` declares no default handler.
+
+4|     ignore (Async.spawn { 1 })
+               ^^^^^^^^^^^^^^^^^
+
+Run it inside `Async.run { ... }`.

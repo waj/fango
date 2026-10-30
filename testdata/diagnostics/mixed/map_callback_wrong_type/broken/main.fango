@@ -1,0 +1,4 @@
+import List
+import String
+
+main() = print (List.map { n -> String.length n } [1, 2])

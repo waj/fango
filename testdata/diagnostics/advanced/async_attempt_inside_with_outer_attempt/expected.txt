@@ -1,0 +1,9 @@
+-- ASYNC BOUNDARY ----------------------------------- main.fango
+
+A task cannot inherit the abort effect `Fail`; handle it inside the task.
+
+11|             ignore (Async.spawn { Fail.attempt { Fail.fail "bad" } })
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If the task already handles `Fail`, a handler of the same effect around the task
+still counts as inherited. Remove that outer handler.

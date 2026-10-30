@@ -1,0 +1,2 @@
+Mistake: record update with the wrong field type
+Fix: use a number

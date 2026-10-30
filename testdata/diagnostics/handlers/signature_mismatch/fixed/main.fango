@@ -1,0 +1,10 @@
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() on
+        fail : String -> a
+        fail message -> 0
+        return value -> 1
+
+main() = print (attempt { fail "x" })

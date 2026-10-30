@@ -1,0 +1,2 @@
+Mistake: polymorphic function performs its own effect but lists only the tail
+Fix: add Console to the outer row

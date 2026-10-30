@@ -1,0 +1,8 @@
+-- NAMING ERROR ------------------------------------- main.fango
+
+I don't know an effect named `Fail`.
+
+3| check : Int ->{Fail String} Int
+                  ^^^^
+
+`Fail` has one: write `Fail.Fail`, or `import Fail exposing (Fail)`.

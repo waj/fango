@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    String
+
+but `greet` expects:
+
+    Int
+
+4| main() = print (greet "Ana" "thirty")
+                               ^^^^^^^^

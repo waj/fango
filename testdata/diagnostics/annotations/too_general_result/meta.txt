@@ -1,0 +1,2 @@
+Mistake: annotated result variable is unrelated to the input
+Fix: use a -> a

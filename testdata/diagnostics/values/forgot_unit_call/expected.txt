@@ -1,0 +1,14 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(++) needs:
+
+    String
+
+but this operand is:
+
+    () -> String
+
+4| main() = print ("Hello " ++ userName)
+                               ^^^^^^^^
+
+This is a function that has not been called. Did you mean to call it with `()`?

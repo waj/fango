@@ -1,0 +1,7 @@
+half : Float -> Float
+half x = x / 2.0
+
+count : Int
+count = 4
+
+main() = print (half count)

@@ -1,0 +1,6 @@
+-- TYPE ARITY --------------------------------------- main.fango
+
+`Maybe` takes 1 type argument(s), but none are given here.
+
+1| first : Maybe
+           ^^^^^

@@ -1,0 +1,7 @@
+import Lib
+
+run : () ->{Lib.Log} ()
+run() = Lib.record "x"
+
+main() = handle run() on
+    Lib.note _ -> resume ()

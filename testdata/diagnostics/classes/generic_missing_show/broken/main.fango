@@ -1,0 +1,4 @@
+label : a -> String
+label x = "<" ++ show x ++ ">"
+
+main() = print (label 1)

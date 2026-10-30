@@ -1,0 +1,2 @@
+Mistake: annotated top-level value reads input
+Fix: make it a function

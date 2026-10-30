@@ -1,0 +1,2 @@
+Mistake: one type argument buried in a large type is wrong
+Fix: make the inner value an Int, as the annotation says

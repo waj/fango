@@ -1,0 +1,8 @@
+-- UNHANDLED EFFECT --------------------------------- main.fango
+
+`main` performs `Fail`, but nothing handles it, and `Fail` declares no default handler.
+
+7| main() = print (check 1)
+                   ^^^^^^^
+
+Catch it with `Fail.attempt { ... }`.

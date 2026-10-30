@@ -1,0 +1,2 @@
+Mistake: field holds a value of the wrong type
+Fix: give age a number

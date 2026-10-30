@@ -1,0 +1,4 @@
+userName : () -> String
+userName() = "Ana"
+
+main() = print ("Hello " ++ userName)

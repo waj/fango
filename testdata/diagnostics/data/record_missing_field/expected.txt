@@ -1,0 +1,6 @@
+-- RECORD FIELDS ------------------------------------ main.fango
+
+Record `Person` is missing field `age`.
+
+3| ana = Person { name = "Ana" }
+         ^^^^^^

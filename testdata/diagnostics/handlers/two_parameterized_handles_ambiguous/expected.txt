@@ -1,0 +1,14 @@
+-- AMBIGUOUS EFFECT --------------------------------- main.fango
+
+`Put` appears more than once in this row, with different arguments:
+
+    {Put Bool, Put String}
+
+and nothing here says which one is meant. Name it in a type the body can see:
+a pattern on its payload, or a helper whose callback parameter lists only
+that application, such as
+
+    (() ->{Put T, e} a) ->{e} Result T a
+
+11|         handle both() on
+                   ^^^^^^

@@ -1,0 +1,6 @@
+import Result exposing (Result(..))
+
+load : Int -> List (String, Maybe (Result String Int))
+load n = [("a", Just (Ok "ok"))]
+
+main() = print (List.length (load 1))

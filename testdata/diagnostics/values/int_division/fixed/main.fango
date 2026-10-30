@@ -1,0 +1,7 @@
+import Basics
+import List
+
+average : List Int -> Int
+average values = Basics.quotientBy (List.length values) (List.foldl (+) 0 values)
+
+main() = print (average [1, 2, 3])

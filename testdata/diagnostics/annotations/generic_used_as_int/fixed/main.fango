@@ -1,0 +1,4 @@
+next : Int -> Int
+next x = x + 1
+
+main() = print (next 1)

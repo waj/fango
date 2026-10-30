@@ -1,0 +1,2 @@
+Mistake: record field is typed pure, but stores an effectful lambda
+Fix: add a row to the field

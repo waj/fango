@@ -1,0 +1,2 @@
+Mistake: callback body uses a String function on Int elements
+Fix: use show first

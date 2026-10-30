@@ -1,0 +1,3 @@
+main() =
+    ignore ("abc" ++ "def")
+    print "done"

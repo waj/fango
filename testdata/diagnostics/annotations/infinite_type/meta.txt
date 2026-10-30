@@ -1,0 +1,2 @@
+Mistake: function returns itself rather than calling it
+Fix: return a value

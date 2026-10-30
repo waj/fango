@@ -1,0 +1,2 @@
+Mistake: prints a value of a type with no Show or Display
+Fix: derive Show

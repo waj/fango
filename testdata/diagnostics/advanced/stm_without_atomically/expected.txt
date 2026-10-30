@@ -1,0 +1,8 @@
+-- UNHANDLED EFFECT --------------------------------- main.fango
+
+`main` performs `STM`, but nothing handles it, and `STM` declares no default handler.
+
+6|         cell = STM.new 0
+                  ^^^^^^^^^
+
+Run it inside `STM.atomically { ... }`.

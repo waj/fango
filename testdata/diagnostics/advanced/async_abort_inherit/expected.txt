@@ -1,0 +1,8 @@
+-- UNHANDLED EFFECT --------------------------------- main.fango
+
+`main` performs `Fail`, but nothing handles it, and `Fail` declares no default handler.
+
+7|         ignore (Async.spawn { Fail.fail "bad" })
+                                 ^^^^^^^^^^^^^^^
+
+Catch it with `Fail.attempt { ... }`.

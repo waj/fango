@@ -1,0 +1,10 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+`resume` hands the operation's result back to its caller, so it needs:
+
+    String
+
+but this is a number.
+
+6|         ask () -> resume 42)
+                            ^^

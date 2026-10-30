@@ -1,0 +1,2 @@
+Mistake: constructor not fully applied where the type is expected
+Fix: supply both fields

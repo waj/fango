@@ -1,0 +1,2 @@
+Mistake: ++ with an Int variable
+Fix: use show count

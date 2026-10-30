@@ -1,0 +1,6 @@
+type Color = Red | Green
+
+instance Eq Color
+    equals a b = True
+
+main() = print (Red == Green)

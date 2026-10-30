@@ -1,0 +1,2 @@
+Mistake: uses a Result as its success value
+Fix: match on the Result

@@ -1,0 +1,7 @@
+effect Log
+    note : String -> ()
+
+say : String ->{Console, Log} ()
+say text = print text
+
+main() = say "hi"

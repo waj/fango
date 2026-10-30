@@ -1,0 +1,9 @@
+effect Log
+    note : String -> ()
+
+work : Int ->{Log} Int
+work n =
+    note "hi"
+    n
+
+main() = print (work 1)

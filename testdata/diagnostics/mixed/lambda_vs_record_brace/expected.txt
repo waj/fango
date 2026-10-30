@@ -1,0 +1,10 @@
+-- AMBIGUOUS RECORD --------------------------------- main.fango
+
+I cannot tell which record this is. Write its type name before the `{`, as in
+`TypeName { ... }`, or add an annotation that gives it one. Field
+names alone never choose a record type.
+
+6| main() = print (run { x = 1 })
+                       ^^^^^^^^^
+
+If you meant a function, `{ x = 1 }` is a record: a function that produces a value is `{ value }`.

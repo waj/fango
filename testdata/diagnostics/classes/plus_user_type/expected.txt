@@ -1,0 +1,11 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(+) works on numbers, but here it is used on:
+
+    Money
+
+4| total a b = a + b
+                 ^
+
+If `Money` is meant to be a number, write an `instance Num` for it. Otherwise take the
+number out of it first.

@@ -1,0 +1,6 @@
+type Shape = Circle Int | Label String
+
+shape : Shape
+shape = Circle 1
+
+main() = print "x"

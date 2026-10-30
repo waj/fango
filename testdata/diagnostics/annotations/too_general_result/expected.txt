@@ -1,0 +1,14 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The annotation for `same` says it returns:
+
+    b
+
+but its body returns:
+
+    a
+
+2| same x = x
+            ^
+
+Note: a type variable from an annotation must stay fully general

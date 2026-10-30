@@ -1,0 +1,2 @@
+Mistake: arithmetic on a Maybe Int without unwrapping
+Fix: unwrap with Maybe.withDefault

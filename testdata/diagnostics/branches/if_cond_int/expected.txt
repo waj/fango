@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+An `if` condition must be a Bool, but this one is:
+
+    Int
+
+4| main() = print (if count then "yes" else "no")
+                      ^^^^^

@@ -1,0 +1,9 @@
+import Result exposing (Result(..))
+
+parse : String -> Result String Int
+parse text = if text == "" then Err "empty" else Ok 1
+
+double : Int -> Int
+double n = n * 2
+
+main() = print (double (Result.withDefault 0 (parse "x")))

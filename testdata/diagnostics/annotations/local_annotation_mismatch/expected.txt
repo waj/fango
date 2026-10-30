@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The type annotation for `label` says it is:
+
+    Int
+
+but the body I found is:
+
+    String
+
+3|     label = "x"
+               ^^^

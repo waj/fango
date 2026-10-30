@@ -1,0 +1,2 @@
+Mistake: misspelled type name
+Fix: correct it to String

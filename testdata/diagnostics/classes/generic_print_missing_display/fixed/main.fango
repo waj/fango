@@ -1,0 +1,4 @@
+say : Display a => a ->{Console} ()
+say x = print x
+
+main() = say 1

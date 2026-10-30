@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The branches of this `case` do not match. This one is a number, but the others are:
+
+    String
+
+5|         Nothing -> 0
+                      ^

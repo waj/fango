@@ -1,0 +1,4 @@
+run : (() ->{e} a) ->{e} a
+run action = action()
+
+main() = print (run { 1 })

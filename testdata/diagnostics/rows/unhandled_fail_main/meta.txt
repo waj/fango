@@ -1,0 +1,2 @@
+Mistake: lets Fail reach main uncaught
+Fix: wrap in Fail.attempt

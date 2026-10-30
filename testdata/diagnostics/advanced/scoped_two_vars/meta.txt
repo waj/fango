@@ -1,0 +1,2 @@
+Mistake: writes a scoped runner with the scoped variable on the outer arrow
+Fix: use an ordinary tail on the outer arrow

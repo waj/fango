@@ -1,0 +1,6 @@
+-- TYPE ARITY --------------------------------------- main.fango
+
+`Int` takes 0 type argument(s), but 1 are given here.
+
+1| count : Int String
+           ^^^^^^^^^^

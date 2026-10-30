@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    Draw.Point
+
+but `Geo.norm` expects:
+
+    Geo.Point
+
+7| main() = print (Geo.norm origin)
+                            ^^^^^^

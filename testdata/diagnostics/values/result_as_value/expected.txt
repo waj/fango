@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    Result String Int
+
+but `double` expects:
+
+    Int
+
+9| main() = print (double (parse "x"))
+                           ^^^^^^^^^

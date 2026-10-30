@@ -1,0 +1,2 @@
+Mistake: list mixes number literal and String
+Fix: make all elements Strings

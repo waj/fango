@@ -1,0 +1,5 @@
+type Button = { onClick : () ->{Console} () }
+
+button = Button { onClick = { print "hi" } }
+
+main() = button.onClick()

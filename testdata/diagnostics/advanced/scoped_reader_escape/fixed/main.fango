@@ -1,0 +1,6 @@
+import Reader
+import Bytes
+
+main() =
+    leaked = Reader.withBytes (Bytes.fromString "x") { reader -> 1 }
+    ignore leaked

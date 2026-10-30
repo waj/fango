@@ -1,0 +1,2 @@
+Mistake: nested handles with payload-ignoring clauses leave the effect argument ambiguous
+Fix: add a typed payload signature

@@ -1,0 +1,6 @@
+effect Ask
+    ask : () -> String
+
+main() =
+    print (handle ask ++ "!" on
+        ask () -> resume "yes")

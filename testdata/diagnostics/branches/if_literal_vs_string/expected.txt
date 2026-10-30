@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The branches of this `if` do not match. This one is a number, but the other is:
+
+    String
+
+1| main() = print (if True then 1 else "x")
+                                ^

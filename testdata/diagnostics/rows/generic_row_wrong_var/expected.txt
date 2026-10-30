@@ -1,0 +1,14 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`run` performs the effects of `e`, which its annotation does not list.
+
+1| run : (() ->{e} a) ->{f} a
+       ^^^^^^^^^^^^^^^^^^^^^^
+
+The annotation says:
+
+    (() ->{e} a) ->{f} a
+
+but the body needs:
+
+    (() ->{e} a) ->{e} a

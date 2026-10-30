@@ -1,0 +1,6 @@
+compute : Int ->{Console} String
+compute n =
+    print n
+    n + 1
+
+main() = ignore (compute 1)

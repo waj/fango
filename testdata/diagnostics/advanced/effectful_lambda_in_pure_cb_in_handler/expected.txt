@@ -1,0 +1,9 @@
+-- HANDLER BINDING EFFECTS -------------------------- main.fango
+
+`pureUse` expects a function that performs no effects, but this one performs `Counter`.
+
+8|     print (handle pureUse { step() } with n = 0 on
+                             ^^^^^^^^^^
+
+To accept effects, make `pureUse` generic over them: give this parameter's arrow a
+row variable, as in `->{e}`, and add `{e}` to the final arrow of `pureUse`.

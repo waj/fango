@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    Int
+
+but `half` expects:
+
+    Float
+
+7| main() = print (half count)
+                        ^^^^^

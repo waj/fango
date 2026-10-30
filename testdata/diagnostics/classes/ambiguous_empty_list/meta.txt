@@ -1,0 +1,2 @@
+Mistake: prints an empty list whose element type nothing determines
+Fix: annotate the list

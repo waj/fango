@@ -1,0 +1,6 @@
+-- REDUNDANT EFFECT ROW ----------------------------- main.fango
+
+A pure arrow is written `->`; remove the empty effect row `{}`.
+
+1| answer : () ->{} Int
+                 ^^

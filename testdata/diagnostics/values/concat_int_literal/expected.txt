@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This is a number, but it is needed here as:
+
+    String
+
+1| main() = print ("total: " ++ 5)
+                                ^

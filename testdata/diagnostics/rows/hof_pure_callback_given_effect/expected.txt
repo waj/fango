@@ -1,0 +1,9 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`twice` expects a function that performs no effects, but this one performs `Console`.
+
+6| main() = twice { print "hi" }
+                  ^^^^^^^^^^^^^^
+
+To accept effects, make `twice` generic over them: give this parameter's arrow a
+row variable, as in `->{e}`, and add `{e}` to the final arrow of `twice`.

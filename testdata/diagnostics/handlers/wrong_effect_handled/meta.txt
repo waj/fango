@@ -1,0 +1,2 @@
+Mistake: handles Log but the subject performs Ask, so Ask escapes
+Fix: add a clause for Ask

@@ -1,0 +1,2 @@
+Mistake: local annotation contradicts its body
+Fix: annotate the local String

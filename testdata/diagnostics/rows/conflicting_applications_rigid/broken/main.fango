@@ -1,0 +1,7 @@
+effect Cell a
+    read : () -> a
+
+bump : () ->{Cell String} Int
+bump() = read() + 1
+
+main() = print "x"

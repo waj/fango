@@ -1,0 +1,16 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    Int
+
+but `Fail.attempt` expects:
+
+    () ->{Fail a} b
+
+7| main() = print (case Fail.attempt check() of
+                                     ^^^^^^^
+
+`Fail.attempt` has type:
+
+    (() ->{Fail error, e} value) ->{e} Result error value

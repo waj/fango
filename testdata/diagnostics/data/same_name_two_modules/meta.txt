@@ -1,0 +1,2 @@
+Mistake: two modules each define Point; passes the wrong one
+Fix: construct the Geo.Point

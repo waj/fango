@@ -1,0 +1,14 @@
+-- AMBIGUOUS EFFECT --------------------------------- main.fango
+
+`Fail` appears more than once in this row, with different arguments:
+
+    {Fail Bool, Fail String}
+
+and nothing here says which one is meant. Name it in a type the body can see:
+a pattern on its payload, or a helper whose callback parameter lists only
+that application, such as
+
+    (() ->{Fail T, e} a) ->{e} Result T a
+
+8| main() = print (case Fail.attempt { check 1 } of
+                                     ^^^^^^^^^^^

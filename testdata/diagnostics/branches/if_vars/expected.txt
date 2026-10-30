@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The branches of this `if` do not match. The `else` branch is:
+
+    Int
+
+but the `then` branch is:
+
+    String
+
+7| main() = print (if count > 3 then label else count)
+                                                ^^^^^

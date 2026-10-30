@@ -1,0 +1,2 @@
+Mistake: a value annotated as a list of pure functions holds an effectful lambda
+Fix: add the row to the element type

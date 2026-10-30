@@ -1,0 +1,2 @@
+Mistake: misspelled function name
+Fix: spell it correctly

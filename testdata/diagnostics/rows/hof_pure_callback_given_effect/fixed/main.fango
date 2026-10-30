@@ -1,0 +1,6 @@
+twice : (() ->{e} ()) ->{e} ()
+twice action =
+    action()
+    action()
+
+main() = twice { print "hi" }

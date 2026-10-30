@@ -1,0 +1,2 @@
+Mistake: annotated as generic but the body needs numbers
+Fix: annotate Int -> Int

@@ -1,0 +1,10 @@
+-- MISSING INSTANCE --------------------------------- main.fango
+
+`print` needs `Display`, which functions do not have, but this is a function:
+
+    () ->{Ask} String
+
+8| main() = print (run { ask() })
+            ^^^^^
+
+Did you forget to call it, or to pass all its arguments?

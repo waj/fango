@@ -1,0 +1,9 @@
+-- UNCALLED HANDLER SUBJECT ------------------------- main.fango
+
+This handler handles `Counter`, but the code it handles is a function that nobody calls,
+so nothing performs `Counter` while the handler is active.
+
+6|     handle { step() } with n = 0 on
+              ^^^^^^^^^^
+
+Call it here, as in `handle action() on`.

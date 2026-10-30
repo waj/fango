@@ -1,0 +1,4 @@
+module Lib exposing (shout)
+
+shout : String -> String
+shout text = text ++ "!"

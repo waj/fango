@@ -1,0 +1,2 @@
+Mistake: raises two different error types in one inferred function, then handles once
+Fix: use one error type

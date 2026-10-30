@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The type annotation for `triple` says it is:
+
+    (Int, Int, Int)
+
+but the body I found is:
+
+    (a, b)
+
+2| triple = (1, 2)
+            ^^^^^^

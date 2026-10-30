@@ -1,0 +1,14 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(++) needs:
+
+    String
+
+but this operand is:
+
+    () ->{Ask} String
+
+5|     print (handle ask ++ "!" on
+                     ^^^
+
+This is a function that has not been called. Did you mean to call it with `()`?

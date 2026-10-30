@@ -1,0 +1,7 @@
+count : Int
+count = 4
+
+label : String
+label = "many"
+
+main() = print (if count > 3 then label else count)

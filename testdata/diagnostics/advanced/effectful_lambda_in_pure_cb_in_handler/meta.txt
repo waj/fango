@@ -1,0 +1,2 @@
+Mistake: pure-callback helper given a lambda that performs the handled effect
+Fix: give the helper a row-polymorphic callback

@@ -1,0 +1,4 @@
+-- no annotation
+input() = readLine()
+
+main() = ignore (input())

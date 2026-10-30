@@ -1,0 +1,1 @@
+main() = print (if True then "1" else "x")

@@ -1,0 +1,2 @@
+Mistake: callback to a stdlib function has the wrong result and an effect
+Fix: make the predicate return Bool

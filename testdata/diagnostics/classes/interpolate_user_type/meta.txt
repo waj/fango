@@ -1,0 +1,2 @@
+Mistake: interpolates a type with no Display or Show
+Fix: derive Show

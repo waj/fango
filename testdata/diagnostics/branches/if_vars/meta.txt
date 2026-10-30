@@ -1,0 +1,2 @@
+Mistake: if branches differ, both typed variables
+Fix: make both branches the same type

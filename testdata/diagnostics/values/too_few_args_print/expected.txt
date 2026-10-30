@@ -1,0 +1,10 @@
+-- MISSING INSTANCE --------------------------------- main.fango
+
+`print` needs `Show`, which functions do not have, but this is a function:
+
+    Int -> String
+
+4| main() = print (greet "Ana")
+            ^^^^^
+
+Did you forget to call it, or to pass all its arguments?

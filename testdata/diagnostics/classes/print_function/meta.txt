@@ -1,0 +1,2 @@
+Mistake: prints a function
+Fix: call the function

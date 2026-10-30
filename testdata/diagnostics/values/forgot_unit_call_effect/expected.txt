@@ -1,0 +1,10 @@
+-- MISSING INSTANCE --------------------------------- main.fango
+
+`print` needs `Display`, which functions do not have, but this is a function:
+
+    () ->{Console} Maybe Line
+
+3|     print input
+       ^^^^^
+
+Did you forget to call it, or to pass all its arguments?

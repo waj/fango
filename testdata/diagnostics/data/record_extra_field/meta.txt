@@ -1,0 +1,2 @@
+Mistake: record literal has a field the type lacks
+Fix: remove email

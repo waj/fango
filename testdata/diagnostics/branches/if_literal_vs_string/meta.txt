@@ -1,0 +1,2 @@
+Mistake: if branches differ, one a number literal
+Fix: make the then branch a String

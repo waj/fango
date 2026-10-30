@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This list element is a number, but the list has to hold:
+
+    String
+
+1| main() = print [1, "two", 3]
+                   ^

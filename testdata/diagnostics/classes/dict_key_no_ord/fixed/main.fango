@@ -1,0 +1,5 @@
+import Dict
+
+type Color = Red | Green deriving (Eq, Ord)
+
+main() = print (Dict.size (Dict.insert Red 1 Dict.empty))

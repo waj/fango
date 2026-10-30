@@ -1,0 +1,2 @@
+Mistake: resumes with a value of the wrong type
+Fix: resume with a String

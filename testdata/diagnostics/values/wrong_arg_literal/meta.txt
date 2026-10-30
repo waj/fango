@@ -1,0 +1,2 @@
+Mistake: passes a String literal where the Int parameter goes
+Fix: pass a number at the call on the main line

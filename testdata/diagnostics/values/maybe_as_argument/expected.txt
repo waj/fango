@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    Maybe Int
+
+but `double` expects:
+
+    Int
+
+7| main() = print (double (String.toInt "3"))
+                           ^^^^^^^^^^^^^^^^

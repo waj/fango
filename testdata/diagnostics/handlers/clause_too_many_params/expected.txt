@@ -1,0 +1,6 @@
+-- HANDLER ARITY ------------------------------------ main.fango
+
+The operation `note` takes 1 argument(s), but this clause has 2.
+
+6|         note a b -> resume ()
+           ^^^^

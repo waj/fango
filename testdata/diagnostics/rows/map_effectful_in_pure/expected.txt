@@ -1,0 +1,19 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`logAll` performs `Console`, which its annotation does not list.
+
+3| logAll : List String -> List ()
+          ^^^^^^^^^^^^^^^^^^^^^^^^
+
+This performs it:
+
+4| logAll items = List.map { item -> print item } items
+                                     ^^^^^^^^^^
+
+The annotation says:
+
+    List String -> List ()
+
+but the body needs:
+
+    List String ->{Console} List ()

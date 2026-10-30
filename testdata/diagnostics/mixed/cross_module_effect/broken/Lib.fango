@@ -1,0 +1,7 @@
+module Lib exposing (Log(..), record)
+
+effect Log
+    note : String -> ()
+
+record : String ->{Log} ()
+record text = note text

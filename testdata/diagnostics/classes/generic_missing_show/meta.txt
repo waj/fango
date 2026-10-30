@@ -1,0 +1,2 @@
+Mistake: generic function uses show without a constraint
+Fix: add Show a =>

@@ -1,0 +1,8 @@
+-- UNHANDLED EFFECT --------------------------------- main.fango
+
+Top-level values must be pure, but this one performs `Console`.
+
+1| greeting = print "hi"
+              ^^^^^^^^^^
+
+Make it a function, like `name() = ...`, and call it from `main`.

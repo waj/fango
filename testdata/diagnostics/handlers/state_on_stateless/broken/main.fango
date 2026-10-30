@@ -1,0 +1,6 @@
+effect Counter
+    tick : () -> Int
+
+main() =
+    print (handle tick() on
+        tick () -> resume 0 with 1)

@@ -1,0 +1,9 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`apply` expects a function that performs no effects, but this one performs `Console`.
+
+4| main() = print (apply { n -> print n; n + 1 } 1)
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+
+To accept effects, make `apply` generic over them: give this parameter's arrow a
+row variable, as in `->{e}`, and add `{e}` to the final arrow of `apply`.

@@ -1,0 +1,19 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`work` performs `Log`, which its annotation does not list.
+
+4| work : Int -> Int
+        ^^^^^^^^^^^^
+
+This performs it:
+
+6|     note "working"
+       ^^^^^^^^^^^^^^
+
+The annotation says:
+
+    Int -> Int
+
+but the body needs:
+
+    Int ->{Log} Int

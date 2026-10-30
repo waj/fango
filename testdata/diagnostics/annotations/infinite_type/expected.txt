@@ -1,0 +1,15 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The recursive uses of `loop` do not match its definition.
+Recursive uses need:
+
+    a
+
+but the definition builds:
+
+    b -> a
+
+1| loop x = loop
+   ^^^^
+
+Note: this would create an infinite type

@@ -1,0 +1,3 @@
+import List
+
+main() = print (List.filter { n -> print n; n > 1 } [1, 2])

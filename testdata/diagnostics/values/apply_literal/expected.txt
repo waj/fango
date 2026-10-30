@@ -1,0 +1,6 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This is a number, so it cannot be called, but it is being given an argument.
+
+1| main() = print (5 (1 + 2))
+                   ^

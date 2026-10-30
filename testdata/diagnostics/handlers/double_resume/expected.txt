@@ -1,0 +1,6 @@
+-- NON-TAIL RESUME ---------------------------------- main.fango
+
+`resume` must be the last thing this clause does, on every path through it. To change what the handled code produces, use a `return` clause. This clause starts at 6:9.
+
+7|             resume ()
+               ^^^^^^^^^

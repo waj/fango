@@ -1,0 +1,6 @@
+-- RESUME ESCAPES ----------------------------------- main.fango
+
+`resume` cannot be captured by a lambda. This clause starts at 8:9.
+
+8|         ask () -> List.foldl { x acc -> resume x } 0 [1])
+                                           ^^^^^^^^

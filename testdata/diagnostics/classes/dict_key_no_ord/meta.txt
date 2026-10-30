@@ -1,0 +1,2 @@
+Mistake: uses a type with no Ord as a Dict key
+Fix: derive Eq and Ord

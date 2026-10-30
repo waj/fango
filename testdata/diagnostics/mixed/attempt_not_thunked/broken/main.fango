@@ -1,0 +1,9 @@
+import Fail exposing (Fail)
+import Result exposing (Result(..))
+
+check : () ->{Fail String} Int
+check() = Fail.fail "bad"
+
+main() = print (case Fail.attempt check() of
+    Ok n -> n
+    Err _ -> 0)

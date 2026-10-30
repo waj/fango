@@ -1,0 +1,2 @@
+Mistake: resumptive clause returns a value without resuming
+Fix: resume, or make the operation abort

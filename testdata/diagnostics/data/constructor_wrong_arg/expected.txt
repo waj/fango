@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    String
+
+but `Circle` expects:
+
+    Int
+
+4| shape = Circle "big"
+                  ^^^^^

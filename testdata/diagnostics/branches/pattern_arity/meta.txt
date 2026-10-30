@@ -1,0 +1,2 @@
+Mistake: constructor pattern with too few fields
+Fix: bind both fields

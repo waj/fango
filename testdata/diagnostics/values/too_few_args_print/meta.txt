@@ -1,0 +1,2 @@
+Mistake: forgot the second argument; result is a function given to print
+Fix: supply the missing age argument

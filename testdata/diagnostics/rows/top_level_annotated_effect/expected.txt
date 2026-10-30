@@ -1,0 +1,21 @@
+-- UNHANDLED EFFECT --------------------------------- main.fango
+
+Top-level values must be pure, but this one performs `Console`.
+
+2| input = readLine()
+           ^^^^^^^^^^
+
+Make it a function, like `name() = ...`, and call it from `main`.
+
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The type annotation for `input` says it is:
+
+    String
+
+but the body I found is:
+
+    Maybe Line
+
+2| input = readLine()
+           ^^^^^^^^^^

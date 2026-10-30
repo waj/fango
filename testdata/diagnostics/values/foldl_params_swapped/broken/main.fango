@@ -1,0 +1,4 @@
+import List
+import String
+
+main() = print (List.foldl { total word -> total + String.length word } 0 ["a", "bb"])

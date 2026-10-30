@@ -1,0 +1,8 @@
+-- AMBIGUOUS CONSTRAINT ----------------------------- main.fango
+
+I cannot tell which type this is, and `print` needs to know, for `Display (List a)`.
+
+3| main() = print nothing
+            ^^^^^
+
+Add a type annotation that says which type it is.

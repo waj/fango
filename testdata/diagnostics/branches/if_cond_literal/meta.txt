@@ -1,0 +1,2 @@
+Mistake: uses a number literal as a condition
+Fix: use a Bool

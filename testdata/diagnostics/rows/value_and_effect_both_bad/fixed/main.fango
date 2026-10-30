@@ -1,0 +1,6 @@
+compute : Int ->{Console} Int
+compute n =
+    print n
+    n
+
+main() = ignore (compute 1)

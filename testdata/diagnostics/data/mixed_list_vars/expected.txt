@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+All the elements of a list must have the same type. This element is:
+
+    String
+
+but the ones before it are:
+
+    Int
+
+7| main() = print [count, label]
+                          ^^^^^

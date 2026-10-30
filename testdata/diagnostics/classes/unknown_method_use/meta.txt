@@ -1,0 +1,2 @@
+Mistake: instance omits a required method
+Fix: define the method

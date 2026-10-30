@@ -1,0 +1,10 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The value of this statement would be thrown away, so it must be `()`, but it is:
+
+    String
+
+2|     "abc" ++ "def"
+       ^^^^^^^^^^^^^^
+
+Use it, or discard it on purpose with `ignore (...)`.

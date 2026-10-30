@@ -1,0 +1,4 @@
+count : Int
+count = 1
+
+main() = print count

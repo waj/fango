@@ -1,0 +1,6 @@
+-- BLOCK RESULT ------------------------------------- main.fango
+
+This block ends with a binding. Add an expression whose value the block should return.
+
+3|     result = n * 2
+       ^^^^^^

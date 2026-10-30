@@ -1,0 +1,8 @@
+-- UNKNOWN OPERATION -------------------------------- main.fango
+
+I don't know an operation named `asks`.
+
+6|         asks () -> resume "x")
+           ^^^^
+
+Did you mean `ask`?

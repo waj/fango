@@ -1,0 +1,4 @@
+double : Int -> Int
+double n = n * 2
+
+main() = print (double 1 + 2 * double)

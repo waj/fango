@@ -1,0 +1,2 @@
+Mistake: destructures a triple as a pair
+Fix: bind all three

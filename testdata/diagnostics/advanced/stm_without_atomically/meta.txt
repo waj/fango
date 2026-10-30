@@ -1,0 +1,2 @@
+Mistake: performs an STM operation outside atomically
+Fix: wrap in STM.atomically

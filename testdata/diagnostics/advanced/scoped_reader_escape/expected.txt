@@ -1,0 +1,7 @@
+-- SCOPE ESCAPE ------------------------------------- main.fango
+
+Something that only works inside this scope reaches the scope's result, so it would outlive the scope.
+Keep values and callbacks that need the scope inside it, and return what you get from them instead.
+
+5|     leaked = Reader.withBytes (Bytes.fromString "x") { reader -> reader }
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

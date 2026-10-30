@@ -1,0 +1,3 @@
+import Lib
+
+main() = print (Lib.shout "42")

@@ -1,0 +1,2 @@
+Mistake: outer arrow has a tail but the callback is pure-annotated, and the body is fine; caller passes an effect
+Fix: add {e} to the callback arrow

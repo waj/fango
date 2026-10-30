@@ -1,0 +1,3 @@
+nothing = []
+
+main() = print nothing

@@ -1,0 +1,2 @@
+Mistake: forgot the operator between a literal and a parenthesis
+Fix: write 5 * (1 + 2)

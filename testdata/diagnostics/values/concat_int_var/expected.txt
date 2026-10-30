@@ -1,0 +1,14 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(++) needs:
+
+    String
+
+but this operand is:
+
+    Int
+
+4| main() = print ("total: " ++ count)
+                                ^^^^^
+
+Turn a value into text with `show`, or use interpolation: `"#{value}"`.

@@ -152,6 +152,10 @@ annotation discards what depended on it, an unsolved constraint is dropped besid
 a real error, one annotation's effects report once, and the rest sort by source.
 A second location goes in `diag.Related`.
 
+[TestDiagnostics](../../cmd/fango/diagnostics_test.go) pins the whole text of
+each report under [testdata/diagnostics](../../testdata/diagnostics), one
+realistic mistake per case, with a fixed copy that must compile.
+
 ## Dependency groups and generalization
 
 Resolved references, including callbacks and nested bodies, determine strongly

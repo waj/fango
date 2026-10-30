@@ -1,0 +1,8 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+The field `onClick` expects a function that performs no effects, but this one performs `Console`.
+
+3| button = Button { onClick = { print "hi" } }
+                               ^^^^^^^^^^^^^^
+
+To allow it, add the effect to the field's arrow in its type declaration.

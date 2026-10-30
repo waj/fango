@@ -1,0 +1,2 @@
+Mistake: captures resume in a lambda
+Fix: call it directly in tail position

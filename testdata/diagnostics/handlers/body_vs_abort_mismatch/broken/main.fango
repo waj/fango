@@ -1,0 +1,9 @@
+effect Stop
+    abort stop : () -> value
+
+work : () ->{Stop} Int
+work() = stop()
+
+main() =
+    print (handle work() on
+        stop () -> "stopped")

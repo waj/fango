@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This pattern matches values of type:
+
+    (a, b)
+
+but it needs to match:
+
+    (Int, Int, Int)
+
+5|     (a, b) = triple
+       ^^^^^^

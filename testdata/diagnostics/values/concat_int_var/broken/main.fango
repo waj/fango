@@ -1,0 +1,4 @@
+count : Int
+count = 4
+
+main() = print ("total: " ++ count)

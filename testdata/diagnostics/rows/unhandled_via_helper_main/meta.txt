@@ -1,0 +1,2 @@
+Mistake: helper performs a user effect; main calls it with no handler
+Fix: install a handler in main

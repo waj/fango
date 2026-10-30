@@ -1,0 +1,10 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+`print` is given 2 arguments here, but after 1 it has finished, returning:
+
+    ()
+
+4| main() = print userName ()
+            ^^^^^^^^^^^^^^
+
+`print f ()` means `(print f) ()`. To call `f`, attach the parentheses: `print f()`.

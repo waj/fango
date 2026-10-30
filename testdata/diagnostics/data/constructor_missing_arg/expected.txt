@@ -1,0 +1,18 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    Int -> Shape
+
+but `area` expects:
+
+    Shape
+
+6| main() = print (area (Rect 1))
+                         ^^^^^^
+
+`area` has type:
+
+    Shape -> Int
+
+This is a function still waiting for an argument. Did you leave one out?

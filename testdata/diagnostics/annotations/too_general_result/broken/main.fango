@@ -1,0 +1,4 @@
+same : a -> b
+same x = x
+
+main() = print (same 1)

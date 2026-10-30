@@ -1,0 +1,2 @@
+Mistake: returns a plain value where Maybe is declared
+Fix: wrap in Just

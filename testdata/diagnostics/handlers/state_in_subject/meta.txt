@@ -1,0 +1,2 @@
+Mistake: reads the state binder inside the handled body
+Fix: use an operation

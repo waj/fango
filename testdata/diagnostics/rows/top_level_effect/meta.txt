@@ -1,0 +1,2 @@
+Mistake: top-level value performs an effect
+Fix: make it a function

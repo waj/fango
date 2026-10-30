@@ -1,0 +1,8 @@
+effect Store
+    load : () -> Int
+    save : Int -> ()
+
+main() =
+    print (handle load() on
+        load () -> resume 1
+        save _ -> resume ())

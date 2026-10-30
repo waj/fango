@@ -1,0 +1,10 @@
+-- MISSING INSTANCE --------------------------------- main.fango
+
+`print` needs `Display`, which functions do not have, but this contains a function:
+
+    List (Int -> Int)
+
+3| main() = print (List.map { x y -> x + y } [1, 2, 3])
+            ^^^^^
+
+Did you forget to call it, or to pass all its arguments?

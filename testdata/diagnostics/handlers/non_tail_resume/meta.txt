@@ -1,0 +1,2 @@
+Mistake: uses the result of resume
+Fix: do the work before resume, in tail position

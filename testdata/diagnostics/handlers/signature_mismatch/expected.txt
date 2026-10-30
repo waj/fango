@@ -1,0 +1,10 @@
+-- OPERATION SIGNATURE MISMATCH --------------------- main.fango
+
+This signature does not specialize `fail`, declared as
+
+    fail : error ->{Fail error} value
+
+It instantiates the operation's own type variable `value` with `Int`; only the effect's parameters may be fixed.
+
+6|         fail : String -> Int
+           ^^^^^^^^^^^^^^^^^^^^

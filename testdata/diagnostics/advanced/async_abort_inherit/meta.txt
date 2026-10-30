@@ -1,0 +1,2 @@
+Mistake: task performs Fail handled outside the task
+Fix: catch it inside with Fail.attempt

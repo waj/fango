@@ -1,0 +1,7 @@
+inner x = print x
+outer x = inner x
+
+run : Int -> ()
+run n = outer n
+
+main() = run 1

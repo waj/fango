@@ -1,0 +1,38 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    Int -> String -> Int
+
+but `List.foldl` expects:
+
+    Int -> String -> String
+
+4| main() = print (List.foldl { total word -> total + String.length word } 0 ["a", "bb"])
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+`List.foldl` has type:
+
+    (a -> b ->{e} b) -> b -> List a ->{e} b
+
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument is a number, but `List.foldl` expects:
+
+    String
+
+4| main() = print (List.foldl { total word -> total + String.length word } 0 ["a", "bb"])
+                                                                           ^
+
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument has type:
+
+    List String
+
+but `List.foldl` expects:
+
+    List Int
+
+4| main() = print (List.foldl { total word -> total + String.length word } 0 ["a", "bb"])
+                                                                             ^^^^^^^^^^^

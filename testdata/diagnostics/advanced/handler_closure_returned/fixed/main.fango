@@ -1,0 +1,9 @@
+effect Counter
+    step : () -> Int
+
+leak : () -> Int
+leak() =
+    handle step() with n = 0 on
+        step () -> resume n with n + 1
+
+main() = print "x"

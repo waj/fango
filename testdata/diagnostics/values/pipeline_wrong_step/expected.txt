@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(|>) passes its left side to this function, which has type:
+
+    String -> Int
+
+but it would need to accept:
+
+    List c -> d
+
+4| main() = print ([1, 2, 3] |> List.map { n -> n * 2 } |> String.length)
+                                                           ^^^^^^^^^^^^^

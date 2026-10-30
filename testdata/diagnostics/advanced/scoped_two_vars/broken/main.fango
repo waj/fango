@@ -1,0 +1,7 @@
+import Reader exposing (Reader)
+import Bytes
+
+withText : String -> (Reader {#s} ->{#s} a) ->{#s} a
+withText text action = Reader.withBytes (Bytes.fromString text) action
+
+main() = print "x"

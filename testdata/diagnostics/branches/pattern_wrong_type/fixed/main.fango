@@ -1,0 +1,9 @@
+import Result exposing (Result(..))
+
+describe : Maybe Int -> Int
+describe value =
+    case value of
+        Just n -> n
+        Nothing -> 0
+
+main() = print (describe Nothing)

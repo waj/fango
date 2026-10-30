@@ -1,0 +1,11 @@
+import Async
+import STM
+
+main() =
+    Async.run {
+        cell = STM.atomically { STM.new 0 }
+        STM.atomically {
+            ignore 1
+            STM.write cell 1
+        }
+    }

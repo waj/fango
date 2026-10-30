@@ -1,0 +1,8 @@
+-- PRIVATE OR UNKNOWN NAME -------------------------- main.fango
+
+Module qualifier `List` does not publicly expose `lenght`.
+
+3| main() = print (List.lenght [1])
+                   ^^^^^^^^^^^
+
+Did you mean `length`?

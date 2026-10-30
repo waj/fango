@@ -1,0 +1,19 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`run` performs `Console`, which its annotation does not list.
+
+4| run : Int -> ()
+       ^^^^^^^^^^^
+
+This performs it:
+
+5| run n = outer n
+           ^^^^^^^
+
+The annotation says:
+
+    Int -> ()
+
+but the body needs:
+
+    Int ->{Console} ()

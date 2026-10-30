@@ -1,0 +1,2 @@
+Mistake: generic function prints without a constraint
+Fix: add Display a =>

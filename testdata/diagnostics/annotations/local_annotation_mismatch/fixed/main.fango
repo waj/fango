@@ -1,0 +1,4 @@
+main() =
+    label : String
+    label = "x"
+    print label

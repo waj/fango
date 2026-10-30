@@ -1,0 +1,4 @@
+count : Int String
+count = 1
+
+main() = print count

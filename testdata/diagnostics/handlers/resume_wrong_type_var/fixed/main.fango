@@ -1,0 +1,9 @@
+effect Ask
+    ask : () -> String
+
+count : Int
+count = 1
+
+main() =
+    print (handle ask() on
+        ask () -> resume (show count))

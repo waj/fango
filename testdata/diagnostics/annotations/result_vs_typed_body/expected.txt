@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The annotation for `identity2` says it returns:
+
+    String
+
+but its body returns:
+
+    Int
+
+2| identity2 x = x
+                 ^

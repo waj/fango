@@ -1,0 +1,6 @@
+type Shape = Rect Int Int | Circle Int
+
+area : Shape -> Int
+area _ = 1
+
+main() = print (area (Rect 1 2))

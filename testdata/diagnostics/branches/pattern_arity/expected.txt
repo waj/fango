@@ -1,0 +1,7 @@
+-- PATTERN ARITY ------------------------------------ main.fango
+
+The `Rect` constructor takes 2 argument(s), but this pattern
+gives it 1.
+
+6|         Rect w -> w
+           ^^^^^^

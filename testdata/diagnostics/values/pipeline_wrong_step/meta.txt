@@ -1,0 +1,2 @@
+Mistake: pipes a List Int into a String function
+Fix: use List.length

@@ -1,0 +1,8 @@
+-- MISSING CONSTRAINT ------------------------------- main.fango
+
+This needs `Eq a`, which the annotation does not list.
+
+2| same x y = x == y
+                ^^
+
+Add `Eq a =>` to the annotation.

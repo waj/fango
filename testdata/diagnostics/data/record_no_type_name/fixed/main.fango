@@ -1,0 +1,5 @@
+type Person = { name : String, age : Int }
+
+ana = Person { name = "Ana", age = 1 }
+
+main() = print ana.name

@@ -1,0 +1,6 @@
+import Fail
+import Result exposing (Result(..))
+
+main() = print (case Fail.attempt { 42 } of
+    Ok n -> n
+    Err _ -> 0)

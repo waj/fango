@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The field `age` holds:
+
+    Int
+
+but this value is:
+
+    String
+
+4| older person = { person | age = "two" }
+                                   ^^^^^

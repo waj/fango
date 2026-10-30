@@ -1,0 +1,6 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+The annotation for `say` lists `Log`, which its body does not perform.
+
+4| say : String ->{Console, Log} ()
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

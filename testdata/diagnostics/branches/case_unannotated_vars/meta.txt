@@ -1,0 +1,2 @@
+Mistake: case branches differ in an unannotated function
+Fix: make the Just branch return a String

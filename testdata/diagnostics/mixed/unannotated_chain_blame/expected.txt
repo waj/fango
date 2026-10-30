@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument is a number, but `doubled` expects:
+
+    String
+
+6| main() = print (doubled 42)
+                           ^^

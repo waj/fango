@@ -1,0 +1,9 @@
+effect Ask
+    ask : () -> String
+
+run : (() -> a) -> a
+run action =
+    handle action() on
+        ask () -> resume "x"
+
+main() = print (run { ask() })

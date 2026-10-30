@@ -1,0 +1,12 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The next state must have the same type as the handler's state, which is:
+
+    Int
+
+but this is:
+
+    String
+
+6|         tick () -> resume n with "one")
+                                    ^^^^^

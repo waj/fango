@@ -1,0 +1,2 @@
+Mistake: prints inside an STM transaction
+Fix: print outside atomically

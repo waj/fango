@@ -1,0 +1,28 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(/) needs:
+
+    Float
+
+but this operand is:
+
+    Int
+
+4| average values = List.foldl (+) 0 values / List.length values
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+
+(/) works only on `Float`, and an `Int` does not convert by itself. Convert with
+`Basics.fromInt`, or divide integers with `Basics.quotientBy`.
+
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+The annotation for `average` says it returns:
+
+    Int
+
+but its body returns:
+
+    Float
+
+4| average values = List.foldl (+) 0 values / List.length values
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

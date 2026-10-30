@@ -1,0 +1,4 @@
+identity2 : Int -> Int
+identity2 x = x
+
+main() = print (identity2 1)

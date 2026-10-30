@@ -1,0 +1,2 @@
+Mistake: next state has a different type from the initial state
+Fix: keep the state Int

@@ -1,0 +1,6 @@
+effect Log
+    note : String -> ()
+
+main() =
+    handle note "hi" on
+        note _ -> resume ()

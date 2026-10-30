@@ -1,0 +1,8 @@
+-- NAMING ERROR ------------------------------------- main.fango
+
+`Console` is an effect, not a type.
+
+1| say : Console -> String -> ()
+         ^^^^^^^
+
+Effects go on an arrow: `A ->{Console} B`.

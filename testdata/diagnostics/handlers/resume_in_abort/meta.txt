@@ -1,0 +1,2 @@
+Mistake: abort clause resumes
+Fix: return a value

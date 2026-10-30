@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+(+) works on numbers, but here it is used on:
+
+    Bool
+
+3| main() = print (List.filter { n -> print n; n + 1 } [1, 2])
+                                                 ^

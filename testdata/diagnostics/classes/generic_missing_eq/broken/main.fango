@@ -1,0 +1,4 @@
+same : a -> a -> Bool
+same x y = x == y
+
+main() = print (same 1 2)

@@ -1,0 +1,6 @@
+import String
+
+size text = String.length text
+doubled value = size value * 2
+
+main() = print (doubled 42)

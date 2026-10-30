@@ -1,0 +1,8 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`health` declares `App`, but its body performs none of its effects.
+Remove `App` from the annotation; a function that performs fewer effects can
+still be passed wherever a `{App}` callback is expected.
+
+6| health : () ->{App} Int
+          ^^^^^^^^^^^^^^^^

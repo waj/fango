@@ -1,0 +1,6 @@
+describe value =
+    case value of
+        Just n -> n + 1
+        Nothing -> "none"
+
+main() = print (describe (Just 1))

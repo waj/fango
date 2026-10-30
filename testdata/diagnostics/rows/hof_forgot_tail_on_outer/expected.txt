@@ -1,0 +1,14 @@
+-- EFFECT MISMATCH ---------------------------------- main.fango
+
+`twice` performs the effects of `e`, which its annotation does not list.
+
+1| twice : (() ->{e} ()) -> ()
+         ^^^^^^^^^^^^^^^^^^^^^
+
+The annotation says:
+
+    (() ->{e} ()) -> ()
+
+but the body needs:
+
+    (() ->{e} ()) ->{e} ()

@@ -1,0 +1,6 @@
+-- MISSING RESUME ----------------------------------- main.fango
+
+Every path through this clause must end by calling `resume` once. If the operation is meant to stop the computation, declare it `abort` in its effect. This clause starts at 6:9.
+
+6|         ask () -> "no")
+                     ^^^^

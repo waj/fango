@@ -1,0 +1,8 @@
+-- AMBIGUOUS RECORD --------------------------------- main.fango
+
+I cannot tell which record this is. Write its type name before the `{`, as in
+`TypeName { ... }`, or add an annotation that gives it one. Field
+names alone never choose a record type.
+
+3| ana = { name = "Ana", age = 1 }
+         ^^^^^^^^^^^^^^^^^^^^^^^^^

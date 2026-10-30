@@ -1,0 +1,2 @@
+Mistake: case branches differ, one a number literal
+Fix: make the Nothing branch a String

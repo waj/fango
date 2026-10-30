@@ -1,0 +1,4 @@
+answer : () ->{} Int
+answer() = 42
+
+main() = print (answer())

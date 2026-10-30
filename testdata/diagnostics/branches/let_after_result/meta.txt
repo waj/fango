@@ -1,0 +1,2 @@
+Mistake: block ends in a binding, so has no result
+Fix: end the block with the expression

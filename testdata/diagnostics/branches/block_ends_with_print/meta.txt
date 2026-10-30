@@ -1,0 +1,2 @@
+Mistake: function declared to return Int ends with a print
+Fix: return the value and print it in main; annotation gets Console

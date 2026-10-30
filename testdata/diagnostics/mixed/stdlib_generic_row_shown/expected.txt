@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument is a number, but `Fail.attempt` expects:
+
+    () ->{Console, Fail a} Int
+
+4| main() = print (case Fail.attempt 42 of
+                                     ^^

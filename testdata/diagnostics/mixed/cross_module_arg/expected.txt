@@ -1,0 +1,8 @@
+-- TYPE MISMATCH ------------------------------------ main.fango
+
+This argument is a number, but `Lib.shout` expects:
+
+    String
+
+3| main() = print (Lib.shout 42)
+                             ^^

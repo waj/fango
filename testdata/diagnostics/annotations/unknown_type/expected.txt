@@ -1,0 +1,8 @@
+-- NAMING ERROR ------------------------------------- main.fango
+
+I don't know a type named `Strng`.
+
+1| name : Strng
+          ^^^^^
+
+Did you mean `String`?

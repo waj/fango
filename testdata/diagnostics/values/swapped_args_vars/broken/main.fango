@@ -1,0 +1,10 @@
+greet : String -> Int -> String
+greet name age = name ++ " is " ++ show age
+
+who : String
+who = "Ana"
+
+years : Int
+years = 30
+
+main() = print (greet years who)

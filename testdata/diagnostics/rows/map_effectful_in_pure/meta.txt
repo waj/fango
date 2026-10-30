@@ -1,0 +1,2 @@
+Mistake: effectful lambda inside List.map in a pure-annotated function
+Fix: add {Console} to the annotation

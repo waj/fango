@@ -1,0 +1,4 @@
+name : Strng
+name = "Ana"
+
+main() = print name

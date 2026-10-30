@@ -1,0 +1,6 @@
+-- UNKNOWN FIELD ------------------------------------ main.fango
+
+Record `Person` has no field named `email`.
+
+3| ana = Person { name = "Ana", age = 1, email = "a@b" }
+                                         ^^^^^
