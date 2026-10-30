@@ -2468,10 +2468,33 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	// Only the handled labels are removed. Any residual effects from the body,
 	// clauses, or return clause compose into the surrounding expression.
 	g.ambient, g.clauseEffects = savedAmbient, savedSink
-	g.scopeObligations = append(g.scopeObligations, Constraint{Scope: &ScopeBoundary{Effect: info.Permission, Result: result, Residual: residual, Outer: outer}, Span: e.Span()})
+	boundary := &ScopeBoundary{Effect: info.Permission, Result: result, Residual: residual, Outer: outer}
+	if uncalledExpr(e.Body) {
+		boundary.Subject, boundary.SubjectSpan, boundary.Handled = bodyTy, e.Body.Span(), labels
+	}
+	g.scopeObligations = append(g.scopeObligations, Constraint{Scope: boundary, Span: e.Span()})
 	g.performs(residual, e.Span(), false)
 	g.ck.HandleInfos[e] = info
 	return result
+}
+
+// uncalledExpr recognizes handled code that evaluates nothing: a lambda or a
+// name written where a call was meant. Code that does run may legitimately
+// return a closure needing the handled effect later, so only these qualify.
+func uncalledExpr(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.Lambda, *ast.Var:
+		return true
+	case *ast.Block:
+		// A block ending in a lambda runs its statements and still hands back
+		// an uncalled function. A named local at the end is a value it built,
+		// which is the legitimate shape.
+		if _, lambda := e.Result.(*ast.Lambda); lambda {
+			return true
+		}
+		return len(e.Items) == 0 && len(e.Binds) == 0 && e.Result != nil && uncalledExpr(e.Result)
+	}
+	return false
 }
 
 // showLabel spells an effect application for a diagnostic.

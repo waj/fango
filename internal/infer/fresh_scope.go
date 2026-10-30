@@ -50,6 +50,37 @@ type ScopeBoundary struct {
 	Result    types.Type
 	Residual  types.Row
 	Outer     []types.Type
+	// Subject is what a handler's handled code evaluates to, and Handled the
+	// effects the handler discharges: see uncalledSubject.
+	Subject     types.Type
+	SubjectSpan source.Span
+	Handled     []types.EffLabel
+}
+
+// uncalledSubject reports handled code that is only a function needing the very
+// effects the handler discharges. Nothing performs them while the handler is
+// active, so the handler can do nothing: this is `handle action on` written for
+// `handle action() on`.
+func (s *ScopeBoundary) uncalledSubject(sub Subst) []diag.Error {
+	if s.Subject == nil {
+		return nil
+	}
+	fn, ok := sub.Apply(s.Subject).(*types.TFun)
+	if !ok {
+		return nil
+	}
+	for cur := fn; cur != nil; cur, _ = cur.Ret.(*types.TFun) {
+		for _, l := range cur.Eff.Labels {
+			for _, handled := range s.Handled {
+				if l.Unique == handled.Unique && !l.Scoped {
+					e := diag.Errorf(s.SubjectSpan, "UNCALLED HANDLER SUBJECT", "This handler handles `%s`, but the code it handles is a function that nobody calls,\nso nothing performs `%s` while the handler is active.", types.SurfaceName(l.Name), types.SurfaceName(l.Name))
+					e.Notes = append(e.Notes, "Call it here, as in `handle action() on`.")
+					return []diag.Error{e}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (s *ScopeBoundary) check(sub Subst, sp source.Span) []diag.Error {
@@ -63,7 +94,10 @@ func (s *ScopeBoundary) check(sub Subst, sp source.Span) []diag.Error {
 			ty   types.Type
 		}{fmt.Sprintf("outer binding %d", i+1), ty})
 	}
-	var errs []diag.Error
+	errs := s.uncalledSubject(sub)
+	if len(errs) > 0 {
+		return errs
+	}
 	for _, root := range roots {
 		resolved := sub.Apply(root.ty)
 		if s.Effect.label.Unique != 0 && types.ContainsScopedEffect(resolved, s.Effect.label.Unique) {

@@ -273,6 +273,11 @@ loop() =
 
 `on` is reserved.
 
+Handling a lambda or a bare name that needs the handled effect, as in
+`handle action on` for `handle action() on`, is `UNCALLED HANDLER SUBJECT`: nothing
+would perform the effect while the handler is active. Code that does run may still
+return a function needing the effect later.
+
 A source-defined resumptive operation may use a type variable local to that
 operation. Each call instantiates it independently, while one handler clause
 must work for every instantiation:

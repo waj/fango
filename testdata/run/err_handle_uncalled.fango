@@ -1,0 +1,9 @@
+-- Handling a function instead of calling it leaves nothing to handle.
+effect Ask
+    ask : () -> Int
+
+leak() =
+    handle ask on
+        ask () -> resume 1
+
+main() = print "x"
