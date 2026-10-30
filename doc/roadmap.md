@@ -222,6 +222,11 @@ contract. Remaining:
 ## Product polish
 
 - Add introductory and task-oriented docs without repeating the reference.
+- Finish the remaining [diagnostic](design/inference.md#reports) gaps: find why
+  inference lets an uncalled lambda subject reach the Core lint, which
+  `UNCALLED HANDLER SUBJECT` currently only intercepts; blame an annotation that
+  keeps a handled effect instead of its caller; point nested mismatches at the
+  part that differs; and spell effects as they are in scope at the report.
 - Make performance baselines reproducible under host variation/load before making
   timing gates unattended. Same-host ratios still move with contention.
 - Record pure and Fail.attempt capture-diamond cold/warm baselines on an idle
