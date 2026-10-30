@@ -366,6 +366,9 @@ entry, so its imports resolve through the bundled provider and it can have
 its own navigation index without an application importing it.
 The editor diagnostic path rolls back a failed owner and checks other modules
 whose dependencies succeeded; dependents of a failed owner are skipped.
+Those checks still publish objects for unopened dependencies beneath the
+workspace, so a server does not return from `Serve` until its request handlers
+and debounced analyses have finished; no write outlives the connection.
 
 The server advertises its resolved standard-library directory through the
 experimental `fango.stdlibPath` capability. The VS Code client watches that

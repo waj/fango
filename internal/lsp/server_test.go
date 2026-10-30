@@ -419,6 +419,77 @@ func TestWorkspaceReferencesInUnopenedModule(t *testing.T) {
 	}
 }
 
+// Exiting with an analysis pending or running must leave nothing writing the
+// module cache once Serve has returned. Each delay leaves the debounced compile
+// in one of those states: not yet fired, or cold and part way through.
+func TestServeJoinsDebouncedAnalysis(t *testing.T) {
+	for _, delay := range []time.Duration{0, 160 * time.Millisecond} {
+		t.Run(delay.String(), func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "Lib.fango")
+			text := "module Lib exposing (value)\nvalue = 1\n"
+			if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			clientSide, serverSide := net.Pipe()
+			serverDone := make(chan error, 1)
+			go func() { serverDone <- Serve(serverSide, serverSide) }()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			conn := jsonrpc2.NewConn(jsonrpc2.NewStream(clientSide))
+			updates := make(chan publishParams, 16)
+			conn.Go(ctx, func(_ context.Context, req *jsonrpc2.Request) (any, error) {
+				if req.Method() == "textDocument/publishDiagnostics" {
+					var p publishParams
+					if err := json.Unmarshal(req.Params(), &p); err != nil {
+						return nil, err
+					}
+					updates <- p
+				}
+				return nil, nil
+			})
+			defer conn.Close()
+			if _, err := conn.Call(ctx, "initialize", map[string]any{"rootUri": pathURI(root)}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.Notify(ctx, "textDocument/didOpen", openParams{TextDocument: textItem{URI: pathURI(path), Version: 1, Text: text}}); err != nil {
+				t.Fatal(err)
+			}
+			waitDiagnostics(t, ctx, updates, pathURI(path), 0)
+			cache := filepath.Join(root, ".fango")
+			if err := os.RemoveAll(cache); err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.Notify(ctx, "workspace/didChangeWatchedFiles", map[string]any{}); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(delay)
+			if _, err := conn.Call(ctx, "shutdown", nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.Notify(ctx, "exit", nil); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-serverDone:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if err := os.RemoveAll(cache); err != nil {
+				t.Fatal(err)
+			}
+			// Outlasts the debounce, so a timer left running has fired.
+			time.Sleep(300 * time.Millisecond)
+			if _, err := os.Stat(cache); !os.IsNotExist(err) {
+				t.Fatalf("module cache written after Serve returned (stat: %v)", err)
+			}
+		})
+	}
+}
+
 func waitAnyDiagnostics(t *testing.T, ctx context.Context, updates <-chan publishParams, uri string) {
 	t.Helper()
 	for {

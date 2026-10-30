@@ -97,6 +97,8 @@ type server struct {
 	exit           chan struct{}
 	shutdown       bool
 	cancels        map[jsonrpc2.ID]context.CancelFunc
+	stopped        bool
+	debounced      sync.WaitGroup
 }
 
 type stdio struct {
@@ -134,7 +136,23 @@ func Serve(in io.Reader, out io.Writer) error {
 	case <-s.exit:
 		_ = conn.Close()
 	}
+	s.stopAnalysis()
 	return conn.Err()
+}
+
+// stopAnalysis ends debounced analysis, whose compiles write the module cache
+// under the workspace. The connection tracks request handlers but not these
+// timers, so returning without it leaves writers behind. The connection closes
+// first, so a publish in flight cannot hold up the wait.
+func (s *server) stopAnalysis() {
+	s.mu.Lock()
+	s.stopped = true
+	s.generation++
+	if s.timer != nil {
+		s.timer.Stop()
+	}
+	s.mu.Unlock()
+	s.debounced.Wait()
 }
 
 func (s *server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error) {
@@ -420,7 +438,17 @@ func (s *server) schedule() {
 	if s.timer != nil {
 		s.timer.Stop()
 	}
-	s.timer = time.AfterFunc(150*time.Millisecond, func() { s.analyzeGeneration(gen) })
+	s.timer = time.AfterFunc(150*time.Millisecond, func() {
+		s.mu.Lock()
+		if s.stopped {
+			s.mu.Unlock()
+			return
+		}
+		s.debounced.Add(1)
+		s.mu.Unlock()
+		defer s.debounced.Done()
+		s.analyzeGeneration(gen)
+	})
 }
 
 func (s *server) analyze() { s.mu.Lock(); gen := s.generation; s.mu.Unlock(); s.analyzeGeneration(gen) }
