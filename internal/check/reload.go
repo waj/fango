@@ -217,7 +217,10 @@ func RemapNominal(v reflect.Value, ids, effects map[int]int) {
 }
 
 // NativeContractsEqual normalizes type variables but retains nominal identity:
-// an old worker must not interpret a new wrapper as an old opaque value.
+// an old worker must not interpret a new wrapper as an old opaque value. The
+// raw identities compare across generations because a is reconciled first: a
+// nominal NominalReuse kept already carries b's identity, and one it retired
+// differs even when the printed scheme does not.
 func NativeContractsEqual(a, b *infer.Checker) bool {
 	fingerprint := func(n *types.NativeInfo) string {
 		nominals, effects := map[int]bool{}, map[int]bool{}

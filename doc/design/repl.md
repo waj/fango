@@ -242,15 +242,24 @@ publishes no resolver or runtime state. Cancellation is checked between stages
 and before commit. Valid immutable cache objects may survive rejection.
 
 Checked nominal contracts are compared without source positions or allocation
-numbers. Matching types, effects, and class dictionaries retain their previous
-identities only while the nominal declarations their contracts reference also
-retain theirs. A fixed point handles recursive contracts. Reconciliation copies
-the candidate compiler graph, preserving sharing and recursive metadata, and
-rebinds reflected schemas to the adopted checker. Cached objects remain
-unchanged. Prompt-owned declarations and historical nominal metadata are merged
-after current modules pass validation; retained instances for retired types or
-classes remain available without competing with replacement instances over
-unchanged types.
+numbers, and independently of how a declaration was built: the session may have
+checked what the candidate decoded, so neither the node sharing of nominal
+applications, nor empty versus nil argument lists, nor which variable took the
+first ID can distinguish two contracts. Matching types, effects, and class
+dictionaries retain their previous identities only while the nominal
+declarations their contracts reference also retain theirs. A fixed point handles
+recursive contracts. Reconciliation copies the candidate compiler graph,
+preserving sharing and recursive metadata, and rebinds reflected schemas to the
+adopted checker. Cached objects remain unchanged. Prompt-owned declarations and
+historical nominal metadata are merged after current modules pass validation;
+retained instances for retired types or classes remain available without
+competing with replacement instances over unchanged types.
+
+Native contracts are compared after reconciliation, by nominal identity rather
+than by name. A retained nominal carries its previous identity, so a difference
+means a native now mentions a retired declaration, even when its printed
+signature is unchanged. The worker holds values of the old declaration, so that
+difference requires a new session.
 
 Runtime module definitions have session-only generation names. All module calls
 inside accepted prompt Core are frozen to those names before installation;

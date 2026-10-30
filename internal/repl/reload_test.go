@@ -564,3 +564,159 @@ func TestReloadReportsPromptInstanceDependencies(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+// nominalIdentities names every declared type and effect of a session.
+func nominalIdentities(s *Session) map[string]int {
+	ids := map[string]int{}
+	for name, ty := range s.ck.TypeNames {
+		if con, ok := ty.(*types.TCon); ok {
+			ids["type "+name] = con.Unique
+		}
+	}
+	for name, effect := range s.ck.Effects {
+		ids["effect "+name] = effect.Unique
+	}
+	return ids
+}
+
+func expectIdentitiesRetained(t *testing.T, s *Session, before map[string]int) {
+	t.Helper()
+	for name, id := range before {
+		if now := nominalIdentities(s)[name]; now != id {
+			t.Errorf("%s changed identity across reload: %d -> %d", name, id, now)
+		}
+	}
+}
+
+// sessionsOver starts sessions over one root and one object cache, each with
+// the given imports already entered.
+func sessionsOver(t *testing.T, start map[string]string, importing string) (func() (*Session, *strings.Builder), func(string, string)) {
+	t.Helper()
+	root := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, body := range start {
+		write(name, body)
+	}
+	opts := Options{Root: root, Cache: newObjectCache()}
+	return func() (*Session, *strings.Builder) {
+		var out strings.Builder
+		s := NewSessionWith(&out, opts)
+		t.Cleanup(s.Close)
+		s.submit(importing)
+		return s, &out
+	}, write
+}
+
+// sessionsFromCache is sessionsOver after a first session filled the cache, so
+// every declaration a later session installs is decoded from an object and
+// numbered in decoding order.
+func sessionsFromCache(t *testing.T, start map[string]string, importing string) (func() (*Session, *strings.Builder), func(string, string)) {
+	t.Helper()
+	session, write := sessionsOver(t, start, importing)
+	session()
+	return session, write
+}
+
+func TestReloadFromCachedObjects(t *testing.T) {
+	for name, module := range map[string]string{
+		"values":  "module Lib exposing (x)\n\nx = %s\n",
+		"effects": "module Lib exposing (x, Log(..))\n\neffect Log\n    info : String -> ()\n\nx = %s\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			lib := func(value string) string { return strings.Replace(module, "%s", value, 1) }
+			session, write := sessionsFromCache(t, map[string]string{"Lib.fango": lib("1")}, "import Lib")
+			// Every later session has to reload as well; the first one to fail
+			// used to leave nothing different behind for the next.
+			for _, value := range []string{"2", "3"} {
+				s, out := session()
+				before := nominalIdentities(s)
+				write("Lib.fango", lib(value))
+				out.Reset()
+				s.command(":reload")
+				s.submit("Lib.x")
+				if want := "reloaded Lib\n" + value + " : Num a => a\n"; out.String() != want {
+					t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
+				}
+				expectIdentitiesRetained(t, s, before)
+			}
+		})
+	}
+}
+
+// Library types and effects survive an unrelated reload, whether the session
+// checked them from source or decoded them. The reload itself decodes them in
+// both, so a contract must not depend on how its declaration was built: a
+// retired Console would strand any retained binding that performs it.
+func TestReloadKeepsLibraryIdentities(t *testing.T) {
+	const imports = "import Lib\nimport Console\nimport File\nimport Bytes"
+	lib := func(value string) string { return "module Lib exposing (x)\n\nx = " + value + "\n" }
+	for name, sessions := range map[string]func(*testing.T, map[string]string, string) (func() (*Session, *strings.Builder), func(string, string)){
+		"from source":  sessionsOver,
+		"from objects": sessionsFromCache,
+	} {
+		t.Run(name, func(t *testing.T) {
+			session, write := sessions(t, map[string]string{"Lib.fango": lib("0")}, imports)
+			s, out := session()
+			s.submit("greet () = Console.write \"hi\"")
+			before := nominalIdentities(s)
+			write("Lib.fango", lib("1"))
+			out.Reset()
+			s.command(":reload")
+			s.command(":type greet")
+			s.submit("Console.runTest Bytes.empty greet")
+			for _, want := range []string{"reloaded Lib", "() ->{Console} ()\n", "Transcript ()"} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("missing %q in:\n%s", want, out.String())
+				}
+			}
+			if strings.Contains(out.String(), "before reload") {
+				t.Errorf("a library effect was retired:\n%s", out.String())
+			}
+			expectIdentitiesRetained(t, s, before)
+		})
+	}
+}
+
+// A native's contract is its nominal identities as well as its printed
+// signature. Each edit leaves the sidecar's bytes alone, so only the contract
+// can refuse it.
+func TestReloadFromCachedObjectsChecksNatives(t *testing.T) {
+	const sidecar = "package native\nfunc Twice(x int64) int64 { return x * 2 }\nfunc Mint(x int64) int64 { return x }\n"
+	module := func(constructor, twice, value string) string {
+		return "module Hash exposing (Token, mint, twice, value)\ntype Token = " + constructor + " Int\nmint : Int -> Token\nmint = native\ntwice : " + twice + "\ntwice = native\nvalue = " + value + "\n"
+	}
+	for _, test := range []struct {
+		name, module string
+		restart      bool
+	}{
+		{"value edit", module("Token", "Int -> Int", "2"), false},
+		{"parameter type", module("Token", "Token -> Int", "1"), true},
+		{"effect row", module("Token", "Int ->{IO} Int", "1"), true},
+		{"same printed signature", module("Wrapped", "Int -> Int", "1"), true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			files := map[string]string{"Hash.fango": module("Token", "Int -> Int", "1"), "Hash.native.go": sidecar}
+			session, write := sessionsFromCache(t, files, "import Hash")
+			s, out := session()
+			worker := s.exec
+			write("Hash.fango", test.module)
+			out.Reset()
+			s.command(":reload")
+			if refused := strings.Contains(out.String(), "A native interface changed"); refused != test.restart {
+				t.Fatalf("restart required = %v, want %v:\n%s", refused, test.restart, out.String())
+			}
+			if !test.restart && !strings.Contains(out.String(), "reloaded Hash") {
+				t.Fatal(out.String())
+			}
+			s.submit("Hash.twice 10")
+			if !strings.Contains(out.String(), "20 : Int") || s.exec != worker {
+				t.Fatalf("worker or session replaced:\n%s", out.String())
+			}
+		})
+	}
+}

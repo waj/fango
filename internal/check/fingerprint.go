@@ -111,6 +111,7 @@ var (
 	spanReflectType       = reflect.TypeOf(source.Span{})
 	tvarReflectType       = reflect.TypeOf(types.TVar{})
 	tconReflectType       = reflect.TypeOf(types.TCon{})
+	tconPtrReflectType    = reflect.TypeOf((*types.TCon)(nil))
 	effectReflectType     = reflect.TypeOf(types.EffectInfo{})
 	effLabelReflectType   = reflect.TypeOf(types.EffLabel{})
 	effectInstReflectType = reflect.TypeOf(core.EffectInstance{})
@@ -130,10 +131,10 @@ func (w *canonicalWriter) token(s string) {
 	w.buf.WriteString(s)
 }
 
+// logicalID numbers an allocated identity by first occurrence. Zero is an
+// identity like any other here: the first type variable a session allocates
+// has ID 0. Kinds that reserve zero for "none" test for it before calling.
 func (w *canonicalWriter) logicalID(t reflect.Type, n int64) int {
-	if n == 0 {
-		return 0
-	}
 	m := w.ids[t]
 	if m == nil {
 		m = map[int64]int{}
@@ -170,6 +171,10 @@ func (w *canonicalWriter) write(v reflect.Value, field string) {
 				return
 			}
 		}
+		if v.Int() == 0 {
+			w.token("0")
+			return
+		}
 		w.token(strconv.Itoa(w.logicalID(v.Type(), v.Int())))
 		return
 	}
@@ -185,6 +190,13 @@ func (w *canonicalWriter) write(v reflect.Value, field string) {
 	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			w.token("nil")
+			return
+		}
+		// A nominal application is a value. Whether two of them share a node
+		// depends on how they were built: interning a decoded object joins and
+		// separates nodes that checking its source did not.
+		if v.Type() == tconPtrReflectType {
+			w.write(v.Elem(), field)
 			return
 		}
 		key := visit{v.Type(), v.Pointer()}
@@ -218,6 +230,12 @@ func (w *canonicalWriter) write(v reflect.Value, field string) {
 				continue
 			}
 			w.token(f.Name)
+			// No arguments is one thing, however the slice was built: inference
+			// allocates an empty one and the object decoder leaves it nil.
+			if v.Type() == tconReflectType && f.Name == "Args" && v.Field(i).Len() == 0 {
+				w.token("no-args")
+				continue
+			}
 			if v.Type() == tvarReflectType && f.Name == "ID" {
 				w.token(strconv.Itoa(w.logicalID(typeParamReflectType, v.Field(i).Int())))
 				continue
