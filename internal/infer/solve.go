@@ -330,7 +330,7 @@ func ambiguousError(c Constraint, m *mismatch, sub Subst) diag.Error {
 }
 
 func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
-	if c.Subsume && m.effect {
+	if c.Subsume && m.effect && c.Declared == nil {
 		c.Why.Kind = WhyEffectNotAllowed
 	}
 	if c.Why.Kind == WhyAnnotation && m.effect {
@@ -346,6 +346,9 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 	// pair (m) is the leaf that failed, surfaced via m.note when set.
 	left := p.Type(sub.Apply(c.Left))
 	right := p.Type(sub.Apply(c.Right))
+	if c.Declared != nil {
+		left, right = p.Type(sub.Apply(c.Declared)), p.Type(sub.Apply(c.Inferred))
+	}
 	var e diag.Error
 	switch c.Why.Kind {
 	case WhyOperand:

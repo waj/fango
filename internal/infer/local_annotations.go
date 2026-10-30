@@ -13,8 +13,7 @@ type localAnnotation struct {
 }
 
 func (g *generator) deferLocalAnnotation(ann, shape types.Type, vars []*types.TVar, bind *ast.LocalBind) {
-	pending := localAnnotation{Constraint: Constraint{Left: ann, Right: shape,
-		Span: bind.Ann.Sp, Why: Why{Kind: WhyAnnotation, Name: bind.Name}}, vars: vars}
+	pending := localAnnotation{Constraint: g.annotationBound(ann, shape, bind.Ann.Sp, bind.Name), vars: vars}
 	// Retain the enclosing types, not the mutable block scope: the annotated
 	// binding itself will be installed in that scope after this check point.
 	for s := g.locals; s != nil; s = s.parent {
@@ -66,7 +65,7 @@ func (g *generator) annotationShape(ann, body types.Type, avoid map[int]bool, bi
 func (g *generator) checkLocalAnnotations() []diag.Error {
 	var errs []diag.Error
 	for _, c := range g.localAnnotations {
-		if !sameKnownEffects(g.ck.Sub.Apply(c.Left), g.ck.Sub.Apply(c.Right)) {
+		if !sameKnownEffects(g.ck.Sub.Apply(c.Right), g.ck.Sub.Apply(c.Left)) {
 			errs = append(errs, diag.Errorf(c.Span, "EFFECT MISMATCH", "The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", c.Why.Name))
 		}
 	}

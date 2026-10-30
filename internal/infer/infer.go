@@ -72,6 +72,11 @@ type Constraint struct {
 	// ScopedCallback marks the Subsume constraint passing a scoped runner's
 	// selected callback; the solver orders its row bounds early.
 	ScopedCallback bool
+
+	// Declared and Inferred are the whole types of an annotation bound. Its
+	// row bounds compare single rows, and a report still tells the story of
+	// the annotation against the body.
+	Declared, Inferred types.Type
 }
 
 // Env maps top-level names to schemes; block scopes and function parameters
@@ -1278,7 +1283,7 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 		// the solve the two sides are equal by construction, so an annotation
 		// could otherwise claim effects the body never performs.
 		effectsAgree = sameKnownEffects(ck.Sub.Apply(annTy), ck.Sub.Apply(ty))
-		sub, _, solveErrs := Solve([]Constraint{{Left: annTy, Right: ty, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: d.Name}}}, nil, ck.Sub, ck.B, ck.Sup)
+		sub, _, solveErrs := Solve([]Constraint{g.annotationBound(annTy, ty, d.Body.Span(), d.Name)}, nil, ck.Sub, ck.B, ck.Sup)
 		ck.Sub = sub
 		errs = append(errs, solveErrs...)
 		annPreSolved = true
@@ -1304,7 +1309,7 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 				errs = append(errs, diag.Errorf(d.Ann.Sp, "EFFECT MISMATCH",
 					"The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", d.Name))
 			}
-			c := Constraint{Left: annTy, Right: ty, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: d.Name}}
+			c := g.annotationBound(annTy, ty, d.Body.Span(), d.Name)
 			sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B, ck.Sup)
 			ck.Sub = sub
 			errs = append(errs, solveErrs...)
@@ -1396,6 +1401,19 @@ func (ck *Checker) checkMainResult(ty types.Type, d *ast.ValueDecl) []diag.Error
 
 // StatusTypeName is the canonical exit-status type an entry may return.
 const StatusTypeName = "Process.Status"
+
+// annotationBound checks a body against its annotation directionally. Known
+// effects on the annotation's arrows are compared separately, before this can
+// fill the inferred rows, so the bound only has to admit a body whose row, or
+// a row inside its type, is narrower than the one the annotation declares.
+func (g *generator) annotationBound(ann, body types.Type, span source.Span, name string) Constraint {
+	var invariant []types.Type
+	for _, p := range g.preds {
+		invariant = append(invariant, p.pred.Ty)
+	}
+	return Constraint{Left: body, Right: ann, Span: span, Why: Why{Kind: WhyAnnotation, Name: name},
+		Subsume: true, ADTs: g.ck.ADTs, Invariant: invariant, Declared: ann, Inferred: body}
+}
 
 func sameKnownEffects(a, b types.Type) bool {
 	af, aok := a.(*types.TFun)
@@ -2914,9 +2932,8 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			} else if !sameKnownEffects(g.ck.Sub.Apply(annTy), g.ck.Sub.Apply(ty)) {
 				g.errs = append(g.errs, diag.Errorf(bind.Ann.Sp, "EFFECT MISMATCH", "The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", bind.Name))
 			}
-			// Skolemize-and-unify, as at the top level.
-			g.cs = append(g.cs, Constraint{Left: annTy, Right: ty,
-				Span: bind.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: bind.Name}})
+			// Skolemize and bound the body, as at the top level.
+			g.cs = append(g.cs, g.annotationBound(annTy, ty, bind.Body.Span(), bind.Name))
 			ty = annTy
 		}
 		scheme := types.Scheme{Body: ty}

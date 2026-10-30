@@ -157,3 +157,56 @@ bad() = restricted { _ -> schedule child }
 		t.Fatal("accepted Console inside a closed callback row")
 	}
 }
+
+func TestAnnotationAdmitsNarrowerBody(t *testing.T) {
+	for name, src := range map[string]string{
+		"stored row": `effect Note
+    note : () -> ()
+type Source e = Source (() ->{e} Int)
+quiet : Source {}
+quiet = Source { 0 }
+noted : Source {Note}
+noted = quiet`,
+		"returned stored row": `effect Note
+    note : () -> ()
+type Source e = Source (() ->{e} Int)
+quiet : Source {}
+quiet = Source { 0 }
+outer : Int -> Source {Note}
+outer n =
+    inner : Int -> Source {Note}
+    inner m = quiet
+    inner n`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, errs := check(t, src); len(errs) != 0 {
+				t.Fatal(errs)
+			}
+		})
+	}
+}
+
+func TestAnnotationStillRejectsWiderBody(t *testing.T) {
+	for name, src := range map[string]string{
+		"stored row": `effect Note
+    note : () -> ()
+type Source e = Source (() ->{e} Int)
+noisy : Source {Note}
+noisy = Source { note(); 0 }
+quiet : Source {}
+quiet = noisy`,
+		"invariant row": `effect Note
+    note : () -> ()
+type Cell e = Cell (() ->{e} Int) ((() ->{e} Int) -> Int)
+quiet : Cell {}
+quiet = Cell { 0 } { _ -> 0 }
+noted : Cell {Note}
+noted = quiet`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, errs := check(t, src); len(errs) == 0 {
+				t.Fatal("accepted a body wider than its annotation")
+			}
+		})
+	}
+}

@@ -32,8 +32,11 @@ Nominal variance is the least fixed point of positive/negative occurrences in
 fields. Mixed occurrences and effect-label arguments are invariant. Abstract
 imports use the same proof because the checker retains their schemas; row kind
 alone does not establish covariance. Definition annotations compare the count
-and nominal names of known arrow effects before annotation equality can
-populate inferred rows; type constraints check their arguments.
+and nominal names of known arrow effects before the annotation can populate
+inferred rows; type constraints check their arguments. The body is then bounded
+by the annotation with the same directional check an argument gets, so a body
+whose type carries a narrower row inside it still fits, and a wider one is
+reported against the annotation's whole type rather than the row that failed.
 
 For `{L, e} ⊆ ρ` with rigid `e` and open `ρ`, include labels immediately but
 defer the bare tail until another constraint closes `ρ`, or solve it last.
