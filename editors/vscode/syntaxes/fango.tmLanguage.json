@@ -12,6 +12,7 @@
     { "include": "#instance_decl" },
     { "include": "#effect_decl" },
     { "include": "#effect_alias_decl" },
+    { "include": "#type_alias_decl" },
     { "include": "#fixity_decl" },
     { "include": "#operator_annotation" },
     { "include": "#operator_definition" },
@@ -189,15 +190,32 @@
     },
     "effect_alias_decl": {
       "comment": "The `{` here opens an effect row, where elsewhere at top level it opens a lambda.",
-      "begin": "^(alias)[\\t ]+([A-Z][A-Za-z0-9_]*)(?=[\\t ]|=|$)",
+      "begin": "^(alias)[\\t ]+([A-Z][A-Za-z0-9_]*)((?:[\\t ]+[a-z][A-Za-z0-9_]*)*)(?=[\\t ]*=[\\t ]*\\{)",
       "end": "(?<=\\})|^(?=[^\\s{])",
       "beginCaptures": {
         "1": { "name": "keyword.other.alias.fango" },
-        "2": { "name": "entity.name.type.effect.fango" }
+        "2": { "name": "entity.name.type.effect.fango" },
+        "3": { "name": "variable.other.generic-type.fango" }
       },
       "patterns": [
         { "include": "#comments" },
         { "include": "#effect_row" }
+      ]
+    },
+    "type_alias_decl": {
+      "begin": "^(alias)[\\t ]+([A-Z][A-Za-z0-9_]*)((?:[\\t ]+[a-z][A-Za-z0-9_]*)*)",
+      "end": "^(?=\\S)",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.alias.fango" },
+        "2": { "name": "entity.name.type.fango" },
+        "3": { "name": "variable.other.generic-type.fango" }
+      },
+      "patterns": [
+        {
+          "name": "keyword.operator.assignment.fango",
+          "match": "="
+        },
+        { "include": "#type_expression" }
       ]
     },
     "operator_name": {

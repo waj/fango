@@ -83,6 +83,9 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 	for name, alias := range state.EffectAliases {
 		ck.EffectAliases[name] = alias
 	}
+	for name, alias := range state.TypeAliases {
+		ck.TypeAliases[name] = alias
+	}
 	for name, op := range state.Operations {
 		ck.Operations[name] = op
 	}
@@ -158,7 +161,7 @@ func validateInstall(ck *infer.Checker, state *infer.ModuleState) error {
 		label              string
 		incoming, existing any
 	}{
-		{"type", state.Types, ck.TypeNames}, {"constructor", state.Ctors, ck.Ctors}, {"effect", state.Effects, ck.Effects}, {"effect alias", state.EffectAliases, ck.EffectAliases},
+		{"type", state.Types, ck.TypeNames}, {"constructor", state.Ctors, ck.Ctors}, {"effect", state.Effects, ck.Effects}, {"effect alias", state.EffectAliases, ck.EffectAliases}, {"type alias", state.TypeAliases, ck.TypeAliases},
 		{"operation", state.Operations, ck.Operations}, {"class", state.Classes, ck.Classes}, {"method", state.Methods, ck.Methods},
 		{"value", state.Schemes, nil}, {"native", state.Natives, ck.Natives}, {"intrinsic", state.Intrinsics, ck.Intrinsics}, {"deriver", state.Derivers, ck.Derivers},
 	}

@@ -224,26 +224,30 @@ func (p *Printer) rowText(r Row) string {
 // foldedLabels prints a row's labels, showing an alias in place of its members
 // when a label came from it and all of its members are present.
 func (p *Printer) foldedLabels(labels []EffLabel) []string {
-	present := map[string]int{}
+	present := map[EffectKey]int{}
 	for i, l := range labels {
-		present[LabelText(l)] = i
+		present[EffectLabelKey(l)] = i
 	}
 	folded := map[int]bool{}
 	shown := map[string]bool{}
 	var parts []string
 	for _, l := range labels {
 		for _, via := range l.Via {
-			missing := func(m string) bool { _, ok := present[m]; return !ok }
-			if shown[via.Name] || slices.ContainsFunc(via.Members, missing) {
+			missing := func(m EffLabel) bool { _, ok := present[EffectLabelKey(m)]; return !ok }
+			if shown[via.Key()] || slices.ContainsFunc(via.Members, missing) {
 				continue
 			}
-			shown[via.Name] = true
+			shown[via.Key()] = true
 			members := make([]string, len(via.Members))
 			for i, m := range via.Members {
-				folded[present[m]] = true
-				members[i] = p.label(labels[present[m]])
+				at := present[EffectLabelKey(m)]
+				folded[at] = true
+				members[i] = p.label(labels[at])
 			}
 			text := p.ref(via.Name, SurfaceName(via.Name))
+			for _, a := range via.Args {
+				text += " " + p.atom(a)
+			}
 			parts = append(parts, text)
 			if p.aliases == nil {
 				p.aliases = map[string]string{}

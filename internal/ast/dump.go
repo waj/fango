@@ -145,8 +145,11 @@ func dumpDecl(d Decl) string {
 		}
 		b.WriteString(")")
 		return b.String()
-	case *EffectAliasDecl:
-		return fmt.Sprintf("(alias %s %s)", d.Name, DumpTypeExpr(&TRow{Row: d.Row}))
+	case *AliasDecl:
+		if p := dumpParams(d.Params); p != "" {
+			return fmt.Sprintf("(alias %s %s %s)", d.Name, p, DumpTypeExpr(d.Body))
+		}
+		return fmt.Sprintf("(alias %s %s)", d.Name, DumpTypeExpr(d.Body))
 	case *EffectDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(effect %s", d.Name)

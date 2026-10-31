@@ -140,8 +140,8 @@ func (i *index) declare(decl ast.Decl) {
 			}
 			i.define(global("field", d.Name+"."+f.Name), f.NameSpan, text, nil, f.Attributes...)
 		}
-	case *ast.EffectAliasDecl:
-		i.define(global("type", d.Name), d.NameSpan, apidoc.EffectAliasHead(ck.EffectAliases[d.Name], types.NewPrinter()), nil)
+	case *ast.AliasDecl:
+		i.define(global("type", d.Name), d.NameSpan, apidoc.AliasHead(ck, d.Name, types.NewPrinter()), nil)
 	case *ast.EffectDecl:
 		i.define(global("type", d.Name), d.NameSpan, apidoc.Head("effect", d.Name, d.Params), nil, d.Attributes...)
 		for _, op := range d.Ops {
@@ -217,8 +217,8 @@ func (i *index) module(m *ast.Module) {
 			for _, f := range d.RecordFields {
 				i.typ(f.Type)
 			}
-		case *ast.EffectAliasDecl:
-			i.typ(&ast.TRow{Row: d.Row})
+		case *ast.AliasDecl:
+			i.typ(d.Body)
 		case *ast.EffectDecl:
 			d.VisitAttributes(func(group *ast.AttributeGroup) {
 				for _, expression := range group.Exprs {

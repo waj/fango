@@ -191,9 +191,23 @@ alias App = {Log, Db, Fail String}
 Use the name wherever a row label goes, including as a
 [row-kinded type argument](functions.md#row-kinded-parameters), as in `Job App`
 or `Job {App, Clock}`. An alias may include other aliases, which flatten, and
-may be declared after its uses. It takes no type parameters and cannot hold a
-tail or a scoped row variable; `BAD EFFECT ALIAS` reports an empty alias, one
-with a tail, and one that includes itself.
+may be declared after its uses. It cannot hold a tail or a scoped row variable;
+`BAD EFFECT ALIAS` reports an empty alias, one with a tail, one that includes
+itself, and a parameter it never uses.
+
+An alias may take type parameters, and a use supplies all of them or reports
+`EFFECT ARITY`:
+
+```fango
+alias Risky error = {Log, Fail error}
+
+parse : String ->{Risky String} Int
+rethrow : e ->{Risky e} Int
+```
+
+Each application is an alias of its own, so `{Risky Int, Risky String}` needs a
+member of each performed. Arguments can make two members one: under
+`alias Both a b = {Fail a, Fail b}`, `Both Int Int` holds a single `Fail Int`.
 
 A row holds the alias's effects, not a separate effect. Handlers discharge them
 one at a time, so handling `Log` under `{App}` leaves `{Db, Fail String}`, and a

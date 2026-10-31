@@ -21,7 +21,7 @@ const shapes = `{-# no-prelude #-}
 -- area (Square 2.0)
 --     |> ignore
 -- ` + "```" + `
-module Shapes exposing (Measuring, Shape(..), Point(..), Pair(..), Hidden, Measure(..), Log(..), area, describe, logged, grouped, (<+>))
+module Shapes exposing (Measuring, Runner, Shape(..), Point(..), Pair(..), Hidden, Measure(..), Log(..), area, describe, logged, grouped, (<+>))
 
 import Basics exposing (..)
 
@@ -93,6 +93,9 @@ secret = Private
 
 -- What a measurement may do.
 alias Measuring = {Log}
+
+-- What runs a measurement.
+alias Runner e = Shape ->{e} Float
 `
 
 const facade = `-- Re-exports.
@@ -148,7 +151,7 @@ func TestExtractDeclarations(t *testing.T) {
 		"class:Shapes.Measure", "constructor:Shapes.Circle", "constructor:Shapes.Square",
 		"effect:Shapes.Log", "effect:Shapes.Measuring", "field:Shapes.Pair.first", "field:Shapes.Pair.second",
 		"field:Shapes.Point.x", "field:Shapes.Point.y", "method:Shapes.Measure.size",
-		"operation:Shapes.Log.log", "type:Shapes.Hidden", "type:Shapes.Pair", "type:Shapes.Point",
+		"operation:Shapes.Log.log", "type:Shapes.Hidden", "type:Shapes.Pair", "type:Shapes.Point", "type:Shapes.Runner",
 		"type:Shapes.Shape", "value:Shapes.<+>", "value:Shapes.area", "value:Shapes.describe",
 		"value:Shapes.grouped", "value:Shapes.logged",
 	}
@@ -207,6 +210,17 @@ func TestExtractEffectAlias(t *testing.T) {
 		t.Fatalf("documentation = %q", alias.Documentation)
 	}
 	if !strings.HasPrefix(alias.Signature, "alias Measuring = {") {
+		t.Fatalf("signature = %q", alias.Signature)
+	}
+}
+
+func TestExtractTypeAlias(t *testing.T) {
+	doc, _ := extract(t)
+	alias := find(t, doc, "type:Shapes.Runner")
+	if alias.Documentation != "What runs a measurement." {
+		t.Fatalf("documentation = %q", alias.Documentation)
+	}
+	if alias.Signature != "alias Runner e = Shape ->{e} Float" {
 		t.Fatalf("signature = %q", alias.Signature)
 	}
 }

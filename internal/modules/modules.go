@@ -532,7 +532,7 @@ func firstDeclFile(decls []ast.Decl) *source.File {
 			sp = d.Sp
 		case *ast.EffectDecl:
 			sp = d.Sp
-		case *ast.EffectAliasDecl:
+		case *ast.AliasDecl:
 			sp = d.Sp
 		case *ast.FixityDecl:
 			sp = d.Sp
@@ -1262,7 +1262,7 @@ func buildInterface(n *node, nodes map[string]*node, errs []diag.Error) (*iface,
 				all.typeMembers[d.Name] = append(all.typeMembers[d.Name], c.Name)
 				all.ctors[c.Name] = canonical(n.name, c.Name)
 			}
-		case *ast.EffectAliasDecl:
+		case *ast.AliasDecl:
 			all.types[d.Name] = canonical(n.name, d.Name)
 			aliases[d.Name] = true
 		case *ast.EffectDecl:
@@ -1333,7 +1333,7 @@ func buildInterface(n *node, nodes map[string]*node, errs []diag.Error) (*iface,
 			continue
 		}
 		if aliases[item.Name] && item.All {
-			errs = append(errs, diag.Errorf(item.Sp, "INVALID EXPORT", "`%s` is an effect alias and has no members; expose it without `(..)`.", item.Name))
+			errs = append(errs, diag.Errorf(item.Sp, "INVALID EXPORT", "`%s` is an alias and has no members; expose it without `(..)`.", item.Name))
 			continue
 		}
 		if v, ok := all.types[item.Name]; ok {
@@ -1720,7 +1720,7 @@ func (r *resolver) declareHeaders(decls []ast.Decl) {
 			for _, c := range d.Ctors {
 				r.add(r.ctors, c.Name, r.canon(c.Name), c.NameSpan)
 			}
-		case *ast.EffectAliasDecl:
+		case *ast.AliasDecl:
 			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
 			r.schemas[r.canon(d.Name)] = true
 		case *ast.EffectDecl:
@@ -1849,9 +1849,9 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 
 			}
 			out = append(out, d)
-		case *ast.EffectAliasDecl:
+		case *ast.AliasDecl:
 			d.Name = r.canon(d.Name)
-			r.effRow(d.Row)
+			r.typ(d.Body)
 			out = append(out, d)
 		case *ast.EffectDecl:
 			d.Name = r.canon(d.Name)

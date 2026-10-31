@@ -359,7 +359,7 @@ func (p *parser) parseDecl() ast.Decl {
 		return p.parseEffectDecl()
 	}
 	if t.Kind == token.KwAlias {
-		return p.parseEffectAliasDecl()
+		return p.parseAliasDecl()
 	}
 	if t.Kind == token.KwInfix || t.Kind == token.KwInfixL || t.Kind == token.KwInfixR {
 		return p.parseFixityDecl()
@@ -699,37 +699,33 @@ func fixityLevel(t token.Token) (int, bool) {
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
-// parseEffectAliasDecl parses `alias Name = {Label, ...}`. What the row may
-// hold is the checker's concern, so a tail gets a language-level report.
-func (p *parser) parseEffectAliasDecl() ast.Decl {
+// parseAliasDecl parses `alias Name params = type`. A row literal on the right
+// makes it an effect alias; what the row may hold is the checker's concern, so
+// a tail gets a language-level report.
+func (p *parser) parseAliasDecl() ast.Decl {
 	kw := p.next() // `alias`
 	nameT := p.peekInExpr()
 	if nameT.Kind != token.UIDENT {
-		p.errorAt(nameT.Span, "SYNTAX PROBLEM", "After `alias` I expect a capitalized name, like `alias App = {Log, Db}`.")
+		p.errorAt(nameT.Span, "SYNTAX PROBLEM", "After `alias` I expect a capitalized name, like `alias Pair a = (a, a)` or `alias App = {Log, Db}`.")
 		p.recoverToTopLevel(false)
 		return nil
 	}
 	p.next()
-	if t := p.peekInExpr(); t.Kind == token.LIDENT {
-		p.errorAt(t.Span, "BAD EFFECT ALIAS", "An effect alias takes no type parameters.")
+	var params []ast.Param
+	for t := p.peekInExpr(); t.Kind == token.LIDENT; t = p.peekInExpr() {
+		p.next()
+		params = append(params, ast.Param{Name: t.Text, Sp: t.Span})
+	}
+	if !p.expect(token.EQ, "I expect `=` after the alias name, like `alias Pair a = (a, a)` or `alias App = {Log, Db}`.") {
 		p.recoverToTopLevel(false)
 		return nil
 	}
-	if !p.expect(token.EQ, "I expect `=` after the alias name, like `alias App = {Log, Db}`.") {
+	body := p.parseTypeExpr()
+	if body == nil {
 		p.recoverToTopLevel(false)
 		return nil
 	}
-	if t := p.peekInExpr(); t.Kind != token.LBRACE {
-		p.errorAt(t.Span, "SYNTAX PROBLEM", "An effect alias names an effect row, like `alias App = {Log, Db}`.")
-		p.recoverToTopLevel(false)
-		return nil
-	}
-	row := p.parseEffRow()
-	if row == nil {
-		p.recoverToTopLevel(false)
-		return nil
-	}
-	return &ast.EffectAliasDecl{Name: nameT.Text, NameSpan: nameT.Span, Row: row, Sp: kw.Span.Merge(row.Sp)}
+	return &ast.AliasDecl{Name: nameT.Text, NameSpan: nameT.Span, Params: params, Body: body, Sp: kw.Span.Merge(body.Span())}
 }
 
 // parseEffectDecl parses an effect header followed by an indented block of

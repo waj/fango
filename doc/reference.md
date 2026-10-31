@@ -68,7 +68,7 @@ defines the default scope.
 
 ## Algebraic data types and matching
 
-[Algebraic data types and matching](reference/types.md) — Records, unions,
+[Algebraic data types and matching](reference/types.md) — Records, unions, type aliases,
 [hidden state](reference/types.md#hidden-state-types), lists, tuples, deriving,
 and patterns.
 

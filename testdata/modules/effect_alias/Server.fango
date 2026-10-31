@@ -1,4 +1,4 @@
-module Server exposing (App, Action(..), Log(..), serve)
+module Server exposing (Action(..), App, Attempt, Fail(..), Log(..), Pair, Risky, serve, settle, swap)
 
 -- Db stays private: importers pass `App` along without being able to name it.
 effect Log
@@ -9,12 +9,37 @@ effect Db
 
 alias App = {Log, Db}
 
+effect Fail error
+    abort fail : error -> a
+
+alias Risky error = {Log, Fail error}
+
+alias Attempt error = () ->{Risky error} Int
+
+alias Pair a = (a, a)
+
+swap : Pair a -> Pair a
+swap (x, y) = (y, x)
+
+settle : Attempt String ->{Console} Int
+settle action =
+    handle
+        handle action() on
+            info text -> print text; resume ()
+    on
+        fail text ->
+            print text
+            -1
+
 type Action = Action (() ->{App} Int)
 
 lookup : () ->{App} Int
 lookup() = query "row"
 
 serve : (() ->{App} Int) ->{Console} Int
-serve action = handle (handle (lookup() + action()) on
-        info text -> print text; resume ()) on
-    query _ -> resume 40
+serve action =
+    handle
+        handle lookup() + action() on
+            info text -> print text; resume ()
+    on
+        query _ -> resume 40

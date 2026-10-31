@@ -702,11 +702,13 @@ type EffectDecl struct {
 	Sp         source.Span
 }
 
-// EffectAliasDecl names a closed set of effects: `alias App = {Log, Db}`.
-type EffectAliasDecl struct {
+// AliasDecl names a type or, when Body is a row literal, a closed set of effects:
+// `alias Pair a = (a, a)`, `alias App = {Log, Db}`.
+type AliasDecl struct {
 	Name     string
 	NameSpan source.Span
-	Row      *EffRow
+	Params   []Param
+	Body     TypeExpr
 	Sp       source.Span
 }
 
@@ -763,7 +765,7 @@ func (*FixityDecl) isDecl() {}
 
 func (*EffectDecl) isDecl() {}
 
-func (*EffectAliasDecl) isDecl() {}
+func (*AliasDecl) isDecl() {}
 
 type ModuleHeader struct {
 	Name     string
@@ -855,7 +857,7 @@ func DeclSpan(d Decl) source.Span {
 		return d.Sp
 	case *EffectDecl:
 		return d.Sp
-	case *EffectAliasDecl:
+	case *AliasDecl:
 		return d.Sp
 	case *ClassDecl:
 		return d.Sp

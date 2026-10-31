@@ -146,36 +146,68 @@ type EffLabel struct {
 	Via []EffectVia
 }
 
-// EffectVia is one alias a label came from. Members are the alias's labels in
-// LabelText form, so a printer can tell the alias is whole without a table.
+// EffectVia is one alias application a label came from. Args are the alias's
+// arguments and Members its labels at them, so a printer can tell the alias is
+// whole without a table. Both follow substitution along with the label itself.
 type EffectVia struct {
 	Name    string
-	Members []string
+	Args    []Type
+	Members []EffLabel
 }
 
-// EffectAlias is a checked `alias` declaration: a closed set of labels.
+// Key identifies the application: `App Int` and `App String` are two aliases
+// in one row, each answering for its own members.
+func (v EffectVia) Key() string {
+	if len(v.Args) == 0 {
+		return v.Name
+	}
+	return v.Name + "\x00" + string(AppliedEffectKey(0, v.Args))
+}
+
+// MapVia rewrites the types provenance holds. An alias without parameters has
+// none that can change, which keeps the common case free of allocation.
+func MapVia(via []EffectVia, f func(Type) Type) []EffectVia {
+	if !slices.ContainsFunc(via, func(v EffectVia) bool { return len(v.Args) > 0 }) {
+		return via
+	}
+	out := make([]EffectVia, len(via))
+	for i, v := range via {
+		if len(v.Args) == 0 {
+			out[i] = v
+			continue
+		}
+		args := make([]Type, len(v.Args))
+		for j, a := range v.Args {
+			args[j] = f(a)
+		}
+		members := make([]EffLabel, len(v.Members))
+		for j, m := range v.Members {
+			memberArgs := make([]Type, len(m.Args))
+			for k, a := range m.Args {
+				memberArgs[k] = f(a)
+			}
+			m.Args = memberArgs
+			members[j] = m
+		}
+		out[i] = EffectVia{Name: v.Name, Args: args, Members: members}
+	}
+	return out
+}
+
+// EffectAlias is a checked `alias` declaration of a row: a closed set of labels
+// over Params.
 type EffectAlias struct {
 	Name   string
+	Params []*TVar
 	Labels []EffLabel
 }
 
-// Via is the provenance every label of the alias carries when it is expanded.
-func (a *EffectAlias) Via() EffectVia {
-	members := make([]string, len(a.Labels))
-	for i, l := range a.Labels {
-		members[i] = LabelText(l)
-	}
-	return EffectVia{Name: a.Name, Members: members}
-}
-
-// LabelText is a label's identity as source can spell it, which unlike its
-// Unique is the same in every session that installs a module.
-func LabelText(l EffLabel) string {
-	text := l.Name
-	for _, a := range l.Args {
-		text += " " + NewPrinter().Atom(a)
-	}
-	return text
+// TypeAlias is a checked `alias` declaration of any other type. It has no
+// solver identity: resolving a use substitutes its arguments into Body.
+type TypeAlias struct {
+	Name   string
+	Params []*TVar
+	Body   Type
 }
 
 // MergeVia is the union of two provenance lists, in name order.
@@ -185,11 +217,11 @@ func MergeVia(a, b []EffectVia) []EffectVia {
 	}
 	out := append([]EffectVia(nil), a...)
 	for _, via := range b {
-		if !slices.ContainsFunc(out, func(have EffectVia) bool { return have.Name == via.Name }) {
+		if !slices.ContainsFunc(out, func(have EffectVia) bool { return have.Key() == via.Key() }) {
 			out = append(out, via)
 		}
 	}
-	slices.SortFunc(out, func(x, y EffectVia) int { return strings.Compare(x.Name, y.Name) })
+	slices.SortStableFunc(out, func(x, y EffectVia) int { return strings.Compare(x.Name, y.Name) })
 	return out
 }
 
@@ -336,7 +368,8 @@ func substRigidRow(r Row, m map[int]Type) Row {
 		for j, a := range l.Args {
 			args[j] = SubstRigid(a, m)
 		}
-		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped, Binding: l.Binding, Via: l.Via}
+		via := MapVia(l.Via, func(a Type) Type { return SubstRigid(a, m) })
+		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped, Binding: l.Binding, Via: via}
 	}
 	var tail Type
 	if r.Tail != nil {

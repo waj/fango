@@ -96,8 +96,8 @@ compares fields in declaration order. Derived `Show` has the form
 ## Union types
 
 A `type` declaration defines a nominal type. Its right-hand side is either a
-record schema or one or more constructor alternatives; it is never a type
-alias:
+record schema or one or more constructor alternatives; it never names an
+existing type, which is what [an alias](#type-aliases) does:
 
 ```fango
 type Status a = Pending | Done a
@@ -112,6 +112,37 @@ orPending fallback status =
 Constructor arguments are type atoms. Parenthesize applied or function types,
 as in `Cons a (List a)` or `Fn (a -> b)`. Constructors are ordinary curried
 values and can be partially applied.
+
+
+## Type aliases
+
+An `alias` declaration gives a type another name:
+
+```fango
+alias Name = String
+
+alias Pair a = (a, a)
+
+alias Handler e = Request ->{e} Response
+```
+
+An alias is its body. `Pair Int` and `(Int, Int)` are the same type everywhere,
+so values mix freely, types and errors print the expanded form, and an instance
+for an alias is an instance for its body. An alias therefore defines no
+constructors and hides nothing; use `type` for a distinct or abstract type. A
+right-hand side that is a row literal declares an
+[effect alias](effects.md#effect-aliases) instead.
+
+An alias may be declared after its uses, and may name other aliases as long as
+none reaches itself: `alias Forest = List Forest` is a `BAD TYPE ALIAS`, while
+`alias Forest = List Tree` beside `type Tree = Node Forest` is fine, since the
+nominal type ends the expansion. Every variable in the body must be a parameter,
+and `BAD TYPE ALIAS` also reports a parameter the body never uses. A use must
+supply every argument, or it reports `TYPE ARITY`.
+
+A parameter's kind comes from its use, as a
+[type parameter's](functions.md#row-kinded-parameters) does: `e` above is an
+effect row, so it takes `Handler {Log}` or a row variable.
 
 ## Hidden state types
 

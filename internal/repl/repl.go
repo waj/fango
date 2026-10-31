@@ -658,12 +658,14 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		}
 		return inputDone
 	}
-	if ad, ok := m.Decls[0].(*ast.EffectAliasDecl); ok {
-		if errs := s.ck.EffectAliasDecl(ad); len(errs) > 0 {
+	if ad, ok := m.Decls[0].(*ast.AliasDecl); ok {
+		if errs := s.ck.AliasDecl(ad); len(errs) > 0 {
 			restore()
 			diag.Render(s.out, errs)
-		} else {
+		} else if _, row := ad.Body.(*ast.TRow); row {
 			fmt.Fprintf(s.out, "%s : effect alias\n", ad.Name)
+		} else {
+			fmt.Fprintf(s.out, "%s : type alias\n", ad.Name)
 		}
 		return inputDone
 	}

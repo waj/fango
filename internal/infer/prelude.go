@@ -34,6 +34,12 @@ func (ck *Checker) InstallPrelude() []diag.Error {
 		if eff, ok := ck.Effects[canonical]; ok {
 			ck.Effects[surface] = eff
 		}
+		if alias, ok := ck.EffectAliases[canonical]; ok {
+			ck.EffectAliases[surface] = alias
+		}
+		if alias, ok := ck.TypeAliases[canonical]; ok {
+			ck.TypeAliases[surface] = alias
+		}
 	}
 	for surface, canonical := range p.Scope.Ctors {
 		if info, ok := ck.Ctors[canonical]; ok {

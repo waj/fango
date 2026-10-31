@@ -20,8 +20,12 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span) bool {
 	case *ast.TypeDecl:
 		p.typeDeclLines(d, sp)
 		return true
-	case *ast.EffectAliasDecl:
-		p.line(0, "alias "+d.Name+" = "+effRowText(d.Row))
+	case *ast.AliasDecl:
+		head := "alias " + d.Name
+		for _, param := range d.Params {
+			head += " " + param.Name
+		}
+		p.line(0, head+" = "+typeText(d.Body))
 		return true
 	case *ast.EffectDecl:
 		for _, group := range d.Attributes {

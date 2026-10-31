@@ -259,6 +259,7 @@ func mergePrompt(dst, src *infer.ModuleState) {
 	mergeMap(dst.Ctors, src.Ctors)
 	mergeMap(dst.Effects, src.Effects)
 	mergeMap(dst.EffectAliases, src.EffectAliases)
+	mergeMap(dst.TypeAliases, src.TypeAliases)
 	mergeMap(dst.Operations, src.Operations)
 	mergeMap(dst.Classes, src.Classes)
 	mergeMap(dst.Methods, src.Methods)

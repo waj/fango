@@ -173,7 +173,7 @@ These are not automatically prerequisites for the first coroutine milestone:
   operation boundary is decided when they are added; scoped capability records
   whose row the handler chooses, which need row-kinded effect parameters or
   existential rows; automatic forwarding of operations a handler omits;
-  effect-row aliases; scripted network fixtures, left to libraries; and
+  scripted network fixtures, left to libraries; and
   fixture operations that must wait for another task, such as a mock read
   blocked until a write.
 - **Escaping coroutine owners and raw resumptions.** The chosen owner stays

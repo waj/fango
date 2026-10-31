@@ -1,7 +1,9 @@
 package infer
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
@@ -129,6 +131,11 @@ func (ck *Checker) unknownType(sp source.Span, name string) diag.Error {
 		e.Notes = append(e.Notes, fmt.Sprintf("Effects go on an arrow: `A ->{%s} B`.", surface))
 		return e
 	}
+	if ck.EffectAliases[name] != nil {
+		e := diag.Errorf(sp, "NAMING ERROR", "`%s` is an effect alias, not a type.", surface)
+		e.Notes = append(e.Notes, fmt.Sprintf("Effects go on an arrow: `A ->{%s} B`. Another alias of them is written `alias Name = {%s}`.", surface, surface))
+		return e
+	}
 	e := diag.Errorf(sp, "NAMING ERROR", "I don't know a type named `%s`.", surface)
 	if hint := diag.DidYouMean(surface, surfaceKeys(ck.TypeNames)); hint != "" {
 		e.Notes = append(e.Notes, hint)
@@ -179,14 +186,24 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 		}
 		return ck.resolveEffRow(te.Row, tv)
 	case *ast.TName:
-		if want == types.RowVar {
+		if want == types.RowVar || want == kindAny && ck.namesRow(te.Name) {
 			if effect := ck.Effects[te.Name]; effect != nil && len(effect.Params) == 0 {
 				return types.Row{Labels: []types.EffLabel{{Unique: effect.Unique, Name: effect.Name}}}, nil
 			}
 			if alias := ck.EffectAliases[te.Name]; alias != nil {
-				return types.Row{Labels: ck.expandEffectAlias(alias)}, nil
+				if len(alias.Params) > 0 {
+					return nil, []diag.Error{diag.Errorf(te.Sp, "EFFECT ARITY", "`%s` takes %d type argument(s), but none are given here.", types.SurfaceName(te.Name), len(alias.Params))}
+				}
+				return types.Row{Labels: ck.expandEffectAlias(alias, nil)}, nil
 			}
 			return nil, []diag.Error{diag.Errorf(te.Sp, "KIND MISMATCH", "A row-kinded parameter must be an effect-row variable or effect label, not the type `%s`.", te.Name)}
+		}
+		if alias := ck.TypeAliases[te.Name]; alias != nil {
+			if len(alias.Params) > 0 {
+				return nil, []diag.Error{diag.Errorf(te.Sp, "TYPE ARITY",
+					"`%s` takes %d type argument(s), but none are given here.", types.SurfaceName(te.Name), len(alias.Params))}
+			}
+			return alias.Body, nil
 		}
 		t, ok := ck.TypeNames[te.Name]
 		if !ok {
@@ -246,7 +263,17 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 		errs = append(errs, rowErrs...)
 		return &types.TFun{Arg: arg, Eff: row, Ret: ret}, errs
 	case *ast.TApp:
-		if want == types.RowVar {
+		if want == types.RowVar || want == kindAny && ck.namesRow(te.Name) {
+			if alias := ck.EffectAliases[te.Name]; alias != nil {
+				if len(alias.Params) != len(te.Args) {
+					return nil, []diag.Error{diag.Errorf(te.Span(), "EFFECT ARITY", "`%s` takes %d type argument(s), but %d are given.", types.SurfaceName(te.Name), len(alias.Params), len(te.Args))}
+				}
+				args, errs := ck.resolveAliasArgs(alias.Params, te.Args, tv)
+				if args == nil {
+					return nil, errs
+				}
+				return types.Row{Labels: ck.expandEffectAlias(alias, args)}, errs
+			}
 			if effect := ck.Effects[te.Name]; effect != nil {
 				if len(effect.Params) != len(te.Args) {
 					return nil, []diag.Error{diag.Errorf(te.Span(), "EFFECT ARITY", "`%s` takes %d effect parameter(s), but %d are given.", te.Name, len(effect.Params), len(te.Args))}
@@ -264,6 +291,17 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 				return types.Row{Labels: []types.EffLabel{{Unique: effect.Unique, Name: effect.Name, Args: args}}}, errs
 			}
 			return nil, []diag.Error{diag.Errorf(te.Span(), "KIND MISMATCH", "A row-kinded parameter must be an effect label, not a type application.")}
+		}
+		if alias := ck.TypeAliases[te.Name]; alias != nil {
+			if len(alias.Params) != len(te.Args) {
+				return nil, []diag.Error{diag.Errorf(te.Span(), "TYPE ARITY",
+					"`%s` takes %d type argument(s), but %d are given here.", types.SurfaceName(te.Name), len(alias.Params), len(te.Args))}
+			}
+			args, errs := ck.resolveAliasArgs(alias.Params, te.Args, tv)
+			if args == nil {
+				return nil, errs
+			}
+			return substAlias(alias.Body, alias.Params, args), errs
 		}
 		t, ok := ck.TypeNames[te.Name]
 		if !ok {
@@ -297,12 +335,59 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 	}
 }
 
-// expandEffectAlias is the alias's labels as a row holds them. A label's Abort
-// flag is read here because an alias resolves before effect operations do.
-func (ck *Checker) expandEffectAlias(alias *types.EffectAlias) []types.EffLabel {
-	via := []types.EffectVia{alias.Via()}
-	labels := make([]types.EffLabel, len(alias.Labels))
-	for i, l := range alias.Labels {
+// namesRow reports whether a name can only be read as an effect row, which
+// settles it even where the parameter it fills has no known kind yet.
+func (ck *Checker) namesRow(name string) bool {
+	return ck.Effects[name] != nil || ck.EffectAliases[name] != nil
+}
+
+// resolveAliasArgs resolves an alias application's arguments at the kinds of
+// its parameters. While a module's declarations are still being checked, a
+// parameter that is not yet known to be a row may become one through a type
+// whose constructors come later, so its argument waits for settleKinds.
+func (ck *Checker) resolveAliasArgs(params []*types.TVar, exprs []ast.TypeExpr, tv *TypeVars) ([]types.Type, []diag.Error) {
+	args := make([]types.Type, len(exprs))
+	var errs []diag.Error
+	for i, a := range exprs {
+		kind := params[i].Kind
+		if kind != types.RowVar && ck.kindsUnsettled {
+			kind = kindAny
+		}
+		at, aErrs := ck.resolveTypeExpr(a, tv, kind)
+		errs = append(errs, aErrs...)
+		if at == nil {
+			return nil, errs
+		}
+		args[i] = at
+	}
+	return args, errs
+}
+
+// substAlias is an alias body at its arguments. Applying the empty substitution
+// normalizes the result, since a row argument filling a tail joins that row.
+func substAlias(body types.Type, params []*types.TVar, args []types.Type) types.Type {
+	if len(params) == 0 {
+		return body
+	}
+	m := make(map[int]types.Type, len(params))
+	for i, p := range params {
+		m[p.ID] = args[i]
+	}
+	return Subst(nil).Apply(types.SubstRigid(body, m))
+}
+
+// expandEffectAlias is the alias's labels at args, as a row holds them. A
+// label's Abort flag is read here because an alias resolves before effect
+// operations do. Arguments may make two members one, as `{Fail a, Fail b}` at
+// `Int Int` does.
+func (ck *Checker) expandEffectAlias(alias *types.EffectAlias, args []types.Type) []types.EffLabel {
+	members := alias.Labels
+	if len(alias.Params) > 0 {
+		members = substAlias(types.Row{Labels: members}, alias.Params, args).(types.Row).Labels
+	}
+	via := []types.EffectVia{{Name: alias.Name, Args: args, Members: members}}
+	labels := make([]types.EffLabel, len(members))
+	for i, l := range members {
 		l.Via = via
 		if info := ck.EffectsByUnique[l.Unique]; info != nil {
 			l.Abort = info.HasAbort()
@@ -312,23 +397,88 @@ func (ck *Checker) expandEffectAlias(alias *types.EffectAlias) []types.EffLabel 
 	return labels
 }
 
-// declareEffectAliases resolves `alias` declarations, each after the aliases
-// it names. It runs once type and effect names exist, before anything that can
+// withCurrentAborts rereads the abort flag of every label in a type alias's
+// body, which resolved before its module's effect operations were declared.
+func (ck *Checker) withCurrentAborts(t types.Type) types.Type {
+	switch t := t.(type) {
+	case *types.TCon:
+		if len(t.Args) == 0 {
+			return t
+		}
+		args := make([]types.Type, len(t.Args))
+		for i, a := range t.Args {
+			args[i] = ck.withCurrentAborts(a)
+		}
+		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
+	case *types.TFun:
+		return &types.TFun{Arg: ck.withCurrentAborts(t.Arg), Eff: ck.withCurrentAborts(t.Eff).(types.Row), Ret: ck.withCurrentAborts(t.Ret), Control: t.Control, OpenRow: t.OpenRow}
+	case types.Row:
+		labels := make([]types.EffLabel, len(t.Labels))
+		for i, l := range t.Labels {
+			if info := ck.EffectsByUnique[l.Unique]; info != nil {
+				l.Abort = info.HasAbort()
+			}
+			args := make([]types.Type, len(l.Args))
+			for j, a := range l.Args {
+				args[j] = ck.withCurrentAborts(a)
+			}
+			l.Args = args
+			labels[i] = l
+		}
+		return types.Row{Labels: labels, Tail: t.Tail}
+	default:
+		return t
+	}
+}
+
+// aliasReferences calls visit with each type or effect name an alias body
+// mentions, which is what decides the order aliases resolve in.
+func aliasReferences(te ast.TypeExpr, visit func(name string, sp source.Span)) {
+	row := func(r *ast.EffRow) {
+		if r == nil {
+			return
+		}
+		for _, l := range r.Labels {
+			visit(l.Name, l.NameSp)
+			for _, a := range l.Args {
+				aliasReferences(a, visit)
+			}
+		}
+	}
+	switch te := te.(type) {
+	case *ast.TName:
+		visit(te.Name, te.Sp)
+	case *ast.TApp:
+		visit(te.Name, te.NameSp)
+		for _, a := range te.Args {
+			aliasReferences(a, visit)
+		}
+	case *ast.TFunExpr:
+		aliasReferences(te.Arg, visit)
+		row(te.Eff)
+		aliasReferences(te.Ret, visit)
+	case *ast.TRow:
+		row(te.Row)
+	}
+}
+
+// declareAliases resolves `alias` declarations, each after the aliases it
+// names. It runs once type and effect names exist, before anything that can
 // mention an alias: operation signatures, constructor fields, and annotations.
-func (ck *Checker) declareEffectAliases(decls []*ast.EffectAliasDecl, batch bool) []diag.Error {
+func (ck *Checker) declareAliases(decls []*ast.AliasDecl, batch bool) []diag.Error {
 	var errs []diag.Error
-	pending := map[string]*ast.EffectAliasDecl{}
+	pending := map[string]*ast.AliasDecl{}
 	for _, d := range decls {
-		_, exists := ck.EffectAliases[d.Name]
+		exists := ck.EffectAliases[d.Name] != nil || ck.TypeAliases[d.Name] != nil
 		if exists && batch || pending[d.Name] != nil {
-			errs = append(errs, diag.Errorf(d.NameSpan, "MULTIPLE DEFINITIONS", "The effect alias `%s` is defined more than once.", types.SurfaceName(d.Name)))
+			errs = append(errs, diag.Errorf(d.NameSpan, "MULTIPLE DEFINITIONS", "The alias `%s` is defined more than once.", types.SurfaceName(d.Name)))
 		}
 		pending[d.Name] = d
 	}
 	const visiting, done, failed = 1, 2, 3
 	state := map[string]int{}
-	var visit func(d *ast.EffectAliasDecl)
-	visit = func(d *ast.EffectAliasDecl) {
+	var visit func(d *ast.AliasDecl)
+	visit = func(d *ast.AliasDecl) {
 		state[d.Name] = visiting
 		ok := false
 		defer func() {
@@ -338,49 +488,95 @@ func (ck *Checker) declareEffectAliases(decls []*ast.EffectAliasDecl, batch bool
 			}
 		}()
 		surface := types.SurfaceName(d.Name)
+		rowBody, isRow := d.Body.(*ast.TRow)
+		what, bad := "type alias", "BAD TYPE ALIAS"
+		if isRow {
+			what, bad = "effect alias", "BAD EFFECT ALIAS"
+		}
 		if _, clash := ck.Effects[d.Name]; clash {
-			errs = append(errs, diag.Errorf(d.NameSpan, "MULTIPLE DEFINITIONS", "The effect alias `%s` collides with an effect of the same name.", surface))
+			errs = append(errs, diag.Errorf(d.NameSpan, "MULTIPLE DEFINITIONS", "The %s `%s` collides with an effect of the same name.", what, surface))
 			return
 		}
 		if _, clash := ck.TypeNames[d.Name]; clash {
-			errs = append(errs, diag.Errorf(d.NameSpan, "MULTIPLE DEFINITIONS", "The effect alias `%s` collides with a type of the same name.", surface))
+			errs = append(errs, diag.Errorf(d.NameSpan, "MULTIPLE DEFINITIONS", "The %s `%s` collides with a type of the same name.", what, surface))
 			return
 		}
-		if d.Row.Tail != "" {
-			errs = append(errs, diag.Errorf(d.Row.TailSp, "BAD EFFECT ALIAS", "The effect alias `%s` must be a closed row; it cannot end in the row variable `%s`.", surface, d.Row.Tail))
-			return
-		}
-		if len(d.Row.Labels) == 0 {
-			errs = append(errs, diag.Errorf(d.Row.Sp, "BAD EFFECT ALIAS", "The effect alias `%s` must name at least one effect.", surface))
-			return
-		}
-		for _, l := range d.Row.Labels {
-			dep := pending[l.Name]
-			if dep == nil {
-				continue
-			}
-			if state[l.Name] == visiting {
-				errs = append(errs, diag.Errorf(l.NameSp, "BAD EFFECT ALIAS", "The effect alias `%s` cannot include itself, directly or through another alias.", surface))
+		if isRow {
+			if rowBody.Row.Tail != "" {
+				errs = append(errs, diag.Errorf(rowBody.Row.TailSp, bad, "The effect alias `%s` must be a closed row; it cannot end in the row variable `%s`.", surface, rowBody.Row.Tail))
 				return
 			}
-			if state[l.Name] == 0 {
+			if len(rowBody.Row.Labels) == 0 {
+				errs = append(errs, diag.Errorf(rowBody.Row.Sp, bad, "The effect alias `%s` must name at least one effect.", surface))
+				return
+			}
+		}
+		cyclic, blocked := false, false
+		aliasReferences(d.Body, func(name string, sp source.Span) {
+			dep := pending[name]
+			if dep == nil || cyclic || blocked {
+				return
+			}
+			if state[name] == visiting {
+				errs = append(errs, diag.Errorf(sp, bad, "The %s `%s` cannot include itself, directly or through another alias.", what, surface))
+				cyclic = true
+				return
+			}
+			if state[name] == 0 {
 				visit(dep)
 			}
-			if state[l.Name] == failed {
-				return // already reported at its own declaration
-			}
-		}
-		row, rowErrs := ck.resolveEffRow(d.Row, &TypeVars{vars: map[string]*types.TVar{}, sup: ck.Sup})
-		errs = append(errs, rowErrs...)
-		if len(rowErrs) > 0 {
+			blocked = state[name] == failed // already reported at its own declaration
+		})
+		if cyclic || blocked {
 			return
 		}
-		labels := make([]types.EffLabel, len(row.Labels))
-		for i, l := range row.Labels {
-			l.Via = nil
-			labels[i] = l
+		seen := map[string]bool{}
+		names := make([]string, len(d.Params))
+		params := make([]*types.TVar, len(d.Params))
+		for i, p := range d.Params {
+			if seen[p.Name] {
+				errs = append(errs, diag.Errorf(p.Sp, "SHADOWING", "The parameter `%s` appears twice in the alias `%s`.", p.Name, surface))
+				return
+			}
+			seen[p.Name] = true
+			names[i] = p.Name
+			params[i] = ck.Sup.FreshRigid(types.General)
+			params[i].Name = p.Name
 		}
-		ck.EffectAliases[d.Name] = &types.EffectAlias{Name: d.Name, Labels: labels}
+		scope := newCtorScope(names, params)
+		var body types.Type
+		var bodyErrs []diag.Error
+		if isRow {
+			var row types.Row
+			row, bodyErrs = ck.resolveEffRow(rowBody.Row, scope)
+			body = row
+		} else {
+			body, bodyErrs = ck.resolveTypeExpr(d.Body, scope, types.General)
+		}
+		errs = append(errs, bodyErrs...)
+		if len(bodyErrs) > 0 || body == nil {
+			return
+		}
+		used := types.RigidVarsIn(body)
+		for i, p := range params {
+			if !slices.Contains(used, p) {
+				errs = append(errs, diag.Errorf(d.Params[i].Sp, bad, "The %s `%s` never uses its parameter `%s`.", what, surface, p.Name))
+				return
+			}
+		}
+		if isRow {
+			row := body.(types.Row)
+			labels := make([]types.EffLabel, len(row.Labels))
+			for i, l := range row.Labels {
+				l.Via = nil
+				labels[i] = l
+			}
+			delete(ck.TypeAliases, d.Name)
+			ck.EffectAliases[d.Name] = &types.EffectAlias{Name: d.Name, Params: params, Labels: labels}
+		} else {
+			delete(ck.EffectAliases, d.Name)
+			ck.TypeAliases[d.Name] = &types.TypeAlias{Name: d.Name, Params: params, Body: body}
+		}
 		ok = true
 	}
 	for _, d := range decls {
@@ -391,9 +587,142 @@ func (ck *Checker) declareEffectAliases(decls []*ast.EffectAliasDecl, batch bool
 	return errs
 }
 
-// EffectAliasDecl declares one alias at the prompt, replacing an earlier one.
-func (ck *Checker) EffectAliasDecl(d *ast.EffectAliasDecl) []diag.Error {
-	return ck.declareEffectAliases([]*ast.EffectAliasDecl{d}, false)
+// AliasDecl declares one alias at the prompt, replacing an earlier one.
+func (ck *Checker) AliasDecl(d *ast.AliasDecl) []diag.Error {
+	return ck.declareAliases([]*ast.AliasDecl{d}, false)
+}
+
+// settleKinds finishes kind checking for a batch of declarations. A parameter's
+// kind comes from how it is used, but a use that passes it to a type declared
+// later, or through an alias of one, could not be read until every constructor
+// had been: `alias Run e = Job e`. So the kinds are propagated here until they
+// stop changing, and then every type the batch declared is checked against them.
+func (ck *Checker) settleKinds(adts map[*ast.TypeDecl]*types.ADTInfo, aliases []*ast.AliasDecl) []diag.Error {
+	type root struct {
+		name   string
+		sp     source.Span
+		params []*types.TVar
+		ty     types.Type
+		kind   types.VarKind
+	}
+	var roots []root
+	for td, adt := range adts {
+		for _, c := range adt.Ctors {
+			for _, f := range c.Fields {
+				roots = append(roots, root{td.Name, td.NameSpan, adt.Params, f, types.General})
+			}
+		}
+	}
+	for _, d := range aliases {
+		if alias := ck.TypeAliases[d.Name]; alias != nil {
+			roots = append(roots, root{d.Name, d.NameSpan, alias.Params, alias.Body, types.General})
+		} else if alias := ck.EffectAliases[d.Name]; alias != nil {
+			roots = append(roots, root{d.Name, d.NameSpan, alias.Params, types.Row{Labels: alias.Labels}, types.RowVar})
+		}
+	}
+	slices.SortStableFunc(roots, func(a, b root) int { return cmp.Compare(a.name, b.name) })
+	for changed := true; changed; {
+		changed = false
+		for _, r := range roots {
+			walkTypeCons(r.ty, func(con *types.TCon, adt *types.ADTInfo) {
+				for i, a := range con.Args {
+					if v, ok := a.(*types.TVar); ok && i < len(adt.Params) && adt.Params[i].Kind == types.RowVar && v.Kind != types.RowVar && slices.Contains(r.params, v) {
+						v.Kind = types.RowVar
+						changed = true
+					}
+				}
+			}, ck.ADTs)
+		}
+	}
+	var errs []diag.Error
+	reported := map[string]bool{}
+	for _, r := range roots {
+		if text := ck.kindProblem(r.ty, r.kind); text != "" && !reported[r.name] {
+			reported[r.name] = true
+			errs = append(errs, diag.Errorf(r.sp, "KIND MISMATCH", "`%s` %s", types.SurfaceName(r.name), text))
+		}
+	}
+	return errs
+}
+
+func walkTypeCons(t types.Type, visit func(*types.TCon, *types.ADTInfo), adts map[int]*types.ADTInfo) {
+	switch t := t.(type) {
+	case *types.TCon:
+		if adt := adts[t.Unique]; adt != nil {
+			visit(t, adt)
+		}
+		for _, a := range t.Args {
+			walkTypeCons(a, visit, adts)
+		}
+	case *types.TFun:
+		walkTypeCons(t.Arg, visit, adts)
+		walkTypeCons(t.Eff, visit, adts)
+		walkTypeCons(t.Ret, visit, adts)
+	case types.Row:
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				walkTypeCons(a, visit, adts)
+			}
+		}
+		if t.Tail != nil {
+			walkTypeCons(t.Tail, visit, adts)
+		}
+	}
+}
+
+// kindProblem describes where t breaks the kinds that have settled, or is empty.
+func (ck *Checker) kindProblem(t types.Type, want types.VarKind) string {
+	rowWanted := "gives an ordinary type `%s` where an effect row is needed."
+	switch t := t.(type) {
+	case *types.TVar:
+		if t.Kind != want {
+			if want == types.RowVar {
+				return fmt.Sprintf(rowWanted, types.NewPrinter().Type(t))
+			}
+			return fmt.Sprintf("uses `%s` both as an ordinary type and as an effect row.", types.NewPrinter().Type(t))
+		}
+	case *types.TCon:
+		if want == types.RowVar {
+			return fmt.Sprintf(rowWanted, types.NewPrinter().Type(t))
+		}
+		adt := ck.ADTs[t.Unique]
+		for i, a := range t.Args {
+			kind := types.General
+			if adt != nil && i < len(adt.Params) {
+				kind = adt.Params[i].Kind
+			}
+			if text := ck.kindProblem(a, kind); text != "" {
+				return text
+			}
+		}
+	case *types.TFun:
+		if want == types.RowVar {
+			return fmt.Sprintf(rowWanted, types.NewPrinter().Type(t))
+		}
+		for _, part := range []struct {
+			ty   types.Type
+			kind types.VarKind
+		}{{t.Arg, types.General}, {t.Eff, types.RowVar}, {t.Ret, types.General}} {
+			if text := ck.kindProblem(part.ty, part.kind); text != "" {
+				return text
+			}
+		}
+	case types.Row:
+		if want != types.RowVar && len(t.Labels) > 0 {
+			return fmt.Sprintf("gives the effect row `%s` where an ordinary type is needed.", types.NewPrinter().Type(t))
+		}
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				if text := ck.kindProblem(a, types.General); text != "" {
+					return text
+				}
+			}
+		}
+		if t.Tail != nil {
+			return ck.kindProblem(t.Tail, types.RowVar)
+		}
+	}
+	return ""
 }
 
 func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []diag.Error) {
@@ -408,11 +737,20 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 	seen := map[types.EffectKey]int{}
 	for _, l := range row.Labels {
 		if alias := ck.EffectAliases[l.Name]; alias != nil {
-			if len(l.Args) > 0 {
-				errs = append(errs, diag.Errorf(l.NameSp, "EFFECT ARITY", "The effect alias `%s` takes no type arguments.", types.SurfaceName(l.Name)))
+			if len(l.Args) != len(alias.Params) {
+				if len(alias.Params) == 0 {
+					errs = append(errs, diag.Errorf(l.NameSp, "EFFECT ARITY", "The effect alias `%s` takes no type arguments.", types.SurfaceName(l.Name)))
+				} else {
+					errs = append(errs, diag.Errorf(l.NameSp, "EFFECT ARITY", "`%s` takes %d type argument(s), but %d are given.", types.SurfaceName(l.Name), len(alias.Params), len(l.Args)))
+				}
 				continue
 			}
-			for _, label := range ck.expandEffectAlias(alias) {
+			aliasArgs, argErrs := ck.resolveAliasArgs(alias.Params, l.Args, tv)
+			errs = append(errs, argErrs...)
+			if aliasArgs == nil && len(alias.Params) > 0 {
+				continue
+			}
+			for _, label := range ck.expandEffectAlias(alias, aliasArgs) {
 				key := types.EffectLabelKey(label)
 				at, dup := seen[key]
 				switch {

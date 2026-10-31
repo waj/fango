@@ -1,0 +1,93 @@
+-- A type alias is its body: values of either spelling mix freely, and nothing
+-- about it survives into inference.
+alias Pair a = (a, a)
+
+alias Name = String
+
+alias Lookup k v = k -> Maybe v
+
+alias Handler e = String ->{e} Int
+
+-- Declared before what it names, and through another alias.
+alias Names = List Name
+
+-- A parameter is a row because the type it reaches through takes one.
+alias Run e = Job e
+
+type Job e = Job (() ->{e} Int)
+
+-- The nominal type breaks what would otherwise be a cycle.
+alias Forest = List Tree
+
+type Tree = Node Int Forest
+
+effect Log
+    info : String -> ()
+
+effect Fail error
+    abort fail : error -> a
+
+-- An effect alias takes parameters too, and a type alias can hold one.
+alias Risky error = {Log, Fail error}
+
+alias Attempt error a = () ->{Risky error} a
+
+swap : Pair a -> Pair a
+swap (x, y) = (y, x)
+
+greet : Name -> Names -> Names
+greet name names = [name | names]
+
+ages : Lookup Name Int
+ages name = if name == "ann" then Just 30 else Nothing
+
+weight : Tree -> Int
+weight (Node n forest) = n + List.length forest
+
+textSize : String -> Int
+textSize text = if text == "four" then 4 else 0
+
+apply : Handler {Log} -> String ->{Log} Int
+apply handler text =
+    info text
+    handler text
+
+parse : String ->{Risky String} Int
+parse text =
+    info "parsing"
+    if text == "" then fail "empty" else 1
+
+-- Performing one member answers for the alias, whichever it is.
+loud : () ->{Risky String} Int
+loud() =
+    info "only logs"
+    2
+
+-- A polymorphic argument flows through the alias to the operation.
+rethrow : e ->{Risky e} Int
+rethrow error =
+    info "rethrowing"
+    fail error
+
+attempt : Attempt String Int
+attempt() = parse ""
+
+quiet : (() ->{Log, e} a) ->{e} a
+quiet action = handle action() on
+    info _ -> resume ()
+
+recover : Attempt String Int -> Int
+recover action = handle quiet action on
+    fail _ -> -1
+
+runJob : Run {Log} ->{Log} Int
+runJob (Job action) = action()
+
+main() =
+    print "#{swap (1, 2)}"
+    print "#{greet "ann" ["bob"]}"
+    print "#{ages "ann"} #{ages "bob"}"
+    print "#{weight (Node 1 [Node 2 []])}"
+    print "#{quiet { apply textSize "four" }}"
+    print "#{recover attempt} #{recover loud} #{recover { rethrow "x" }}"
+    print "#{quiet { runJob (Job { 7 }) }}"

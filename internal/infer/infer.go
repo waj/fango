@@ -7,6 +7,7 @@ package infer
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -188,9 +189,13 @@ type Checker struct {
 	// table's embryo, exactly as Ctors is for constructors. `type`
 	// declarations and REPL generations extend it; identity stays the
 	// TCon Unique underneath.
-	TypeNames       map[string]types.Type
-	Effects         map[string]*types.EffectInfo
-	EffectAliases   map[string]*types.EffectAlias
+	TypeNames     map[string]types.Type
+	Effects       map[string]*types.EffectInfo
+	EffectAliases map[string]*types.EffectAlias
+	TypeAliases   map[string]*types.TypeAlias
+	// kindsUnsettled holds while a batch of declarations is being checked, when
+	// an alias parameter may still turn out to be a row. See settleKinds.
+	kindsUnsettled  bool
 	EffectsByUnique map[int]*types.EffectInfo
 	Operations      map[string]*types.EffectOp
 	// IO is the ambient IO effect, and is nil when the bundled IO module is
@@ -377,6 +382,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		Desugared:         map[ast.Expr]ast.Expr{},
 		Aliases:           map[string]string{},
 		EffectAliases:     map[string]*types.EffectAlias{},
+		TypeAliases:       map[string]*types.TypeAlias{},
 		Sup:               sup,
 		B:                 b,
 		Env:               env,
@@ -517,9 +523,9 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 				errs = append(errs, diag.Errorf(td.NameSpan, "MULTIPLE DEFINITIONS",
 					"The type `%s` collides with an effect of the same name.", td.Name))
 			}
-			if _, clash := ck.EffectAliases[td.Name]; clash {
+			if ck.EffectAliases[td.Name] != nil || ck.TypeAliases[td.Name] != nil {
 				errs = append(errs, diag.Errorf(td.NameSpan, "MULTIPLE DEFINITIONS",
-					"The type `%s` collides with an effect alias of the same name.", td.Name))
+					"The type `%s` collides with an alias of the same name.", td.Name))
 			}
 			// Duplicate types are a batch-compilation error only: the REPL
 			// redefines types freely (generational uniques).
@@ -534,16 +540,22 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			}
 		}
 	}
-	var aliasDecls []*ast.EffectAliasDecl
+	var aliasDecls []*ast.AliasDecl
 	for _, d := range m.Decls {
-		if ad, ok := d.(*ast.EffectAliasDecl); ok {
+		if ad, ok := d.(*ast.AliasDecl); ok {
 			aliasDecls = append(aliasDecls, ad)
 		}
 	}
-	errs = append(errs, ck.declareEffectAliases(aliasDecls, true)...)
+	ck.kindsUnsettled = true
+	errs = append(errs, ck.declareAliases(aliasDecls, true)...)
 	for _, d := range m.Decls {
 		if ed, ok := d.(*ast.EffectDecl); ok {
 			errs = append(errs, ck.declareEffectOps(ed, true)...)
+		}
+	}
+	for _, d := range aliasDecls {
+		if alias := ck.TypeAliases[d.Name]; alias != nil {
+			alias.Body = ck.withCurrentAborts(alias.Body)
 		}
 	}
 	for _, d := range m.Decls {
@@ -553,6 +565,8 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			}
 		}
 	}
+	ck.kindsUnsettled = false
+	errs = append(errs, ck.settleKinds(adts, aliasDecls)...)
 	errs = append(errs, ck.checkRegularity(adts)...)
 	// Native schemes and operator bindings are graph-wide metadata and must
 	// be available before ordinary definitions are inferred.
@@ -870,9 +884,9 @@ func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Er
 		errs = append(errs, diag.Errorf(ed.NameSpan, "MULTIPLE DEFINITIONS",
 			"The effect `%s` is defined more than once.", ed.Name))
 	}
-	if _, exists := ck.EffectAliases[ed.Name]; exists {
+	if ck.EffectAliases[ed.Name] != nil || ck.TypeAliases[ed.Name] != nil {
 		errs = append(errs, diag.Errorf(ed.NameSpan, "MULTIPLE DEFINITIONS",
-			"The effect `%s` collides with an effect alias of the same name.", ed.Name))
+			"The effect `%s` collides with an alias of the same name.", ed.Name))
 	}
 	seen := map[string]bool{}
 	params := make([]*types.TVar, len(ed.Params))
@@ -1548,10 +1562,10 @@ func (g *generator) annotationRowProblem(ann, body types.Row, sp source.Span, na
 	}
 	used := map[string]bool{}
 	for _, l := range ann.Labels {
-		if len(l.Via) > 0 && performed[l.Unique] > 0 {
+		if len(l.Via) > 0 && performed[l.Unique] > 0 && g.bodyMayPerform(l, body) {
 			performed[l.Unique]--
 			for _, via := range l.Via {
-				used[via.Name] = true
+				used[via.Key()] = true
 			}
 		}
 	}
@@ -1582,14 +1596,63 @@ func (g *generator) annotationRowProblem(ann, body types.Row, sp source.Span, na
 	seen := map[string]bool{}
 	for _, l := range ann.Labels {
 		for _, via := range l.Via {
-			if !used[via.Name] && !seen[via.Name] {
-				seen[via.Name] = true
+			if !used[via.Key()] && !seen[via.Key()] {
+				seen[via.Key()] = true
 				alias := types.SurfaceName(via.Name)
+				for _, a := range via.Args {
+					alias += " " + types.NewPrinter().Atom(a)
+				}
 				errs = append(errs, diag.Errorf(sp, "EFFECT MISMATCH", "`%s` declares `%s`, but its body performs none of its effects.\nRemove `%s` from the annotation; a function that performs fewer effects can\nstill be passed wherever a `{%s}` callback is expected.", types.SurfaceName(name), alias, alias, alias))
 			}
 		}
 	}
 	return errs
+}
+
+// bodyMayPerform reports whether a body's row can hold this application of an
+// annotation's label. The body's rows are still being inferred, so a variable in
+// one may yet become what the annotation says; only what is already known to
+// differ, as `Fail Int` does from `Fail String`, tells the two apart.
+func (g *generator) bodyMayPerform(l types.EffLabel, body types.Row) bool {
+	if len(l.Args) == 0 {
+		return true
+	}
+	return slices.ContainsFunc(body.Labels, func(b types.EffLabel) bool {
+		if b.Unique != l.Unique || len(b.Args) != len(l.Args) {
+			return false
+		}
+		for i := range b.Args {
+			if !mayMatch(g.ck.Sub.Apply(l.Args[i]), g.ck.Sub.Apply(b.Args[i])) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func mayMatch(a, b types.Type) bool {
+	if v, ok := b.(*types.TVar); ok && !v.Rigid {
+		return true
+	}
+	if v, ok := a.(*types.TVar); ok && !v.Rigid {
+		return true
+	}
+	ac, aok := a.(*types.TCon)
+	bc, bok := b.(*types.TCon)
+	if !aok || !bok {
+		_, afun := a.(*types.TFun)
+		_, bfun := b.(*types.TFun)
+		return afun && bfun || types.Equal(a, b)
+	}
+	if ac.Unique != bc.Unique || len(ac.Args) != len(bc.Args) {
+		return false
+	}
+	for i := range ac.Args {
+		if !mayMatch(ac.Args[i], bc.Args[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // closeSingleRows makes an inferred arrow pure when its open row occurs only

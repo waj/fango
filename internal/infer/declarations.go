@@ -11,7 +11,7 @@ import (
 // editing; this is the same immutability contract as ModuleState.
 func (ck *Checker) Declarations() *ModuleState {
 	return &ModuleState{Schemes: ck.Env.vars, Types: ck.TypeNames, Aliases: ck.Aliases,
-		Ctors: ck.Ctors, ADTs: ck.ADTOrder, Effects: ck.Effects, EffectAliases: ck.EffectAliases, Operations: ck.Operations,
+		Ctors: ck.Ctors, ADTs: ck.ADTOrder, Effects: ck.Effects, EffectAliases: ck.EffectAliases, TypeAliases: ck.TypeAliases, Operations: ck.Operations,
 		Classes: ck.Classes, Methods: ck.Methods, Instances: ck.Instances, Workers: ck.Workers,
 		Natives: ck.Natives, Intrinsics: ck.Intrinsics, Derivers: ck.Derivers, Captures: ck.CaptureSummaries}
 }
@@ -28,7 +28,7 @@ func (ck *Checker) ReplaceDeclarations(s *ModuleState) {
 		ck.ADTs[adt.Con.Unique] = adt
 	}
 	ck.Effects, ck.EffectsByUnique = s.Effects, map[int]*types.EffectInfo{}
-	ck.EffectAliases = s.EffectAliases
+	ck.EffectAliases, ck.TypeAliases = s.EffectAliases, s.TypeAliases
 	for _, effect := range s.Effects {
 		ck.EffectsByUnique[effect.Unique] = effect
 	}
@@ -53,6 +53,7 @@ func (ck *Checker) PromptDeclarations(modules []*ModuleState) *ModuleState {
 	s.Ctors = maps.Clone(s.Ctors)
 	s.Effects = maps.Clone(s.Effects)
 	s.EffectAliases = maps.Clone(s.EffectAliases)
+	s.TypeAliases = maps.Clone(s.TypeAliases)
 	s.Operations = maps.Clone(s.Operations)
 	s.Classes = maps.Clone(s.Classes)
 	s.Methods = maps.Clone(s.Methods)
@@ -85,6 +86,9 @@ func (ck *Checker) PromptDeclarations(modules []*ModuleState) *ModuleState {
 		}
 		for k := range m.EffectAliases {
 			delete(s.EffectAliases, k)
+		}
+		for k := range m.TypeAliases {
+			delete(s.TypeAliases, k)
 		}
 		for k := range m.Operations {
 			delete(s.Operations, k)

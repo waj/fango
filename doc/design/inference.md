@@ -46,14 +46,24 @@ Applications separate callee-shape equality from directional argument checks;
 fresh expected types and covariant ADT row arguments get their own row views.
 For bounds sharing a tail, extra permitted labels need no equality, missing
 required labels can extend a flexible tail, and rigid tails cannot gain labels.
-An effect alias has no solver identity. Annotation resolution expands it to its
-labels, each recording in `Via` the aliases it came from. Row matching ignores
-`Via`, which only the annotation comparison and the type printer read, so losing
-it on a path through the solver can print a row expanded but cannot change a
-result. It names members textually because that needs no remapping when a cached
-module is installed. The annotation comparison reads it from the annotation, not
-from inferred rows, and a label's abort flag is read at expansion because aliases
-resolve before effect operations do.
+An alias has no solver identity. Annotation resolution substitutes a type
+alias's arguments into its checked body, normalizing so a row argument joins the
+row whose tail it fills. An effect alias expands the same way to its labels, each
+recording in `Via` the alias applications it came from, with their arguments and
+members at those arguments. Substitution rewrites `Via` along with its label, so
+`App a` at a call site still reads `App Int`; an application is identified by its
+name and arguments, since `App Int` and `App String` can share a row. Row matching
+ignores `Via`, which only the annotation comparison and the type printer read, so
+losing it on a path through the solver can print a row expanded but cannot change
+a result. The annotation comparison reads it from the annotation, not from
+inferred rows. Aliases resolve before effect operations do, so a label's abort
+flag is read at expansion, and reread in type alias bodies once operations exist.
+
+Aliases also resolve before constructor fields do, so a parameter reaching a type
+declared in the same module has no known kind yet. Arguments in that position
+resolve at an unknown kind, as a recursive reference to a type does, and
+`settleKinds` then propagates row kinds through alias bodies and constructor
+fields to a fixed point and checks every declared type against the result.
 Fully resolved applications of one nominal effect are distinct labels. An
 application containing a flexible inference variable can overlap another
 occurrence, so inference unifies their arguments before deciding whether the

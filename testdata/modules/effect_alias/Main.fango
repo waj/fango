@@ -1,4 +1,4 @@
-import Server exposing (App, Action(..), Log(..), serve)
+import Server exposing (Action(..), App, Attempt, Fail(..), Log(..), Pair, Risky, serve, settle, swap)
 
 logged : () ->{App} Int
 logged() =
@@ -12,6 +12,16 @@ fromImport = Action logged
 
 run (Action action) = serve action
 
+failing : Attempt String
+failing() =
+    info "failing"
+    fail "failed"
+
+twice : Pair Int
+twice = swap (1, 2)
+
 main() =
+    print (settle failing)
+    print twice
     print (run fromImport)
     print (run (Action pureAction))

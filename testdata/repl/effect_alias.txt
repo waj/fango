@@ -23,4 +23,22 @@ still be passed wherever a `{App}` callback is expected.
 > App : effect alias
 > | | narrowed : () ->{App} ()
 > () ->{App} ()
+> | | Fail : effect
+> Risky : effect alias
+> | | risky : a ->{Risky a} Int
+> a ->{Risky a} Int
+> atString : () ->{Risky String} Int
+> () ->{Risky String} Int
+> Pair : type alias
+> | | swap : (a, a) -> (a, a)
+> (a, a) -> (a, a)
+> Pair : effect alias
+> | | -- NAMING ERROR ----------------------------------------- <repl>
+
+`Pair` is an effect alias, not a type.
+
+1| wrong : Pair
+           ^^^^
+
+Effects go on an arrow: `A ->{Pair} B`. Another alias of them is written `alias Name = {Pair}`.
 > 

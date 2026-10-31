@@ -63,6 +63,29 @@ func TestIndexAcrossModulesAndRecordFields(t *testing.T) {
 	}
 }
 
+func TestTypeAliasHover(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "Main.fango")
+	data := "module Main exposing (main)\nalias Handler e = Int ->{e} Int\nf : Handler {} -> Int\nf g = g 1\nmain() = ()\n"
+	if err := os.WriteFile(entry, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, errs, internal := (&check.Session{DisableObjectCache: true}).Compile(entry)
+	if internal != nil || len(errs) > 0 {
+		t.Fatalf("%v %v", internal, errs)
+	}
+	idx := newIndex(root, result)
+	var hover string
+	for _, sym := range idx.symbols {
+		if strings.HasPrefix(sym.typeText, "alias ") {
+			hover = sym.typeText
+		}
+	}
+	if hover != "alias Handler e = Int ->{e} Int" {
+		t.Fatalf("hover = %q", hover)
+	}
+}
+
 func TestEffectAliasNavigation(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "Main.fango")

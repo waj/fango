@@ -32,4 +32,23 @@ narrowed : () ->{App} ()
 narrowed() = info "x"
 
 :type narrowed
+effect Fail error
+    abort fail : error -> a
+
+alias Risky error = {Log, Fail error}
+risky : e ->{Risky e} Int
+risky e = fail e
+
+:type risky
+atString() = risky "x"
+:type atString
+alias Pair a = (a, a)
+swap : Pair a -> Pair a
+swap (x, y) = (y, x)
+
+:type swap
+alias Pair a = {Fail a}
+wrong : Pair
+wrong = 1
+
 :q

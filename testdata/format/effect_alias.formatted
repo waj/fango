@@ -4,3 +4,11 @@ effect Log
 alias App = {Log, Fail String}
 
 alias Web = {App}
+
+alias Risky error = {Log, Fail error}
+
+alias Pair a = (a, a)
+
+alias Handler e = String ->{e} Int
+
+alias Names = List String
