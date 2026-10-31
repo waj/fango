@@ -81,6 +81,48 @@ recursion n =
     handle sumTick n on
         tick x -> resume (x + 1)
 
+-- Shallow shapes under one activation. Deep recursion overflows the hardware
+-- return predictor and costs about the same in hand-written Go.
+repeatPure : Int -> Int -> Int
+repeatPure times acc = if times <= 0 then acc else repeatPure (times - 1) (acc + sumPure 16)
+repeatTick : Int -> Int ->{Tick} Int
+repeatTick times acc = if times <= 0 then acc else repeatTick (times - 1) (acc + sumTick 16)
+shallowPure : Int -> Int
+shallowPure times = repeatPure times 0
+shallowTick : Int -> Int
+shallowTick times =
+    handle repeatTick times 0 on
+        tick x -> resume (x + 1)
+type Tree = Leaf Int | Node Tree Tree
+tree : Int -> Tree
+tree depth = if depth <= 0 then Leaf depth else Node (tree (depth - 1)) (tree (depth - 1))
+walkPure : Tree -> Int
+walkPure t = case t of
+    Leaf x -> x + 1
+    Node l r -> 1 + walkPure l + walkPure r
+walkTick : Tree ->{Tick} Int
+walkTick t = case t of
+    Leaf x -> tick x
+    Node l r ->
+        a = tick 1
+        a + walkTick l + walkTick r
+treeTick : Tree -> Int
+treeTick t =
+    handle walkTick t on
+        tick x -> resume (x + 1)
+helper : Int ->{Tick} Int
+helper x =
+    a = tick x
+    b = if a > 1000000 then a - 1000000 else a + 1
+    c = if b < 0 then 0 - b else b
+    c + 1
+helperLoop : Int -> Int ->{Tick} Int
+helperLoop n acc = if n <= 0 then acc else helperLoop (n - 1) (helper acc)
+callHelper : Int -> Int
+callHelper n =
+    handle helperLoop n 0 on
+        tick x -> resume (x + 1)
+
 -- Library higher-order functions, with a pure then an effectful callback
 foldPure : List Int -> Int
 foldPure values = List.foldl { value total -> value + total } 0 values
@@ -204,4 +246,4 @@ attemptDeep d shouldFail =
         Ok value -> value
         Err value -> value
 
-main() = print (constructEach 1 + constructFold (input 1) + escapeOne 1 + escapeThree 1 + escapeState 1 + pure 1 + closedStateless 1 + closedStateful 1 + stdState 1 + exitWorker 1 + exitClause 1 + sumPure 1 + recursion 1 + foldPure (input 1) + foldTick (input 1) + foldThreeRow (input 1) + foldState (input 1) + mapPure (input 1) + mapTick (input 1) + openOne 1 + openThree 1 + openState 1 + installHandler 1 + installAttempt 1 + attemptDeep 1 True)
+main() = print (shallowPure 1 + shallowTick 1 + walkPure (tree 1) + treeTick (tree 1) + callHelper 1 + constructEach 1 + constructFold (input 1) + escapeOne 1 + escapeThree 1 + escapeState 1 + pure 1 + closedStateless 1 + closedStateful 1 + stdState 1 + exitWorker 1 + exitClause 1 + sumPure 1 + recursion 1 + foldPure (input 1) + foldTick (input 1) + foldThreeRow (input 1) + foldState (input 1) + mapPure (input 1) + mapTick (input 1) + openOne 1 + openThree 1 + openState 1 + installHandler 1 + installAttempt 1 + attemptDeep 1 True)

@@ -33,7 +33,7 @@ import (
 // backend agree on where the entry lands: they are compared path by path.
 type Unit struct {
 	// BodyStrategy selects a backend comparison strategy. Empty uses the
-	// compiler build's default, selective body sharing.
+	// compiler build's default, shared callback factories.
 	BodyStrategy string
 	Debug        bool
 	Name         string
@@ -175,7 +175,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit) ([]byte, error) {
 	if strategy == "" {
 		strategy = effectBodyStrategy
 	}
-	if strategy != "baseline" && strategy != "factory" && strategy != "selective" {
+	if strategy != "baseline" && strategy != "factory" {
 		return nil, fmt.Errorf("codegen: unknown effect body strategy %q", strategy)
 	}
 	lowered, err := lower.Module(p, unit.Name)
@@ -333,7 +333,6 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit) ([]byte, error) {
 		g.elideCopies(file)
 		g.splitCallbackLocals(file)
 	}
-	g.markTransportBridges(file)
 	var buf bytes.Buffer
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
 		return nil, fmt.Errorf("codegen: printing generated Go: %w", err)
@@ -369,30 +368,28 @@ func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
 }
 
 type gen struct {
-	currentWorker         string
-	canonicalExitEvidence bool
-	transportBridges      map[*goast.BlockStmt]bool
-	bodyStrategy          string
-	outlinedCallbacks     map[outlinedCallbackKey]*outlinedCallback
-	outlinedEvidence      map[goast.Expr]goast.Expr
-	rowResolved           map[rowResolvedKey]*core.Lambda
-	initializingCells     map[string]bool
-	b                     *types.Builtins
-	adts                  map[int]*types.ADTInfo
-	tmp                   int // type-switch binding counter (ts0, ts1, …)
-	usesFangort           bool
-	source                string                     // the owner's Fango file name; empty disables line directives
-	site                  source.Span                // the innermost own-file origin being emitted
-	origins               map[goast.Node]source.Span // emitted nodes attributed to a source line
-	usesMath              bool
-	descriptorNames       map[string]string
-	descriptorDecls       []goast.Decl
-	callableNames         map[string]string
-	callableDecls         []goast.Decl
-	regexNames            map[string]string
-	regexDecls            []goast.Decl
-	rowPreparation        *rowPreparation
-	forwarders            map[string]*core.Lambda
+	currentWorker     string
+	bodyStrategy      string
+	outlinedCallbacks map[outlinedCallbackKey]*outlinedCallback
+	outlinedEvidence  map[goast.Expr]goast.Expr
+	rowResolved       map[rowResolvedKey]*core.Lambda
+	initializingCells map[string]bool
+	b                 *types.Builtins
+	adts              map[int]*types.ADTInfo
+	tmp               int // type-switch binding counter (ts0, ts1, …)
+	usesFangort       bool
+	source            string                     // the owner's Fango file name; empty disables line directives
+	site              source.Span                // the innermost own-file origin being emitted
+	origins           map[goast.Node]source.Span // emitted nodes attributed to a source line
+	usesMath          bool
+	descriptorNames   map[string]string
+	descriptorDecls   []goast.Decl
+	callableNames     map[string]string
+	callableDecls     []goast.Decl
+	regexNames        map[string]string
+	regexDecls        []goast.Decl
+	rowPreparation    *rowPreparation
+	forwarders        map[string]*core.Lambda
 
 	sharedCallbacks     map[sharedCallbackKey]string
 	sharedCallbackDecls []goast.Decl
@@ -720,9 +717,6 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 	oldWorker := g.currentWorker
 	g.currentWorker = d.Name
 	defer func() { g.currentWorker = oldWorker }()
-	oldCanonical := g.canonicalExitEvidence
-	g.canonicalExitEvidence = g.bodyStrategy == "selective" && mode == types.Exit && g.shareWorkerBody(d)
-	defer func() { g.canonicalExitEvidence = oldCanonical }()
 	oldCallbacks := g.flatCallbacks
 	g.flatCallbacks = map[string]flatCallback{}
 	defer func() { g.flatCallbacks = oldCallbacks }()
@@ -789,27 +783,14 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 	// either return or jump. A `for` with no break is a terminating
 	// statement in Go, so no trailing return is needed in either result
 	// shape.
-	var body []goast.Stmt
-	bridge := g.bodyStrategy == "selective" && mode == types.Direct && abi == types.Direct && g.shareWorkerBody(d)
-	if bridge {
-		body = g.sharedWorkerBridge(d, argTys, ret, params)
-	} else {
-		finishRows := g.prepareRows()
-		body = g.loweredStmts(d, g.lowered.Functions[d.Name].Body, false, g.isUnit(ret))
-		body = finishRows(body)
-	}
+	finishRows := g.prepareRows()
+	body := finishRows(g.loweredStmts(d, g.lowered.Functions[d.Name].Body, false, g.isUnit(ret)))
 	name := g.topValueName(d.Name)
 	if abi == types.Exit {
 		name += "_exit"
 	}
 
 	decl := workerDecl(name, params, result, body).(*goast.FuncDecl)
-	if bridge {
-		if g.transportBridges == nil {
-			g.transportBridges = map[*goast.BlockStmt]bool{}
-		}
-		g.transportBridges[decl.Body] = true
-	}
 	for _, ev := range d.EffectParams {
 		g.evidence[ev.Key()] = g.evidence[ev.Key()][:len(g.evidence[ev.Key()])-1]
 		g.evidenceModes[ev.Key()] = g.evidenceModes[ev.Key()][:len(g.evidenceModes[ev.Key()])-1]
@@ -2506,7 +2487,7 @@ func (g *gen) rawEvidenceAdapter(ev core.EffectInstance, value goast.Expr, actua
 		desired.Control = types.Control{Transport: want}
 		return &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: g.effectTypeMode(desired, want).(*goast.StarExpr).X, Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}, &goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}}}}}
 	}
-	if eff := g.effects[ev.Unique]; actual == types.Exit && want == types.Direct && (g.canonicalExitEvidence || eff != nil && eff.HasAbort()) {
+	if eff := g.effects[ev.Unique]; actual == types.Exit && want == types.Direct && eff != nil && eff.HasAbort() {
 		return g.checkedDirectEvidence(ev, value)
 	}
 	if actual == want || want == types.Direct {

@@ -30,7 +30,7 @@ func TestEffectCallbackGrowthIsBounded(t *testing.T) {
 			if !ok {
 				t.Fatal(diagnostics.String())
 			}
-			for _, strategy := range []string{"baseline", "factory", "selective"} {
+			for _, strategy := range []string{"baseline", "factory"} {
 				var units []codegen.Unit
 				for _, unit := range result.Graph.Units {
 					units = append(units, codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source, BodyStrategy: strategy})
@@ -44,12 +44,8 @@ func TestEffectCallbackGrowthIsBounded(t *testing.T) {
 				if strategy == "baseline" {
 					continue
 				}
-				limit := 2
-				if strategy == "selective" && depth == 0 {
-					limit = 1
-				}
-				if count < 1 || count > limit {
-					t.Errorf("%s: %d bodies, limit %d", strategy, count, limit)
+				if count < 1 || count > 2 {
+					t.Errorf("%s: %d bodies, limit 2", strategy, count)
 				}
 			}
 		})

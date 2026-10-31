@@ -14,7 +14,7 @@ import (
 
 // The linker override retains comparison controls without adding a source-language
 // or command-line option. Compiler build IDs isolate their cache namespaces.
-var effectBodyStrategy = "selective"
+var effectBodyStrategy = "factory"
 
 type outlinedCallbackKey struct {
 	lambda *core.Lambda

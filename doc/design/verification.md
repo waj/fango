@@ -215,9 +215,8 @@ and stored baselines were left intact.
 ### Effect body sharing comparison
 
 [`benchmarks/effectcompare/compare.py`](../../benchmarks/effectcompare/compare.py)
-compares the original `baseline` emitter with the default `selective` strategy
-for [bounded effect bodies](lowering.md#bounded-effect-bodies). The optional
-`factory` control shares callbacks but keeps both named-worker implementations.
+compares the original `baseline` emitter with the default `factory` strategy
+for [bounded effect bodies](lowering.md#bounded-effect-bodies).
 Select controls with Go's
 `-X github.com/waj/fango/internal/codegen.effectBodyStrategy=…` linker option;
 compiler build IDs isolate their cache namespaces. An explicit codegen unit
@@ -239,8 +238,7 @@ On an idle host, from the Nix development shell:
 python3 benchmarks/effectcompare/compare.py --out /tmp/fango-effects --runs 7
 ```
 
-The destination must be new. `--variants baseline factory selective` includes the
-factory-only control. `--prepare-only` builds and validates without timing runtime;
+The destination must be new. `--prepare-only` builds and validates without timing runtime;
 `--measure-only` measures an existing prepared directory. Generated Go, compiler
 binaries, raw samples, and `report.json` remain there. The harness measures
 uncached checking/emission, initial Go compilation with the host's Go cache,
@@ -260,25 +258,18 @@ full improvement over an older runtime. Reject repeatable regressions above five
 percent and preserve existing allocation guarantees. Report variability; a median
 alone does not establish a repeatable regression.
 
-The 2026-10-14 comparison on an Apple M5 Max, macOS arm64, Go 1.26.7 used
-seven rotating samples at 500 ms per benchmark. At six callback nesting levels,
-the marker body fell from 128 copies to two and entry source from 125,079 to
-9,143 bytes. The nonnested generic worker's body fell from two copies to one.
-On the combined workload, entry Go fell from 935,273 to 695,513 bytes (25.6%);
-dependency Go grew from 2,132,604 to 2,149,221 bytes, leaving total generated Go
-7.3% smaller. Median uncached emission fell from 0.770 to 0.654 seconds.
-The executable grew from 5,283,122 to 5,503,266 bytes (4.2%); source sharing does
-not guarantee smaller Go machine code.
-
-State, Console, folds, and JSON median runtime changes were +0.4%, +1.6%, +2.2%,
-and +1.6%; successful/aborting resumptive handlers were 4.9%/2.9% faster.
-Cleanup's initial +5.1% and Async's +4.7% were checked with seven further
-alternating one-second samples: +1.7% and +3.6%, respectively. No regression
-above five percent repeated. Fold and cleanup allocations remained zero; State,
-Console, and resumptive-handler counts were unchanged. Async added about 66
-allocations per 64-task run, and the 10 MB JSON decode added one allocation.
-These are same-host observations, not portable timing guarantees. The full
-`make ci` gate passed with selective sharing as the default.
+A 2026-10-31 comparison on an Apple M5 Max, macOS arm64, Go 1.26.7, seven rotating
+samples at 300 ms each, retired an additional strategy that routed each Direct
+worker through its Exit body. Against it, separate bodies stayed within 1.6% on
+every workload with identical allocations, generated 0.4% more Go, and the
+executable grew by 448 bytes. A program of 400 effectful non-higher-order workers
+generated 15% more Go, built in the same time, and linked 5% smaller. Shapes like
+the recursive and helper probes in [`realistic.fango`](../../benchmarks/effectscale/realistic.fango)
+ran faster: shallow recursion 1.55 to 1.22 ns per frame, a tree walk 1.92 to 1.52 ns
+per node, and a helper in a loop 2.48 to 1.18 ns per call. Recursion deep
+enough to overflow the return predictor gains less, since it costs about 4 ns per
+Go call even in hand-written Go. These are same-host observations, not portable
+timing guarantees.
 
 ### Effect handler comparison
 

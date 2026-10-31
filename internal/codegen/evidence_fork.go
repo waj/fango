@@ -178,7 +178,7 @@ func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual 
 	typ := g.effectTypeMode(desired, actual)
 	effect := g.effects[ev.Unique]
 	abort := effect != nil && effect.HasAbort()
-	bothViews := actual == types.Direct || abort || g.canonicalExitEvidence
+	bothViews := actual == types.Direct || abort
 	// Keep the typed records and binding in one allocation. Interior pointers
 	// retain the same immutable family identity without separate heap objects.
 	fields := []*goast.Field{

@@ -1,7 +1,6 @@
 package fangort
 
 import (
-	"runtime"
 	"testing"
 )
 
@@ -49,17 +48,6 @@ func TestDemangle(t *testing.T) {
 		if ok != tc.ok || (ok && symbol.String() != tc.want) {
 			t.Errorf("Demangle(%q) = %q, %v; want %q, %v", tc.goFunction, symbol.String(), ok, tc.want, tc.ok)
 		}
-	}
-}
-
-func TestTransportBridgeIsNotASourceFrame(t *testing.T) {
-	frame := runtime.Frame{Function: "main.V_Main_dot_compute", File: TransportBridgeFile, Line: 1}
-	if _, ok := fangoFrame(frame); ok {
-		t.Fatal("synthetic transport frame was exposed")
-	}
-	frame.File = "Main.fango"
-	if _, ok := fangoFrame(frame); !ok {
-		t.Fatal("source frame was hidden")
 	}
 }
 

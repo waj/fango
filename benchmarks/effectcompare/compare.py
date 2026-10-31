@@ -22,8 +22,8 @@ def main():
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--benchtime", default="300ms")
     parser.add_argument("--bytes", type=int, default=10_000_000)
-    parser.add_argument("--variants", nargs="+", choices=("baseline", "factory", "selective"),
-                        default=["baseline", "selective"])
+    parser.add_argument("--variants", nargs="+", choices=("baseline", "factory"),
+                        default=["baseline", "factory"])
     parser.add_argument("--prepare-only", action="store_true", help="build and check without timing runtime")
     parser.add_argument("--measure-only", action="store_true", help="time already prepared binaries on an idle host")
     args = parser.parse_args()
@@ -65,7 +65,7 @@ def main():
                         log=out / "growth.log")
         report["nesting"] = [
             {"variant":variant, "depth":int(depth), "bodies":int(bodies), "entry_bytes":int(size)}
-            for variant, depth, bodies, size in re.findall(r"(baseline|factory|selective): depth=(\d+) bodies=(\d+) entryBytes=(\d+)", growth)
+            for variant, depth, bodies, size in re.findall(r"(baseline|factory): depth=(\d+) bodies=(\d+) entryBytes=(\d+)", growth)
         ]
         run(["python3", str(root / "benchmarks/jsoncompare/generate.py"),
              "--bytes", str(args.bytes), "--output", str(out / "orders.json")], log=out / "input.log")

@@ -35,10 +35,6 @@ const TracebackVariable = "FANGO_TRACEBACK"
 
 const nativePackagePrefix = "fangobuild/native/"
 
-// TransportBridgeFile identifies compiler-only ABI adapters in Go line tables.
-// Their calls are not additional source-language stack frames.
-const TransportBridgeFile = "<fango-transport>"
-
 // Capture walks the calling goroutine's stack and keeps the frames that
 // belong to Fango code, innermost first, skipping the innermost `skip` Fango
 // frames. Consecutive frames with the same function and line collapse into
@@ -83,9 +79,6 @@ func symbolizeStack(pcs []uintptr) []Frame {
 }
 
 func fangoFrame(frame runtime.Frame) (Frame, bool) {
-	if frame.File == TransportBridgeFile {
-		return Frame{}, false
-	}
 	if symbol, ok := Demangle(frame.Function); ok {
 		return Frame{Function: symbol.String(), File: frame.File, Line: frame.Line}, true
 	}

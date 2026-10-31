@@ -110,14 +110,11 @@ inlining even with zero allocations.
 
 ## Bounded effect bodies
 
-The backend shares ordinary transport-polymorphic workers through one Exit
-implementation and a checked Direct entry. Direct callers prove normal completion;
-the entry projects the result with `RequireNormal`. Module exports retain both
-signatures, so this is an owner-local choice with no downstream specialization.
-Eligible workers have more than eight Core expression nodes, no function-typed
-parameters, and no self-tail loop. Tiny forwarders, loops, and higher-order workers
-retain separate bodies: their Direct specialization avoids repeated adapters,
-and a bridge can be larger than a small operation forwarder.
+A transport-polymorphic worker emits a Direct and an Exit body. Routing Direct
+callers through the Exit body would save little Go source and no executable size,
+since the linker drops whichever member a program does not call, while each call
+would pay a checked entry and each operation an evidence adapter. Multiplication
+under nesting comes from callbacks, which are bounded below.
 
 General callbacks use module-local closure factories keyed by source lambda and
 transport. A factory contains the actual closure body; constructing a callback
@@ -138,15 +135,14 @@ evidence uses its linked Exit pointer as a canonical family reference; each body
 selects the appropriate view without specializing on combinations of captured
 handler modes. Invocation-time evidence remains an argument. Recursive bindings
 capture their typed cell and read its assigned value on invocation, preserving
-recursive initialization. Handler activations installed inside a shared Exit
-worker supply a checked Direct view where selected Direct callbacks need one;
-other Exit activations keep their existing representation.
+recursive initialization. Abort-capable activations installed in an Exit context
+supply a checked Direct view where selected Direct callbacks need one; other Exit
+activations keep their existing representation.
 
-Factory names retain the containing Fango function for source traces. Compiler-only
-worker bridges have a private line-table marker and are omitted from those traces.
+Factory names retain the containing Fango function for source traces.
 Debug and optimization-disabled emission retain literal bodies. The
 [comparison harness](verification.md#effect-body-sharing-comparison) retains the
-original emitter and a factory-only control for performance checks.
+original emitter for performance checks.
 
 ## Exit results
 

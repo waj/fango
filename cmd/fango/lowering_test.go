@@ -211,12 +211,8 @@ func TestClosedAsyncCallbackBodyIsShared(t *testing.T) {
 	testLoweringAgreement(t, "async_callback_sharing_io")
 }
 
-func TestEffectBodyStrategiesAgree(t *testing.T) {
-	for _, strategy := range []string{"factory", "selective"} {
-		t.Run(strategy, func(t *testing.T) {
-			testLoweringStrategies(t, "async_callback_sharing", strategy)
-		})
-	}
+func TestEffectBodyStrategyAgrees(t *testing.T) {
+	testLoweringStrategies(t, "async_callback_sharing", "factory")
 }
 
 func testLoweringAgreement(t *testing.T, stem string) {
