@@ -46,7 +46,7 @@ install-lib:
 # Go unit tests and compiled Fango integration tests. Interpreter/compiler
 # comparisons are added by ci; interpreter-specific Go unit tests still run.
 test:
-	FANGO_TEST_BACKENDS=compiled go test -parallel 16 $$(go list ./... | grep -v benchmarks)
+	FANGO_TEST_BACKENDS=compiled go test -parallel 16 $$(go list ./... | grep -v benchmarks) ./benchmarks/effectscale
 
 # The compatible language/library cases and documentation examples share one
 # compiled executable. CI also executes it through the interpreter.
@@ -106,7 +106,7 @@ ci: check-files
 	test -z "$$(gofmt -l .)"
 	go run ./cmd/fango fmt -l $(FANGO_SOURCES)
 	go vet ./...
-	FANGO_TEST_BACKENDS=both go test -parallel 16 $$(go list ./... | grep -v benchmarks)
+	FANGO_TEST_BACKENDS=both go test -parallel 16 $$(go list ./... | grep -v benchmarks) ./benchmarks/effectscale
 
 clean:
 	rm -f fango

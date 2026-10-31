@@ -280,6 +280,20 @@ allocations per 64-task run, and the 10 MB JSON decode added one allocation.
 These are same-host observations, not portable timing guarantees. The full
 `make ci` gate passed with selective sharing as the default.
 
+### Effect handler comparison
+
+```sh
+nix develop -c go run ./benchmarks/effectscale -out /tmp/fango-effect-evidence
+```
+
+The opt-in command measures handler-count and operation-count scaling, separates
+activation/setup from steady-state calls and residual-row lookup, and records
+fresh-cache, warm, and changed-source build costs. It supports alternating Git
+revision comparisons and comparisons with saved evidence. Workload definitions,
+cache boundaries, output artifacts, and interpretation are in
+[effect handler performance](effect-performance.md). Its generated-program smoke
+tests check checksums and build-cache modes without elapsed-time thresholds.
+
 ### Typed JSON comparison
 
 [Typed JSON comparison](json-performance.md) documents the opt-in 10 MB

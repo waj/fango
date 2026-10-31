@@ -375,6 +375,7 @@ type gen struct {
 	bodyStrategy          string
 	outlinedCallbacks     map[outlinedCallbackKey]*outlinedCallback
 	outlinedEvidence      map[goast.Expr]goast.Expr
+	rowResolved           map[rowResolvedKey]*core.Lambda
 	initializingCells     map[string]bool
 	b                     *types.Builtins
 	adts                  map[int]*types.ADTInfo
@@ -949,7 +950,7 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 		if i < len(formal) && g.isUnit(formal[i]) {
 			continue
 		}
-		args = append(args, g.workerArgument(g.defs[ref.Name], i, a, mode))
+		args = append(args, g.workerArgument(g.defs[ref.Name], i, a, e.Row, mode))
 	}
 	return exprStmt(g.markExpr(callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...)))
 }
@@ -1715,7 +1716,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			}
 			continue
 		}
-		args = append(args, g.workerArgument(g.defs[ref.Name], i, a, mode))
+		args = append(args, g.workerArgument(g.defs[ref.Name], i, a, e.Row, mode))
 	}
 	if needPrelude {
 		var body []goast.Stmt
@@ -1727,7 +1728,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			}
 			name := fmt.Sprintf("t_u%d", g.tmp)
 			g.tmp++
-			body = append(body, varDeclStmt(name, g.workerArgumentType(g.defs[ref.Name], i, a.Type(), mode), g.workerArgument(g.defs[ref.Name], i, a, mode)))
+			body = append(body, varDeclStmt(name, g.workerArgumentType(g.defs[ref.Name], i, a.Type(), mode), g.workerArgument(g.defs[ref.Name], i, a, e.Row, mode)))
 			args = append(args, ident(name))
 		}
 		call := g.markExpr(callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...))

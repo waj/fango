@@ -194,13 +194,39 @@ func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual 
 		otherInstance.Control = types.Control{Transport: other}
 		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Other")}, Type: g.effectTypeMode(otherInstance, other).(*goast.StarExpr).X})
 	}
-	storageType := &goast.StructType{Fields: &goast.FieldList{List: fields}}
 	literal := value.(*goast.UnaryExpr).X.(*goast.CompositeLit)
+	// An origin this activation constructs shares the allocation too.
+	var originStorage goast.Expr
+	var elts []goast.Expr
+	for _, elt := range literal.Elts {
+		kv, isField := elt.(*goast.KeyValueExpr)
+		if isField {
+			if key, ok := kv.Key.(*goast.Ident); ok && key.Name == "Origin" {
+				if fresh, ok := kv.Value.(*goast.UnaryExpr); ok {
+					originStorage = fresh.X
+					continue
+				}
+			}
+		}
+		elts = append(elts, elt)
+	}
+	if originStorage != nil {
+		copied := *literal
+		copied.Elts = elts
+		literal = &copied
+		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("OriginValue")}, Type: selector("fangort", "EvidenceOrigin")})
+	}
+	storageType := &goast.StructType{Fields: &goast.FieldList{List: fields}}
 	body := []goast.Stmt{
 		varDeclStmt(storage, &goast.StarExpr{X: storageType}, &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: storageType, Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Own"), Value: literal},
 		}}}),
 		varDeclStmt(name, typ, &goast.UnaryExpr{Op: gotoken.AND, X: selector(storage, "Own")}),
+	}
+	if originStorage != nil {
+		body = append(body,
+			&goast.AssignStmt{Lhs: []goast.Expr{selector(storage, "OriginValue")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{originStorage}},
+			&goast.AssignStmt{Lhs: []goast.Expr{selector(name, "Origin")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{&goast.UnaryExpr{Op: gotoken.AND, X: selector(storage, "OriginValue")}}})
 	}
 	var direct, exit goast.Expr = ident("nil"), own
 	if bothViews {

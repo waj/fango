@@ -53,7 +53,7 @@ func (g *gen) tailJumpStmts(d *core.Def, e *core.App) []goast.Stmt {
 			}
 			name := fmt.Sprintf("t_u%d", g.tmp)
 			g.tmp++
-			stmts = append(stmts, varDeclStmt(name, g.workerArgumentType(d, i, a.Type(), g.control), g.workerArgument(d, i, a, g.control)))
+			stmts = append(stmts, varDeclStmt(name, g.workerArgumentType(d, i, a.Type(), g.control), g.workerArgument(d, i, a, nil, g.control)))
 			lhs, rhs = append(lhs, ident(mangleValue(param))), append(rhs, ident(name))
 			continue
 		}
@@ -61,7 +61,7 @@ func (g *gen) tailJumpStmts(d *core.Def, e *core.App) []goast.Stmt {
 		if param != "_" {
 			target = mangleValue(param)
 		}
-		lhs, rhs = append(lhs, ident(target)), append(rhs, g.workerArgument(d, i, a, g.control))
+		lhs, rhs = append(lhs, ident(target)), append(rhs, g.workerArgument(d, i, a, nil, g.control))
 	}
 	if len(lhs) > 0 {
 		assign := &goast.AssignStmt{Lhs: lhs, Tok: gotoken.ASSIGN, Rhs: rhs}

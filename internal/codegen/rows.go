@@ -113,9 +113,14 @@ func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
 func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode types.Transport) goast.Expr {
 	desired := ev
 	desired.Control = types.Control{Transport: mode}
-	args := []goast.Expr{row, stringLit(ev.Name), selector("fangort", memberName(mode)+"Evidence")}
-	args = append(args, g.typeDescriptorArgs(ev.Args)...)
-	return callExpr(indexExpr(selector("fangort", "ValueEvidence"), []goast.Expr{g.effectTypeMode(desired, mode)}), args...)
+	lookup := "RowBinding"
+	args := []goast.Expr{row, stringLit(ev.Name)}
+	if descriptors := g.typeDescriptorArgs(ev.Args); len(descriptors) > 0 {
+		lookup = "AppliedRowBinding"
+		args = append(args, descriptors...)
+	}
+	family := &goast.SelectorExpr{X: callExpr(selector("fangort", lookup), args...), Sel: ident("Family")}
+	return &goast.TypeAssertExpr{X: &goast.SelectorExpr{X: family, Sel: ident(memberName(mode))}, Type: g.effectTypeMode(desired, mode)}
 }
 
 func (g *gen) bindDeferredEffects(effects []core.EffectInstance, row goast.Expr, mode types.Transport) func() {

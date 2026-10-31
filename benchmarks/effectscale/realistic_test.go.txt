@@ -1,0 +1,66 @@
+package main
+
+import (
+	"fmt"
+	"testing"
+)
+
+var sink int64
+
+type cell struct{ op func(int64) int64 }
+
+//go:noinline
+func goClosure(n int64) int64 {
+	var current int64
+	ev := &cell{op: func(x int64) int64 { r := x + current + 1; current++; return r }}
+	x := int64(0)
+	for ; n > 0; n-- {
+		x = ev.op(x)
+	}
+	return x
+}
+
+func step(b *testing.B, name string, n int64, f func() int64) {
+	b.Run(fmt.Sprintf("%s/n=%d", name, n), func(b *testing.B) {
+		for b.Loop() {
+			sink = f()
+		}
+	})
+}
+
+func BenchmarkAll(b *testing.B) {
+	const N = 100000
+	const L = 10000
+	values := V_input(L)
+	step(b, "control-go-closure", N, func() int64 { return goClosure(N) })
+	step(b, "control-pure-loop", N, func() int64 { return V_pure(N) })
+	step(b, "closed-stateless", N, func() int64 { return V_closedStateless(N) })
+	step(b, "closed-stateful", N, func() int64 { return V_closedStateful(N) })
+	step(b, "closed-stdlib-state-2ops", N, func() int64 { return V_stdState(N) })
+	step(b, "exit-worker", N, func() int64 { return V_exitWorker(N) })
+	step(b, "exit-clause", N, func() int64 { return V_exitClause(N) })
+	step(b, "recursion-pure", L, func() int64 { return V_sumPure(L) })
+	step(b, "recursion-tick", L, func() int64 { return V_recursion(L) })
+	step(b, "foldl-pure", L, func() int64 { return V_foldPure(values) })
+	step(b, "foldl-tick-row1", L, func() int64 { return V_foldTick(values) })
+	step(b, "foldl-tick-row3", L, func() int64 { return V_foldThreeRow(values) })
+	step(b, "foldl-stdlib-state-2ops", L, func() int64 { return V_foldState(values) })
+	step(b, "map-pure", L, func() int64 { return V_mapPure(values) })
+	step(b, "map-tick", L, func() int64 { return V_mapTick(values) })
+	step(b, "open-callback-row1", N, func() int64 { return V_openOne(N) })
+	step(b, "open-callback-row3", N, func() int64 { return V_openThree(N) })
+	step(b, "open-stdlib-state-2ops", N, func() int64 { return V_openState(N) })
+	step(b, "escape-row1", N, func() int64 { return V_escapeOne(N) })
+	step(b, "escape-row3", N, func() int64 { return V_escapeThree(N) })
+	step(b, "escape-stdlib-state-2ops", N, func() int64 { return V_escapeState(N) })
+	short := V_input(1)
+	step(b, "construct-each", L, func() int64 { return V_constructEach(L) })
+	step(b, "construct-fold", L, func() int64 { return V_constructFold(short) })
+	step(b, "install-handler", L, func() int64 { return V_installHandler(L) })
+	step(b, "install-attempt", L, func() int64 { return V_installAttempt(L) })
+	for _, d := range []int64{0, 10, 100, 1000} {
+		d := d
+		step(b, fmt.Sprintf("attempt-ok-depth%d", d), 1, func() int64 { return V_attemptDeep(d, false) })
+		step(b, fmt.Sprintf("abort-depth%d", d), 1, func() int64 { return V_attemptDeep(d, true) })
+	}
+}

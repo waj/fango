@@ -97,11 +97,14 @@ type ABISummary struct {
 // CallbackABI describes a parameter consumed only by saturated calls or by
 // forwarding to an equally restricted parameter. Arity zero retains the
 // general value ABI. DirectUses and ExitUses record demanded members in each worker
-// execution context: bit 0 is Direct and bit 1 is Exit.
+// execution context: bit 0 is Direct and bit 1 is Exit. ForwardsRow means every
+// invocation receives the worker's own residual row without an overlay, so a
+// caller's row argument is the row the callback will see.
 type CallbackABI struct {
-	Arity      int
-	DirectUses uint8
-	ExitUses   uint8
+	Arity       int
+	DirectUses  uint8
+	ExitUses    uint8
+	ForwardsRow bool
 }
 
 func (c CallbackABI) Mode(context types.Transport) (types.Transport, bool) {

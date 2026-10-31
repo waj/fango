@@ -152,6 +152,16 @@ callbacks. Either must keep obligations replayed at every cached return, as
 today. This stage begins with a design and a measurement of how many contexts
 the sharing key would actually fold.
 
+### CL6 Row solving under nested handlers
+
+Checking grows close to cubically with nested handlers: one function nesting 64
+takes about 1.4 seconds and one nesting 32 about 0.2, while eight are negligible.
+Each constraint applies the substitution to whole rows, and `Solve`'s trial
+unification rebuilds applied-effect keys in `unifyRows` and `includeRows`. Sorting
+already avoids building order keys. Avoid re-substituting rows a binding cannot
+have changed, and compare applications without building their keys. Realistic
+nesting is shallow, so measure a program that reaches this before investing here.
+
 ### Dependencies
 
 | Stage | Depends on | Documentation |

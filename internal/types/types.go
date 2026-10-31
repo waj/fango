@@ -8,7 +8,6 @@ package types
 import (
 	"github.com/waj/fango/internal/source"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -230,8 +229,20 @@ func (r Row) Empty() bool { return len(r.Labels) == 0 && r.Tail == nil }
 // SortedRow returns a deterministic copy in EffectOrder.
 func SortedRow(r Row) Row {
 	labels := append([]EffLabel(nil), r.Labels...)
-	sort.Slice(labels, func(i, j int) bool { return EffectLabelOrder(labels[i]) < EffectLabelOrder(labels[j]) })
+	if !slices.IsSortedFunc(labels, compareEffectLabels) {
+		slices.SortFunc(labels, compareEffectLabels)
+	}
 	return Row{Labels: labels, Tail: r.Tail}
+}
+
+// compareEffectLabels agrees with EffectOrder, which begins with the name and a
+// terminator. Rows are mostly sorted already and their names mostly differ, so
+// building the full order is left to the applications of one effect.
+func compareEffectLabels(a, b EffLabel) int {
+	if a.Name != b.Name {
+		return strings.Compare(a.Name, b.Name)
+	}
+	return strings.Compare(string(EffectLabelOrder(a)), string(EffectLabelOrder(b)))
 }
 
 // Scheme is a ∀-quantified type and its compiler-only capture summary.

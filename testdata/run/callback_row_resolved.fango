@@ -1,0 +1,172 @@
+import Async
+import Fail
+import List
+import Result exposing (Result(..))
+import State
+
+-- Row effects of a callback literal bind where its row argument is built, when
+-- the worker forwards that row. Each case below could observe a wrong binding.
+
+effect Tick
+    tick : Int -> Int
+
+effect Other
+    other : Int -> Int
+
+each : (Int ->{e} Int) -> Int -> Int ->{e} Int
+each action n x = if n <= 0 then x else each action (n - 1) (action x)
+
+-- The worker's own handler of an unrelated effect overlays the row.
+underOther : (Int ->{e} Int) -> Int ->{e} Int
+underOther action x =
+    handle action x on
+        other y -> resume (y + 7)
+
+-- The callback escapes the worker into a returned closure.
+wrap : (Int ->{e} Int) -> Int ->{e} Int
+wrap action = { x -> action x + 1 }
+
+-- A forwarding worker keeps the contract across its own call.
+relay : (Int ->{e} Int) -> Int ->{e} Int
+relay action x = each action 2 x
+
+-- The callback has an explicit label its runner supplies, beside the row.
+withTick : (() ->{Tick, e} Int) ->{e} Int
+withTick action =
+    handle action () on
+        tick x -> resume (x + 1000)
+
+nested : Int
+nested =
+    handle
+        handle each { x -> tick x } 1 0 on
+            tick x -> resume (x + 10)
+    on
+        tick x -> resume (x + 100)
+
+-- The binding is outside the inner handler and used inside it.
+aliasedInner : Int
+aliasedInner =
+    handle
+        f = { x -> tick x }
+        handle each f 1 0 on
+            tick x -> resume (x + 10)
+    on
+        tick x -> resume (x + 100)
+
+-- The same callback literal is passed under two different handlers.
+twoActivations : (Int, Int)
+twoActivations =
+    twice = { n ->
+        handle each { x -> tick x } n 0 on
+            tick x -> resume (x + n)
+    }
+    (twice 2, twice 3)
+
+escaped : Int
+escaped =
+    handle
+        f = wrap { x -> tick x }
+        handle f 1 on
+            tick x -> resume (x + 10)
+    on
+        tick x -> resume (x + 100)
+
+unrelatedOverlay : Int
+unrelatedOverlay =
+    handle underOther { x -> tick x } 1 on
+        tick x -> resume (x + 10)
+
+-- The overlaid effect itself is performed by the callback.
+overlaidEffect : Int
+overlaidEffect =
+    handle
+        handle each { x -> other (tick x) } 2 0 on
+            tick x -> resume (x + 1)
+    on
+        other x -> resume (x * 2)
+
+relayed : Int
+relayed =
+    handle relay { x -> tick x } 1 on
+        tick x -> resume (x + 10)
+
+runner : Int
+runner =
+    handle withTick { each { x -> tick x } 1 0 } on
+        tick x -> resume (x + 10)
+
+-- A stateful clause sees updates from every invocation, in order.
+stateful : Int
+stateful =
+    handle each { x -> tick x } 4 0 with current = 1 on
+        tick x -> resume (x + current) with current * 2
+
+folded : Int
+folded =
+    handle List.foldl { value total -> tick value + total } 0 [1, 2, 3] on
+        tick x -> resume (x * 10)
+
+mapped : List Int
+mapped =
+    handle List.map { value -> tick value } [1, 2, 3] on
+        tick x -> resume (x + 1)
+
+-- Nested literals resolve through the outer literal's own binding.
+nestedLiterals : Int
+nestedLiterals =
+    handle
+        List.foldl { value total -> total + List.foldl { inner sum -> tick inner + sum } 0 [value] } 0 [1, 2]
+    on
+        tick x -> resume (x + 5)
+
+standardState : Int
+standardState = (State.run 1 { each { x -> State.put (State.get() + x); x + 1 } 3 0 }).state
+
+-- An abort from the callback, through the same worker.
+aborted : Result Int Int
+aborted =
+    Fail.attempt {
+        handle each { x -> if x > 12 then Fail.fail x else tick x } 5 0 on
+            tick x -> resume (x + 10)
+    }
+
+abortCaught : Int
+abortCaught =
+    handle
+        case Fail.attempt { each { x -> if x > 12 then Fail.fail x else tick x } 5 0 } of
+            Ok value -> value
+            Err value -> value + 1000
+    on
+        tick x -> resume (x + 10)
+
+-- A child task inherits the handler while a nested literal uses it.
+inherited : () ->{IO} Int
+inherited() =
+    handle
+        case Async.runOutcome {
+            task = Async.spawn { List.foldl { value total -> tick value + total } 0 [1, 2, 3] }
+            Async.await task
+        } of
+            Async.Completed value -> value
+            Async.Cancelled -> -1
+    on
+        tick x -> resume (x + 1)
+
+main() =
+    print nested
+    print aliasedInner
+    print twoActivations
+    print escaped
+    print unrelatedOverlay
+    print overlaidEffect
+    print relayed
+    print runner
+    print stateful
+    print folded
+    print mapped
+    print nestedLiterals
+    print standardState
+    print aborted
+    print abortCaught
+    print inherited()

@@ -229,7 +229,7 @@ func Dump(p *Program, order []core.Def) string {
 		fmt.Fprintf(&b, "%s: %s loop=%t\n", d.Name, core.ControlName(d.Control), f.Loop)
 		for i, c := range d.ABI.Callbacks {
 			if c.Arity != 0 {
-				fmt.Fprintf(&b, "  %s: arity=%d direct=%d exit=%d\n", d.Params[i], c.Arity, c.DirectUses, c.ExitUses)
+				fmt.Fprintf(&b, "  %s: arity=%d direct=%d exit=%d forwardsRow=%t\n", d.Params[i], c.Arity, c.DirectUses, c.ExitUses, c.ForwardsRow)
 			}
 		}
 		var walk func(Block, string)

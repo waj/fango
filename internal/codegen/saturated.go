@@ -4,10 +4,16 @@ import (
 	"fmt"
 	goast "go/ast"
 	"maps"
+	"strings"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
 )
+
+type rowResolvedKey struct {
+	lambda *core.Lambda
+	bound  string
+}
 
 type flatCallback struct {
 	arity int
@@ -46,14 +52,14 @@ func (g *gen) workerArgumentType(d *core.Def, index int, t types.Type, mode type
 	return g.goType(t)
 }
 
-func (g *gen) workerArgument(d *core.Def, index int, e core.Expr, context types.Transport) goast.Expr {
+func (g *gen) workerArgument(d *core.Def, index int, e core.Expr, row *core.RowArgument, context types.Transport) goast.Expr {
 	c, mode, ok := g.callbackContract(d, index, context)
 	if !ok {
 		return g.expr(e, 0)
 	}
 	if ref, ok := e.(*core.VarRef); ok && ref.Local {
 		if lam := g.forwarders[ref.Name]; lam != nil {
-			if value, ok := g.saturatedLambda(lam, c.Arity, mode); ok {
+			if value, ok := g.rowResolvedCallback(lam, e.Type(), c, row, mode); ok {
 				return value
 			}
 			panic("codegen: restricted local callback cannot be materialized")
@@ -66,7 +72,7 @@ func (g *gen) workerArgument(d *core.Def, index int, e core.Expr, context types.
 		}
 	}
 	if lam, ok := e.(*core.Lambda); ok {
-		if value, ok := g.saturatedLambda(lam, c.Arity, mode); ok {
+		if value, ok := g.rowResolvedCallback(lam, e.Type(), c, row, mode); ok {
 			return value
 		}
 	}
@@ -104,6 +110,101 @@ func (g *gen) workerArgument(d *core.Def, index int, e core.Expr, context types.
 		g.markOutcomeCall(call.(*goast.CallExpr), g.goType(ret))
 	}
 	return callExpr(funcLitParams([]paramSpec{{name: name, typ: g.goType(e.Type())}}, g.flatCallbackType(e.Type(), c.Arity, mode), []goast.Stmt{returnStmt(adapter)}), value)
+}
+
+// rowResolvedCallback emits a callback literal whose row effects are bound where
+// its row is built. The worker hands that row on unchanged, so the activation a
+// body would find at invocation is already known here: an effect the argument
+// overlays is lexical evidence, and one the row forwards is projected once as
+// the literal is constructed rather than on every invocation. Evidence the
+// selected transport cannot call stays deferred.
+func (g *gen) rowResolvedCallback(lam *core.Lambda, t types.Type, c core.CallbackABI, row *core.RowArgument, mode types.Transport) (goast.Expr, bool) {
+	if !c.ForwardsRow || row == nil || g.disableOptimizations {
+		return g.saturatedLambda(lam, c.Arity, mode)
+	}
+	chain := []*core.Lambda{lam}
+	for range c.Arity - 1 {
+		next, ok := chain[len(chain)-1].Body.(*core.Lambda)
+		if !ok {
+			return g.saturatedLambda(lam, c.Arity, mode)
+		}
+		chain = append(chain, next)
+	}
+	last := chain[len(chain)-1]
+	overlaid := map[types.EffectKey]bool{}
+	for _, ev := range row.Effects {
+		overlaid[ev.Key()] = true
+	}
+	var deferred []core.EffectInstance
+	var bound strings.Builder
+	var params []paramSpec
+	var args []goast.Expr
+	project := func(ev core.EffectInstance, value goast.Expr, evidenceMode types.Transport) {
+		name := fmt.Sprintf("t_rowEvidence%d", g.tmp)
+		g.tmp++
+		desired := ev
+		desired.Control = types.Control{Transport: evidenceMode}
+		params = append(params, paramSpec{name, g.effectTypeMode(desired, evidenceMode)})
+		args = append(args, value)
+		g.evidence[ev.Key()] = append(g.evidence[ev.Key()], ident(name))
+		g.evidenceModes[ev.Key()] = append(g.evidenceModes[ev.Key()], evidenceMode)
+	}
+	var pushed []types.EffectKey
+	for _, ev := range last.RowEffects {
+		key := ev.Key()
+		switch stack := g.evidence[key]; {
+		case overlaid[key] && len(stack) > 0 && g.currentEvidenceMode(key) <= mode:
+			// A projection deferred by an enclosing callback is still a lookup.
+			if top := stack[len(stack)-1]; isProjection(top) {
+				project(ev, top, g.currentEvidenceMode(key))
+				pushed = append(pushed, key)
+			}
+		case !overlaid[key] && row.From != 0:
+			project(ev, g.deferredEvidence(ev, g.rowValue(row.From), mode), mode)
+			pushed = append(pushed, key)
+		default:
+			deferred = append(deferred, ev)
+			continue
+		}
+		fmt.Fprintf(&bound, "%s;", key)
+	}
+	defer func() {
+		for _, key := range pushed {
+			g.evidence[key] = g.evidence[key][:len(g.evidence[key])-1]
+			g.evidenceModes[key] = g.evidenceModes[key][:len(g.evidenceModes[key])-1]
+		}
+	}()
+	if bound.Len() == 0 {
+		return g.saturatedLambda(lam, c.Arity, mode)
+	}
+	// The same literal emits once per transport. Sharing the copy lets those
+	// emissions reuse one outlined body per transport, as the original would.
+	memo := rowResolvedKey{lam, bound.String()}
+	resolved := g.rowResolved[memo]
+	if resolved == nil {
+		copied := *last
+		copied.RowEffects = deferred
+		resolved = &copied
+		for i := len(chain) - 2; i >= 0; i-- {
+			outer := *chain[i]
+			outer.Body = resolved
+			resolved = &outer
+		}
+		if g.rowResolved == nil {
+			g.rowResolved = map[rowResolvedKey]*core.Lambda{}
+		}
+		g.rowResolved[memo] = resolved
+	}
+	value, ok := g.saturatedLambda(resolved, c.Arity, mode)
+	if !ok || len(params) == 0 {
+		return value, ok
+	}
+	return callExpr(funcLitParams(params, g.flatCallbackType(t, c.Arity, mode), []goast.Stmt{returnStmt(value)}), args...), true
+}
+
+func isProjection(e goast.Expr) bool {
+	_, ok := e.(*goast.TypeAssertExpr)
+	return ok
 }
 
 func (g *gen) saturatedLambda(lam *core.Lambda, arity int, mode types.Transport) (goast.Expr, bool) {

@@ -1,0 +1,207 @@
+import Fail
+import List
+import Result exposing (Result(..))
+import State
+
+effect Tick
+    tick : Int -> Int
+effect Aaaa
+    aaaa : Int -> Int
+effect Bbbb
+    bbbb : Int -> Int
+effect Cccc
+    cccc : Int -> Int
+
+input : Int -> List Int
+input n = List.range 1 n
+
+-- Controls
+pureLoop : Int -> Int -> Int
+pureLoop n x = if n <= 0 then x else pureLoop (n - 1) (x + 1)
+pure : Int -> Int
+pure n = pureLoop n 0
+
+-- Closed row, Direct transport
+closedLoop : Int -> Int ->{Tick} Int
+closedLoop n x = if n <= 0 then x else closedLoop (n - 1) (tick x)
+closedStateless : Int -> Int
+closedStateless n =
+    handle closedLoop n 0 on
+        tick x -> resume (x + 1)
+closedStateful : Int -> Int
+closedStateful n =
+    handle closedLoop n 0 with current = 0 on
+        tick x -> resume (x + current + 1) with current + 1
+
+-- The standard library's State: two operations per step
+advance : Int ->{State.State Int} Int
+advance n =
+    if n <= 0 then State.get()
+    else
+        current = State.get()
+        State.put (current + 1)
+        advance (n - 1)
+stdState : Int -> Int
+stdState n = (State.run 0 { advance n }).state
+
+-- Exit transport: the worker can abort, the clause cannot
+exitLoop : Int -> Int ->{Tick, Fail.Fail Int} Int
+exitLoop n x =
+    if n <= 0 then x
+    else if x < 0 then Fail.fail x
+    else exitLoop (n - 1) (tick x)
+exitWorker : Int -> Int
+exitWorker n =
+    result = Fail.attempt {
+        handle exitLoop n 0 on
+            tick x -> resume (x + 1)
+    }
+    case result of
+        Ok value -> value
+        Err value -> value
+
+-- Exit transport: the operation's own clause can abort
+exitClause : Int -> Int
+exitClause n =
+    result = Fail.attempt {
+        handle closedLoop n 0 on
+            tick x -> if x < 0 then Fail.fail x else resume (x + 1)
+    }
+    case result of
+        Ok value -> value
+        Err value -> value
+
+-- Evidence carried through non-tail frames, against the same recursion pure
+sumPure : Int -> Int
+sumPure n = if n <= 0 then 0 else (n + 1) + sumPure (n - 1)
+sumTick : Int ->{Tick} Int
+sumTick n = if n <= 0 then 0 else tick n + sumTick (n - 1)
+recursion : Int -> Int
+recursion n =
+    handle sumTick n on
+        tick x -> resume (x + 1)
+
+-- Library higher-order functions, with a pure then an effectful callback
+foldPure : List Int -> Int
+foldPure values = List.foldl { value total -> value + total } 0 values
+foldTick : List Int -> Int
+foldTick values =
+    handle List.foldl { value total -> tick value + total } 0 values on
+        tick x -> resume (x + 1)
+foldThreeRow : List Int -> Int
+foldThreeRow values =
+    handle
+        handle
+            handle
+                total = List.foldl { value total -> aaaa value + total } 0 values
+                total + bbbb 0 + cccc 0
+            on
+                aaaa x -> resume (x + 1)
+        on
+            bbbb x -> resume (x + 1)
+    on
+        cccc x -> resume (x + 1)
+foldState : List Int -> Int
+foldState values =
+    result = State.run 0 {
+        List.foldl { value total -> State.put (State.get() + value); total + 1 } 0 values
+    }
+    result.state
+mapPure : List Int -> Int
+mapPure values = List.length (List.map { value -> value + 1 } values)
+mapTick : List Int -> Int
+mapTick values =
+    handle List.length (List.map { value -> tick value } values) on
+        tick x -> resume (x + 1)
+
+-- User-defined open-row worker with an effectful callback
+each : (Int ->{e} Int) -> Int -> Int ->{e} Int
+each action n x = if n <= 0 then x else each action (n - 1) (action x)
+openOne : Int -> Int
+openOne n =
+    handle each { x -> tick x } n 0 on
+        tick x -> resume (x + 1)
+openThree : Int -> Int
+openThree n =
+    handle
+        handle
+            handle
+                total = each { x -> aaaa x } n 0
+                total + bbbb 0 + cccc 0
+            on
+                aaaa x -> resume (x + 1)
+        on
+            bbbb x -> resume (x + 1)
+    on
+        cccc x -> resume (x + 1)
+openState : Int -> Int
+openState n = (State.run 0 { each { x -> State.put (State.get() + 1); x } n 0 }).state
+
+-- Callbacks that escape keep invocation-time lookup.
+escape : (Int ->{e} Int) -> Int ->{e} Int
+escape action = { x -> action x }
+escapeOne : Int -> Int
+escapeOne n =
+    handle each (escape { x -> tick x }) n 0 on
+        tick x -> resume (x + 1)
+escapeThree : Int -> Int
+escapeThree n =
+    handle
+        handle
+            handle
+                total = each (escape { x -> aaaa x }) n 0
+                total + bbbb 0 + cccc 0
+            on
+                aaaa x -> resume (x + 1)
+        on
+            bbbb x -> resume (x + 1)
+    on
+        cccc x -> resume (x + 1)
+escapeState : Int -> Int
+escapeState n = (State.run 0 { each (escape { x -> State.put (State.get() + 1); x }) n 0 }).state
+
+-- A literal built on every iteration, one and two argument callbacks.
+constructLoop : Int -> Int ->{Tick} Int
+constructLoop n x = if n <= 0 then x else constructLoop (n - 1) (each { y -> tick y } 1 x)
+constructEach : Int -> Int
+constructEach n =
+    handle constructLoop n 0 on
+        tick x -> resume (x + 1)
+constructFoldLoop : List Int -> Int -> Int ->{Tick} Int
+constructFoldLoop values n x = if n <= 0 then x else constructFoldLoop values (n - 1) (List.foldl { value total -> tick total } x values)
+constructFold : List Int -> Int
+constructFold values =
+    handle constructFoldLoop values 10000 0 on
+        tick x -> resume (x + 1)
+
+-- Installation per iteration
+installTick : Int -> Int
+installTick x =
+    handle tick x on
+        tick y -> resume (y + 1)
+installManyTick : Int -> Int -> Int
+installManyTick n total = if n <= 0 then total else installManyTick (n - 1) (total + installTick n)
+installHandler : Int -> Int
+installHandler n = installManyTick n 0
+attemptOk : Int -> Int
+attemptOk x =
+    case Fail.attempt { x } of
+        Ok value -> value
+        Err value -> value
+attemptManyOk : Int -> Int -> Int
+attemptManyOk n total = if n <= 0 then total else attemptManyOk (n - 1) (total + attemptOk n)
+installAttempt : Int -> Int
+installAttempt n = attemptManyOk n 0
+
+-- Abort, per abort, from varying depth, and the same depth returning normally
+deep : Int -> Bool ->{Fail.Fail Int} Int
+deep d shouldFail =
+    if d <= 0 then if shouldFail then Fail.fail 1 else 1
+    else 1 + deep (d - 1) shouldFail
+attemptDeep : Int -> Bool -> Int
+attemptDeep d shouldFail =
+    case Fail.attempt { deep d shouldFail } of
+        Ok value -> value
+        Err value -> value
+
+main() = print (constructEach 1 + constructFold (input 1) + escapeOne 1 + escapeThree 1 + escapeState 1 + pure 1 + closedStateless 1 + closedStateful 1 + stdState 1 + exitWorker 1 + exitClause 1 + sumPure 1 + recursion 1 + foldPure (input 1) + foldTick (input 1) + foldThreeRow (input 1) + foldState (input 1) + mapPure (input 1) + mapTick (input 1) + openOne 1 + openThree 1 + openState 1 + installHandler 1 + installAttempt 1 + attemptDeep 1 True)

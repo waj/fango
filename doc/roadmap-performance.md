@@ -40,3 +40,28 @@ indirect call runs about once per list element, roughly a hundred thousand
 times per decode, which bounds its cost well under one percent. Revisit with
 row-polymorphic clones or dictionary specialization when a workload shows the
 indirect calls.
+
+## P6 — constant-offset row evidence
+
+**Problem.** A callback that escapes the worker it is passed to, or is stored in
+a value, [looks its evidence up](design/effect-performance.md#recorded-compiled-results)
+at invocation. The row is a chain searched from its newest binding, so an effect
+that sorts first costs 8 ns at three handlers and 16 ns at eight, and the cost
+follows an effect's name. Callbacks that only flow through forwarding workers no
+longer look anything up, which leaves this path for a narrower set of programs.
+
+**Change.** Represent a row as one canonically ordered vector, as Koka does, so
+that a use whose row is closed indexes it at a constant offset. For an open row,
+pass the offset as a hidden argument where the label's position is fixed, the
+TREX-style approach "Effect Handlers, Evidently" proposes, or verify a static
+position hint before falling back to a search. Extension copies a vector, so the
+allocation-free inline case must keep its measured benefit.
+
+**Acceptance.** The `escaping` cases of the
+[handler comparison](design/verification.md#effect-handler-comparison) stop
+depending on row position, with no new allocation on row extension and no
+regression in the forwarding cases.
+
+**Status: deferred on measurement.** Measure on a program whose hot callbacks
+escape first. List traversal does not need it, since `List.foldl` and `List.map`
+forward their rows.

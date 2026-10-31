@@ -549,7 +549,7 @@ func transformDiagnosticProject(project, variant string) (map[string]int, error)
 						slot = 1
 					case relative == "fangort/evidence_value.go" && name == "ExtendEvidenceValue":
 						slot = 2
-					case relative == "fangort/evidence_value.go" && name == "ValueEvidence":
+					case relative == "fangort/evidence_value.go" && (name == "RowBinding" || name == "rowBindingSearch"):
 						slot = 3
 					case relative == "fangort/evidence.go" && name == "sameEvidenceBinding":
 						slot = 4

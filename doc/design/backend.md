@@ -62,7 +62,7 @@ linked layer; lookup always prefers the new inline bindings. The interpreter
 uses linked rows directly. Task creation materializes and rebases a compiled
 row through the same activation memo as captured evidence, preserving aliases.
 Each activation owns immutable bindings shared by its transport views. Its
-typed transport records and binding share one allocation, with interior
+typed transport records, binding, and origin share one allocation, with interior
 pointers retaining their identity. Applied-name comparisons take those immutable
 bindings by pointer rather than copying their transport families. An extension
 returns its existing row when
@@ -71,7 +71,9 @@ visible by pointer identity. Duplicate applied effect names are checked before
 this shortcut. Generated workers and callable members common row extensions
 over immutable entry binders at entry, outside self-tail loops. Extensions
 depending on newly installed handlers stay within that handler's scope.
-Deferred evidence is projected when used, preserving invocation-time lookup.
+Deferred evidence is projected when used, preserving invocation-time lookup,
+with the selected member and its type fixed at the use. A callback whose worker
+[forwards its row](lowering.md#callback-contracts) does not defer it at all.
 
 ## List representation
 

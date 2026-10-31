@@ -110,3 +110,48 @@ func TestCallbackContractsResolveAbortHandlerSubjectsInExit(t *testing.T) {
 		}
 	}
 }
+
+// A caller may bind a callback's row effects only when the row it builds is the
+// row every invocation receives, including through forwarding workers.
+func TestCallbackContractsRecordRowForwarding(t *testing.T) {
+	b := types.NewBuiltins(&types.Supply{})
+	const row = types.CaptureVar(7)
+	fn := &types.TFun{Arg: b.Int, Ret: b.Int}
+	worker := &types.TFun{Arg: fn, Ret: b.Int}
+	ref := func() Expr { return &VarRef{Name: "f", Local: true, Ty: fn} }
+	invoke := func(arg *RowArgument) Expr {
+		return &App{CalleeKind: Value, Callee: ref(), Args: []Expr{&IntLit{Val: 1, Ty: b.Int}}, Ty: b.Int, Row: arg}
+	}
+	relay := func(name string, arg *RowArgument) Expr {
+		return &App{CalleeKind: Worker, Callee: &VarRef{Name: name, Ty: worker}, Args: []Expr{ref()}, Ty: b.Int, Row: arg}
+	}
+	forwarded := &RowArgument{From: row}
+	overlaid := &RowArgument{From: row, Effects: []EffectInstance{{Unique: 1, Name: "E"}}}
+	for _, tc := range []struct {
+		name string
+		body Expr
+		want bool
+	}{
+		{"forwarded", invoke(forwarded), true},
+		{"no row", invoke(nil), true},
+		{"overlaid", invoke(overlaid), false},
+		{"another row", invoke(&RowArgument{From: 8}), false},
+		{"empty row", invoke(&RowArgument{}), false},
+		{"mixed", &Seq{First: invoke(forwarded), Then: invoke(overlaid), Ty: b.Int}, false},
+		{"forwarded through a worker", relay("leaf", forwarded), true},
+		{"overlaid at a worker", relay("leaf", overlaid), false},
+		{"worker overlays", relay("overlay", forwarded), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Prog{Defs: []Def{
+				{Name: "leaf", Type: worker, Params: []string{"f"}, RowParam: row, Body: invoke(forwarded)},
+				{Name: "overlay", Type: worker, Params: []string{"f"}, RowParam: row, Body: invoke(overlaid)},
+				{Name: "use", Type: worker, Params: []string{"f"}, RowParam: row, Body: tc.body},
+			}}
+			SummarizeABI(p, nil)
+			if got := p.Defs[2].ABI.Callbacks[0]; got.Arity != 1 || got.ForwardsRow != tc.want {
+				t.Fatalf("contract = %+v, want ForwardsRow %t", got, tc.want)
+			}
+		})
+	}
+}

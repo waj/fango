@@ -76,6 +76,17 @@ same contract, including every use of the original binding. Lambdas capturing ev
 keep their definition-site closure. Escaping values and partial application retain
 the structural Direct/Exit callable record described by the [backend](backend.md).
 
+A contract also records whether every invocation passes the worker's own
+residual row with no overlay, directly or through a forwarded parameter with the
+same property. The row a caller builds for such a worker is then the row its
+callback sees. A literal or expanded local argument binds its row effects there:
+an effect the argument overlays is the lexical evidence the row was built from,
+and one the row only forwards is projected once as the literal is constructed.
+Invocations then call the operation with no row lookup. Evidence the selected
+transport cannot call stays deferred, as does a literal passed to a worker
+without this property, since a callback that escapes can run under another row.
+A self-tail call's arguments are not bound this way.
+
 Closed callbacks with a fixed Direct body share a module-local Go function and
 an Exit wrapper that supplies a nil exit. Both callable members name these
 functions, including inside generic workers and enclosing transport families.

@@ -305,3 +305,34 @@ func TestHiddenPackageAllocations(t *testing.T) {
 		t.Fatalf("allocation check: %v\n%s", err, out)
 	}
 }
+
+func TestForwardedRowCallbacksBindEvidenceAtTheirCallSite(t *testing.T) {
+	const prelude = `import List
+effect Tick
+    tick : Int -> Int
+each : (Int ->{e} Int) -> Int -> Int ->{e} Int
+each action n x = if n <= 0 then x else each action (n - 1) (action x)
+escape : (Int ->{e} Int) -> Int ->{e} Int
+escape action = { x -> action x }
+`
+	for _, tc := range []struct {
+		name, program string
+		lookup        bool
+	}{
+		{"user worker", "go n =\n    handle each { x -> tick x } n 0 on\n        tick x -> resume (x + 1)\nmain() = print (go 1)\n", false},
+		{"library fold", "go n =\n    handle List.foldl { v t -> tick v + t } 0 (List.range 1 n) on\n        tick x -> resume (x + 1)\nmain() = print (go 1)\n", false},
+		{"nested literals", "go n =\n    handle List.foldl { v t -> t + List.foldl { i s -> tick i + s } 0 [v] } 0 (List.range 1 n) on\n        tick x -> resume (x + 1)\nmain() = print (go 1)\n", false},
+		{"escaping", "go n =\n    handle each (escape { x -> tick x }) n 0 on\n        tick x -> resume (x + 1)\nmain() = print (go 1)\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := filepath.Join(t.TempDir(), "probe.fango")
+			if err := os.WriteFile(source, []byte(prelude+tc.program), 0600); err != nil {
+				t.Fatal(err)
+			}
+			src := string(generatedFile(t, emittedProject(t, source), "entries/probe/main.go"))
+			if got := strings.Contains(src, "fangort.RowBinding("); got != tc.lookup {
+				t.Errorf("row lookup = %t, want %t:\n%s", got, tc.lookup, src)
+			}
+		})
+	}
+}

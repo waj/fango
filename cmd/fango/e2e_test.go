@@ -1202,7 +1202,7 @@ func TestCleanupScopesOverLiteralCallbacksInlineAtTheCallSite(t *testing.T) {
 			t.Errorf("withKey_exit is missing %q:\n%s", want, body)
 		}
 	}
-	for _, unwanted := range []string{"V_Runtime_dot_Scope_dot_bracket", "ValueEvidence", "ExtendEvidenceValue", "func("} {
+	for _, unwanted := range []string{"V_Runtime_dot_Scope_dot_bracket", "RowBinding", "ExtendEvidenceValue", "func("} {
 		if strings.Contains(body, unwanted) {
 			t.Errorf("withKey_exit still contains %q:\n%s", unwanted, body)
 		}

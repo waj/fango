@@ -28,14 +28,14 @@ func (s *HandlerState[T]) Share() {
 	}
 }
 
+// Snapshot and Store stay within Go's inlining budget so that an unshared cell
+// costs a field access inside the clause. The locked paths are kept apart: with
+// them inline, each access is a call.
 func (s *HandlerState[T]) Snapshot() T {
 	if !s.shared {
 		return s.value
 	}
-	s.mu.Lock()
-	value := s.value
-	s.mu.Unlock()
-	return value
+	return s.sharedSnapshot()
 }
 
 func (s *HandlerState[T]) Store(value T) {
@@ -43,6 +43,19 @@ func (s *HandlerState[T]) Store(value T) {
 		s.value = value
 		return
 	}
+	s.sharedStore(value)
+}
+
+//go:noinline
+func (s *HandlerState[T]) sharedSnapshot() T {
+	s.mu.Lock()
+	value := s.value
+	s.mu.Unlock()
+	return value
+}
+
+//go:noinline
+func (s *HandlerState[T]) sharedStore(value T) {
 	s.mu.Lock()
 	s.value = value
 	s.mu.Unlock()

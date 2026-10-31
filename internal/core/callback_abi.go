@@ -81,7 +81,7 @@ func summarizeCallbacks(defs, context []Def) {
 		args, _ := PeelFun(d.Type, len(d.Params))
 		d.ABI.Callbacks = make([]CallbackABI, len(d.Params))
 		for j, arg := range args {
-			d.ABI.Callbacks[j] = CallbackABI{Arity: callbackArity(arg), DirectUses: 1, ExitUses: 2}
+			d.ABI.Callbacks[j] = CallbackABI{Arity: callbackArity(arg), DirectUses: 1, ExitUses: 2, ForwardsRow: true}
 		}
 	}
 	for changed := true; changed; {
@@ -93,7 +93,7 @@ func summarizeCallbacks(defs, context []Def) {
 				if old.Arity == 0 {
 					continue
 				}
-				next := callbackUses(d.Body, name, old.Arity, all)
+				next := callbackUses(d.Body, name, old.Arity, d.RowParam, all)
 				if next != old {
 					d.ABI.Callbacks[j] = next
 					changed = true
@@ -103,13 +103,14 @@ func summarizeCallbacks(defs, context []Def) {
 	}
 }
 
-func callbackUses(body Expr, name string, arity int, defs map[string]*Def) CallbackABI {
-	out := CallbackABI{Arity: arity}
+func callbackUses(body Expr, name string, arity int, row types.CaptureVar, defs map[string]*Def) CallbackABI {
+	out := CallbackABI{Arity: arity, ForwardsRow: true}
 	escapes := false
 	add := func(c CallbackABI) {
 		if c.Arity != arity {
 			escapes = true
 		}
+		out.ForwardsRow = out.ForwardsRow && c.ForwardsRow
 		for mode := range 2 {
 			out.AddUses(types.Transport(mode), c.Uses(types.Transport(mode)))
 		}
@@ -124,7 +125,7 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 			switch e := e.(type) {
 			case *Let:
 				if ref, ok := e.Rhs.(*VarRef); ok && ref.Local && ref.Name == name && !e.Rec {
-					c := callbackUses(e.Body, e.Name, arity, defs)
+					c := callbackUses(e.Body, e.Name, arity, row, defs)
 					add(c.inContext(context))
 					visit(e.Body, context)
 					return false
@@ -172,7 +173,7 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 							escapes = true
 						}
 						last := stages[len(stages)-1]
-						c := CallbackABI{Arity: len(stages)}
+						c := CallbackABI{Arity: len(stages), ForwardsRow: forwardsRow(last.Row, row)}
 						for mode := range 2 {
 							c.AddUses(types.Transport(mode), 1<<last.Control.Resolve(context[mode]))
 						}
@@ -197,7 +198,7 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 							continue
 						}
 						want := target.ABI.Callbacks[j]
-						c := CallbackABI{Arity: want.Arity}
+						c := CallbackABI{Arity: want.Arity, ForwardsRow: want.ForwardsRow && forwardsRow(e.Row, row)}
 						for mode := range 2 {
 							c.AddUses(types.Transport(mode), want.Uses(e.Control.Resolve(context[mode])))
 						}
@@ -216,16 +217,22 @@ func callbackUses(body Expr, name string, arity int, defs map[string]*Def) Callb
 	return out
 }
 
+// forwardsRow reports whether an argument hands on the row bound by row as it
+// is. A call without a row argument passes none for a callback to observe.
+func forwardsRow(arg *RowArgument, row types.CaptureVar) bool {
+	return arg == nil || (row != 0 && arg.From == row && len(arg.Effects) == 0)
+}
+
 // LocalCallbackABI applies the same conservative use contract to a local
 // binding. It is not serialized: only the enclosing module can use it.
 func LocalCallbackABI(body Expr, name string, t types.Type, defs map[string]*Def) CallbackABI {
-	return callbackUses(body, name, callbackArity(t), defs)
+	return callbackUses(body, name, callbackArity(t), 0, defs)
 }
 
 // inContext reads uses summarized for worker transports as uses emitted in
 // the given control context.
 func (c CallbackABI) inContext(context [2]types.Transport) CallbackABI {
-	out := CallbackABI{Arity: c.Arity}
+	out := CallbackABI{Arity: c.Arity, ForwardsRow: c.ForwardsRow}
 	for mode := range 2 {
 		out.AddUses(types.Transport(mode), c.Uses(context[mode]))
 	}

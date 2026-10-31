@@ -112,7 +112,8 @@ commits and their synchronization are unchanged.
 An installed activation's evidence carries the transport its own clauses need.
 A Direct handler inside an Exit worker still uses Direct evidence; calls adapt
 the plain result to the caller's protocol. Open-row callback adapters receive
-evidence at invocation, including when constructed inside a matching handler.
+evidence at invocation, including when constructed inside a matching handler,
+unless the worker they are passed to [forwards their row](lowering.md#callback-contracts).
 
 Closure compatibility uses effect-row inclusion. Binding a closure to an
 activation replaces its nominal label with a fresh local permission plus the
