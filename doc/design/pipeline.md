@@ -58,7 +58,10 @@ reads only the finished object and copies taken when it was queued, so one
 background worker computes it, in module order, while later modules are
 checked; the summaries it produces are folded in before anything consults them
 (a cache lookup that found an artifact, or the end of the group), and the group
-waits for every artifact it publishes before it returns. Runtime and stage elaborations check their respective definitions. Core lint
+waits for every artifact it publishes before it returns. A finished object shares
+its nominal declarations with the checker and with every importer's Core, so
+checking a later module must leave them untouched: a write would race that work
+and make the fingerprints depend on its timing. Runtime and stage elaborations check their respective definitions. Core lint
 reconstructs structural summaries after transforms; it performs no lifetime flow
 analysis. Emission rechecks the owned Core against dependency signatures.
 The entry/dependency role and

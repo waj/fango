@@ -666,7 +666,8 @@ func (a *ADTInfo) ParamSubst(args []Type) map[int]Type {
 }
 
 // InstFields returns c's field types instantiated at args — the type
-// arguments of the constructor's result type.
+// arguments of the constructor's result type. With no parameters to
+// instantiate the result is c.Fields itself, so callers must not write to it.
 func (a *ADTInfo) InstFields(c *CtorInfo, args []Type) []Type {
 	if len(a.Params) == 0 {
 		return c.Fields
@@ -679,6 +680,8 @@ func (a *ADTInfo) InstFields(c *CtorInfo, args []Type) []Type {
 	return fields
 }
 
+// InstHiddenFields is InstFields that also opens c's hidden binders at
+// witnesses. Its result can likewise be c.Fields itself.
 func (a *ADTInfo) InstHiddenFields(c *CtorInfo, args, witnesses []Type) []Type {
 	fields := a.InstFields(c, args)
 	if len(c.Hidden) == 0 {

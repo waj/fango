@@ -1071,8 +1071,9 @@ func (el *elab) recordUpdate(e *ast.RecordUpdate, ty types.Type) core.Expr {
 	args := make([]core.Expr, len(adt.RecordFields))
 	con := ty.(*types.TCon)
 	hidden := el.freshHidden(adt.Ctors[0])
-	fieldTypes := adt.InstHiddenFields(adt.Ctors[0], con.Args, hiddenTypes(hidden))
-	for i, field := range fieldTypes {
+	declared := adt.InstHiddenFields(adt.Ctors[0], con.Args, hiddenTypes(hidden))
+	fieldTypes := make([]types.Type, len(declared))
+	for i, field := range declared {
 		fieldTypes[i] = el.eraseRuntimeKinds(eraseRows(field))
 	}
 	for i := range old {
