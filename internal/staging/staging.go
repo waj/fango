@@ -36,14 +36,21 @@ type Observer = compileevent.Observer
 // tell reuse from work.
 func (s *Session) Observe(observe Observer) { s.ev.observe = observe }
 
-// deferred is one module's stage Core, recorded but not yet read. read is the
-// part of reading it that touches nothing shared, so the sections being forced
-// together read concurrently; load then installs each, in order. load also
+// Section is one module's stage Core, recorded but not yet read. Read and Intern
+// touch nothing another section touches, so the sections being forced together
+// run them concurrently; Allocate takes identities from the shared supply in
+// between, in order, and Load then hands back each result, in order. Load also
 // reports the encoded size of the section it read, for cache accounting.
+type Section interface {
+	Read()
+	Allocate()
+	Intern()
+	Load() ([]core.Def, []Group, int, error)
+}
+
 type deferred struct {
-	owner string
-	read  func()
-	load  func() ([]core.Def, []Group, int, error)
+	owner   string
+	section Section
 }
 
 type Group struct {
@@ -84,8 +91,8 @@ func Install(ck *infer.Checker) *Session {
 // snapshot elaborates a module's declarations against the installed stage
 // definitions of its dependencies, so a single module checked from source
 // needs all of them; a compile whose modules all come from cache needs none.
-func (s *Session) Defer(owner string, read func(), load func() ([]core.Def, []Group, int, error)) {
-	s.ev.pending = append(s.ev.pending, deferred{owner: owner, read: read, load: load})
+func (s *Session) Defer(owner string, section Section) {
+	s.ev.pending = append(s.ev.pending, deferred{owner: owner, section: section})
 }
 
 // Force installs every deferred section in the order it was recorded. Callers
@@ -97,28 +104,58 @@ func (s *Session) Force() error { return s.ev.force() }
 func (ev *evaluator) force() error {
 	pending := ev.pending
 	ev.pending = nil
-	shares := readAll(pending)
-	for n, section := range pending {
+	sections := make([]Interning, len(pending))
+	for n, item := range pending {
+		sections[n] = item.section
+	}
+	shares := InternAll(sections)
+	for n, item := range pending {
 		start := time.Now()
-		defs, groups, size, err := section.load()
+		defs, groups, size, err := item.section.Load()
 		if err != nil {
-			return fmt.Errorf("stage Core for module %s: %w", section.owner, err)
+			return fmt.Errorf("stage Core for module %s: %w", item.owner, err)
 		}
-		ev.observe.Report(compileevent.Event{Stage: "stage-section", Owner: section.owner, Duration: shares[n] + time.Since(start), Bytes: size})
+		ev.observe.Report(compileevent.Event{Stage: "stage-section", Owner: item.owner, Duration: shares[n] + time.Since(start), Bytes: size})
 		(&Session{ev: ev}).InstallCore(defs, groups)
 	}
 	return nil
 }
 
-// readAll runs the sections' independent reads across the available
-// processors and returns when all of them are done. Each section answers for
-// its share of the elapsed time, in proportion to its own work, so the sections
-// still add up to the time the build spent reading them.
-func readAll(pending []deferred) []time.Duration {
-	busy := make([]time.Duration, len(pending))
-	next := make(chan int, len(pending))
-	for n, section := range pending {
-		if section.read != nil {
+// Interning is the part of a deferred section that InternAll runs.
+type Interning interface {
+	Read()
+	Allocate()
+	Intern()
+}
+
+// InternAll runs each section's steps and returns what each one cost. Nothing
+// else may be using the checker the sections intern against.
+func InternAll(sections []Interning) []time.Duration {
+	reads, interns := make([]func(), len(sections)), make([]func(), len(sections))
+	for n, section := range sections {
+		reads[n], interns[n] = section.Read, section.Intern
+	}
+	shares := ReadAll(reads)
+	for n, section := range sections {
+		start := time.Now()
+		section.Allocate()
+		shares[n] += time.Since(start)
+	}
+	for n, share := range ReadAll(interns) {
+		shares[n] += share
+	}
+	return shares
+}
+
+// ReadAll runs independent reads across the available processors and returns
+// when all of them are done. Each read answers for its share of the elapsed
+// time, in proportion to its own work, so they still add up to the time the
+// build spent reading them.
+func ReadAll(reads []func()) []time.Duration {
+	busy := make([]time.Duration, len(reads))
+	next := make(chan int, len(reads))
+	for n, read := range reads {
+		if read != nil {
 			next <- n
 		}
 	}
@@ -131,7 +168,7 @@ func readAll(pending []deferred) []time.Duration {
 			defer wg.Done()
 			for n := range next {
 				begin := time.Now()
-				pending[n].read()
+				reads[n]()
 				busy[n] = time.Since(begin)
 			}
 		}()
@@ -142,7 +179,7 @@ func readAll(pending []deferred) []time.Duration {
 	for _, d := range busy {
 		total += d
 	}
-	shares := make([]time.Duration, len(pending))
+	shares := make([]time.Duration, len(reads))
 	for n, d := range busy {
 		if total > 0 {
 			shares[n] = time.Duration(float64(elapsed) * float64(d) / float64(total))

@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	moduleObjectSchema = 15
+	moduleObjectSchema = 16
 	moduleObjectKind   = "module-object"
+	runtimeSection     = "runtime"
 	stageSection       = "stage"
 )
 
@@ -49,6 +50,9 @@ type ModuleObject struct {
 	TemplateBase           int
 	Templates              []*meta.Template
 	Pending                *PendingStage `object:"omit"`
+	// PendingRuntime holds Runtime while it is unread. See DeferRuntime on
+	// Installer.
+	PendingRuntime *PendingRuntime `object:"omit"`
 }
 
 // PendingStage is a decoded object whose stage Core has not been read yet.
@@ -60,6 +64,10 @@ type PendingStage struct {
 	// decoded is the section once decode has run, ahead of load.
 	decoded *stagePayload
 	err     error
+	// remapper and ids are the installation it joins and the identities it
+	// needs, once it has been read for one.
+	remapper *remapper
+	ids      *remapIDs
 }
 
 type stagePayload struct {
@@ -70,19 +78,14 @@ type stagePayload struct {
 // size is the encoded byte size of the undecoded stage section.
 func (p *PendingStage) size() int { return p.decoder.SectionSize(stageSection) }
 
-// decode reads the stage section ahead of load. It touches only this
-// object's decoder, so the sections of different objects decode concurrently.
+// decode reads the stage section through the decoder that produced the rest of
+// the object, so structure shared with it comes back as the same pointers. It
+// touches only this object's decoder, so the sections of different objects
+// decode concurrently.
 func (p *PendingStage) decode() {
 	if p.decoded == nil && p.err == nil {
 		p.decoded, p.err = p.read()
 	}
-}
-
-// load decodes the stage section through the decoder that produced the rest of
-// the object, so structure shared with it comes back as the same pointers.
-func (p *PendingStage) load() (*stagePayload, error) {
-	p.decode()
-	return p.decoded, p.err
 }
 
 func (p *PendingStage) read() (*stagePayload, error) {
@@ -96,6 +99,39 @@ func (p *PendingStage) read() (*stagePayload, error) {
 	return payload, nil
 }
 
+// PendingRuntime is a decoded object's runtime Core, not yet read. It is most
+// of what the object's interface half would otherwise cost to decode and
+// intern, and a module whose emission is reused never looks at it.
+type PendingRuntime struct {
+	decoder *objectcodec.Decoder
+	decoded *runtimePayload
+	err     error
+	// remapper is the object's installation, once it has one. The section is
+	// interned against the same identities as the rest of the object.
+	remapper *remapper
+	ids      *remapIDs
+}
+
+type runtimePayload struct {
+	Defs []core.Def
+}
+
+// decode reads the section ahead of load, under the same rule as
+// PendingStage.decode: only this object's decoder is touched.
+func (p *PendingRuntime) decode() {
+	if p.decoded != nil || p.err != nil {
+		return
+	}
+	var payload *runtimePayload
+	if p.err = p.decoder.Section(runtimeSection, &payload); p.err != nil {
+		return
+	}
+	if payload == nil {
+		payload = &runtimePayload{}
+	}
+	p.decoded = payload
+}
+
 // EncodeObject frames the object behind the record of what it was built from.
 // The record leads the payload instead of sitting among the object's own
 // sections, so a slot holding a superseded artifact is rejected without
@@ -105,9 +141,10 @@ func EncodeObject(object *ModuleObject, record []byte) ([]byte, error) {
 		return nil, fmt.Errorf("a validity record cannot span lines")
 	}
 	head := *object
-	head.Stage, head.StageGroups, head.Pending = nil, nil, nil
+	head.Runtime, head.Stage, head.StageGroups, head.Pending, head.PendingRuntime = nil, nil, nil, nil, nil
 	sections, err := objectcodec.EncodeSections(
 		objectcodec.Section{Value: &head},
+		objectcodec.Section{Name: runtimeSection, Value: &runtimePayload{Defs: object.Runtime}},
 		objectcodec.Section{Name: stageSection, Value: &stagePayload{Stage: object.Stage, Groups: object.StageGroups}},
 	)
 	if err != nil {
@@ -143,11 +180,21 @@ func DecodeObject(data []byte, sources map[string]*source.File) (*ModuleObject, 
 	if err != nil {
 		return nil, err
 	}
-	return DecodeObjectSections(sections, sources)
+	object, err := DecodeObjectSections(sections, sources)
+	if err != nil || object == nil {
+		return object, err
+	}
+	pending := object.PendingRuntime
+	pending.decode()
+	if pending.err != nil {
+		return nil, pending.err
+	}
+	object.Runtime, object.PendingRuntime = pending.decoded.Defs, nil
+	return object, nil
 }
 
 // DecodeObjectSections decodes the object itself, once its record has been
-// accepted.
+// accepted, leaving its runtime and stage sections unread.
 func DecodeObjectSections(sections []byte, sources map[string]*source.File) (*ModuleObject, error) {
 	decoder, err := objectcodec.NewDecoder(sections, objectcodec.Context{Types: objectTypes(), Sources: sources})
 	if err != nil {
@@ -159,6 +206,7 @@ func DecodeObjectSections(sections []byte, sources map[string]*source.File) (*Mo
 	}
 	if object != nil {
 		object.Pending = &PendingStage{decoder: decoder}
+		object.PendingRuntime = &PendingRuntime{decoder: decoder}
 	}
 	return object, nil
 }

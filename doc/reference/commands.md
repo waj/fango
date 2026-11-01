@@ -180,8 +180,8 @@ then adds a table of where the time went and what the cache moved. Stages that
 belong to no module — writing the generated project, and the Go toolchain — are
 timed by the command itself, and time that belongs to no stage is reported as
 `other`, so the rows always reconcile with the total. Work the compiler runs
-concurrently — emitting several modules at once, reading deferred stage Core,
-storing checked artifacts while later modules are checked — counts the time the
+concurrently — emitting several modules at once, reading modules ahead of
+discovery and deferred Core, storing checked artifacts while later modules are checked — counts the time the
 build spent on it, divided among its modules in proportion to each one's work,
 so overlapping work is not counted twice. The rows reconcile as measured, that is:
 each duration is rounded to the unit it is shown in, and a build of a second or
@@ -189,7 +189,8 @@ more is shown in seconds, so adding up a printed column lands near the printed
 total rather than on it. Modules that arrive from
 cache defer their stage Core until some module is checked from source; the
 `stage Core` row and the count beneath the cache block are what reading it
-cost. Each reuse count is over every module that stage covered, so a module
+cost. They defer their runtime Core until some module is checked from source or
+some owner has to be emitted, which the `runtime Core` row reports. Each reuse count is over every module that stage covered, so a module
 whose generated code cannot be cached counts against reuse rather than
 disappearing from the ratio.
 

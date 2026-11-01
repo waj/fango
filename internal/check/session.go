@@ -28,6 +28,9 @@ type Session struct {
 	// AccumulateDiagnostics checks modules independent of a failed owner.
 	// Batch commands retain their existing fail-fast behavior.
 	AccumulateDiagnostics bool
+	// DeferRuntime leaves cached modules' runtime Core unread, and with it
+	// their definitions out of Result.Program, until Result.LoadRuntime.
+	DeferRuntime bool
 }
 
 type Result struct {
@@ -36,6 +39,17 @@ type Result struct {
 	Graph   *modules.Result
 	States  []*infer.ModuleState
 	Objects []*ModuleObject
+
+	loadRuntime func() error
+}
+
+// LoadRuntime completes Program.Defs under Session.DeferRuntime. Until it is
+// called they hold the entry and whatever was checked from source.
+func (r *Result) LoadRuntime() error {
+	if r.loadRuntime == nil {
+		return nil
+	}
+	return r.loadRuntime()
 }
 
 // Compile discovers a graph and checks, elaborates, and semantically lints one
@@ -64,22 +78,27 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 	}
 	installer := NewInstaller(ck, stageSession, objectCache, s.Observe)
 	installer.FreshSources = s.FreshSources
-	var defs []core.Def
+	installer.DeferRuntime = s.DeferRuntime
 	var diagnostics []diag.Error
 	var err error
 	if s.AccumulateDiagnostics {
-		defs, diagnostics, err = installer.InstallCollect(loaded.Modules, loaded.FixityHash)
+		_, diagnostics, err = installer.InstallCollect(loaded.Modules, loaded.FixityHash)
 	} else {
-		defs, diagnostics, err = installer.Install(loaded.Modules, loaded.FixityHash)
+		_, diagnostics, err = installer.Install(loaded.Modules, loaded.FixityHash)
 	}
 	if len(diagnostics) != 0 || err != nil {
 		return nil, diagnostics, err
 	}
-	prog, entryErrs := elaborate.AssembleModuleProgram(defs, installer.Infos(), loaded.Entry, ck)
+	prog, entryErrs := elaborate.AssembleModuleProgram(installer.installed, installer.Infos(), loaded.Entry, ck)
 	if len(entryErrs) != 0 {
 		return nil, entryErrs, nil
 	}
-	return &Result{Program: prog, Checker: ck, Graph: loaded, States: installer.States(), Objects: installer.Objects()}, nil, nil
+	load := func() error {
+		err := installer.LoadRuntime()
+		prog.Defs = installer.installed
+		return err
+	}
+	return &Result{Program: prog, Checker: ck, Graph: loaded, States: installer.States(), Objects: installer.Objects(), loadRuntime: load}, nil, nil
 }
 
 func nominalNames(ck *infer.Checker) map[int]string {

@@ -72,11 +72,17 @@ func compileFileGraphSession(entry string, stderr io.Writer, session *compilatio
 	if !ok {
 		return nil, nil, nil, nil, nil, false
 	}
+	if err := result.LoadRuntime(); err != nil {
+		reportInternal(stderr, err)
+		return nil, nil, nil, nil, nil, false
+	}
 	return result.Program, result.Checker, result.Graph.Manifest, result.Graph.Units, result.Graph.Natives, true
 }
 
+// checkGraph leaves cached modules' runtime Core unread; a caller that reads
+// the program's definitions beyond the entry's loads them first.
 func checkGraph(entry string, stderr io.Writer, session *compilationSession) (*compilecheck.Result, bool) {
-	result, checkErrs, internalErr := (&compilecheck.Session{Debug: session.debugEnabled(), Observe: session.observer(), DisableObjectCache: session.disableCache()}).Compile(entry)
+	result, checkErrs, internalErr := (&compilecheck.Session{Debug: session.debugEnabled(), Observe: session.observer(), DisableObjectCache: session.disableCache(), DeferRuntime: true}).Compile(entry)
 	if report(stderr, checkErrs) {
 		return nil, false
 	}
@@ -220,7 +226,7 @@ func cmdCheckSession(args []string, stderr io.Writer, session *compilationSessio
 		usage(stderr)
 		return 2
 	}
-	if _, _, _, _, _, ok := compileFileGraphSession(args[0], stderr, session); !ok {
+	if _, ok := checkGraph(args[0], stderr, session); !ok {
 		return 1
 	}
 	return 0

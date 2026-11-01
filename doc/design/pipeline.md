@@ -87,8 +87,9 @@ header-validation rules, respectively.
 
 The installable `ModuleObject` adds the module's public resolver interface,
 owned runtime and stage Core, staging completion groups, templates, and ABI
-summaries. Stage Core is a separate section of the artifact over the same node
-pool, so it can be left unread; the rest of this paragraph describes both. Its typed reference-graph codec preserves shared and recursive
+summaries. Runtime and stage Core are separate sections of the artifact over the
+same node pool, so either can be left unread; the rest of this paragraph
+describes all of it. Its typed reference-graph codec preserves shared and recursive
 compiler data, uses exact IEEE floating-point bits, sorts maps, and rejects
 unknown variants, malformed references, missing fields, and invalid source
 provenance.
@@ -136,13 +137,26 @@ none. Deferred sections are decoded concurrently, each through its own
 object's decoder, and installed in installation order, immediately before
 the first module is checked from source, and again before a prompt runs a
 splice, which is the only way the REPL reaches the evaluator without going
-through installation. A deferral holds the object's own decoder and remapper,
+through installation. Only allocating a section's fresh identities from the
+shared supply is sequential: collecting which it needs and rewriting its nodes
+touch only that object and read a checker nothing writes while sections are
+being forced, so they run concurrently as well. Remapping allocates nothing;
+an identity collection missed is a violated invariant. A deferral holds the object's own decoder and remapper,
 so the stage half comes back as the same pointers for structure the installed
 half already holds and is interned against the same declarations; a section
 that cannot be read is a violated compiler invariant rather than a miss,
 because its object is already installed. Its stage fingerprint, like the
 object's other own fingerprints, is carried by the verified frame and is not
 recomputed when the section is read.
+
+Batch commands defer runtime Core the same way, except for the entry, whose
+definitions say where the program starts. Checking a module from source reads
+it, because elaboration and linting run against the installed definitions, and
+so does emitting any owner the emission cache cannot supply; a build that
+reuses every owner reads none, and `check` reads what its source checks need.
+Until then `Program.Defs` holds only what has been read, so only code reading
+the definitions of dependencies has to load first. The REPL and the language
+server take objects whole.
 
 Module installation validates all decoded state, instance cutoffs included,
 before it mutates the checker, so nothing after that point can reject the
@@ -196,8 +210,8 @@ semantic, ABI, or stage fingerprints.
 Every cached state is still installed through the graph compatibility checks.
 Consequently independently cached branches cannot bypass duplicate-deriver,
 instance-overlap, or blanket-cycle validation. Batch event instrumentation
-reports `checked-cache-hit`, `checked-cache-miss`, and `stage-section`
-separately from actual `check`, `elaborate`, and `semantic-lint` work, so
+reports `checked-cache-hit`, `checked-cache-miss`, `stage-section`, and
+`runtime-section` separately from actual `check`, `elaborate`, and `semantic-lint` work, so
 reusing a module and checking one are never confused for each other.
 
 ## Parsing and surface lowering
@@ -305,7 +319,10 @@ compiler rebuild, and nothing detects it.
 
 `modules.Graph` runs source discovery, complete-graph validation, and per-module
 resolution as separate phases. Discovery always rechecks provider paths,
-headers, reserved bundled names, and native sidecars. Validation detects cycles
+headers, reserved bundled names, and native sidecars. Files are read and parsed
+concurrently, ahead of the walk over imports; the walk still visits modules in
+its own order and is what reports them, so neither diagnostics nor node order
+depend on which read finishes first. Validation detects cycles
 and collects the complete effective fixity table, including builtins, before any
 fresh tree is rewritten; the sorted table also has a stable SHA-256 fingerprint.
 Resolution then processes modules in dependency-first order with lexical

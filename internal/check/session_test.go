@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -556,11 +557,11 @@ func TestModuleObjectCodecRoundTrip(t *testing.T) {
 	if len(decoded.Runtime) == 0 || len(decoded.Stage) != 0 || decoded.Pending == nil {
 		t.Fatalf("runtime=%d stage=%d pending=%v", len(decoded.Runtime), len(decoded.Stage), decoded.Pending != nil)
 	}
-	payload, err := decoded.Pending.load()
-	if err != nil {
-		t.Fatal(err)
+	decoded.Pending.decode()
+	if decoded.Pending.err != nil {
+		t.Fatal(decoded.Pending.err)
 	}
-	if len(payload.Stage) == 0 {
+	if len(decoded.Pending.decoded.Stage) == 0 {
 		t.Fatal("the deferred stage section is empty")
 	}
 	if decoded.State.ADTs[0] != adt {
@@ -836,6 +837,84 @@ func TestAllHitCompileReadsNoStageSection(t *testing.T) {
 	}
 	if events["stage-section"]["Lib"] != 1 {
 		t.Fatalf("the dependency's stage section was not read for a source check: %#v", events)
+	}
+}
+
+// Runtime Core is deferred like stage Core, and only for a session that asks. A
+// session completing its program must end with the same definitions in the same
+// order as one that read every section as it installed them.
+func TestDeferredRuntimeCoreCompletesTheProgram(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value, twice)\nvalue = \"one\"\ntwice x = x\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.twice Lib.value\nmain() = ()\n")
+	cache := newMemoryObjectCache()
+	names := func(result *Result) []string {
+		out := make([]string, 0, len(result.Program.Defs))
+		for _, def := range result.Program.Defs {
+			out = append(out, def.Name)
+		}
+		return out
+	}
+	eager, events := compileEvents(t, main, cache)
+	want := names(eager)
+	eager, events = compileEvents(t, main, cache)
+	if len(events["runtime-section"]) != 0 || !slices.Equal(names(eager), want) {
+		t.Fatalf("a session that did not ask deferred: %v %#v", names(eager), events)
+	}
+
+	compile := func() (*Result, map[string]int) {
+		t.Helper()
+		read := map[string]int{}
+		s := &Session{Cache: cache, DeferRuntime: true, Observe: func(event compileevent.Event) {
+			if !event.Begin && event.Stage == "runtime-section" {
+				read[event.Owner]++
+			}
+		}}
+		result, diagnostics, internalErr := s.Compile(main)
+		if internalErr != nil || len(diagnostics) != 0 {
+			t.Fatal(internalErr, diagnostics)
+		}
+		return result, read
+	}
+	result, read := compile()
+	if len(read) != 0 {
+		t.Fatalf("an all-hit compile read runtime Core: %#v", read)
+	}
+	for _, def := range result.Program.Defs {
+		if def.Owner != "Main" {
+			t.Fatalf("%s is in the program before its section was read", def.Name)
+		}
+	}
+	if !slices.Contains(names(result), "Main.main") {
+		t.Fatalf("the entry's own definitions must be read: %v", names(result))
+	}
+	if err := result.LoadRuntime(); err != nil {
+		t.Fatal(err)
+	}
+	if read["Lib"] != 1 || !slices.Equal(names(result), want) {
+		t.Fatalf("loaded %v, read %#v; want %v", names(result), read, want)
+	}
+	if err := result.LoadRuntime(); err != nil || read["Lib"] != 1 {
+		t.Fatalf("a second load read again: %v %#v", err, read)
+	}
+	if lintErrs := elaborate.LintProgIn(result.Program.Defs, nil, result.Checker); len(lintErrs) != 0 {
+		t.Fatal(lintErrs)
+	}
+
+	// Checking a module from source reads what its elaboration runs against,
+	// and the definitions still end up in installation order.
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nresult = Lib.twice Lib.value\nmain() = ()\n-- edited\n")
+	result, read = compile()
+	if read["Lib"] != 1 || !slices.Equal(names(result), want) {
+		t.Fatalf("source check loaded %v, read %#v; want %v", names(result), read, want)
 	}
 }
 

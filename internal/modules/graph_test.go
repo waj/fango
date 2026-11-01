@@ -1,7 +1,10 @@
 package modules
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/waj/fango/internal/ast"
@@ -43,6 +46,52 @@ func TestGraphImportsBeyondPrelude(t *testing.T) {
 	restore()
 	if g.Loaded("Range") || !g.Loaded("Dict") {
 		t.Fatal("checkpoint did not restore the graph")
+	}
+}
+
+// Modules are read ahead concurrently, but the walk that consumes them decides
+// what is reported, so diagnostics keep the order of the imports that asked.
+func TestConcurrentReadsKeepDiagnosticOrder(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "Main.fango")
+	text := "module Main exposing (main)\nimport Zebra\nimport Mango\nimport Apple\nmain() = ()\n"
+	if err := os.WriteFile(entry, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		_, errs := Load(entry)
+		var got []string
+		for _, err := range errs {
+			if err.Title == "MISSING MODULE" {
+				got = append(got, err.Body)
+			}
+		}
+		if len(got) != 3 || !strings.Contains(got[0], "Zebra") || !strings.Contains(got[1], "Mango") || !strings.Contains(got[2], "Apple") {
+			t.Fatalf("diagnostics out of import order: %v", got)
+		}
+	}
+}
+
+// What one import read ahead does not outlive it: a failed import followed by
+// a fix sees the fixed file.
+func TestGraphRereadsAfterAnImport(t *testing.T) {
+	dir := t.TempDir()
+	g, _, errs := NewGraph(dir)
+	if len(errs) > 0 {
+		t.Fatalf("NewGraph: %v", errs)
+	}
+	path := filepath.Join(dir, "Lib.fango")
+	if err := os.WriteFile(path, []byte("module Lib exposing (\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, errs := g.Import("Lib", source.Span{}); len(errs) == 0 {
+		t.Fatal("expected the broken module to be reported")
+	}
+	if err := os.WriteFile(path, []byte("module Lib exposing (value)\nvalue = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, errs := g.Import("Lib", source.Span{}); len(errs) > 0 {
+		t.Fatalf("the fixed module was not reread: %v", errs)
 	}
 }
 

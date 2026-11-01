@@ -15,6 +15,9 @@ func TestJSONRecordFieldArgumentLoop(t *testing.T) {
 	if !ok {
 		t.Fatal(diagnostics.String())
 	}
+	if err := result.LoadRuntime(); err != nil {
+		t.Fatal(err)
+	}
 	foundWideScan := false
 	for i := range result.Program.Defs {
 		def := &result.Program.Defs[i]

@@ -431,7 +431,9 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
 	}
 	pending := map[string]*node{entryName: rootNode}
-	if errs := g.loadDeps(pending, rootNode, source.Span{}); len(errs) > 0 {
+	errs = g.loadDeps(pending, rootNode, source.Span{})
+	g.discovered()
+	if len(errs) > 0 {
 		return nil, errs
 	}
 	order, errs := g.complete(pending)

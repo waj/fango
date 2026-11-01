@@ -85,7 +85,7 @@ func (p *project) record(event compileevent.Event) {
 func (p *project) check(t *testing.T) *check.Result {
 	t.Helper()
 	p.events = map[string]map[string]int{}
-	result, diagnostics, internalErr := (&check.Session{Cache: p.objects, Observe: p.record}).Compile(p.entry)
+	result, diagnostics, internalErr := (&check.Session{Cache: p.objects, Observe: p.record, DeferRuntime: true}).Compile(p.entry)
 	if internalErr != nil {
 		t.Fatal(internalErr)
 	}
@@ -142,6 +142,9 @@ func TestUnchangedBuildDoesNoModuleWork(t *testing.T) {
 	}
 	if p.total("checked-cache-hit") == 0 || p.total("emitted-cache-hit") != len(second) {
 		t.Fatalf("unchanged build was not served from artifacts: %#v", p.events)
+	}
+	if read := p.total("runtime-section"); read != 0 {
+		t.Fatalf("unchanged build read %d runtime sections: %#v", read, p.events)
 	}
 }
 
@@ -280,6 +283,9 @@ func TestEmittingFromAReusedObjectMatchesEmittingFromSource(t *testing.T) {
 			}
 			if p.events["emission"]["<entry>"] != 1 {
 				t.Fatalf("the second build did not re-emit the entry: %#v", p.events)
+			}
+			if p.total("runtime-section") == 0 {
+				t.Fatalf("the second build emitted without reading runtime Core: %#v", p.events)
 			}
 			assertSameFiles(t, "emission from a reused object", fromObjects, fromSource)
 		})

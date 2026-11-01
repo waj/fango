@@ -38,6 +38,14 @@ type Installer struct {
 	infos        []infer.DeclInfo
 	FreshSources map[string]bool
 
+	// DeferRuntime leaves the runtime Core of modules taken from the cache
+	// unread until LoadRuntime. Only checking a module from source and emitting
+	// one read it, so a build that reuses everything never pays for it. The
+	// entry is always read: its definitions say where the program starts.
+	DeferRuntime bool
+	// unread is the objects installed with their runtime Core deferred.
+	unread []*ModuleObject
+
 	// publishing holds artifacts being encoded and stored while later modules
 	// are checked. An object is complete once its module is installed, and
 	// nothing mutates it after, so writing it can overlap the rest of the
@@ -233,8 +241,12 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 			object, hit = acceptCachedObject(cached, baseKey, module, i.summaries)
 		}
 		if hit {
-			if err := InstallObject(i.ck, i.stage, object); err == nil {
+			deferRuntime := i.DeferRuntime && module.Role != modules.EntryRole
+			if err := installObject(i.ck, i.stage, object, cached.ids, deferRuntime); err == nil {
 				i.artifact("checked-cache-hit", owner, lookupStart, read)
+				if object.PendingRuntime != nil {
+					i.unread = append(i.unread, object)
+				}
 				i.states = append(i.states, object.State)
 				i.objects = append(i.objects, object)
 				i.installed = append(i.installed, object.Runtime...)
@@ -249,6 +261,10 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	// definitions of its dependencies, so every deferred section is needed
 	// from here on. Nothing before this point can reach one.
 	if err := i.stage.Force(); err != nil {
+		return nil, nil, err
+	}
+	// Elaborating and linting it read the installed runtime definitions too.
+	if err := i.LoadRuntime(); err != nil {
 		return nil, nil, err
 	}
 	// Prompt declarations can be pending when a REPL imports this module.
@@ -322,6 +338,33 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	i.objects = append(i.objects, object)
 	i.installed = append(i.installed, owned...)
 	return owned, nil, nil
+}
+
+// LoadRuntime reads and interns every runtime section still deferred, and
+// restores the installed definitions to installation order. A section that cannot be read is a
+// violated invariant: its object was already installed.
+func (i *Installer) LoadRuntime() error {
+	unread := i.unread
+	if len(unread) == 0 {
+		return nil
+	}
+	i.unread = nil
+	sections := make([]staging.Interning, len(unread))
+	for n, object := range unread {
+		sections[n] = object.PendingRuntime
+	}
+	shares := staging.InternAll(sections)
+	for n, object := range unread {
+		if err := object.PendingRuntime.finish(object); err != nil {
+			return fmt.Errorf("runtime Core for module %s: %w", object.State.Name, err)
+		}
+		i.observe.Report(compileevent.Event{Stage: "runtime-section", Owner: object.State.Name, Duration: shares[n]})
+	}
+	i.installed = i.installed[:0:0]
+	for _, object := range i.objects {
+		i.installed = append(i.installed, object.Runtime...)
+	}
+	return nil
 }
 
 // readAhead starts reading every slot the group may consult. Reading and

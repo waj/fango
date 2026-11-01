@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/waj/fango/internal/ast"
@@ -36,6 +37,12 @@ type Graph struct {
 	// one place.
 	fixities fixity.Table
 	observe  StageObserver
+
+	// reads holds the modules read ahead of the current walk; reading counts
+	// the ones still running.
+	reads   map[string]*moduleRead
+	readMu  sync.Mutex
+	reading sync.WaitGroup
 }
 
 // Increment is what one import adds to a graph: the newly loaded modules in
@@ -114,7 +121,9 @@ func (g *Graph) Checkpoint() func() {
 // already in the graph yields an empty increment.
 func (g *Graph) Import(name string, at source.Span) (*Increment, []diag.Error) {
 	pending := map[string]*node{}
-	if errs := g.load(pending, name, at); len(errs) > 0 {
+	errs := g.load(pending, name, at)
+	g.discovered()
+	if len(errs) > 0 {
 		return nil, errs
 	}
 	order, errs := g.complete(pending)
@@ -147,51 +156,13 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 	if g.nodes[name] != nil || pending[name] != nil {
 		return nil
 	}
-	bundlePath, bundleContent, bundleErr := g.bundled.Source(name)
-	// No library at all is its own situation. Left as an ordinary miss it
-	// would fall through to the source root and report that Prelude is
-	// missing from the user's own directory, which sends them looking in
-	// entirely the wrong place.
-	if libroot.Missing(bundleErr) {
-		return []diag.Error{{Title: "MISSING LIBRARY", Body: bundleErr.Error() + "."}}
-	}
-	var path string
-	var b []byte
-	var readErr error
-	bundled := false
-	if g.local == nil {
-		if bundleErr != nil {
-			return []diag.Error{{Title: "INVALID BUNDLED PRELUDE", Body: bundleErr.Error()}}
-		}
-		path, b, bundled = bundlePath, bundleContent, true
-	} else {
-		localPath, localContent, localErr := g.local.Source(name)
-		path, b, readErr = localPath, localContent, localErr
-		if bundleErr == nil {
-			if localErr == nil {
-				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; remove or rename the local `%s`.", name, bundlePath, localPath)}
-			}
-			if _, caseCollision := localErr.(pathCaseError); caseCollision {
-				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; a case-insensitive local path also conflicts with that reserved name.", name, bundlePath)}
-			}
-			if !errors.Is(localErr, fs.ErrNotExist) {
-				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; the local `%s` also occupies that reserved path.", name, bundlePath, localPath)}
-			}
-			path, b, readErr, bundled = bundlePath, bundleContent, nil, true
-		}
-	}
-	if readErr != nil {
-		if ce, ok := readErr.(pathCaseError); ok {
-			return []diag.Error{diag.Errorf(at, "MODULE PATH CASING", "Module `%s` requires exact path casing; expected `%s` but found `%s`.", name, ce.want, ce.found)}
-		}
-		return []diag.Error{diag.Errorf(at, "MISSING MODULE", "I cannot find module `%s`; expected `%s` beneath the entry directory.", name, path)}
-	}
-	mf := source.NewFile(path, b)
 	parseStart := time.Now()
-	mm, errs := parse(mf)
-	if len(errs) > 0 {
-		return errs
+	read := g.readAhead(name)
+	<-read.done
+	if read.fail != nil {
+		return read.fail(at)
 	}
+	path, b, bundled, mm := read.path, read.content, read.bundled, read.mod
 	if mm.Header == nil {
 		return []diag.Error{diag.Errorf(at, "MISSING MODULE HEADER", "Imported file `%s` must declare `module %s exposing (...)`.", path, name)}
 	}
@@ -200,7 +171,7 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 	}
 	g.observe.Timed("parse", name, parseStart)
 	n := &node{name: name, path: path, content: b, mod: mm, sourceHash: hashBytes(b), bundled: bundled, nativeModule: name}
-	n.deps = syntaxDependencies(mm, name)
+	n.deps = read.deps
 	var np string
 	var nb []byte
 	var ne error
@@ -219,6 +190,7 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 // loadDeps loads a pending node's imports and syntax-driven dependencies,
 // collecting every diagnostic rather than stopping at the first.
 func (g *Graph) loadDeps(pending map[string]*node, n *node, at source.Span) []diag.Error {
+	g.readDependencies(n.mod, n.deps)
 	var errs []diag.Error
 	for _, im := range n.mod.Imports {
 		errs = append(errs, g.load(pending, im.Module, im.ModuleSpan)...)
@@ -227,6 +199,136 @@ func (g *Graph) loadDeps(pending map[string]*node, n *node, at source.Span) []di
 		errs = append(errs, g.load(pending, dep, at)...)
 	}
 	return errs
+}
+
+// moduleRead is one module's source and syntax, read ahead of the walk that
+// consumes it. Reading and parsing depend on nothing the walk computes, so
+// they run concurrently across the whole reachable graph; the walk still visits
+// modules in its own order, so its diagnostics and node order do not depend on
+// which read finishes first.
+type moduleRead struct {
+	done    chan struct{}
+	path    string
+	content []byte
+	bundled bool
+	mod     *ast.Module
+	deps    []string
+	// fail is why the module cannot be used, given the span that asked for it.
+	fail func(at source.Span) []diag.Error
+}
+
+// readAhead starts reading module name unless a read of it already exists.
+// Each read goes on to its own dependencies. discovered ends them.
+func (g *Graph) readAhead(name string) *moduleRead {
+	g.readMu.Lock()
+	defer g.readMu.Unlock()
+	if read := g.reads[name]; read != nil {
+		return read
+	}
+	if g.reads == nil {
+		g.reads = map[string]*moduleRead{}
+	}
+	read := &moduleRead{done: make(chan struct{})}
+	g.reads[name] = read
+	g.reading.Add(1)
+	go func() {
+		defer g.reading.Done()
+		g.readModule(name, read)
+		close(read.done)
+		if read.fail == nil {
+			g.readDependencies(read.mod, read.deps)
+		}
+	}()
+	return read
+}
+
+func (g *Graph) readDependencies(m *ast.Module, deps []string) {
+	for _, im := range m.Imports {
+		if g.nodes[im.Module] == nil {
+			g.readAhead(im.Module)
+		}
+	}
+	for _, dep := range deps {
+		if g.nodes[dep] == nil {
+			g.readAhead(dep)
+		}
+	}
+}
+
+// discovered waits out the reads a walk started and forgets them, so a later
+// import sees the files as they are then. It must run before the graph's nodes
+// change, because the reads consult them.
+func (g *Graph) discovered() {
+	g.reading.Wait()
+	g.reads = nil
+}
+
+func (g *Graph) readModule(name string, read *moduleRead) {
+	fail := func(diagnose func(at source.Span) []diag.Error) { read.fail = diagnose }
+	bundlePath, bundleContent, bundleErr := g.bundled.Source(name)
+	// No library at all is its own situation. Left as an ordinary miss it
+	// would fall through to the source root and report that Prelude is
+	// missing from the user's own directory, which sends them looking in
+	// entirely the wrong place.
+	if libroot.Missing(bundleErr) {
+		fail(func(source.Span) []diag.Error {
+			return []diag.Error{{Title: "MISSING LIBRARY", Body: bundleErr.Error() + "."}}
+		})
+		return
+	}
+	var path string
+	var b []byte
+	var readErr error
+	bundled := false
+	if g.local == nil {
+		if bundleErr != nil {
+			fail(func(source.Span) []diag.Error {
+				return []diag.Error{{Title: "INVALID BUNDLED PRELUDE", Body: bundleErr.Error()}}
+			})
+			return
+		}
+		path, b, bundled = bundlePath, bundleContent, true
+	} else {
+		localPath, localContent, localErr := g.local.Source(name)
+		path, b, readErr = localPath, localContent, localErr
+		if bundleErr == nil {
+			if localErr == nil {
+				fail(func(at source.Span) []diag.Error {
+					return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; remove or rename the local `%s`.", name, bundlePath, localPath)}
+				})
+				return
+			}
+			if _, caseCollision := localErr.(pathCaseError); caseCollision {
+				fail(func(at source.Span) []diag.Error {
+					return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; a case-insensitive local path also conflicts with that reserved name.", name, bundlePath)}
+				})
+				return
+			}
+			if !errors.Is(localErr, fs.ErrNotExist) {
+				fail(func(at source.Span) []diag.Error {
+					return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; the local `%s` also occupies that reserved path.", name, bundlePath, localPath)}
+				})
+				return
+			}
+			path, b, readErr, bundled = bundlePath, bundleContent, nil, true
+		}
+	}
+	if readErr != nil {
+		fail(func(at source.Span) []diag.Error {
+			if ce, ok := readErr.(pathCaseError); ok {
+				return []diag.Error{diag.Errorf(at, "MODULE PATH CASING", "Module `%s` requires exact path casing; expected `%s` but found `%s`.", name, ce.want, ce.found)}
+			}
+			return []diag.Error{diag.Errorf(at, "MISSING MODULE", "I cannot find module `%s`; expected `%s` beneath the entry directory.", name, path)}
+		})
+		return
+	}
+	mod, errs := parse(source.NewFile(path, b))
+	if len(errs) > 0 {
+		fail(func(source.Span) []diag.Error { return errs })
+		return
+	}
+	read.path, read.content, read.bundled, read.mod = path, b, bundled, mod
+	read.deps = syntaxDependencies(mod, name)
 }
 
 // complete keeps discovery, graph validation, and per-module resolution as
@@ -388,6 +490,7 @@ func (g *Graph) loadPrelude() (*PreludeResult, []diag.Error) {
 	for _, root := range []string{PreludeModule, MetaModule, DeriveModule, ListModule, TupleModule, RegexModule} {
 		errs = append(errs, g.load(pending, root, source.Span{})...)
 	}
+	g.discovered()
 	if len(errs) > 0 {
 		return nil, errs
 	}

@@ -10,7 +10,8 @@ import "time"
 // work it names, so Duration always covers that work and never the gap to the
 // next event. Stage names are the pipeline vocabulary: parse, resolve,
 // checked-cache-hit, checked-cache-miss, check, elaborate, semantic-lint,
-// stage-section, emitted-cache-hit, emitted-cache-miss, and emission.
+// stage-section, runtime-section, emitted-cache-hit, emitted-cache-miss, and
+// emission.
 type Event struct {
 	Stage string
 	// Owner is a module name, or "<entry>" for a headerless entry module.

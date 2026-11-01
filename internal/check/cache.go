@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 
 	"github.com/waj/fango/internal/compilecache"
@@ -132,6 +133,9 @@ type cachedObject struct {
 	read   int
 	record []byte
 	object *ModuleObject
+	// ids is what installing object needs to allocate. Finding them only walks
+	// the object, so it is done here rather than at installation.
+	ids *remapIDs
 }
 
 // readCachedObject reads and decodes a slot. It depends on nothing the graph
@@ -151,7 +155,7 @@ func readCachedObject(cache ObjectCache, slot string, sources map[string]*source
 	if err != nil {
 		return cachedObject{read: read}
 	}
-	return cachedObject{read: read, record: recordData, object: object}
+	return cachedObject{read: read, record: recordData, object: object, ids: collectIDs(reflect.ValueOf(object), nil)}
 }
 
 // acceptCachedObject decides whether a decoded artifact is this module as the

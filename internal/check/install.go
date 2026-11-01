@@ -26,14 +26,34 @@ import (
 // holds this remapper, so the stage half is interned against the same
 // installed declarations and the same shared structure as the rest.
 func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObject) error {
+	return installObject(ck, stage, object, nil, false)
+}
+
+// installObject also takes the object's identities if they are already
+// collected, and whether to leave an unread runtime section unread, for the
+// caller to load once something needs it. Interning it is then no longer among
+// the checks that can reject the object, so a failure is a violated invariant
+// like a stage section's, not a miss.
+func installObject(ck *infer.Checker, stage *staging.Session, object *ModuleObject, ids *remapIDs, deferRuntime bool) error {
 	if object == nil || object.State == nil {
 		return fmt.Errorf("module object has no state")
 	}
 	newTemplateBase := ck.Templates.Len()
 	pending := object.Pending
-	r := newRemapper(ck, object, newTemplateBase)
+	r := newRemapper(ck, object, ids, newTemplateBase)
 	if err := r.remap(); err != nil {
 		return err
+	}
+	if runtime := object.PendingRuntime; runtime != nil {
+		runtime.remapper = r
+		if !deferRuntime {
+			runtime.Read()
+			runtime.Allocate()
+			runtime.Intern()
+			if err := runtime.finish(object); err != nil {
+				return err
+			}
+		}
 	}
 	state := object.State
 	compatBase := &infer.ModuleState{Instances: append([]*infer.InstanceInfo(nil), ck.Instances...), Derivers: ck.Derivers}
@@ -131,29 +151,86 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 	ck.InstanceImports[state.Name] = visible
 	ck.Templates.Append(object.Templates)
 	if pending != nil {
-		stage.Defer(state.Name, pending.decode, func() ([]core.Def, []staging.Group, int, error) { return r.stage(pending) })
+		pending.remapper = r
+		stage.Defer(state.Name, pending)
 	} else {
 		stage.InstallCore(object.Stage, object.StageGroups)
 	}
 	return nil
 }
 
-// stage reads and interns a deferred stage section. Decoding it through the
-// object's own decoder returns the same pointers for structure the installed
-// half already holds, and this remapper's memo recognizes those as already
-// remapped, so the two halves cannot acquire disagreeing identities.
-func (r *remapper) stage(pending *PendingStage) ([]core.Def, []staging.Group, int, error) {
-	size := pending.size()
-	payload, err := pending.load()
-	if err != nil {
-		return nil, nil, 0, err
+// A deferred section is interned through this remapper in the steps
+// staging.InternAll runs. Decoding through the object's own decoder returns the
+// same pointers for structure the installed half already holds, and the memo
+// recognizes those as already remapped, so the halves cannot acquire
+// disagreeing identities. Read and Intern touch this object's nodes and read the
+// checker, which nothing writes while sections are being forced.
+
+// Read implements staging.Section.
+func (p *PendingStage) Read() {
+	p.decode()
+	if p.err == nil {
+		p.ids = p.remapper.collect(reflect.ValueOf(p.decoded))
 	}
-	r.extend(reflect.ValueOf(payload))
-	r.pointer(reflect.ValueOf(payload))
-	if r.err != nil {
-		return nil, nil, 0, r.err
+}
+
+// Allocate implements staging.Section.
+func (p *PendingStage) Allocate() {
+	if p.ids != nil {
+		p.remapper.allocate(p.ids)
 	}
-	return payload.Stage, payload.Groups, size, nil
+}
+
+// Intern implements staging.Section.
+func (p *PendingStage) Intern() {
+	if p.ids != nil {
+		p.remapper.pointer(reflect.ValueOf(p.decoded))
+	}
+}
+
+// Load implements staging.Section.
+func (p *PendingStage) Load() ([]core.Def, []staging.Group, int, error) {
+	if p.err != nil {
+		return nil, nil, 0, p.err
+	}
+	if p.remapper.err != nil {
+		return nil, nil, 0, p.remapper.err
+	}
+	return p.decoded.Stage, p.decoded.Groups, p.size(), nil
+}
+
+// Read implements staging.Interning.
+func (p *PendingRuntime) Read() {
+	p.decode()
+	if p.err == nil {
+		p.ids = p.remapper.collect(reflect.ValueOf(p.decoded))
+	}
+}
+
+// Allocate implements staging.Interning.
+func (p *PendingRuntime) Allocate() {
+	if p.ids != nil {
+		p.remapper.allocate(p.ids)
+	}
+}
+
+// Intern implements staging.Interning.
+func (p *PendingRuntime) Intern() {
+	if p.ids != nil {
+		p.remapper.pointer(reflect.ValueOf(p.decoded))
+	}
+}
+
+// finish moves an interned runtime section into its object.
+func (p *PendingRuntime) finish(object *ModuleObject) error {
+	if p.err != nil {
+		return p.err
+	}
+	if p.remapper.err != nil {
+		return p.remapper.err
+	}
+	object.Runtime, object.PendingRuntime = p.decoded.Defs, nil
+	return nil
 }
 
 func validateInstall(ck *infer.Checker, state *infer.ModuleState) error {
@@ -210,7 +287,7 @@ type remapper struct {
 	err          error
 }
 
-func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *remapper {
+func newRemapper(ck *infer.Checker, object *ModuleObject, ids *remapIDs, templateBase int) *remapper {
 	r := &remapper{ck: ck, object: object, templateOld: object.TemplateBase, templateNew: templateBase,
 		unique: map[int]int{}, effect: map[int]int{}, vars: map[int]int{}, captures: map[types.CaptureVar]types.CaptureVar{}, scopes: map[types.ScopeID]types.ScopeID{}, resumes: map[types.ResumeID]types.ResumeID{}, memo: map[uintptr]reflect.Value{}, written: map[*types.TCon]int{},
 		ownedADTs: map[*types.ADTInfo]bool{}, ownedCtors: map[*types.CtorInfo]bool{}, ownedEffects: map[*types.EffectInfo]bool{}, ownedOps: map[*types.EffectOp]bool{}, ownedClasses: map[*types.ClassInfo]bool{}}
@@ -242,25 +319,26 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 		nominalIDs = append(nominalIDs, id)
 	}
 	sort.Ints(nominalIDs)
+	// An object names every nominal its session knew of, so this index beats
+	// searching the installed declarations once for each.
+	installedNominals := make(map[string]int, len(ck.TypeNames)+len(ck.ADTs))
+	for _, builtin := range []*types.TCon{ck.B.Int, ck.B.Float, ck.B.String, ck.B.Char, ck.B.Bool, ck.B.Unit} {
+		installedNominals[builtin.Name] = builtin.Unique
+	}
+	for _, ty := range ck.TypeNames {
+		if con, ok := ty.(*types.TCon); ok {
+			installedNominals[con.Name] = con.Unique
+		}
+	}
+	for _, adt := range ck.ADTs {
+		installedNominals[adt.Con.Name] = adt.Con.Unique
+	}
 	for _, id := range nominalIDs {
 		if _, mapped := r.unique[id]; mapped {
 			continue
 		}
-		name := object.Nominals[id]
-		for _, builtin := range []*types.TCon{ck.B.Int, ck.B.Float, ck.B.String, ck.B.Char, ck.B.Bool, ck.B.Unit} {
-			if builtin.Name == name {
-				r.unique[id] = builtin.Unique
-			}
-		}
-		for _, ty := range ck.TypeNames {
-			if con, ok := ty.(*types.TCon); ok && con.Name == name {
-				r.unique[id] = con.Unique
-			}
-		}
-		for _, adt := range ck.ADTs {
-			if adt.Con.Name == name {
-				r.unique[id] = adt.Con.Unique
-			}
+		if unique, ok := installedNominals[object.Nominals[id]]; ok {
+			r.unique[id] = unique
 		}
 	}
 	var effectIDs []int
@@ -288,7 +366,10 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 			r.err = fmt.Errorf("unknown imported capture scope %s", name)
 		}
 	}
-	r.extend(reflect.ValueOf(object))
+	if ids == nil {
+		ids = collectIDs(reflect.ValueOf(object), nil)
+	}
+	r.allocate(ids)
 	return r
 }
 
@@ -308,16 +389,29 @@ func installedScope(ck *infer.Checker, written string) types.ScopeID {
 	return summary.Captures.Scopes[index]
 }
 
-// extend gives a decoded value the identities it needs: foreign declarations
-// keep the installed parameters they describe, and everything the value
-// allocates for itself is renamed in a deterministic order. A deferred stage
-// section goes through it too, so it cannot disagree with the half of the
+// Giving a decoded value the identities it needs takes two steps. Foreign
+// declarations keep the installed parameters they describe, and everything the
+// value allocates for itself is renamed in a deterministic order. A deferred
+// section goes through them too, so it cannot disagree with the half of the
 // object already installed.
-func (r *remapper) extend(v reflect.Value) {
-	ck := r.ck
+//
+// collect finds the identities a decoded value needs. It reads only the value
+// and this remapper's memo.
+func (r *remapper) collect(v reflect.Value) *remapIDs {
+	return collectIDs(v, r.memo)
+}
+
+func collectIDs(v reflect.Value, done map[uintptr]reflect.Value) *remapIDs {
 	ids := &remapIDs{permissions: map[int]bool{}, vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{},
-		done: r.memo}
+		done: done}
 	collectRemapIDs(v, make(map[uintptr]bool, 1024), ids)
+	return ids
+}
+
+// allocate gives collected identities their values from the shared supply, so
+// sections take it one at a time and in order.
+func (r *remapper) allocate(ids *remapIDs) {
+	ck := r.ck
 	r.alignForeignParams(ids)
 	// Fresh permission labels have no module declaration to intern. Allocate
 	// them in source identity order, preserving sharing across deferred sections.
@@ -356,7 +450,9 @@ func (r *remapper) extend(v reflect.Value) {
 	}
 	sort.Ints(captureIDs)
 	for _, id := range captureIDs {
-		r.captures[types.CaptureVar(id)] = ck.Sup.FreshCapture()
+		if _, mapped := r.captures[types.CaptureVar(id)]; !mapped {
+			r.captures[types.CaptureVar(id)] = ck.Sup.FreshCapture()
+		}
 	}
 	var scopeIDs []int
 	for id := range scopes {
@@ -378,8 +474,10 @@ func (r *remapper) extend(v reflect.Value) {
 	}
 	sort.Ints(resumeIDs)
 	for _, id := range resumeIDs {
-		ck.ResumeGen++
-		r.resumes[types.ResumeID(id)] = ck.ResumeGen
+		if _, mapped := r.resumes[types.ResumeID(id)]; !mapped {
+			ck.ResumeGen++
+			r.resumes[types.ResumeID(id)] = ck.ResumeGen
+		}
 	}
 }
 
@@ -548,13 +646,20 @@ func (r *remapper) resumeID(old types.ResumeID) types.ResumeID {
 	if old == 0 {
 		return 0
 	}
-	n := r.resumes[old]
-	if n == 0 {
-		r.ck.ResumeGen++
-		n = r.ck.ResumeGen
-		r.resumes[old] = n
+	n, ok := r.resumes[old]
+	if !ok {
+		r.identityMissing("resume", int(old))
 	}
 	return n
+}
+
+// identityMissing reports an identity allocate never saw. Remapping allocates
+// nothing itself, because deferred sections remap concurrently, so this is
+// collectRemapIDs and fix disagreeing about what a value holds.
+func (r *remapper) identityMissing(kind string, old int) {
+	if r.err == nil {
+		r.err = fmt.Errorf("uncollected %s identity %d", kind, old)
+	}
 }
 
 // pointer returns what a decoded pointer becomes: an installed declaration it
@@ -588,20 +693,18 @@ func (r *remapper) fix(v reflect.Value) {
 	switch t {
 	case captureVarType:
 		if old := types.CaptureVar(v.Int()); old != 0 {
-			n := r.captures[old]
-			if n == 0 {
-				n = r.ck.Sup.FreshCapture()
-				r.captures[old] = n
+			n, ok := r.captures[old]
+			if !ok {
+				r.identityMissing("capture", int(old))
 			}
 			v.SetInt(int64(n))
 		}
 		return
 	case scopeType:
 		if old := types.ScopeID(v.Int()); old != 0 {
-			n := r.scopes[old]
-			if n == 0 {
-				n = r.ck.Sup.FreshScope()
-				r.scopes[old] = n
+			n, ok := r.scopes[old]
+			if !ok {
+				r.identityMissing("scope", int(old))
 			}
 			v.SetInt(int64(n))
 		}
@@ -831,12 +934,7 @@ func (r *remapper) remapPointer(v reflect.Value) {
 		old := t.ID
 		n, ok := r.vars[old]
 		if !ok {
-			if t.Rigid {
-				n = r.ck.Sup.FreshRigid(t.Kind).ID
-			} else {
-				n = r.ck.Sup.FreshVar(t.Kind).ID
-			}
-			r.vars[old] = n
+			r.identityMissing("type variable", old)
 		}
 		t.ID = n
 	case tConPtr:

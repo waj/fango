@@ -284,8 +284,8 @@ makes the digest cover the bytes as stored rather than a re-encoded copy of
 them. Every payload leads with the record of what its artifact was built from,
 which is what a lookup compares against the graph it has; behind it, an emitted
 unit carries the digest of the Go it produced, and a checked module object its
-[object encoding](pipeline.md#pipeline), whose stage Core is a section of its
-own that a compile reads only when it needs it. There is no
+[object encoding](pipeline.md#pipeline), whose runtime and stage Core are
+sections of their own that a compile reads only when it needs them. There is no
 whole-project artifact: every invocation discovers and validates the current
 graph, and one module-artifact pipeline decides what is still valid, so no
 command can be served a stale program by a shortcut that outranks its modules.

@@ -24,7 +24,7 @@ const (
 // build are absent from the table rather than reported as zero.
 var stageOrder = []string{
 	"parse", "resolve",
-	"checked lookup", "checked store", "stage Core",
+	"checked lookup", "checked store", "stage Core", "runtime Core",
 	"check", "elaborate", "stage snapshot", "semantic-lint",
 	"emitted lookup", "emitted store", "lowering", "emission",
 	"write + sync", "go build",
@@ -40,6 +40,7 @@ var stageLabel = map[string]string{
 	"checked-cache-miss":  "checked lookup",
 	"checked-cache-store": "checked store",
 	"stage-section":       "stage Core",
+	"runtime-section":     "runtime Core",
 	"stage-snapshot":      "stage snapshot",
 	"check":               "check",
 	"elaborate":           "elaborate",

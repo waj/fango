@@ -128,6 +128,16 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 		}
 		work = append(work, emission{unit: unit, owner: owner, record: record, recorded: recorded, slot: slot})
 	}
+	if len(work) != 0 {
+		// Lowering an owner reads its own Core, which a build that reuses every
+		// owner never needs. What it loads has not been validated yet.
+		if err := result.LoadRuntime(); err != nil {
+			return nil, err
+		}
+		if err := codegen.ValidateUnits(result.Program, units); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.emit(result, cache, work); err != nil {
 		return nil, err
 	}
