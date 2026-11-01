@@ -108,6 +108,46 @@ the selected function to Go's devirtualizer after a known hidden package has
 been eliminated; retaining a struct-field projection can otherwise obstruct
 inlining even with zero allocations.
 
+## Dictionary method entries
+
+A method is curried in Core, so applying a dictionary's field with all its
+arguments would build an intermediate callable, with both transport members, at
+each stage. A method whose every stage is pure and which takes at least two
+arguments therefore has a second field, `M<i>`, beside its field `F<i>`: one Go
+function at the declared arity. A known lambda chain is the entry's own body. Any
+other field value keeps its intermediate applications, and their cost, through an
+adapter evaluated once with the dictionary's other fields. Dictionary conversion
+adapts the converted fields the same way.
+
+A binding of a projected method, or a dictionary match's binder as inlining leaves
+it, selects its saturated calls: `dict.M0(x, y)`. Those calls must be in the same
+Go function as the binding, because a lambda or handler can be outlined with only
+its own captures. A later stage's argument must already be an atom, since an
+unknown method's intermediate application runs before that argument is evaluated.
+A partial application, a first-class use, a use under a lambda, a computed later
+argument, and a method with an effect use the curried field. The binding is dropped
+when nothing else mentions it. Core is unchanged, so the interpreter applies the
+same methods curried, and debug and optimization-disabled emission call `F<i>`.
+
+[`benchmarks/dictcompare`](../../benchmarks/dictcompare/generic.fango) holds the
+generic workload, and a compiled test pins its allocation-free calls. On
+2026-10-31, an Apple M5 Max, darwin/arm64, Go 1.26.7, `GOMAXPROCS=1`, alternating
+five samples of 150 ms each against the previous compiler, nanoseconds and
+allocations per run, before → after:
+
+| Workload | Time | Allocations |
+| --- | ---: | ---: |
+| 1000 `Dict.get`, `Int` keys | 253608 → 18901 | 30406 → 0 |
+| 1000 `Dict.insert`, `Int` keys | 580700 → 238687 | 59180 → 13424 |
+| Insertion sort of 500 `Int` | 3589497 → 1795011 | 374751 → 125251 |
+| 1000 `==`, new `Eq (Maybe Int)` dictionary each | 47769 → 2356 | 4000 → 0 |
+| 1000 `==` on `[Just n]`, new dictionary each | 132031 → 69473 | 10000 → 5000 |
+| 1000 `show (Just n, [n])` | 625264 → 562471 | 42000 → 38000 |
+
+`examples/lisp.fango` computing `(fib 30)` fell from about 3.3 s and 236 million
+allocations to about 1.6 s and 78 million. Its generated Go grew 1% and its binary
+784 bytes.
+
 ## Bounded effect bodies
 
 A transport-polymorphic worker emits a Direct and an Exit body. Routing Direct

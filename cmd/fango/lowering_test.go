@@ -278,6 +278,30 @@ func testLoweringStrategies(t *testing.T, stem, strategy string) {
 	}
 }
 
+func TestSaturatedMethodCallAllocations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiled allocation check")
+	}
+	source := filepath.Join("..", "..", "benchmarks", "dictcompare", "generic.fango")
+	project := filepath.Join(t.TempDir(), "generated")
+	cmd := exec.Command(cliBinary(t), "build", "--emit-go", "-o", project, source)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("emit: %v\n%s", err, out)
+	}
+	test, err := os.ReadFile(filepath.Join("..", "..", "benchmarks", "dictcompare", "generic_test.go.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "entries", "generic", "measure_test.go"), test, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("go", "test", "-count=1", "-run", "TestSaturatedMethodsDoNotAllocate", "./entries/generic")
+	cmd.Dir = project
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
 func TestHiddenPackageAllocations(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiled allocation check")
@@ -299,6 +323,60 @@ func TestHiddenPackageAllocations(t *testing.T) {
 	cmd.Dir = project
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("allocation check: %v\n%s", err, out)
+	}
+}
+
+func TestSaturatedMethodCallsUseDictionaryEntries(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "probe.fango")
+	program := `class Mix a
+    mix : a -> a -> a
+    stepper : a -> a -> a
+    audit : a -> a ->{Console} a
+instance Mix Int
+    mix x y = x + y
+    stepper x =
+        doubled = x * 2
+        { y -> doubled + y }
+    audit x y = x + y
+atoms : Mix a => a -> a -> a
+atoms x y = mix x y
+computed : Mix a => a -> a -> a
+computed x y = stepper x (stepper y x)
+partial : Mix a => a -> a -> a
+partial x =
+    applied = mix x
+    applied
+effectful : Mix a => a -> a ->{Console} a
+effectful x y = audit x y
+one : Int
+one = 1
+main() = print (atoms one 2 + computed one 2 + partial one 2 + effectful one 2)
+`
+	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
+		t.Fatal(err)
+	}
+	src := string(generatedFile(t, emittedProject(t, source), "entries/probe/main.go"))
+	body := func(name string) string {
+		start := strings.Index(src, "func "+name+"[")
+		if start < 0 {
+			t.Fatalf("no %s:\n%s", name, src)
+		}
+		end := strings.Index(src[start:], "\n}\n")
+		return src[start : start+end]
+	}
+	if got := body("V_atoms"); !strings.Contains(got, ".M0(v_x, v_y)") || strings.Contains(got, ".Direct(") {
+		t.Errorf("saturated call does not use the entry:\n%s", got)
+	}
+	// The inner call's arguments are atoms. The outer call's later argument is
+	// not, and must run after the method's first application.
+	if got := body("V_computed"); !strings.Contains(got, ".Direct(v_x).Direct(") || !strings.Contains(got, ".M1(v_y, v_x)") {
+		t.Errorf("computed argument moved across an intermediate application:\n%s", got)
+	}
+	if got := body("V_partial"); strings.Contains(got, ".M0(") {
+		t.Errorf("partial application uses the entry:\n%s", got)
+	}
+	if got := body("V_effectful"); strings.Contains(got, ".M2") {
+		t.Errorf("effectful method has an entry:\n%s", got)
 	}
 }
 

@@ -71,6 +71,7 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 					for i, f := range ctor.Fields {
 						fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(fieldName(i))}, Type: g.goType(f)})
 					}
+					fields = append(fields, g.methodEntryFields(adt, ctor)...)
 					restore()
 					for i := range ctor.Hidden {
 						fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(hiddenDescriptorField(i))}, Type: g.descriptorType()})
@@ -134,6 +135,9 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 		for _, w := range e.Witnesses {
 			args = append(args, g.typeDescriptor(w))
 		}
+	}
+	if dictionaryADT(adt) {
+		return g.dictionaryValue(e.Ctor, typeArgs, g.goType(e.Ty), adt.InstFields(e.Ctor, e.TyArgs), args, e.Args)
 	}
 	return g.ctorValue(e.Ctor, typeArgs, args...)
 }

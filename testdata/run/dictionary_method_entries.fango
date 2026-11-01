@@ -1,0 +1,129 @@
+-- Class methods reached through a dictionary, in every shape a call can take:
+-- saturated, partial, first-class, under a lambda, with a computed argument,
+-- and through conditional instances, effects, and hidden state.
+import Fail exposing (Fail)
+import List
+import Result exposing (Result(..))
+
+class Mix a
+    mix : a -> a -> a -> a
+    blend : a -> a -> a
+    -- Computes between its arguments, and is a function once applied.
+    stepper : a -> (a -> a)
+    lone : a -> a
+
+instance Mix Int
+    mix x y z = x * 100 + y * 10 + z
+    blend x y = x * 10 + y
+    stepper x =
+        doubled = x * 2
+        { y -> doubled + y }
+    lone x = x + 1
+
+instance Mix String
+    mix x y z = x ++ y ++ z
+    blend x y = x ++ "+" ++ y
+    stepper x = { y -> y ++ x }
+    lone x = x ++ "!"
+
+-- A conditional instance's dictionary captures its context.
+instance Mix a => Mix (Maybe a)
+    mix x y z = blend (blend x y) z
+    blend x y = case (x, y) of
+        (Just a, Just b) -> Just (blend a b)
+        (Nothing, other) -> other
+        (other, Nothing) -> other
+    stepper x = { y -> blend x y }
+    lone x = case x of
+        Just a -> Just (lone a)
+        Nothing -> Nothing
+
+saturated : Mix a => a -> a -> a -> a
+saturated x y z = mix x y z
+
+partial : Mix a => a -> a -> a -> a
+partial x y z =
+    onceApplied = mix x
+    twiceApplied = onceApplied y
+    twiceApplied z
+
+folded : Mix a => a -> a -> List a -> a
+folded x y rest = List.foldl { item total -> blend total item } (blend x y) rest
+
+passed : (a -> a -> a) -> a -> a -> a
+passed f x y = f x y
+
+asValue : Mix a => a -> a -> a
+asValue x y = passed blend x y
+
+underLambda : Mix a => a -> a -> List a -> List a
+underLambda x y items = List.map { item -> mix x y item } items
+
+computedArgument : Mix a => a -> a -> a
+computedArgument x y = blend (lone x) (blend y (lone y))
+
+laterComputed : Mix a => a -> a -> a
+laterComputed x y = stepper x (stepper y x)
+
+-- A method whose result is applied again, beyond its declared arguments.
+class Curried a
+    chosen : a -> a -> (a -> a)
+
+instance Curried Int
+    chosen x y = { z -> x + y * z }
+
+overApplied : Curried a => a -> a -> a -> a
+overApplied x y z = chosen x y z
+
+insertSorted : Ord a => a -> List a -> List a
+insertSorted x items = case items of
+    [] -> [x]
+    [first | rest] -> if x <= first then [x, first | rest] else [first | insertSorted x rest]
+
+sorted : Ord a => List a -> List a
+sorted items = List.foldl insertSorted [] items
+
+same : Eq a => a -> a -> Bool
+same x y = x == y
+
+-- A method with an effect keeps its curried field.
+class Audit a
+    audit : a -> a ->{Fail String} a
+
+instance Audit Int
+    audit x y = if y == 0 then Fail.fail "zero" else x * 7 + y
+
+auditBoth : Audit a => a -> a -> a ->{Fail String} a
+auditBoth x y z = audit (audit x y) z
+
+-- A method called where the surrounding function can abort.
+failing : Mix a => a -> a -> Bool ->{Fail a} a
+failing x y stop = if stop then Fail.fail (blend x y) else mix x y x
+
+-- A method stored alongside hidden state.
+type Packed = { first : state, second : state, combine : state -> state -> state, render : state -> String }
+
+packed : (Mix a, Show a) => a -> a -> Packed
+packed x y = Packed { first = x, second = y, combine = blend, render = show }
+
+openPacked : Packed -> String
+openPacked (Packed { first = x, second = y, combine = f, render = r }) = r (f x (f y x))
+
+one : Int
+one = 1
+
+main() =
+    print (saturated one 2 3, saturated "a" "b" "c", saturated (Just one) Nothing (Just 3))
+    print (partial one 2 3, partial "a" "b" "c")
+    print (folded one 2 [3, 4], folded "a" "b" ["c"])
+    print (asValue one 2, asValue "a" "b", asValue (Just one) (Just 2))
+    print (underLambda one 2 [3, 4], underLambda "a" "b" ["c"])
+    print (computedArgument one 2, computedArgument "a" "b")
+    print (laterComputed one 2, laterComputed "a" "b")
+    print (overApplied one 2 3)
+    print (sorted [3, one, 2], sorted ["b", "c", "a"], sorted [[2, one], [one], []])
+    print (same one 1, same "a" "b", same [Just one] [Just 1])
+    print (same (one, "x") (one, "y"))
+    print (Fail.attempt { auditBoth one 1 1 }, Fail.attempt { auditBoth one 0 1 })
+    print (Fail.attempt { failing one 2 False }, Fail.attempt { failing one 2 True })
+    print (openPacked (packed one 2), openPacked (packed "a" "b"))

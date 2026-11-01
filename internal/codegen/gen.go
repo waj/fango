@@ -370,6 +370,7 @@ func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
 type gen struct {
 	currentWorker     string
 	bodyStrategy      string
+	methodEntries     map[*core.App]methodEntryCall
 	outlinedCallbacks map[outlinedCallbackKey]*outlinedCallback
 	outlinedEvidence  map[goast.Expr]goast.Expr
 	rowResolved       map[rowResolvedKey]*core.Lambda
@@ -1458,6 +1459,9 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			return g.workerCallExpr(e)
 		case core.Value:
 			if call, ok := g.flatCallbackCall(e); ok {
+				return g.markExpr(call)
+			}
+			if call, ok := g.methodEntryCall(e); ok {
 				return g.markExpr(call)
 			}
 			// One typed indirect call per application; chains render
@@ -2739,7 +2743,7 @@ func (g *gen) letBindingStmts(let *core.Let) (out []goast.Stmt) {
 			return []goast.Stmt{varDeclStmt(mangleValue(let.Name), g.flatCallbackType(let.Rhs.Type(), flat.arity, flat.mode), ident(mangleValue(ref.Name)))}
 		}
 	}
-	if g.rememberForwarder(let) {
+	if g.rememberForwarder(let) || g.rememberProjectedMethod(let) {
 		return nil
 	}
 	// An inlined call binds the callee's parameters as locals, and a

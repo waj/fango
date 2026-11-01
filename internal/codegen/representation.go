@@ -117,6 +117,9 @@ func (g *gen) productSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stm
 			continue
 		}
 		g.caseVarTys[b] = fields[i]
+		if g.rememberMatchedMethod(t, i) {
+			continue
+		}
 		body = append(body, varDeclStmt(mangleValue(b), g.goType(fields[i]), selector(mangleValue(t.Scrut), fieldName(i))))
 		if g.isUnit(fields[i]) {
 			body = append(body, assignBlank(ident(mangleValue(b))))
@@ -200,6 +203,11 @@ func (g *gen) convertProduct(value goast.Expr, from, to *types.TCon, adt *types.
 	for i := range ctor.Hidden {
 		fields = append(fields, selector(name, hiddenDescriptorField(i)))
 	}
-	result := g.ctorValue(ctor, runtimeADTArgs(adt, to.Args), fields...)
+	var result goast.Expr
+	if dictionaryADT(adt) {
+		result = g.dictionaryValue(ctor, runtimeADTArgs(adt, to.Args), g.goType(to), b, fields, nil)
+	} else {
+		result = g.ctorValue(ctor, runtimeADTArgs(adt, to.Args), fields...)
+	}
 	return callExpr(funcLitParams([]paramSpec{{name: name, typ: g.goType(from)}}, g.goType(to), []goast.Stmt{returnStmt(result)}), value)
 }

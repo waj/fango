@@ -17,6 +17,7 @@ It does not depend on Go runtime internals, stack maps, barriers, or scheduler A
 | Unit | Shared fangort.Unit/UnitValue when represented |
 | Function value | Structural generic alias for a typed Direct/Exit callable record |
 | Invocation-only callback parameter | Selected Go function member with a verified saturated arity |
+| Pure class method of two or more arguments | Curried field plus a [method entry](lowering.md#dictionary-method-entries) at full arity |
 | Single-constructor ADT | Typed constructor struct; pointer for recursive layouts or larger callable bundles |
 | Maybe, Result | Tagged struct with typed payload fields |
 | Payload-free enum (2–256 constructors) | One-byte tagged struct |

@@ -32,7 +32,9 @@ Dictionaries are internal single-constructor ADTs containing typed method
 functions. Qualified workers take dictionary parameters; conditional factories
 take their context dictionaries. Construction/projection use ordinary Core
 constructor/Case rules. Known evidence calls its method worker directly.
-Exact scalar native forwarders and identities may bypass wrappers.
+Exact scalar native forwarders and identities may bypass wrappers. A saturated
+call through a dictionary parameter stays a curried application in Core; the
+Go backend gives it a [method entry](lowering.md#dictionary-method-entries).
 
 Go evidence arguments precede dictionaries, which precede source parameters.
 Effects belong to method application, never dictionary construction. A method

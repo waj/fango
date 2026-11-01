@@ -1,0 +1,57 @@
+-- Generic code calling class methods through dictionaries.
+import String
+import Dict exposing (Dict)
+import List
+
+insertAll : Int -> Int -> Dict Int Int -> Dict Int Int
+insertAll i n d = if i >= n then d else insertAll (i + 1) n (Dict.insert (i * 7919) i d)
+
+dictInsert : Int -> Int
+dictInsert n = Dict.size (insertAll 0 n Dict.empty)
+
+lookups : Int -> Int -> Dict Int Int -> Int -> Int
+lookups i n d acc = if i >= n then acc else lookups (i + 1) n d (case Dict.get (i * 7919) d of
+    Just v -> acc + v
+    Nothing -> acc)
+
+dictGet : Dict Int Int -> Int -> Int
+dictGet d n = lookups 0 n d 0
+
+smallDict : Int -> Dict Int Int
+smallDict n = insertAll 0 n Dict.empty
+
+insertSorted : Ord a => a -> List a -> List a
+insertSorted x items = case items of
+    [] -> [x]
+    [first | rest] -> if x <= first then [x, first | rest] else [first | insertSorted x rest]
+
+sorted : Ord a => List a -> List a
+sorted items = List.foldl insertSorted [] items
+
+sortInts : List Int -> Int
+sortInts items = List.length (sorted items)
+
+same : Eq a => a -> a -> Bool
+same x y = x == y
+
+-- Builds a conditional dictionary at each comparison.
+countSame : Int -> Int -> Int
+countSame n acc = if n <= 0 then acc else countSame (n - 1) (if same [Just n] [Just n] then acc + 1 else acc)
+
+-- A generic function given a conditional dictionary built once per call.
+countGeneric : Eq a => a -> a -> Int -> Int -> Int
+countGeneric x y n acc = if n <= 0 then acc else countGeneric x y (n - 1) (if x == y then acc + 1 else acc)
+genericList : Int -> Int
+genericList n = countGeneric [Just n] [Just n] n 0
+
+-- Conditional dictionary construction alone, per iteration, with no list walk.
+constructOnly : Int -> Int -> Int
+constructOnly n acc = if n <= 0 then acc else constructOnly (n - 1) (if same (Just n) (Just n) then acc + 1 else acc)
+
+showAll : Int -> Int -> Int
+showAll n acc = if n <= 0 then acc else showAll (n - 1) (acc + String.length (show (Just n, [n])))
+
+values : Int -> List Int
+values n = List.map { i -> i * 7919 } (List.range 1 n)
+
+main() = print (dictInsert 1 + dictGet (smallDict 1) 1 + sortInts (values 2) + countSame 1 0 + genericList 1 + constructOnly 1 0 + showAll 1 0)
