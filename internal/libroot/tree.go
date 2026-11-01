@@ -125,13 +125,21 @@ func (t *tree) read(dir, name string) ([]byte, error) {
 		return nil, &fs.PathError{Op: "open", Path: filepath.Join(dir, name), Err: fs.ErrNotExist}
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	if data, ok := t.files[name]; ok {
+	data, ok := t.files[name]
+	t.mu.Unlock()
+	if ok {
 		return data, nil
 	}
 	data, err := os.ReadFile(filepath.Join(dir, name))
 	if err != nil {
 		return nil, err
+	}
+	// Reading outside the lock lets the files of a package be read together. If
+	// two readers of one file race, the first to finish is what both see.
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if first, ok := t.files[name]; ok {
+		return first, nil
 	}
 	t.files[name] = data
 	return data, nil

@@ -5,7 +5,8 @@
 // modules they have in common and keep their own entry package, binary, and
 // manifest of what they generated. Every write goes through WriteIfChanged so
 // the Go build cache stays effective, and each program's link is skipped from
-// the stamp of what its binary was built from.
+// the stamp of what its binary was built from. A [Tree] carries what a build
+// has already read from the directory, so that a file is read once.
 package build
 
 import (
@@ -21,6 +22,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/runtimefiles"
@@ -181,11 +183,20 @@ func ValidateExportDir(dir string) error {
 	return fmt.Errorf("refusing to replace non-empty directory %s because it is not a Fango-generated project", dir)
 }
 
-// SyncGenerated writes every file one program in the directory is made of —
-// its entry package, the modules and native sidecars it reaches, and the fixed
-// [RuntimeFiles] — and removes only the stale paths the manifest attributes to
-// that program alone. It never recursively removes an unmanaged path.
+// SyncGenerated synchronizes a directory no build has read from yet. See
+// [Tree.Sync].
 func SyncGenerated(dir, program string, files []codegen.File) (changed bool, err error) {
+	return NewTree(dir).Sync(program, files)
+}
+
+// Sync writes every file one program in the directory is made of — its entry
+// package, the modules and native sidecars it reaches, and the fixed
+// [RuntimeFiles] — and removes only the stale paths the manifest attributes to
+// that program alone. It never recursively removes an unmanaged path. A file
+// this build already read through [Tree.Source] and found to be what it wants
+// is not read again.
+func (t *Tree) Sync(program string, files []codegen.File) (changed bool, err error) {
+	dir := t.dir
 	manifestPath := filepath.Join(dir, generatedManifestName)
 	var old generatedManifest
 	if data, readErr := os.ReadFile(manifestPath); readErr == nil {
@@ -207,6 +218,9 @@ func SyncGenerated(dir, program string, files []codegen.File) (changed bool, err
 			fixed = append(fixed, slash)
 		} else {
 			owned = append(owned, slash)
+		}
+		if t.holds(slash, file.Data) {
+			continue
 		}
 		wrote, writeErr := WriteIfChanged(filepath.Join(dir, rel), file.Data)
 		if writeErr != nil {
@@ -248,20 +262,51 @@ func SyncGenerated(dir, program string, files []codegen.File) (changed bool, err
 	return changed || wrote, err
 }
 
-// Generated reads the files a build tree already holds. It is how emission
-// reuses generated Go without a second copy of it: the artifact records what
-// a unit was built from and the digest of what came out, and the bytes stay
-// here, where the Go toolchain compiles them. An empty tree, an unreadable
-// file, and a path the driver would never write are all simply absent.
-type Generated string
+// Tree reads the files a build directory already holds. It is how reuse avoids
+// a second copy of generated Go: an artifact records what a file was built from
+// and the digest of what came out, and the bytes stay here, where the Go
+// toolchain compiles them. An empty tree, an unreadable file, and a path the
+// driver would never write are all simply absent, as is everything in a nil
+// Tree.
+//
+// A Tree belongs to one build, and remembers what it read. Whoever read a file
+// has held it to its digest, so what [Tree.Sync] wants is compared against those
+// bytes rather than against a second read of them, and a file edited by hand is
+// restored because its digest missed and the bytes wanted are not the ones read.
+type Tree struct {
+	dir string
 
-func (dir Generated) Source(path string) ([]byte, bool) {
-	rel := filepath.Clean(filepath.FromSlash(path))
-	if dir == "" || !validGeneratedSourcePath(rel) {
+	mu   sync.Mutex
+	read map[string][]byte
+}
+
+func NewTree(dir string) *Tree { return &Tree{dir: dir, read: map[string][]byte{}} }
+
+// Source may be called concurrently.
+func (t *Tree) Source(path string) ([]byte, bool) {
+	if t == nil {
 		return nil, false
 	}
-	data, err := os.ReadFile(filepath.Join(string(dir), rel))
-	return data, err == nil
+	rel := filepath.Clean(filepath.FromSlash(path))
+	if !validGeneratedSourcePath(rel) {
+		return nil, false
+	}
+	data, err := os.ReadFile(filepath.Join(t.dir, rel))
+	if err != nil {
+		return nil, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.read[filepath.ToSlash(rel)] = data
+	return data, true
+}
+
+// holds reports whether this build already read exactly data from a path.
+func (t *Tree) holds(slash string, data []byte) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	read, ok := t.read[slash]
+	return ok && bytes.Equal(read, data)
 }
 
 // sharedRuntimePath reports whether a generated path is part of the private
@@ -292,8 +337,8 @@ func validGeneratedSourcePath(rel string) bool {
 // every other file the driver writes and go through the same manifest, so a
 // runtime source the library root stops shipping leaves the build directory
 // rather than staying in the package every generated module imports.
-func RuntimeFiles() ([]codegen.File, error) {
-	sources, err := runtimefiles.Packages("fangort")
+func RuntimeFiles(adapter *runtimefiles.Adapter) ([]codegen.File, error) {
+	sources, err := adapter.Packages("fangort")
 	if err != nil {
 		return nil, err
 	}

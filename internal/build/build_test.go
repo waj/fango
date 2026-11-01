@@ -287,3 +287,45 @@ func TestBuildDirOverrideDoesNotRedirectCompilationCache(t *testing.T) {
 		t.Fatalf("cache dir = %q, want %q", local, want)
 	}
 }
+
+// A sync does not read again what its build already read, and writes whatever
+// is not what was read: the case of a file edited by hand, whose digest missed.
+func TestTreeSyncComparesAgainstWhatWasRead(t *testing.T) {
+	dir := t.TempDir()
+	path := "modules/A/module.go"
+	full := filepath.Join(dir, filepath.FromSlash(path))
+	want := []codegen.File{{Path: path, Data: []byte("package fangomod\n")}}
+	if _, err := SyncGenerated(dir, "Main", want); err != nil {
+		t.Fatal(err)
+	}
+
+	tree := NewTree(dir)
+	if data, ok := tree.Source(path); !ok || string(data) != "package fangomod\n" {
+		t.Fatalf("source %q %v", data, ok)
+	}
+	if changed, err := tree.Sync("Main", want); err != nil || changed {
+		t.Fatalf("matching sync changed=%v err=%v", changed, err)
+	}
+
+	if err := os.WriteFile(full, []byte("edited by hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree = NewTree(dir)
+	if _, ok := tree.Source(path); !ok {
+		t.Fatal("source missing")
+	}
+	if changed, err := tree.Sync("Main", want); err != nil || !changed {
+		t.Fatalf("restoring sync changed=%v err=%v", changed, err)
+	}
+	if data, err := os.ReadFile(full); err != nil || string(data) != "package fangomod\n" {
+		t.Fatalf("file %q err=%v", data, err)
+	}
+
+	var absent *Tree
+	if _, ok := absent.Source(path); ok {
+		t.Fatal("a nil tree held a file")
+	}
+	if _, ok := NewTree(dir).Source("../outside.go"); ok {
+		t.Fatal("a path the driver would never write was read")
+	}
+}

@@ -692,3 +692,90 @@ main() = print (left 1 True)`, diagnostic: "MISSING CONSTRAINT"},
 		})
 	}
 }
+
+// treeFiles reads every generated source beneath a build directory.
+func treeFiles(t *testing.T, dir string) map[string][]byte {
+	t.Helper()
+	files := map[string][]byte{}
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		files[filepath.ToSlash(rel)] = data
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+// A no-change build reuses its generated files without regenerating them, and
+// that must neither change a byte nor miss a file someone has touched. Every
+// kind of file the driver keeps comes back from an edit and from a removal,
+// and the settled tree is the one a build with no cache produces.
+func TestReusedGeneratedFilesAreRestoredByteForByte(t *testing.T) {
+	root := t.TempDir()
+	entry := writeModuleFile(t, root, "Main.fango", "module Main exposing (main)\nimport Hash\nmain() = print (Hash.twice 2)\n")
+	writeModuleFile(t, root, "Hash.fango", "module Hash exposing (twice)\n\ntwice : Int -> Int\ntwice = native\n")
+	writeModuleFile(t, root, "Hash.native.go", "package native\n\nimport (\n\t\"fmt\"\n\t\"github.com/waj/fango/runtime/fangort\"\n)\n\nvar _ =   fmt.Sprint(fangort.UnitValue)\n\nfunc Twice(x int64) int64 { return x*2 }\n")
+	buildDir := t.TempDir()
+	var stderr bytes.Buffer
+	if _, _, _, ok := compileToDir(entry, buildDir, &stderr, nil, nil); !ok {
+		t.Fatalf("first compile: %s", stderr.String())
+	}
+	want := treeFiles(t, buildDir)
+	if !bytes.Contains(want["native/Hash/native.go"], []byte("\"fangobuild/fangort\"\n\t\"fmt\"")) {
+		t.Fatalf("sidecar not adapted:\n%s", want["native/Hash/native.go"])
+	}
+
+	settled := func(step string, wantChanged bool) {
+		t.Helper()
+		_, _, changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil)
+		if !ok || changed != wantChanged {
+			t.Fatalf("%s: changed=%v ok=%v: %s", step, changed, ok, stderr.String())
+		}
+		got := treeFiles(t, buildDir)
+		if len(got) != len(want) {
+			t.Fatalf("%s: %d files, want %d", step, len(got), len(want))
+		}
+		for path, data := range want {
+			if !bytes.Equal(got[path], data) {
+				t.Fatalf("%s: %s differs:\n%s", step, path, got[path])
+			}
+		}
+	}
+	settled("no change", false)
+
+	for _, path := range []string{"modules/Hash/module.go", "entries/Main/main.go", "fangort/list.go", "native/Hash/native.go", "native/Hash/host.go"} {
+		if _, known := want[path]; !known {
+			t.Fatalf("%s was not generated", path)
+		}
+		full := filepath.Join(buildDir, filepath.FromSlash(path))
+		if err := os.WriteFile(full, append(want[path], []byte("// edited by hand\n")...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		settled("edited "+path, true)
+		settled("after editing "+path, false)
+		if err := os.Remove(full); err != nil {
+			t.Fatal(err)
+		}
+		settled("removed "+path, true)
+	}
+
+	fresh := t.TempDir()
+	if _, _, _, ok := compileToDir(entry, fresh, &stderr, &compilationSession{noCache: true}, nil); !ok {
+		t.Fatalf("uncached compile: %s", stderr.String())
+	}
+	got := treeFiles(t, fresh)
+	for path, data := range want {
+		if !bytes.Equal(got[path], data) {
+			t.Fatalf("uncached %s differs:\n%s", path, got[path])
+		}
+	}
+}

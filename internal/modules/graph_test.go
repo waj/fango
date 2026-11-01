@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -103,5 +104,29 @@ func TestTopoIgnoresExternalDependencies(t *testing.T) {
 	}
 	if got := topo(nodes); !slices.Equal(got, []string{"B", "C"}) {
 		t.Fatalf("order %v", got)
+	}
+}
+
+// One load sees one listing of a directory, which is what lets it ask about many
+// absent modules cheaply; a session graph outlives new files and must see them.
+func TestLoadProviderRemembersListingsAndOthersDoNot(t *testing.T) {
+	root := t.TempDir()
+	load, session := newLoadProvider(root), FSProvider{Root: root}
+	for _, p := range []FSProvider{load, session} {
+		if _, _, err := p.Source("Later"); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("before the file exists: %v", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "Later.fango"), []byte("module Later exposing ()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := load.Source("Later"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a load saw a second listing: %v", err)
+	}
+	if _, data, err := session.Source("Later"); err != nil || len(data) == 0 {
+		t.Fatalf("a session missed a new file: %q %v", data, err)
+	}
+	if _, _, err := newLoadProvider(root).Source("later"); err == nil || errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a casing mismatch was not reported: %v", err)
 	}
 }

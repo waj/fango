@@ -102,7 +102,7 @@ main() =
 		}
 	}
 	dir := t.TempDir()
-	fixed, err := build.RuntimeFiles()
+	fixed, err := build.RuntimeFiles(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -304,6 +304,8 @@ The local provider checks every path component against directory entries and
 reports a casing mismatch only when the complete requested file exists with
 different casing. A similarly named directory without that file is an ordinary
 miss, so it cannot shadow a bundled module or trigger a reserved-name error.
+One load lists each directory once, since it asks about every module it reaches
+and most are not local; a session graph outlives new files and lists afresh.
 
 What the library cannot do is disagree with the compiler that reads it. Bundled
 native declarations are checked against the linked interpreter registry

@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/waj/fango/internal/ast"
@@ -44,6 +45,44 @@ type StageObserver = compileevent.Observer
 
 type FSProvider struct {
 	Root string
+	// listings, when set, keeps one listing of each directory. A load asks about
+	// every module it reaches, most of them in the same directory and most of
+	// those not there at all. A session graph outlives files being added, so it
+	// leaves this unset and lists afresh.
+	listings *listings
+}
+
+// newLoadProvider returns a provider for the lifetime of one load. Contents are
+// still read when asked for; only the case-exact names are remembered.
+func newLoadProvider(root string) FSProvider {
+	return FSProvider{Root: root, listings: &listings{dirs: map[string]*listing{}}}
+}
+
+type listings struct {
+	mu   sync.Mutex
+	dirs map[string]*listing
+}
+
+type listing struct {
+	once    sync.Once
+	entries []os.DirEntry
+	err     error
+}
+
+// list may be called concurrently, and on a nil receiver, which remembers nothing.
+func (l *listings) list(dir string) ([]os.DirEntry, error) {
+	if l == nil {
+		return os.ReadDir(dir)
+	}
+	l.mu.Lock()
+	entry, ok := l.dirs[dir]
+	if !ok {
+		entry = &listing{}
+		l.dirs[dir] = entry
+	}
+	l.mu.Unlock()
+	entry.once.Do(func() { entry.entries, entry.err = os.ReadDir(dir) })
+	return entry.entries, entry.err
 }
 
 // OverlayProvider reads unsaved editor content at the same logical paths as
@@ -56,7 +95,7 @@ type OverlayProvider struct {
 func (p OverlayProvider) Source(module string) (string, []byte, error) {
 	rel := filepath.FromSlash(strings.ReplaceAll(module, ".", "/") + ".fango")
 	if b, ok := p.Overlays[filepath.Clean(filepath.Join(p.Root, rel))]; ok {
-		if _, err := readExact(p.Root, rel); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if _, err := readExact(p.Root, rel, p.listings); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return filepath.ToSlash(rel), nil, err
 		}
 		return filepath.ToSlash(rel), b, nil
@@ -76,7 +115,7 @@ func (e pathCaseError) Error() string {
 
 func (p FSProvider) Source(module string) (string, []byte, error) {
 	rel := filepath.FromSlash(strings.ReplaceAll(module, ".", "/") + ".fango")
-	b, err := readExact(p.Root, rel)
+	b, err := readExact(p.Root, rel, p.listings)
 	return filepath.ToSlash(rel), b, err
 }
 
@@ -118,7 +157,7 @@ func (p FSProvider) Modules() []string {
 	return names
 }
 
-func readExact(root, rel string) ([]byte, error) {
+func readExact(root, rel string, dirs *listings) ([]byte, error) {
 	path := filepath.Join(root, rel)
 	absRoot, _ := filepath.Abs(root)
 	absPath, _ := filepath.Abs(path)
@@ -128,7 +167,7 @@ func readExact(root, rel string) ([]byte, error) {
 	cur := root
 	var casing *pathCaseError
 	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
-		entries, readErr := os.ReadDir(cur)
+		entries, readErr := dirs.list(cur)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -158,7 +197,7 @@ func readExact(root, rel string) ([]byte, error) {
 
 func (p FSProvider) Native(module string) (string, []byte, error) {
 	rel := filepath.FromSlash(strings.ReplaceAll(module, ".", "/") + ".native.go")
-	b, err := readExact(p.Root, rel)
+	b, err := readExact(p.Root, rel, p.listings)
 	return filepath.ToSlash(rel), b, err
 }
 
@@ -389,9 +428,9 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		entryName = m.Header.Name
 	}
 	options.Observe.Timed("parse", entryName, parseStart)
-	var provider Provider = FSProvider{Root: root}
+	var provider Provider = newLoadProvider(root)
 	if options.Overlays != nil {
-		provider = OverlayProvider{FSProvider: FSProvider{Root: root}, Overlays: options.Overlays}
+		provider = OverlayProvider{FSProvider: newLoadProvider(root), Overlays: options.Overlays}
 	}
 	g := newGraph(provider)
 	g.observe = options.Observe

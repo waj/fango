@@ -229,6 +229,25 @@ only what the bytes were and where they are, rather than the bytes, is what
 keeps that cheap: the generated Go is on disk once, and a warm build reads it
 once.
 
+The fangort sources and native sidecars are adapted rather than emitted: their
+repository runtime imports are rewritten to the private module's paths and the
+result is formatted, which also sorts those imports. Whether a source is already
+formatted cannot be told without formatting it, and a sidecar need not be, so the
+adaptation is not skipped by inspection. It is memoized as what it is, a function
+of one source's bytes under one compiler. One artifact, replaced as a whole,
+records per generated path the digest of the source and of what came out, and a
+hit is the same two halves as emission's: a record of the source as it is now and
+a file that still hashes to what that record produced. A sibling program's paths
+stay in the artifact, so storage is bounded by the paths a project has generated.
+
+A build's tree remembers the files it has read. Whoever read one held it to a
+digest, so synchronization compares what it wants against those bytes rather
+than reading the file a second time. A file edited by hand misses that digest,
+is generated again, and differs from the bytes read, so it is written. Only what
+no lookup read — go.mod, sources.json, the manifest, and every file of a build
+with no cache — is read by synchronization, and a no-change build therefore
+reads each file once and writes nothing beneath the tree.
+
 The driver writes only changed files beneath persistent .fango/build and removes
 only stale generated paths recorded in its manifest. The manifest is in two
 parts because the two are pruned by different rules. The private module's fixed
@@ -261,8 +280,8 @@ managed-directory safeguards.
 
 The source project keeps its artifacts beneath
 `.fango/cache/v1/<compiler fingerprint>/<kind>/<group>/<name>.json`, one
-namespace per artifact kind — checked module objects and emission records —
-holding one slot per module. A slot is the module's own identity, never a digest of
+namespace per artifact kind — checked module objects, emission records, and the
+one record of source adaptations — holding one slot per module. A slot is the module's own identity, never a digest of
 its inputs, so a rebuild replaces an artifact rather than adding one beside it
 and storage is bounded by the modules a project has rather than by its edit
 history. The group separates entries from named modules, because a headerless

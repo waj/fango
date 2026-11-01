@@ -32,3 +32,16 @@ func (s *EmissionStore) Store(slot string, data []byte) {
 	}
 	s.store.store(s.kind(), slot, data)
 }
+
+// AdaptedStore is the opaque byte-storage seam for what the driver knows about
+// the Go sources it adapts. There is one artifact per project: the runtimefiles
+// package owns its schema, and keeps one record per generated path inside it.
+type AdaptedStore struct {
+	store *slotStore
+}
+
+func NewAdaptedStore(entry string) *AdaptedStore { return &AdaptedStore{store: newStore(entry)} }
+
+func (s *AdaptedStore) Load() ([]byte, bool) { return s.store.load(adaptedKind, adaptedSlot) }
+
+func (s *AdaptedStore) Store(data []byte) { s.store.store(adaptedKind, adaptedSlot, data) }

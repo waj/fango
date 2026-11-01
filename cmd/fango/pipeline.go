@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"go/format"
 	"io"
 
 	"github.com/waj/fango/internal/backend"
@@ -119,12 +118,13 @@ func hasMain(p *core.Prog) bool {
 // it returns is the entry's stem, which names both its generated package and
 // its cached artifacts. The tree is where the generated Go a cached emission
 // describes already lives; emitting without one, as the structural tests do,
-// generates every unit.
+// generates every unit. The adapter, which reads the same tree, does the same
+// for native sidecars.
 func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, string, bool) {
-	return emitProjectManifestSession(entry, "", stderr, nil)
+	return emitProjectManifestSession(entry, nil, nil, stderr, nil)
 }
 
-func emitProjectManifestSession(entry, tree string, stderr io.Writer, session *compilationSession) ([]codegen.File, []modules.ManifestEntry, string, bool) {
+func emitProjectManifestSession(entry string, tree *build.Tree, adapter *runtimefiles.Adapter, stderr io.Writer, session *compilationSession) ([]codegen.File, []modules.ManifestEntry, string, bool) {
 	result, ok := checkGraph(entry, stderr, session)
 	if !ok {
 		return nil, nil, "", false
@@ -153,7 +153,7 @@ func emitProjectManifestSession(entry, tree string, stderr io.Writer, session *c
 			}
 		}
 	}
-	emitting := &backend.Session{Debug: session.debugEnabled(), Observe: session.observer(), DisableCache: session.disableCache(), Emitted: build.Generated(tree)}
+	emitting := &backend.Session{Debug: session.debugEnabled(), Observe: session.observer(), DisableCache: session.disableCache(), Emitted: tree}
 	files, err := emitting.EmitProject(entry, result, units)
 	if err != nil {
 		reportInternal(stderr, err)
@@ -179,24 +179,17 @@ func emitProjectManifestSession(entry, tree string, stderr io.Writer, session *c
 			}
 		}
 	}
-	hostSource, err := runtimefiles.NativeHost()
+	sidecars := make([]runtimefiles.Sidecar, len(nativeSources))
+	for i, native := range nativeSources {
+		sidecars[i] = runtimefiles.Sidecar{Dir: "native/" + codegen.NativeLinkName(native.Module) + "/", Path: native.Path, Source: native.Content}
+	}
+	adapted, err := adapter.Sidecars(sidecars)
 	if err != nil {
 		reportInternal(stderr, err)
 		return nil, nil, "", false
 	}
-	for _, native := range nativeSources {
-		data, err := runtimefiles.ForGeneratedModule(native.Path, native.Content)
-		if err != nil {
-			reportInternal(stderr, err)
-			return nil, nil, "", false
-		}
-		if formatted, err := format.Source(data); err == nil {
-			data = formatted
-		}
-		dir := "native/" + codegen.NativeLinkName(native.Module) + "/"
-		files = append(files,
-			codegen.File{Path: dir + "native.go", Data: data},
-			codegen.File{Path: dir + "host.go", Data: hostSource})
+	for _, file := range adapted {
+		files = append(files, codegen.File{Path: file.Path, Data: file.Data})
 	}
 	return files, manifest, program, true
 }

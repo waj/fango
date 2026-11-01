@@ -235,7 +235,7 @@ func testLoweringStrategies(t *testing.T, stem, strategy string) {
 		units = append(units, codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry, Source: unit.Source, BodyStrategy: strategy})
 	}
 	native := emittedProject(t, source)
-	runtime, err := build.RuntimeFiles()
+	runtime, err := build.RuntimeFiles(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

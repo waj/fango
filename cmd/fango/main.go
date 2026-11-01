@@ -14,9 +14,11 @@ import (
 
 	"github.com/waj/fango/internal/build"
 	"github.com/waj/fango/internal/codegen"
+	"github.com/waj/fango/internal/compilecache"
 	"github.com/waj/fango/internal/lsp"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/nativedebug"
+	"github.com/waj/fango/internal/runtimefiles"
 )
 
 func main() {
@@ -121,13 +123,18 @@ Progress goes to stderr; a compiled program's own output is untouched.
 // program the entry generated as, the files the Go toolchain will read for it,
 // and whether anything was written.
 func compileToDir(entry, dir string, stderr io.Writer, session *compilationSession, report *reporter) (program string, files []codegen.File, changed bool, ok bool) {
-	files, manifest, program, ok := emitProjectManifestSession(entry, dir, stderr, session)
+	tree := build.NewTree(dir)
+	adapter := &runtimefiles.Adapter{Tree: tree}
+	if !session.disableCache() {
+		adapter.Store = compilecache.NewAdaptedStore(entry)
+	}
+	files, manifest, program, ok := emitProjectManifestSession(entry, tree, adapter, stderr, session)
 	if !ok {
 		return "", nil, false, false
 	}
 	syncStart := time.Now()
 	defer func() { report.phase("write + sync", syncStart) }()
-	fixed, err := build.RuntimeFiles()
+	fixed, err := build.RuntimeFiles(adapter)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return "", nil, false, false
@@ -141,11 +148,12 @@ func compileToDir(entry, dir string, stderr io.Writer, session *compilationSessi
 		Path: build.EntryDir(program) + "/sources.json",
 		Data: modules.ManifestJSON(manifest),
 	})
-	wrote, err := build.SyncGenerated(dir, program, files)
+	wrote, err := tree.Sync(program, files)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return "", nil, false, false
 	}
+	adapter.Save()
 	return program, compiled, wrote, true
 }
 

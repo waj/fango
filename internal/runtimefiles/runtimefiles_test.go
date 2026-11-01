@@ -7,7 +7,8 @@ import (
 )
 
 func TestGeneratedRuntimeSources(t *testing.T) {
-	files, err := Packages("fangort", "nativewire", "nativeworker")
+	var adapter *Adapter
+	files, err := adapter.Packages("fangort", "nativewire", "nativeworker")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,10 +23,11 @@ func TestGeneratedRuntimeSources(t *testing.T) {
 			t.Errorf("repository import survived in %s", file.Path)
 		}
 	}
-	host, err := NativeHost()
+	sidecars, err := adapter.Sidecars([]Sidecar{{Dir: "native/Hash/", Path: "Hash.native.go", Source: []byte("package native\n")}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	host := sidecars[1].Data
 	if !bytes.Contains(host, []byte(`"fangobuild/fangort"`)) || bytes.Contains(host, []byte(repositoryRuntime)) {
 		t.Fatalf("host imports were not adapted:\n%s", host)
 	}

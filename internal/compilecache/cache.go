@@ -1,5 +1,5 @@
 // Package compilecache locates the compiler's persistent artifacts — checked
-// module objects and emitted Go — beneath a source-local root with a
+// module objects, emitted Go, and adapted Go — beneath a source-local root with a
 // user-cache fallback. Cache failures are deliberately
 // indistinguishable from misses: compilation must never depend on this
 // optimization being writable or intact.
@@ -29,6 +29,10 @@ import (
 const (
 	checkedKind = "checked"
 	emittedKind = "emitted"
+	adaptedKind = "adapted"
+
+	// adaptedSlot is the one artifact of its kind, named as a module's slot is.
+	adaptedSlot = moduleGroup + "/Sources"
 
 	// moduleGroup and entryGroup keep a headerless String.fango entry from
 	// sharing a slot with the stdlib String it imports: the two are different
