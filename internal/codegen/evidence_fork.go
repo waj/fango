@@ -195,26 +195,52 @@ func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual 
 		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Other")}, Type: g.effectTypeMode(otherInstance, other).(*goast.StarExpr).X})
 	}
 	literal := value.(*goast.UnaryExpr).X.(*goast.CompositeLit)
-	// An origin this activation constructs shares the allocation too.
-	var originStorage goast.Expr
+	// An origin or exit target this activation constructs shares the allocation
+	// too, as do the origin's type arguments. A target is only ever compared by
+	// its address, which is still unique to the activation.
+	var originStorage *goast.CompositeLit
+	var targetStorage goast.Expr
 	var elts []goast.Expr
 	for _, elt := range literal.Elts {
 		kv, isField := elt.(*goast.KeyValueExpr)
 		if isField {
 			if key, ok := kv.Key.(*goast.Ident); ok && key.Name == "Origin" {
 				if fresh, ok := kv.Value.(*goast.UnaryExpr); ok {
-					originStorage = fresh.X
+					originStorage = fresh.X.(*goast.CompositeLit)
+					continue
+				}
+			}
+			if key, ok := kv.Key.(*goast.Ident); ok && key.Name == "Target" {
+				if fresh, ok := kv.Value.(*goast.UnaryExpr); ok {
+					targetStorage = fresh.X
 					continue
 				}
 			}
 		}
 		elts = append(elts, elt)
 	}
+	copied := *literal
+	copied.Elts = elts
+	literal = &copied
+	var argumentStorage *goast.CompositeLit
 	if originStorage != nil {
-		copied := *literal
-		copied.Elts = elts
-		literal = &copied
 		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("OriginValue")}, Type: selector("fangort", "EvidenceOrigin")})
+		origin := *originStorage
+		origin.Elts = nil
+		for _, elt := range originStorage.Elts {
+			kv := elt.(*goast.KeyValueExpr)
+			if arguments, ok := kv.Value.(*goast.CompositeLit); ok && len(arguments.Elts) > 0 {
+				arrayType := &goast.ArrayType{Len: intLit(int64(len(arguments.Elts))), Elt: g.descriptorType()}
+				argumentStorage = &goast.CompositeLit{Type: arrayType, Elts: arguments.Elts}
+				fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("OriginArguments")}, Type: arrayType})
+				elt = &goast.KeyValueExpr{Key: kv.Key, Value: &goast.SliceExpr{X: selector(storage, "OriginArguments")}}
+			}
+			origin.Elts = append(origin.Elts, elt)
+		}
+		originStorage = &origin
+	}
+	if targetStorage != nil {
+		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("TargetValue")}, Type: selector("fangort", "ExitTarget")})
 	}
 	storageType := &goast.StructType{Fields: &goast.FieldList{List: fields}}
 	body := []goast.Stmt{
@@ -222,6 +248,14 @@ func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual 
 			&goast.KeyValueExpr{Key: ident("Own"), Value: literal},
 		}}}),
 		varDeclStmt(name, typ, &goast.UnaryExpr{Op: gotoken.AND, X: selector(storage, "Own")}),
+	}
+	if targetStorage != nil {
+		body = append(body,
+			&goast.AssignStmt{Lhs: []goast.Expr{selector(storage, "TargetValue")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{targetStorage}},
+			&goast.AssignStmt{Lhs: []goast.Expr{selector(name, "Target")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{&goast.UnaryExpr{Op: gotoken.AND, X: selector(storage, "TargetValue")}}})
+	}
+	if argumentStorage != nil {
+		body = append(body, &goast.AssignStmt{Lhs: []goast.Expr{selector(storage, "OriginArguments")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{argumentStorage}})
 	}
 	if originStorage != nil {
 		body = append(body,

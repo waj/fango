@@ -22,6 +22,17 @@ type ExitRequest struct {
 	// release that failed while the body was already exiting. Deterministic
 	// inner-to-outer order; reporting handlers expose detached snapshots.
 	Suppressed []*ExitRequest
+	// A single payload, the usual case, shares the request's allocation.
+	payload     [1]any
+	payloadType [1]*TypeDescriptor
+}
+
+// NewExit builds a request carrying one payload.
+func NewExit(target *ExitTarget, effect string, operation int, operationName string, payload any, payloadType *TypeDescriptor) *ExitRequest {
+	exit := &ExitRequest{Target: target, Effect: effect, Operation: operation, OperationName: operationName}
+	exit.payload[0], exit.payloadType[0] = payload, payloadType
+	exit.Payload, exit.PayloadTypes = exit.payload[:], exit.payloadType[:]
+	return exit
 }
 
 // ExitTarget is deliberately non-zero-sized. A fresh pointer is one handler

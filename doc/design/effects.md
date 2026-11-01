@@ -165,8 +165,9 @@ progress. All of this runs through ordinary calls and handler boundaries,
 without capturing or replaying a continuation.
 
 Abort evidence carries a fresh runtime target pointer to a non-zero-sized
-object. Performing evaluates payloads left to right and returns an ExitRequest;
-it does not execute the clause. The matching boundary restores definition-site
+object. Performing evaluates payloads left to right and returns an ExitRequest,
+whose single payload, when it has one, shares the request's allocation; it does
+not execute the clause. The matching boundary restores definition-site
 outer evidence and invokes the clause after unwinding. Foreign exits propagate;
 exits from a clause or return transformation never re-enter that activation.
 Canonical effect names keep generated envelopes independent of graph-local IDs.

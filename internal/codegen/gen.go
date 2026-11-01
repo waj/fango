@@ -1633,14 +1633,18 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			payload[i] = callExpr(g.goType(p.Type()), g.expr(p, 0))
 			descriptors[i] = g.typeDescriptor(p.Type())
 		}
-		exit := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitRequest"), Elts: []goast.Expr{
-			&goast.KeyValueExpr{Key: ident("Target"), Value: callExpr(selector("fangort", "ResolveExitTarget"), &goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Target")})},
+		resolved := callExpr(selector("fangort", "ResolveExitTarget"), &goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Target")})
+		var exit goast.Expr = &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitRequest"), Elts: []goast.Expr{
+			&goast.KeyValueExpr{Key: ident("Target"), Value: resolved},
 			&goast.KeyValueExpr{Key: ident("Effect"), Value: stringLit(e.Op.Owner.Name)},
 			&goast.KeyValueExpr{Key: ident("Operation"), Value: intLit(int64(e.Op.Index))},
 			&goast.KeyValueExpr{Key: ident("OperationName"), Value: stringLit(e.Op.Name)},
 			&goast.KeyValueExpr{Key: ident("Payload"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: ident("any")}, Elts: payload}},
 			&goast.KeyValueExpr{Key: ident("PayloadTypes"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: g.descriptorType()}, Elts: descriptors}},
 		}}}
+		if len(payload) == 1 {
+			exit = callExpr(selector("fangort", "NewExit"), resolved, stringLit(e.Op.Owner.Name), intLit(int64(e.Op.Index)), stringLit(e.Op.Name), payload[0], descriptors[0])
+		}
 		captured := callExpr(selector("fangort", "CaptureExit"), exit)
 		g.mark(captured)
 		return g.propagateOutcome(e.Ty, captured)
@@ -2082,8 +2086,8 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 			&goast.KeyValueExpr{Key: ident("Marker"), Value: intLit(1)},
 			&goast.KeyValueExpr{Key: ident("CaptureTrace"), Value: ident(strconv.FormatBool(e.CaptureTrace))},
 		}}}
-		stmts = append(stmts, varDeclStmt(targetNames[i], &goast.StarExpr{X: selector("fangort", "ExitTarget")}, target))
 		if labelResumes(e, i) {
+			stmts = append(stmts, varDeclStmt(targetNames[i], &goast.StarExpr{X: selector("fangort", "ExitTarget")}, target))
 			stmts = append(stmts, g.resumptiveRecord(e, i, state, targetNames[i])...)
 			continue
 		}
@@ -2092,9 +2096,10 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 		st := g.effectType(inst)
 		evidenceValue := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: st.(*goast.StarExpr).X, Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Origin"), Value: g.evidenceOrigin(inst)},
-			&goast.KeyValueExpr{Key: ident("Target"), Value: ident(targetNames[i])},
+			&goast.KeyValueExpr{Key: ident("Target"), Value: target},
 		}}}
 		stmts = append(stmts, varDeclStmt(evidenceName, st, g.completeEvidence(inst, evidenceValue, types.Exit)), assignBlank(ident(evidenceName)))
+		stmts = append(stmts, varDeclStmt(targetNames[i], &goast.StarExpr{X: selector("fangort", "ExitTarget")}, &goast.SelectorExpr{X: ident(evidenceName), Sel: ident("Target")}))
 		g.evidence[inst.Key()] = append(g.evidence[inst.Key()], ident(evidenceName))
 		g.evidenceModes[inst.Key()] = append(g.evidenceModes[inst.Key()], types.Exit)
 	}

@@ -302,6 +302,32 @@ func TestHiddenPackageAllocations(t *testing.T) {
 	}
 }
 
+func TestAbortOnlyActivationSharesOneAllocation(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "probe.fango")
+	program := `effect Stop e
+    abort stop : e -> value
+run : (() ->{Stop e} a) -> Maybe a
+run action =
+    handle Just (action()) on
+        stop _ -> Nothing
+main() = print (run { 1 } == run { stop "no" })
+`
+	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
+		t.Fatal(err)
+	}
+	src := string(generatedFile(t, emittedProject(t, source), "entries/probe/main.go"))
+	for _, want := range []string{"TargetValue", "OriginArguments", "fangort.NewExit("} {
+		if !strings.Contains(src, want) {
+			t.Errorf("generated code lacks %s:\n%s", want, src)
+		}
+	}
+	for _, separate := range []string{"= &fangort.ExitTarget{", "&fangort.ExitRequest{"} {
+		if strings.Contains(src, separate) {
+			t.Errorf("generated code allocates %s separately:\n%s", separate, src)
+		}
+	}
+}
+
 func TestForwardedRowCallbacksBindEvidenceAtTheirCallSite(t *testing.T) {
 	const prelude = `import List
 effect Tick

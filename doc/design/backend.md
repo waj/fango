@@ -62,8 +62,9 @@ linked layer; lookup always prefers the new inline bindings. The interpreter
 uses linked rows directly. Task creation materializes and rebases a compiled
 row through the same activation memo as captured evidence, preserving aliases.
 Each activation owns immutable bindings shared by its transport views. Its
-typed transport records, binding, and origin share one allocation, with interior
-pointers retaining their identity. Applied-name comparisons take those immutable
+typed transport records, binding, origin and its type arguments, and an abort-only
+effect's exit target share one allocation, with interior pointers retaining their
+identity. Applied-name comparisons take those immutable
 bindings by pointer rather than copying their transport families. An extension
 returns its existing row when
 every requested binding is already

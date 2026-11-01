@@ -2,6 +2,26 @@ package fangort
 
 import "testing"
 
+func TestNewExitSharesOneAllocation(t *testing.T) {
+	target, descriptor := &ExitTarget{}, &TypeDescriptor{}
+	var exit *ExitRequest
+	if allocs := testing.AllocsPerRun(100, func() {
+		exit = NewExit(target, "Fail.Fail", 2, "Fail.fail", "payload", descriptor)
+	}); allocs != 1 {
+		t.Errorf("allocations = %v, want 1", allocs)
+	}
+	if exit.Target != target || exit.Effect != "Fail.Fail" || exit.Operation != 2 || exit.OperationName != "Fail.fail" {
+		t.Errorf("request = %+v", exit)
+	}
+	if len(exit.Payload) != 1 || exit.Payload[0] != "payload" || len(exit.PayloadTypes) != 1 || exit.PayloadTypes[0] != descriptor {
+		t.Errorf("payload = %v %v", exit.Payload, exit.PayloadTypes)
+	}
+	joined := Suppress(exit, &ExitRequest{Target: target})
+	if joined.Payload[0] != "payload" || len(exit.Suppressed) != 0 {
+		t.Errorf("suppression edited the primary or lost its payload: %+v", joined)
+	}
+}
+
 func TestCaptureExitOnlyForResolvedDiagnosticTarget(t *testing.T) {
 	ordinary := &ExitRequest{Target: &ExitTarget{}}
 	if got := CaptureExit(ordinary); got != ordinary || got.TraceCaptured || len(got.Trace) != 0 {

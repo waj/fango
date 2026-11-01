@@ -152,6 +152,12 @@ are unchanged to about 2% larger.
 | 32 | 1 | 5529 → 3694 | 4506 → 2674 |
 | 64 | 1 | 33535 → 18763 | 32289 → 17665 |
 
+Sharing one allocation per activation and per one-payload abort, against the
+preceding revision, 200 ms samples, medians of five: `Fail.attempt` that completes
+from 72.0 ns and 3 allocations to 52.0 ns and 1, and one that aborts from 121.5 ns
+and 6 to 77.8 ns and 2. Unwinding is the ordinary return path, so at depth 1000
+both cost about 4.3 ns per frame either way.
+
 These suites hold many probes, so they do not describe a minimal application's
 per-handler cost. Checking remains superlinear in nested handlers; see
 [compile latency](../roadmap-compile-latency.md#cl6-row-solving-under-nested-handlers).

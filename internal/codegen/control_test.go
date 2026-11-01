@@ -46,7 +46,7 @@ func TestExitWorkerEmitsSplitResultWhileDirectWorkerStaysPlain(t *testing.T) {
 		"func V_Main_dot_id(v_x int64) int64",
 		"func V_Main_dot_main_exit(ev_Main_dot_Fail *Eff_Main_dot_Fail_exit) (int64, *fangort.ExitRequest)",
 		"func V_Main_dot_unitMain_exit(ev_Main_dot_Fail *Eff_Main_dot_Fail_exit) *fangort.ExitRequest",
-		`Effect: "Main.Fail"`,
+		`fangort.NewExit(fangort.ResolveExitTarget(ev_Main_dot_Fail.Target), "Main.Fail"`,
 		"fangort.CaptureExit(",
 		"if t_exit3 != nil",
 		"V_Main_dot_tick()",
