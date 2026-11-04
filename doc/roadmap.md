@@ -121,13 +121,14 @@ remaining transport questions.
 
 ## Typed web APIs
 
-[Typed web APIs](roadmap-web.md) propose an official `Web` library with effect
-declarations, named request fields, and typed endpoint values sharing one wire
-contract. Server handlers, ordinary client calls with per-call failure recovery,
-links, and OpenAPI use that contract. The first buffered JSON slice needs
-operation attributes, reflection, and generated operation calls; client runners,
-partial handlers, streaming responses, and official distribution remain follow-up
-work.
+[Typed web APIs](roadmap-web.md) propose an official `Web` library whose
+contract is a row-indexed record of operations with route attributes on its
+fields and named request records. A server implementation and the generated
+client are values of that one type; typed endpoint values derived from it
+serve the dispatcher, client calls with per-call failure recovery, links, and
+OpenAPI. The first buffered JSON slice needs no language work beyond
+reflecting a row-indexed type with `typeOf`; streaming responses, web app
+support, and official distribution remain follow-up work.
 
 ## Async task results and failure policy
 

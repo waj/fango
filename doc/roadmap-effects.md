@@ -177,11 +177,10 @@ These are not automatically prerequisites for the first coroutine milestone:
   blocked until a write.
 - **Partial handlers.** Forwarding the operations a handler omits, through
   a wildcard clause and `super`, is proposed as
-  [W14](roadmap-web.md#w14-partial-handlers-and-super), alongside its first
-  consumers. It remains independent language work: typed web endpoints,
-  ordinary client calls, and complete test handlers do not depend on it.
-  Wildcard forwarding can precede expression-level `super`, whose evaluation
-  and capture semantics need a separate review.
+  [W14](#w14-partial-handlers-and-super). Its consumer is a test or
+  middleware that overrides one operation of a multi-operation service effect.
+  The [typed web APIs](roadmap-web.md) do not depend on it: their contract is
+  a record, which record update overrides.
 - **Escaping coroutine owners and raw resumptions.** The chosen owner stays
   scoped. Dynamic allocation means allocation into a live owner, not detachment
   from every owner. Raw resume escape and continuation cloning are not included.
@@ -194,6 +193,112 @@ These are not automatically prerequisites for the first coroutine milestone:
 Handlers do not roll back arbitrary external writes. Search may replay fresh
 actions without cloning continuations. Cleanup guarantees an attempt, not
 successful external close or termination of user release code.
+
+## W14 Partial handlers and `super`
+
+Deferred independent language work. Wildcard forwarding can precede
+expression-level `super`; its evaluation and lambda-capture semantics need a
+separate review. Named clauses can already forward with explicit operation
+calls.
+
+Today a handler [needs a clause group for every operation](reference/effects.md#handler-clauses-and-abort-routing).
+Overriding one operation of a six-operation service effect therefore takes
+six clauses, five of which perform their operation again for the enclosing
+handler. Tests that stub one call and operation-level middleware both pay
+this cost, and it grows with every operation added. Two additions remove it:
+
+- a **wildcard clause** `_ -> super`, written last, which covers every
+  operation and argument pattern the earlier clauses leave unmatched;
+- the keyword **`super`**, meaning the same operation performed again, with
+  the same arguments, for the next handler out.
+
+```fango
+effect Catalog
+    lookup : Int -> Maybe String
+    names : () -> List String
+
+withKnownName : (() ->{Catalog, e} a) ->{Catalog, e} a
+withKnownName action =
+    handle action() on
+        lookup 7 -> resume (Just "Alice")
+        names () -> resume (List.filter isActive super)
+        _ -> super
+```
+
+Here `lookup 8` falls through to the wildcard. `names` forwards and filters
+the outer answer; `isActive` is an application predicate on names.
+
+### Wildcard clause
+
+- `_` matches every operation, of every handled application, not covered by
+  an earlier clause. This includes argument patterns of named groups that left
+  some calls unmatched.
+- Its body must be exactly `super`. No other body type-checks for operations
+  with different result types and disciplines.
+- It is the last clause before `return`. A clause after it is redundant, and a
+  wildcard with nothing left to cover is a redundant-clause error.
+- A handler needs at least one named clause, which decides the handled
+  effects. A handler whose only clause is `_ -> super` is rejected.
+- Coverage checking is unchanged: without a wildcard, a missing group or
+  pattern is still an error. A handler opts in visibly, clause by clause, not
+  through a handle-level keyword that would also hide mistakes.
+- `_` never matches the `return` group, and carries no
+  [operation signature](reference/effects.md#operation-signatures). Under
+  several applications it covers each one independently.
+
+### `super`
+
+`super` is valid only inside a handler clause, and refers to that clause's
+operation and arguments. As in Ruby, it takes no arguments. Performing the
+operation with different arguments needs no new syntax: clauses already run
+outside their own activation, so calling the operation by name reaches the
+next handler out.
+
+- **As a whole clause body, it forwards.** A resumptive operation resumes with
+  the outer handler's answer. A [stateful handler](reference/effects.md#stateful-handlers)
+  resumes with its snapshot unchanged. An abort operation propagates the
+  outer abort. The body counts as the clause's one tail resume, or as its
+  abort terminal, under
+  [resume discipline](reference/effects.md#resume-discipline).
+- **Inside an expression, it is the outer answer.** It has the operation's
+  result type, so a resumptive clause can post-process it
+  (`resume (List.filter isActive super)`) or record a call before forwarding.
+- In a nested `handle` inside a clause body, `super` refers to the innermost
+  enclosing clause. A lambda inside a clause body may capture `super`, as it
+  captures the clause's argument binders.
+- Outside a clause, `super` is a `SUPER OUTSIDE CLAUSE` error.
+
+### Typing
+
+A handler that can forward an operation of an application, through a wildcard
+or through `super`, keeps that application in its own effect row, because an
+outer handler still has to answer it. A handler that never forwards removes
+the application, as it does today. This is the shape of Haskell's `interpose`,
+and matches the forwarding rule of open handlers in Eff and Links.
+
+### Lowering
+
+Forwarding is tail-resumptive, so it fits the
+[synchronous effect execution](design/effects.md) without continuation
+objects:
+
+- a forwarding body is a call through the outer handler's evidence, followed
+  by `resume`;
+- an operation reached only by the wildcard can bind its evidence slot directly
+  to the outer handler's, with no clause frame;
+- an abort is forwarded by aborting outward with the same payload.
+
+Core sees ordinary clauses, so the Core linter's coverage and resume checks
+apply unchanged.
+
+### Surface changes
+
+- `super` becomes a reserved word, in the lexer and the TextMate grammar, with a
+  `tokenize.cjs` case, verified by `make test-grammar`.
+- The parser accepts the wildcard clause.
+- The formatter keeps it last.
+- The [effects reference](reference/effects.md) documents both forms and their
+  diagnostics.
 
 ## Verification and documentation lifecycle
 
