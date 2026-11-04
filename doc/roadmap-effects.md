@@ -172,10 +172,16 @@ These are not automatically prerequisites for the first coroutine milestone:
   need them: environment variables, subprocesses, and other OS services, whose
   operation boundary is decided when they are added; scoped capability records
   whose row the handler chooses, which need row-kinded effect parameters or
-  existential rows; automatic forwarding of operations a handler omits;
-  scripted network fixtures, left to libraries; and
+  existential rows; scripted network fixtures, left to libraries; and
   fixture operations that must wait for another task, such as a mock read
   blocked until a write.
+- **Partial handlers.** Forwarding the operations a handler omits, through
+  a wildcard clause and `super`, is proposed as
+  [W14](roadmap-web.md#w14-partial-handlers-and-super), alongside its first
+  consumers. It remains independent language work: typed web endpoints,
+  ordinary client calls, and complete test handlers do not depend on it.
+  Wildcard forwarding can precede expression-level `super`, whose evaluation
+  and capture semantics need a separate review.
 - **Escaping coroutine owners and raw resumptions.** The chosen owner stays
   scoped. Dynamic allocation means allocation into a live owner, not detachment
   from every owner. Raw resume escape and continuation cloning are not included.

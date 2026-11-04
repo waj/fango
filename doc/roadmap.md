@@ -119,6 +119,16 @@ and [mocking through framing](design/http.md#mocking-through-framing)
 are implemented; the [HTTP client roadmap](roadmap-http-client.md) covers
 remaining transport questions.
 
+## Typed web APIs
+
+[Typed web APIs](roadmap-web.md) propose an official `Web` library with effect
+declarations, named request fields, and typed endpoint values sharing one wire
+contract. Server handlers, ordinary client calls with per-call failure recovery,
+links, and OpenAPI use that contract. The first buffered JSON slice needs
+operation attributes, reflection, and generated operation calls; client runners,
+partial handlers, streaming responses, and official distribution remain follow-up
+work.
+
 ## Async task results and failure policy
 
 Value-returning [tasks and cancel-and-drain lifetimes](design/tasks.md#async-runtime-foundation),
