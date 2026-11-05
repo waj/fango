@@ -1,0 +1,21 @@
+-- Where the shop's contracts are served, and its named endpoints.
+module Shop.Api exposing (api, getUserEndpoint, users)
+
+import Bytes
+import Http exposing (Body(..))
+import Http.Server exposing (Request(..), Response(..))
+import Http.Server.Route
+import Result exposing (Result(..))
+import Shop.Users exposing (GetUser(..), User(..), UserError(..), Users(..))
+import Web
+
+-- A plain route beside the typed ones.
+health : List Http.Server.Route.Param -> Request e ->{e} Response e
+health _ _ = Response { status = 200, headers = [], body = BytesBody (Bytes.fromString "ok") }
+
+users = Web.mount "users" "/orgs/:org" (typeOf (Users {}))
+
+api = Web.api [users, Web.raw "health" "GET /health" `health`]
+
+getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
+getUserEndpoint = $(Web.endpoint users "getUser")

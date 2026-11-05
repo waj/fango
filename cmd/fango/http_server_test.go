@@ -168,3 +168,31 @@ func TestHTTPServerResponseBodies(t *testing.T) {
 		t.Fatalf("sized response: %q", sized)
 	}
 }
+
+// The typed API example, built with the web library enabled, answers over a
+// real socket with its endpoints' encodings and the dispatcher's statuses.
+func TestShopExample(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("..", "..", "examples", "shop.fango")
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := unusedTCPPort(t)
+	cmd := exec.Command(buildCLIBinary(t, path, abs, new(cliBuild), "web"), strconv.Itoa(port))
+	connection := startTCPServer(t, cmd, port)
+	connection.Close()
+	for _, tc := range []struct{ request, status, body string }{
+		{"GET /orgs/acme/users/1 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n", "200", `{"id":1,"name":"Ada"}`},
+		{"GET /orgs/acme/users/9 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n", "404", `"NoSuchUser"`},
+		{"POST /orgs/acme/users HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 21\r\nConnection: close\r\n\r\n{\"id\":3,\"name\":\"Lin\"}", "200", `{"id":3,"name":"Lin"}`},
+		{"POST /orgs/acme/users HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 21\r\nConnection: close\r\n\r\n{\"id\":3,\"name\":\"Ada\"}", "409", `{"NameTaken":["Ada"]}`},
+		{"PUT /orgs/acme/users HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n", "405", "does not answer this method"},
+		{"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n", "200", "ok"},
+	} {
+		got := socketHTTP(t, port, tc.request)
+		if !strings.HasPrefix(got, "HTTP/1.1 "+tc.status) || !strings.Contains(got, tc.body) {
+			t.Errorf("%q answered %q", strings.SplitN(tc.request, "\r\n", 2)[0], got)
+		}
+	}
+}

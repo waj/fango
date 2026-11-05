@@ -121,14 +121,12 @@ remaining transport questions.
 
 ## Typed web APIs
 
-[Typed web APIs](roadmap-web.md) propose an official `Web` library whose
-contract is a row-indexed record of operations with route attributes on its
-fields and named request records. A server implementation and the generated
-client are values of that one type; typed endpoint values derived from it
-serve the dispatcher, client calls with per-call failure recovery, links, and
-OpenAPI. The first buffered JSON slice needs no language work beyond
-reflecting a row-indexed type with `typeOf`; streaming responses, web app
-support, and official distribution remain follow-up work.
+[Typed web APIs](roadmap-web.md) track the official `Web` library in
+[`libs/web`](../libs/web/Web.fango), whose contract is a row-indexed record of
+operations with route attributes on its fields. The buffered JSON slice is
+implemented: endpoints, the dispatcher, the generated client, links, and
+strict test values. OpenAPI, extensible and streaming responses, and web app
+support remain.
 
 ## Async task results and failure policy
 

@@ -10,7 +10,7 @@ unfinished work. Use `rg -n '^#{1,3} ' doc/reference` to list topic headings.
 
 ## Modules, imports, and source layout
 
-[Modules, imports, and source layout](reference/modules.md) — Module identity, imports, exports, Prelude, and source roots; [lexical syntax and layout](reference/syntax.md).
+[Modules, imports, and source layout](reference/modules.md) — Module identity, imports, exports, Prelude, source roots, and [optional libraries](reference/modules.md#optional-libraries); [lexical syntax and layout](reference/syntax.md).
 
 ## Bundled standard library
 
@@ -41,6 +41,16 @@ defines the default scope.
 | Native sidecars ([guide](reference/native.md)) | [Runtime.Native](../stdlib/Runtime/Native.fango) |
 | REPL handler levels ([guide](reference/repl.md#handler-levels)) | [Runtime.Prompt](../stdlib/Runtime/Prompt.fango) |
 | Default scope ([rules](reference/modules.md#prelude-and-implicit-dependencies)) | [Prelude](../stdlib/Prelude.fango) |
+
+## Optional libraries
+
+Libraries in the library root's `libs/`, enabled with
+[`--lib`](reference/modules.md#optional-libraries), document themselves the
+same way, through `fango doc --lib NAME`.
+
+| Library | Modules |
+| --- | --- |
+| `web`: typed HTTP APIs | [Web](../libs/web/Web.fango), [Web.Server](../libs/web/Web/Server.fango), [Web.Client](../libs/web/Web/Client.fango), [Web.Testing](../libs/web/Web/Testing.fango) |
 
 ## Native Go sidecars
 

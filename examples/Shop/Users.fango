@@ -1,0 +1,40 @@
+-- The contract of the shop's users API, shared by its server and clients.
+module Shop.Users exposing (GetUser(..), NewUser(..), User(..), UserError(..), Users(..))
+
+import Json
+import Result exposing (Result(..))
+import Web
+
+type User = { id : Int, name : String }
+    deriving (Eq, Show, Json.Encode, Json.Decode)
+
+type UserError
+    = #[Web.Status 404] NoSuchUser
+    | #[Web.Status 409] NameTaken String
+    deriving (Eq, Show, Json.Encode, Json.Decode, Web.Failure)
+
+-- `GetUser` reads its inputs from the path and the query, so it needs no
+-- JSON instance.
+type GetUser =
+    { #[Web.Path "org"]
+      org : String
+    , #[Web.Path "id"]
+      id : Int
+    , #[Web.Query "verbose"]
+      verbose : Maybe Bool
+    }
+
+type NewUser =
+    { #[Web.Path "org"]
+      org : String
+    , #[Web.Body]
+      user : User
+    }
+
+-- Users of one organization. Operations perform `e`.
+type Users e =
+    { #[Web.Get "/users/:id"]
+      getUser : GetUser ->{e} Result UserError User
+    , #[Web.Post "/users"]
+      createUser : NewUser ->{e} Result UserError User
+    }
