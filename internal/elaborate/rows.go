@@ -71,7 +71,12 @@ func typeMayInstantiate(pattern, actual types.Type) bool {
 }
 
 func (el *elab) residualArgument(actual, explicit types.Row) *core.RowArgument {
-	row := &core.RowArgument{}
+	// The callee may look up what its own row lists in the forwarded row,
+	// so neither those labels nor the ones this call requires are hidden.
+	row := &core.RowArgument{CalleeEffects: []int{}}
+	for _, label := range append(append([]types.EffLabel(nil), actual.Labels...), explicit.Labels...) {
+		row.CalleeEffects = append(row.CalleeEffects, label.Unique)
+	}
 	if actual.Tail != nil {
 		row.From = pendingRow
 	}
@@ -120,15 +125,38 @@ func bindRows(defs []core.Def, ck *infer.Checker) {
 		if core.ArrowOpenRow(d.Type, len(d.Params)) && d.RowParam == 0 {
 			d.RowParam = ck.Sup.FreshCapture()
 		}
+		explicit := append(append([]core.EffectInstance(nil), d.EffectParams...), d.RowEffects...)
 		evidence := map[types.EffectKey]core.EffectInstance{}
-		for _, ev := range append(append([]core.EffectInstance(nil), d.EffectParams...), d.RowEffects...) {
+		for _, ev := range explicit {
 			evidence[ev.Key()] = ev
 		}
-		bindExpressionRows(d.Body, d.RowParam, evidence, ck)
+		bindExpressionRows(d.Body, d.RowParam, explicit, evidence, ck)
 	}
 }
 
-func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[types.EffectKey]core.EffectInstance, ck *infer.Checker) {
+// hiddenFromCallee lists the abort applications that the owner of a
+// forwarded row names explicitly and the callee's row does not include. The
+// owner's row is its explicit labels and a disjoint tail, so these are not in
+// the tail the callee receives, although the row value, which is the owner's
+// whole invocation row, still binds them. A task forked further down must not
+// try to inherit them. Any application of the same effect in the callee's row
+// keeps them, conservatively.
+func hiddenFromCallee(row *core.RowArgument, explicit []core.EffectInstance, ck *infer.Checker) []core.EffectInstance {
+	if row.CalleeEffects == nil {
+		return nil
+	}
+	var hidden []core.EffectInstance
+	for _, ev := range explicit {
+		effect := ck.Effects[ev.Name]
+		if effect == nil || !effect.HasAbort() || slices.Contains(row.CalleeEffects, ev.Unique) {
+			continue
+		}
+		hidden = append(hidden, core.EffectInstance{Unique: ev.Unique, Name: ev.Name, Args: ev.Args})
+	}
+	return hidden
+}
+
+func bindExpressionRows(expr core.Expr, current types.CaptureVar, explicit []core.EffectInstance, evidence map[types.EffectKey]core.EffectInstance, ck *infer.Checker) {
 	resolve := func(ev *core.EffectInstance) {
 		if actual, found := evidence[ev.Key()]; found && ev.Captures.Empty() {
 			ev.Captures, ev.Control = actual.Captures, actual.Control
@@ -169,25 +197,31 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[t
 				row = e.RowParam
 			}
 			inner := maps.Clone(evidence)
-			for _, ev := range append(append([]core.EffectInstance(nil), e.EffectParams...), e.RowEffects...) {
+			own := append(append([]core.EffectInstance(nil), e.EffectParams...), e.RowEffects...)
+			for _, ev := range own {
 				inner[ev.Key()] = ev
 			}
-			bindExpressionRows(e.Body, row, inner, ck)
+			// A lambda with its own row owns what that row binds; one that
+			// forwards the enclosing row forwards its owner's too.
+			if row == current {
+				own = explicit
+			}
+			bindExpressionRows(e.Body, row, own, inner, ck)
 			return false
 		case *core.Handle:
 			inner := maps.Clone(evidence)
 			for _, ev := range e.Effects {
 				inner[ev.Key()] = ev
 			}
-			bindExpressionRows(e.Body, current, inner, ck)
+			bindExpressionRows(e.Body, current, explicit, inner, ck)
 			for _, clause := range e.Clauses {
-				bindExpressionRows(clause.Body, current, evidence, ck)
+				bindExpressionRows(clause.Body, current, explicit, evidence, ck)
 			}
 			if e.Return != nil {
-				bindExpressionRows(e.Return.Body, current, evidence, ck)
+				bindExpressionRows(e.Return.Body, current, explicit, evidence, ck)
 			}
 			if e.State != nil {
-				bindExpressionRows(e.State.Initial, current, evidence, ck)
+				bindExpressionRows(e.State.Initial, current, explicit, evidence, ck)
 			}
 			return false
 		case *core.App:
@@ -196,6 +230,12 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[t
 				arity = len(e.Args)
 			}
 			bind(&e.Row, e.CalleeKind != core.Ctor && core.ArrowOpenRow(e.Callee.Type(), arity))
+			if e.Row != nil {
+				if e.Row.From != 0 && e.Row.From == current {
+					e.Row.Hidden = hiddenFromCallee(e.Row, explicit, ck)
+				}
+				e.Row.CalleeEffects = nil
+			}
 			for i := range e.EvidenceArgs {
 				resolve(&e.EvidenceArgs[i])
 			}
@@ -210,7 +250,7 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[t
 }
 
 // callbackResidual avoids treating a surrounding row's upper bound as the
-// requirements of a closed callback. A shared quantified tail is the union of
+// requirements of a callback. A shared quantified tail is the union of
 // the concrete callback rows supplying it, less each callback's explicit row.
 // Lists of callbacks follow the same rule, including their literal elements.
 // List element budgets can subtract explicit handled labels while forwarding
@@ -273,8 +313,12 @@ func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, tyArgs
 		if !ok {
 			return fallback
 		}
+		// An open lambda literal needs its labels and its tail, which the
+		// forwarded row carries; the surrounding row's other explicit labels
+		// are not its requirements. A callback passed by name may read its
+		// own labels from the forwarded row, so it keeps them all.
 		if actual.Tail != nil {
-			if !list {
+			if _, literal := args[i].(*ast.Lambda); !list && !literal {
 				return fallback
 			}
 			if needed.Tail != nil && !types.Equal(needed.Tail, actual.Tail) {

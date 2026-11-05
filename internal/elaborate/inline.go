@@ -233,7 +233,7 @@ func simpleBodyWithClosures(e core.Expr, closures bool) bool {
 			ok = ok && closures && len(e.EffectParams) == 0 && e.RowParam == 0 && len(e.RowEffects) == 0
 		case *core.App:
 			ok = ok && (e.CalleeKind == core.Worker || e.CalleeKind == core.Ctor || closures && e.CalleeKind == core.Value) &&
-				len(e.EvidenceArgs) == 0 && (e.Row == nil || closures && e.Row.From == 0 && len(e.Row.Effects) == 0) && e.Control.Transport == types.Direct && !e.Control.Polymorphic
+				len(e.EvidenceArgs) == 0 && (e.Row == nil || closures && e.Row.From == 0 && len(e.Row.Effects) == 0 && len(e.Row.Hidden) == 0) && e.Control.Transport == types.Direct && !e.Control.Polymorphic
 		default:
 			ok = false
 		}

@@ -109,6 +109,19 @@ and exact activation identities. Rewrites, capture reconstruction, and free-row
 analysis distinguish invocation binders from captured rows. Equal source types
 cannot retag a stored value to a different residual-row ABI.
 
+A residual row value is the caller's whole invocation row, so it still binds
+the applications the caller names explicitly, although the callee's source row
+leaves them out. A task forked from such a row must not try to inherit them,
+and abort applications cannot be inherited at all. Row binding therefore hides,
+at each forwarding call, the abort applications the row's owner names
+explicitly and the callee's instantiated row does not include
+(`RowArgument.Hidden`). The owner's row is those labels and a disjoint tail, so
+nothing the callee may need is hidden. A hidden binding ends lookups, and a fork
+skips it. A lambda literal passed for a callback is likewise narrowed to what its body
+performs, open tail included, rather than the surrounding row it unifies with; a
+callback passed by name keeps the whole row, because it may read its own labels
+from it.
+
 The interpreter passes rows explicitly on worker/closure calls; deferred
 operations resolve through them at execution. Captured evidence stays fixed,
 and mutable-frame closure snapshots retain only referenced rows. Self-frame

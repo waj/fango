@@ -1,0 +1,19 @@
+import Async exposing (Async)
+import Fail exposing (Fail)
+import State
+
+-- A launcher names `Fail String` explicitly and spawns a callback whose row
+-- is only its generic tail. The tail cannot hold that `Fail`, so the task
+-- inherits the caller's `State` but not the `Fail` handler around it.
+launch : (() ->{e} Int) ->{Async, Fail String, e} Int
+launch action =
+    task = Async.spawn { action() }
+    result = Async.await task
+    if result < 0 then Fail.fail "negative" else result
+
+main() =
+    print (Fail.attempt {
+            Async.runOutcome {
+                State.run 41 { launch { State.get() + 1 } }
+            }
+    })

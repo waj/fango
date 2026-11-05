@@ -179,7 +179,7 @@ func IsTailLoopCall(d *Def, e *App) bool {
 		if e.Row != nil {
 			return false
 		}
-	} else if e.Row == nil || e.Row.From != d.RowParam || len(e.Row.Effects) != 0 {
+	} else if e.Row == nil || e.Row.From != d.RowParam || len(e.Row.Effects) != 0 || len(e.Row.Hidden) != 0 {
 		return false
 	}
 	for i, ta := range e.TyArgs {

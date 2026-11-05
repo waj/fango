@@ -47,9 +47,18 @@ func (e EffectInstance) Order() types.EffectOrder {
 
 // RowArgument forwards a lexically bound residual row and overlays checked
 // effect instances. A zero From denotes the empty row, never ambient lookup.
+// Hidden lists abort applications the forwarding owner names explicitly and
+// the callee's row does not include: the forwarded row value still holds
+// them, and a task forked from it below must not inherit them. They are not
+// evidence uses; only their applications are read.
 type RowArgument struct {
 	From    types.CaptureVar
 	Effects []EffectInstance
+	Hidden  []EffectInstance
+	// CalleeEffects are the effects of the callee's instantiated row, by
+	// unique. Elaboration records them for row binding to compute Hidden, and
+	// row binding clears them; nil means unknown, which hides nothing.
+	CalleeEffects []int
 }
 
 type Def struct {

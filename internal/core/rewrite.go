@@ -34,9 +34,12 @@ func (r rewriter) row(row *RowArgument) *RowArgument {
 	if row == nil {
 		return nil
 	}
-	out := &RowArgument{From: row.From, Effects: make([]EffectInstance, len(row.Effects))}
+	out := &RowArgument{From: row.From, Effects: make([]EffectInstance, len(row.Effects)), CalleeEffects: row.CalleeEffects}
 	for i, ev := range row.Effects {
 		out.Effects[i] = r.effect(ev)
+	}
+	for _, ev := range row.Hidden {
+		out.Hidden = append(out.Hidden, r.effect(ev))
 	}
 	return out
 }

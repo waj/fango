@@ -11,6 +11,16 @@ type EvidenceBinding struct {
 	Name      string
 	Arguments []*TypeDescriptor
 	Family    EvidenceFamily
+	// Hidden marks an application the row does not carry, although an older
+	// segment does: a caller's own explicit effect, passed on with its
+	// residual row to a callee whose row does not include it. Lookups stop at
+	// it, and a task forked from the row does not inherit what it hides.
+	Hidden bool
+}
+
+// HiddenEvidenceBinding hides one application from the rows it extends.
+func HiddenEvidenceBinding(name string, args ...*TypeDescriptor) *EvidenceBinding {
+	return &EvidenceBinding{Name: name, Arguments: args, Hidden: true}
 }
 
 func sameEvidenceBinding(name string, args []*TypeDescriptor, binding *EvidenceBinding) bool {
@@ -96,30 +106,39 @@ func visibleBinding(row *EvidenceRow, name string, args []*TypeDescriptor) *Evid
 	for ; row != nil; row = row.tail {
 		for _, binding := range row.inline {
 			if binding != nil && sameEvidenceBinding(name, args, binding) {
-				return binding
+				return unlessHidden(binding)
 			}
 		}
 		for _, binding := range row.extra {
 			if sameEvidenceBinding(name, args, binding) {
-				return binding
+				return unlessHidden(binding)
 			}
 		}
 	}
 	return nil
 }
 
-func (row *EvidenceRow) find(name string, args []*TypeDescriptor) (EvidenceFamily, bool) {
+func unlessHidden(binding *EvidenceBinding) *EvidenceBinding {
+	if binding.Hidden {
+		return nil
+	}
+	return binding
+}
+
+// find reports the segment's binding of an application. A hidden one is
+// found, and absent: the search ends without evidence.
+func (row *EvidenceRow) find(name string, args []*TypeDescriptor) (family EvidenceFamily, found, hidden bool) {
 	for _, binding := range row.inline {
 		if binding != nil && sameEvidenceBinding(name, args, binding) {
-			return binding.Family, true
+			return binding.Family, true, binding.Hidden
 		}
 	}
 	for _, binding := range row.extra {
 		if sameEvidenceBinding(name, args, binding) {
-			return binding.Family, true
+			return binding.Family, true, binding.Hidden
 		}
 	}
-	return EvidenceFamily{}, false
+	return EvidenceFamily{}, false, false
 }
 
 type EvidenceMode uint8
@@ -134,8 +153,8 @@ const (
 // HasRowEvidence reports whether row or its tail binds the effect.
 func HasRowEvidence(row *EvidenceRow, name string, args ...*TypeDescriptor) bool {
 	for ; row != nil; row = row.tail {
-		if _, ok := row.find(name, args); ok {
-			return true
+		if _, ok, hidden := row.find(name, args); ok {
+			return !hidden
 		}
 	}
 	return false
@@ -143,7 +162,10 @@ func HasRowEvidence(row *EvidenceRow, name string, args ...*TypeDescriptor) bool
 
 func RowEvidence[T any](row *EvidenceRow, name string, mode EvidenceMode, args ...*TypeDescriptor) T {
 	for row != nil {
-		if family, ok := row.find(name, args); ok {
+		if family, ok, hidden := row.find(name, args); ok {
+			if hidden {
+				break
+			}
 			var value any
 			switch mode {
 			case DirectEvidence:

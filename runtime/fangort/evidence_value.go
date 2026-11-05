@@ -10,10 +10,22 @@ type EvidenceValue struct {
 func (row EvidenceValue) visible(name string, args []*TypeDescriptor) *EvidenceBinding {
 	for _, binding := range row.inline {
 		if binding != nil && sameEvidenceBinding(name, args, binding) {
-			return binding
+			return unlessHidden(binding)
 		}
 	}
 	return visibleBinding(row.tail, name, args)
+}
+
+// HideEvidenceValue hides applications a callee's row does not include from
+// the residual row passed to it. See EvidenceBinding.Hidden.
+func HideEvidenceValue(row EvidenceValue, hidden ...*EvidenceBinding) EvidenceValue {
+	var bindings []*EvidenceBinding
+	for _, binding := range row.inline {
+		if binding != nil {
+			bindings = append(bindings, binding)
+		}
+	}
+	return EvidenceValue{tail: ExtendEvidenceBindings(ExtendEvidenceBindings(row.tail, bindings...), hidden...)}
 }
 
 func ExtendEvidenceValue(row EvidenceValue, bindings ...*EvidenceBinding) EvidenceValue {

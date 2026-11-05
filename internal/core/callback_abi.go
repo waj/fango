@@ -220,7 +220,7 @@ func callbackUses(body Expr, name string, arity int, row types.CaptureVar, defs 
 // forwardsRow reports whether an argument hands on the row bound by row as it
 // is. A call without a row argument passes none for a callback to observe.
 func forwardsRow(arg *RowArgument, row types.CaptureVar) bool {
-	return arg == nil || (row != 0 && arg.From == row && len(arg.Effects) == 0)
+	return arg == nil || (row != 0 && arg.From == row && len(arg.Effects) == 0 && len(arg.Hidden) == 0)
 }
 
 // LocalCallbackABI applies the same conservative use contract to a local

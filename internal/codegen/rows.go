@@ -68,6 +68,14 @@ func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
 	if row.From != 0 {
 		tail = g.rowValue(row.From)
 	}
+	if len(row.Hidden) > 0 {
+		args := []goast.Expr{tail}
+		for _, ev := range row.Hidden {
+			args = append(args, callExpr(selector("fangort", "HiddenEvidenceBinding"), append([]goast.Expr{stringLit(ev.Name)}, g.typeDescriptorArgs(ev.Args)...)...))
+		}
+		g.usesFangort = true
+		tail = callExpr(selector("fangort", "HideEvidenceValue"), args...)
+	}
 	if len(row.Effects) == 0 {
 		return tail
 	}

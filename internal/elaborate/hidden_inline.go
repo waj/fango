@@ -3,6 +3,7 @@ package elaborate
 import (
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
+	"slices"
 )
 
 // Hidden package factories and consumers may forward an invocation row. They
@@ -48,7 +49,7 @@ func hiddenInlineBody(e core.Expr, row types.CaptureVar) bool {
 			len(e.EvidenceArgs) != 0 || e.Control.Transport != types.Direct {
 			return false
 		}
-		if e.Row != nil && (len(e.Row.Effects) != 0 || e.Row.From != 0 && e.Row.From != row) {
+		if e.Row != nil && (len(e.Row.Effects) != 0 || len(e.Row.Hidden) != 0 || e.Row.From != 0 && e.Row.From != row) {
 			return false
 		}
 		return hiddenInlineBody(e.Callee, row) && all(e.Args)
@@ -86,11 +87,28 @@ func (c *copier) row(row *core.RowArgument) *core.RowArgument {
 	if row == nil {
 		return nil
 	}
-	n := &core.RowArgument{From: row.From}
+	n := &core.RowArgument{From: row.From, CalleeEffects: row.CalleeEffects}
+	var hidden []core.EffectInstance
+	for _, effect := range row.Hidden {
+		effect.Args = c.types(effect.Args)
+		hidden = append(hidden, effect)
+	}
 	if actual, ok := c.rows[row.From]; ok {
 		n.From = actual.From
-		// Actual arguments are already in the caller's type scope.
-		n.Effects = append(n.Effects, actual.Effects...)
+		// Actual arguments are already in the caller's type scope. What the
+		// copied row hides is hidden from the actual row as a whole, so it
+		// removes the actual overlays it covers as well.
+		for _, effect := range actual.Effects {
+			if !slices.ContainsFunc(hidden, func(h core.EffectInstance) bool { return h.Key() == effect.Key() }) {
+				n.Effects = append(n.Effects, effect)
+			}
+		}
+		n.Hidden = append(n.Hidden, actual.Hidden...)
+	}
+	for _, effect := range hidden {
+		if !slices.ContainsFunc(n.Hidden, func(h core.EffectInstance) bool { return h.Key() == effect.Key() }) {
+			n.Hidden = append(n.Hidden, effect)
+		}
 	}
 	for _, effect := range row.Effects {
 		effect.Args = c.types(effect.Args)

@@ -541,6 +541,12 @@ a task inherits its resumptive applications and the one cell they share; its
 applications of effects with abort operations, including the resumptive
 operations of such an effect, still have to be handled inside the task.
 
+A task inherits only what its callback can perform. A callback whose row is a
+launcher's generic tail does not inherit an abort effect the launcher names
+explicitly in its own row, such as the `Fail String` of
+`launch : (() ->{e} a) ->{Async, Fail String, e} a`: that `Fail` is not part of
+`e`, whatever handles it around the call.
+
 A directly known escaping abort, including Fail, or a local scoped permission
 is rejected with `ASYNC BOUNDARY`: handle the abort or install the scoped handler
 inside the task. Dependencies hidden in inherited handlers or generic rows are

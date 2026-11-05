@@ -32,6 +32,21 @@ func (in *interp) argumentRow(argument *core.RowArgument, fr *Frame) (*fangort.E
 			return nil, fmt.Errorf("eval: missing residual row %d", argument.From)
 		}
 	}
+	if len(argument.Hidden) > 0 {
+		hidden := make([]*fangort.EvidenceBinding, len(argument.Hidden))
+		for i, effect := range argument.Hidden {
+			args := make([]*fangort.TypeDescriptor, len(effect.Args))
+			for j, arg := range effect.Args {
+				var err error
+				args[j], err = in.typeDescriptor(arg, fr)
+				if err != nil {
+					return nil, err
+				}
+			}
+			hidden[i] = fangort.HiddenEvidenceBinding(strconv.Itoa(effect.Unique), args...)
+		}
+		tail = fangort.ExtendEvidenceBindings(tail, hidden...)
+	}
 	bindings := make([]fangort.EvidenceBinding, len(argument.Effects))
 	for i, effect := range argument.Effects {
 		ev := in.evidence[effect.Key()]

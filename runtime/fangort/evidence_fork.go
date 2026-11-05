@@ -78,8 +78,8 @@ func NewEvidenceFork(overrides *EvidenceRow) *EvidenceFork {
 
 func evidenceFamily(row *EvidenceRow, name string, args []*TypeDescriptor) (EvidenceFamily, bool) {
 	for ; row != nil; row = row.tail {
-		if family, ok := row.find(name, args); ok {
-			return family, true
+		if family, ok, hidden := row.find(name, args); ok {
+			return family, !hidden
 		}
 	}
 	return EvidenceFamily{}, false
@@ -141,7 +141,8 @@ func ForkEvidence[T any](fork *EvidenceFork, origin *EvidenceOrigin, mode Eviden
 	panic(fmt.Sprintf("Async: incompatible inherited handler %s", origin.Name))
 }
 
-// Row rebuilds visible bindings only. A shadowed tail entry is not inherited.
+// Row rebuilds visible bindings only. A shadowed or hidden tail entry is not
+// inherited.
 func (f *EvidenceFork) Row(row *EvidenceRow) *EvidenceRow {
 	var seen []EvidenceBinding
 	var bindings []EvidenceBinding
@@ -165,7 +166,11 @@ func (f *EvidenceFork) Row(row *EvidenceRow) *EvidenceRow {
 			}
 			if !shadowed {
 				seen = append(seen, *binding)
-				bindings = append(bindings, EvidenceBinding{Name: binding.Name, Arguments: binding.Arguments, Family: f.Family(binding.Family.Origin)})
+				// A hidden application is not the task's to inherit, and it
+				// keeps hiding the older one it covers.
+				if !binding.Hidden {
+					bindings = append(bindings, EvidenceBinding{Name: binding.Name, Arguments: binding.Arguments, Family: f.Family(binding.Family.Origin)})
+				}
 			}
 		}
 	}
