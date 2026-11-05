@@ -4,7 +4,8 @@
 // resolving them from a root instead is what lets an installed compiler and a
 // working checkout share one mechanism.
 //
-// A root holds stdlib/, runtime/, and internal/ side by side. Resolution is process-wide
+// A root holds stdlib/, runtime/, and internal/ side by side, and optionally
+// libs/, one directory per library a program may enable. Resolution is process-wide
 // and computed once: both the value and any failure to find one are stable for
 // the process, so every session in it agrees on which library it is compiling
 // against.
@@ -16,6 +17,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -220,6 +222,74 @@ func read(root, rel string, depth int) ([]byte, error) {
 	}
 	return t.read(filepath.Join(abs, filepath.FromSlash(dir)), name)
 }
+
+// libraryName is the spelling of a library directory under libs/. Library
+// names are lower case so that they can never be mistaken for a module
+// segment, which is what keeps `--lib web` and `import Web` distinct.
+var libraryName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+
+// Libraries names the optional libraries of the library tree, sorted: each
+// directory of libs/ whose name is a library name. A tree without libs/ has
+// none.
+func Libraries() ([]string, error) {
+	abs, err := Root()
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(filepath.Join(abs, "libs"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() && libraryName.MatchString(entry.Name()) {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// ReadLibrary reads one file of library lib by its path relative to the
+// library's directory, for example "Web/Server.fango". It misses with
+// fs.ErrNotExist exactly as ReadStdlib does.
+func ReadLibrary(lib, rel string) ([]byte, error) {
+	if !libraryName.MatchString(lib) {
+		return nil, &fs.PathError{Op: "open", Path: rel, Err: fs.ErrNotExist}
+	}
+	return read("libs/"+lib, rel, -1)
+}
+
+// LibrarySources lists library lib's Fango sources by path relative to its
+// directory. Only paths whose every component is a module name count: a
+// library keeps its tests and examples in lower-case directories beside its
+// modules, and those are not part of what it provides.
+func LibrarySources(lib string) ([]string, error) {
+	if !libraryName.MatchString(lib) {
+		return nil, &fs.PathError{Op: "open", Path: "libs/" + lib, Err: fs.ErrNotExist}
+	}
+	t, err := lookup("libs/" + lib)
+	if err != nil {
+		return nil, err
+	}
+	return t.list(func(name string) bool {
+		base, ok := strings.CutSuffix(name, ".fango")
+		if !ok {
+			return false
+		}
+		for _, part := range strings.Split(base, "/") {
+			if !moduleSegment.MatchString(part) {
+				return false
+			}
+		}
+		return true
+	}), nil
+}
+
+var moduleSegment = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 
 // StdlibNatives lists the standard library's Go sidecars by path relative to
 // stdlib/, including sidecars belonging to nested modules.

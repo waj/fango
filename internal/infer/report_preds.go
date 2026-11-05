@@ -181,7 +181,7 @@ func (ck *Checker) instanceProblem(o predObligation, r InstanceResolution) diag.
 	}
 	// Generated code's callee means nothing to the author, who reads it from
 	// the `deriving` it came from.
-	if o.op != "" && (o.span.File == nil || !strings.HasPrefix(o.span.File.Name, "<stdlib>")) {
+	if o.op != "" && (o.span.File == nil || !strings.HasPrefix(o.span.File.Name, "<stdlib>") && !strings.HasPrefix(o.span.File.Name, "<libs>")) {
 		err.Body += fmt.Sprintf(" %s needs it.", ck.showOp(o.op))
 	}
 	if con, ok := ty.(*types.TCon); ok && ck.ADTs[con.Unique] != nil && ck.Derivers[missing.Class] != nil {

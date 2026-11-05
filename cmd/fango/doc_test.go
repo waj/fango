@@ -52,7 +52,7 @@ func TestDocArguments(t *testing.T) {
 		args   []string
 		stderr string
 	}{
-		{"no stdlib", nil, "--stdlib is required"},
+		{"no library", nil, "exactly one of --stdlib or --lib is required"},
 		{"unknown module", []string{"--stdlib", "--module", "Maybe", "--module", "Nope"}, `unknown standard-library module "Nope"`},
 		{"module case", []string{"--stdlib", "--module", "maybe"}, `unknown standard-library module "maybe"`},
 		{"positional", []string{"--stdlib", "Maybe"}, "usage:"},

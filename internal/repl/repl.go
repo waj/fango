@@ -48,6 +48,9 @@ type Options struct {
 	// `Foo/Bar.fango`, the way an entry file's directory is in a build.
 	// Empty means the working directory.
 	Root string
+	// Libraries are the optional libraries of the library root a prompt
+	// import may resolve to. The caller validates them first.
+	Libraries []string
 	// Observe reports per-module compilation stages, for tests that count
 	// imported-module work apart from the prompt's own input.
 	Observe check.Observer
@@ -153,7 +156,7 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	if root == "" {
 		root = "."
 	}
-	graph, prelude, errs := modules.NewGraph(root)
+	graph, prelude, errs := modules.NewGraph(root, opts.Libraries)
 	if len(errs) > 0 {
 		panic("invalid bundled prelude: " + errs[0].Body)
 	}

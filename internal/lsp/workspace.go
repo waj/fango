@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/check"
-	"github.com/waj/fango/internal/libroot"
 	"github.com/waj/fango/internal/modules"
 )
 
@@ -176,7 +175,7 @@ func scanWorkspace(ctx context.Context, roots []string, open map[string][]byte, 
 		}
 		root := sourceRoot(path, content)
 		fresh := freshSources(root, path, open)
-		result, errs, internal := (&check.Session{LoadOptions: modules.LoadOptions{Root: root, Overlays: open, AllowBundledEntry: true}, FreshSources: fresh}).Compile(path)
+		result, errs, internal := (&check.Session{LoadOptions: modules.LoadOptions{Root: root, Overlays: open, AllowBundledEntry: true, Libraries: modules.AllLibraries()}, FreshSources: fresh}).Compile(path)
 		if result != nil && len(errs) == 0 && internal == nil {
 			indexes[path] = newIndex(root, result)
 		} else if old := prior[path]; old != nil && old.documents[path] != nil && string(old.documents[path].file.Content) == string(content) {
@@ -193,13 +192,9 @@ func freshSources(root, entry string, open map[string][]byte) map[string]bool {
 	for path := range open {
 		paths = append(paths, path)
 	}
-	lib, libErr := libroot.Root()
 	for _, path := range paths {
-		if libErr == nil {
-			stdlib := filepath.Join(lib, "stdlib") + string(filepath.Separator)
-			if strings.HasPrefix(path, stdlib) {
-				fresh["<stdlib>/"+filepath.ToSlash(strings.TrimPrefix(path, stdlib))] = true
-			}
+		if logical, ok := modules.LogicalPath(path); ok {
+			fresh[logical] = true
 		}
 		if rel, err := filepath.Rel(root, path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			fresh[filepath.ToSlash(rel)] = true

@@ -15,7 +15,7 @@ import (
 // read afresh, together, so removed imports and fixities cannot linger.
 func (g *Graph) Refresh(ctx context.Context, imports []ast.Import, promptFixities []ast.Decl) (*Graph, *Increment, []string, []diag.Error) {
 	next := newGraph(g.local)
-	next.bundled, next.observe = g.bundled, g.observe
+	next.bundled, next.libraries, next.observe = g.bundled, g.libraries, g.observe
 	pending := map[string]*node{}
 	for name, n := range g.nodes {
 		if n.bundled {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/libroot"
+	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/repl"
 	"golang.org/x/term"
 )
@@ -17,6 +18,8 @@ func cmdRepl(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("repl", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	debug := flags.Bool("debug", false, "retain source information and enable debugger commands")
+	var libraries libraryFlag
+	flags.Var(&libraries, "lib", "enable the library `name` of the library root (repeatable)")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -32,7 +35,11 @@ func cmdRepl(args []string, stdout, stderr io.Writer) int {
 		diag.Render(stderr, []diag.Error{{Title: "MISSING LIBRARY", Body: err.Error() + "."}})
 		return 1
 	}
-	opts := repl.Options{Debug: *debug}
+	if errs := modules.CheckLibraries(libraries); len(errs) > 0 {
+		diag.Render(stderr, errs)
+		return 1
+	}
+	opts := repl.Options{Debug: *debug, Libraries: libraries}
 	opts.ErrorWriter = stderr
 	if len(args) == 1 {
 		opts.Root = args[0]

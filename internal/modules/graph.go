@@ -2,6 +2,7 @@ package modules
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"maps"
 	"slices"
@@ -27,6 +28,9 @@ type Graph struct {
 	// modules, which is how the embedded prelude is built.
 	local   Provider
 	bundled BundledProvider
+	// libraries are the enabled optional libraries, consulted in order
+	// after the bundled library and before the source root.
+	libraries []LibraryProvider
 
 	nodes map[string]*node
 	// visible is each module's transitive instance visibility: its
@@ -68,11 +72,16 @@ func newGraph(local Provider) *Graph {
 	return &Graph{local: local, nodes: map[string]*node{}, visible: map[string]map[string]bool{}, fixities: fixity.Builtin()}
 }
 
-// NewGraph starts a session graph rooted at root and loads the bundled
-// prelude closure into it, returning the prelude the way Prelude does so the
-// checker installs the same declarations either way.
-func NewGraph(root string) (*Graph, *PreludeResult, []diag.Error) {
+// NewGraph starts a session graph rooted at root, with the named optional
+// libraries enabled, and loads the bundled prelude closure into it, returning
+// the prelude the way Prelude does so the checker installs the same
+// declarations either way.
+func NewGraph(root string, libraries []string) (*Graph, *PreludeResult, []diag.Error) {
 	g := newGraph(FSProvider{Root: root})
+	var errs []diag.Error
+	if g.libraries, errs = enableLibraries(libraries); len(errs) > 0 {
+		return nil, nil, errs
+	}
 	p, errs := g.loadPrelude()
 	if len(errs) > 0 {
 		return nil, nil, errs
@@ -84,9 +93,14 @@ func NewGraph(root string) (*Graph, *PreludeResult, []diag.Error) {
 func (g *Graph) Loaded(name string) bool { return g.nodes[name] != nil }
 
 // Modules names every module an import could load, sorted: the bundled
-// library and, for a filesystem source root, the modules under it.
+// library, the enabled libraries, and, for a filesystem source root, the
+// modules under it.
 func (g *Graph) Modules() []string {
 	names, _ := BundledModules()
+	for _, library := range g.libraries {
+		provided, _ := library.Modules()
+		names = append(names, provided...)
+	}
 	if l, ok := g.local.(interface{ Modules() []string }); ok {
 		names = append(names, l.Modules()...)
 	}
@@ -177,6 +191,8 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 	var ne error
 	if bundled {
 		np, nb, ne = g.bundled.Native(name)
+	} else if read.library != "" {
+		np, nb, ne = LibraryProvider{Name: read.library}.Native(name)
 	} else {
 		np, nb, ne = g.local.Native(name)
 	}
@@ -211,6 +227,8 @@ type moduleRead struct {
 	path    string
 	content []byte
 	bundled bool
+	// library names the enabled library the module was read from.
+	library string
 	mod     *ast.Module
 	deps    []string
 	// fail is why the module cannot be used, given the span that asked for it.
@@ -276,52 +294,90 @@ func (g *Graph) readModule(name string, read *moduleRead) {
 		})
 		return
 	}
+	// An enabled library sits between the bundled library and the source
+	// root. It reserves its names the way the bundled library does, and may
+	// not itself take a bundled name or one another enabled library has.
+	library := ""
+	var libPath string
+	var libContent []byte
+	for _, provider := range g.libraries {
+		path, content, err := provider.Source(name)
+		if err != nil {
+			continue
+		}
+		if bundleErr == nil {
+			fail(func(at source.Span) []diag.Error {
+				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; the library `%s` cannot also provide it as `%s`.", name, bundlePath, provider.Name, path)}
+			})
+			return
+		}
+		if library != "" {
+			first := library
+			fail(func(at source.Span) []diag.Error {
+				return []diag.Error{diag.Errorf(at, "LIBRARY CONFLICT", "Module `%s` is provided by both enabled libraries `%s` and `%s`.", name, first, provider.Name)}
+			})
+			return
+		}
+		library, libPath, libContent = provider.Name, path, content
+	}
+	owner, ownerPath, ownerContent, ownerErr := "is bundled with Fango", bundlePath, bundleContent, bundleErr
+	if library != "" {
+		owner, ownerPath, ownerContent, ownerErr = "is provided by the library `"+library+"`", libPath, libContent, nil
+	}
 	var path string
 	var b []byte
 	var readErr error
 	bundled := false
 	if g.local == nil {
-		if bundleErr != nil {
+		if ownerErr != nil {
+			if len(g.libraries) > 0 {
+				fail(func(at source.Span) []diag.Error {
+					return []diag.Error{diag.Errorf(at, "MISSING MODULE", "I cannot find module `%s` in the bundled library or the enabled libraries.", name)}
+				})
+				return
+			}
 			fail(func(source.Span) []diag.Error {
 				return []diag.Error{{Title: "INVALID BUNDLED PRELUDE", Body: bundleErr.Error()}}
 			})
 			return
 		}
-		path, b, bundled = bundlePath, bundleContent, true
+		path, b, bundled = ownerPath, ownerContent, library == ""
 	} else {
 		localPath, localContent, localErr := g.local.Source(name)
 		path, b, readErr = localPath, localContent, localErr
-		if bundleErr == nil {
+		if ownerErr == nil {
 			if localErr == nil {
 				fail(func(at source.Span) []diag.Error {
-					return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; remove or rename the local `%s`.", name, bundlePath, localPath)}
+					return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` %s as `%s`; remove or rename the local `%s`.", name, owner, ownerPath, localPath)}
 				})
 				return
 			}
 			if _, caseCollision := localErr.(pathCaseError); caseCollision {
 				fail(func(at source.Span) []diag.Error {
-					return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; a case-insensitive local path also conflicts with that reserved name.", name, bundlePath)}
+					return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` %s as `%s`; a case-insensitive local path also conflicts with that reserved name.", name, owner, ownerPath)}
 				})
 				return
 			}
 			if !errors.Is(localErr, fs.ErrNotExist) {
 				fail(func(at source.Span) []diag.Error {
-					return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; the local `%s` also occupies that reserved path.", name, bundlePath, localPath)}
+					return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` %s as `%s`; the local `%s` also occupies that reserved path.", name, owner, ownerPath, localPath)}
 				})
 				return
 			}
-			path, b, readErr, bundled = bundlePath, bundleContent, nil, true
+			path, b, readErr, bundled = ownerPath, ownerContent, nil, library == ""
 		}
 	}
 	if readErr != nil {
+		hint := disabledLibraryHint(name)
 		fail(func(at source.Span) []diag.Error {
 			if ce, ok := readErr.(pathCaseError); ok {
 				return []diag.Error{diag.Errorf(at, "MODULE PATH CASING", "Module `%s` requires exact path casing; expected `%s` but found `%s`.", name, ce.want, ce.found)}
 			}
-			return []diag.Error{diag.Errorf(at, "MISSING MODULE", "I cannot find module `%s`; expected `%s` beneath the entry directory.", name, path)}
+			return []diag.Error{diag.Errorf(at, "MISSING MODULE", "I cannot find module `%s`; expected `%s` beneath the entry directory.%s", name, path, hint)}
 		})
 		return
 	}
+	read.library = library
 	mod, errs := parse(source.NewFile(path, b))
 	if len(errs) > 0 {
 		fail(func(source.Span) []diag.Error { return errs })
@@ -520,4 +576,19 @@ func (g *Graph) loadPrelude() (*PreludeResult, []diag.Error) {
 	}
 	return &PreludeResult{Module: merged, Fixities: g.fixities, Owners: owners, Scope: scope,
 		Units: units, FixityHash: fixity.Hash(g.fixities), PromptVisible: promptVisible}, nil
+}
+
+// disabledLibraryHint suggests the library that would provide a missing
+// module, when one in the library root does but is not enabled.
+func disabledLibraryHint(name string) string {
+	available, err := libroot.Libraries()
+	if err != nil {
+		return ""
+	}
+	for _, library := range available {
+		if _, _, err := (LibraryProvider{Name: library}).Source(name); err == nil {
+			return fmt.Sprintf(" The library `%s` provides it; enable it with `--lib %s`.", library, library)
+		}
+	}
+	return ""
 }

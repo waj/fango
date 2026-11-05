@@ -74,6 +74,35 @@ For example, `Runtime.Local` is stored at `stdlib/Runtime/Local.fango`.
 A native sidecar for a dotted module follows the same nested path and uses
 the `.native.go` suffix beside its source.
 
+## Optional libraries
+
+The [library root](commands.md#the-library-root) may also hold optional
+libraries under `libs/`, one lower-case directory per library, for example
+`libs/web/`. A library uses the same path convention as `stdlib/`: `Web.Server`
+is `libs/web/Web/Server.fango`. Only paths whose every segment is a module name
+belong to the library, so its tests and examples live in lower-case
+directories beside its modules.
+
+A program enables a library with `--lib NAME` on `build`, `run`, `check`,
+`debug`, or `repl`; repeat the option for several. Imports then resolve in
+three tiers: the bundled standard library, then the enabled libraries, then
+the source root. An enabled library reserves its module names the way the
+standard library does:
+
+- a local module, or a named entry, with one of its names is a `RESERVED
+  MODULE`;
+- a library module with a bundled name is a `RESERVED MODULE`, reported where
+  it is imported;
+- a module provided by two enabled libraries is a `LIBRARY CONFLICT`;
+- an unknown library name is a `MISSING LIBRARY` that lists the available
+  ones.
+
+A library that is not enabled reserves nothing, but a `MISSING MODULE` that it
+could provide names the option that enables it. Library modules are otherwise
+ordinary modules: they have no bundled module's native privileges, and their
+sidecars run in the per-program worker. The editor server has no command line
+and enables every library of the root.
+
 ## Prelude and implicit dependencies
 
 Fango also ships standard-library modules, in the
@@ -149,7 +178,7 @@ every program there is a package main of its own and they share the modules
 they both import. Each one has a `sources.json` beside its entry package,
 containing each transitive Fango source and native sidecar's logical name,
 path, and SHA-256 hash. Local paths are relative to the source root; bundled
-paths begin with `<stdlib>/`. It records what that build was made from; what
+paths begin with `<stdlib>/`, and library paths with `<libs>/NAME/`. It records what that build was made from; what
 decides whether a program is recompiled or relinked is the compilation cache
 and the generated Go itself, module at a time, on keys that cover bundled and
 local sources alike.

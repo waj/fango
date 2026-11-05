@@ -478,7 +478,7 @@ func (s *server) analyzeGeneration(gen uint64) {
 	for entry, content := range open {
 		root := sourceRoot(entry, content)
 		fresh := freshSources(root, entry, open)
-		result, errs, internal := (&check.Session{LoadOptions: modules.LoadOptions{Root: root, Overlays: open, AllowBundledEntry: true}, FreshSources: fresh, AccumulateDiagnostics: true}).Compile(entry)
+		result, errs, internal := (&check.Session{LoadOptions: modules.LoadOptions{Root: root, Overlays: open, AllowBundledEntry: true, Libraries: modules.AllLibraries()}, FreshSources: fresh, AccumulateDiagnostics: true}).Compile(entry)
 		if internal != nil {
 			errs = append(errs, diag.Error{Title: "INTERNAL COMPILER ERROR", Body: internal.Error()})
 		}
@@ -595,10 +595,8 @@ func sourceRoot(path string, content []byte) string {
 	return root
 }
 func sourcePath(root, name string) string {
-	if strings.HasPrefix(name, "<stdlib>/") {
-		if lib, err := libroot.Root(); err == nil {
-			return filepath.Join(lib, "stdlib", strings.TrimPrefix(name, "<stdlib>/"))
-		}
+	if path, ok := modules.PhysicalPath(name); ok {
+		return path
 	}
 	return filepath.Clean(filepath.Join(root, filepath.FromSlash(name)))
 }

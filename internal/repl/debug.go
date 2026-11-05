@@ -17,7 +17,7 @@ import (
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/lexer"
-	"github.com/waj/fango/internal/libroot"
+	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
 )
@@ -125,10 +125,8 @@ func (s *Session) debugRefresh(expr core.Expr) []string {
 	s.debug.sources = found
 	for name, src := range found {
 		path := filepath.Join(s.options.Root, filepath.FromSlash(name))
-		if strings.HasPrefix(name, "<stdlib>/") {
-			if root, err := libroot.Root(); err == nil {
-				path = filepath.Join(root, "stdlib", filepath.FromSlash(strings.TrimPrefix(name, "<stdlib>/")))
-			}
+		if physical, ok := modules.PhysicalPath(name); ok {
+			path = physical
 		} else if strings.HasPrefix(name, "<") {
 			continue
 		}
@@ -188,11 +186,9 @@ func (s *Session) debugFile(name string) string {
 	}
 	if filepath.IsAbs(name) {
 		// A checkout can be both the session root and the library root.
-		// Resolve its stdlib subtree before the more general source root.
-		if lib, err := libroot.Root(); err == nil {
-			if rel, err := filepath.Rel(filepath.Join(lib, "stdlib"), name); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return "<stdlib>/" + filepath.ToSlash(rel)
-			}
+		// Resolve its library subtrees before the more general source root.
+		if logical, ok := modules.LogicalPath(name); ok {
+			return logical
 		}
 		root, _ := filepath.Abs(s.options.Root)
 		if s.options.Root == "" {

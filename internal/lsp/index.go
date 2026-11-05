@@ -3,14 +3,13 @@ package lsp
 import (
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/waj/fango/internal/apidoc"
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/lexer"
-	"github.com/waj/fango/internal/libroot"
+	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/token"
 	"github.com/waj/fango/internal/types"
@@ -76,11 +75,8 @@ func newIndex(root string, result *check.Result) *index {
 }
 
 func (i *index) path(f *source.File) string {
-	if strings.HasPrefix(f.Name, "<stdlib>/") {
-		root, err := libroot.Root()
-		if err == nil {
-			return filepath.Clean(filepath.Join(root, "stdlib", strings.TrimPrefix(f.Name, "<stdlib>/")))
-		}
+	if path, ok := modules.PhysicalPath(f.Name); ok {
+		return filepath.Clean(path)
 	}
 	return filepath.Clean(filepath.Join(i.root, filepath.FromSlash(f.Name)))
 }

@@ -16,7 +16,7 @@ import (
 // modules beyond it on demand; an import already loaded adds nothing, and a
 // checkpoint forgets what came after it.
 func TestGraphImportsBeyondPrelude(t *testing.T) {
-	g, p, errs := NewGraph(t.TempDir())
+	g, p, errs := NewGraph(t.TempDir(), nil)
 	if len(errs) > 0 {
 		t.Fatalf("NewGraph: %v", errs)
 	}
@@ -77,7 +77,7 @@ func TestConcurrentReadsKeepDiagnosticOrder(t *testing.T) {
 // a fix sees the fixed file.
 func TestGraphRereadsAfterAnImport(t *testing.T) {
 	dir := t.TempDir()
-	g, _, errs := NewGraph(dir)
+	g, _, errs := NewGraph(dir, nil)
 	if len(errs) > 0 {
 		t.Fatalf("NewGraph: %v", errs)
 	}

@@ -98,17 +98,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	fmt.Fprint(w, `usage:
-  fango build [-o out] [--debug | --emit-go] [verbosity] main.fango
-  fango debug [verbosity] SOURCE.fango|BINARY [--] [args...]
-  fango run [verbosity] main.fango [--] [args...]
-  fango check [verbosity] main.fango
+  fango build [-o out] [--debug | --emit-go] [options] main.fango
+  fango debug [options] SOURCE.fango|BINARY [--] [args...]
+  fango run [options] main.fango [--] [args...]
+  fango check [options] main.fango
   fango fmt [-w] [-l] [file...]
-  fango repl [--debug] [dir]
+  fango repl [--debug] [--lib name]... [dir]
   fango clean main.fango
-  fango doc --stdlib [--module name]... [--strict]
+  fango doc (--stdlib | --lib name) [--module name]... [--strict]
   fango lsp
 
-verbosity, on build, run, and check:
+options, on build, debug, run, and check:
+  --lib name    enable a library of the library root; repeat for several
   -v            report each module as it is compiled or reused
   -vv           also report stage timings and cache totals
   -timings json machine-readable build statistics
@@ -193,6 +194,8 @@ func reporting(fs *flag.FlagSet, stderr io.Writer) func() (*compilationSession, 
 	veryVerbose := fs.Bool("vv", false, "also report stage timings and cache totals")
 	timings := fs.String("timings", "", "write machine-readable build statistics (`json`)")
 	noCache := fs.Bool("no-cache", false, "compile every module from source, ignoring cached artifacts")
+	var libraries libraryFlag
+	fs.Var(&libraries, "lib", "enable the library `name` of the library root (repeatable)")
 	return func() (*compilationSession, *reporter) {
 		level := quiet
 		switch {
@@ -202,7 +205,7 @@ func reporting(fs *flag.FlagSet, stderr io.Writer) func() (*compilationSession, 
 			level = progress
 		}
 		report := newReporter(level, *timings == "json", *noCache, stderr)
-		return &compilationSession{observe: report.observer(), noCache: *noCache}, report
+		return &compilationSession{observe: report.observer(), noCache: *noCache, libraries: libraries}, report
 	}
 }
 

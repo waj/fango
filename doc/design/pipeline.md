@@ -336,7 +336,16 @@ list can re-export what the module's imports expose unqualified; the entry
 keeps the defining module's canonical name, and only the interface map changes.
 Local modules come from the
 entry directory; bundled sources come from the [library root](#the-library-root)
-and reserve their module names. Imported scopes expose only direct public interfaces,
+and reserve their module names. Between the two, `LoadOptions.Libraries` enables
+[optional libraries](../reference/modules.md#optional-libraries) of the same
+root's `libs/`. One read consults every tier, so a reservation is decided by
+what each provider has rather than by which answered first: a library cannot
+take a bundled name or one another enabled library provides, and an enabled
+library's names are reserved against the source root. Library sources carry the
+logical `<libs>/NAME/` prefix, as bundled ones carry `<stdlib>/`, and
+`modules.PhysicalPath`/`LogicalPath` translate both for the editor and the
+debugger. A library module is otherwise a local module: it gets no bundled
+native privileges, and its sidecar goes to the user worker. Imported scopes expose only direct public interfaces,
 although instance visibility includes transitive dependencies.
 
 Prelude contains only imports and emits no Go package. Its imports enter each
@@ -385,7 +394,9 @@ types are available, while unopened dependencies may use checked objects.
 Overlay checks never publish persistent objects for the open modules.
 An opened file at its actual bundled library path is checked as a bundled
 entry, so its imports resolve through the bundled provider and it can have
-its own navigation index without an application importing it.
+its own navigation index without an application importing it. The server has
+no command line, so it enables every optional library; a file at a library's
+own path is checked as that library's entry in the same way.
 The editor diagnostic path rolls back a failed owner and checks other modules
 whose dependencies succeeded; dependents of a failed owner are skipped.
 Those checks still publish objects for unopened dependencies beneath the
@@ -432,8 +443,8 @@ through `types.Printer.Bind`; a bound row stays visible on an arrow where the
 printer would otherwise elide its only occurrence.
 
 `fango doc` checks a synthetic headerless entry that imports every bundled
-module. It is loaded with `LoadOptions.BundledOnly`, so no local source root is
-consulted, and with the object cache disabled, so nothing is written. The whole
+module, or with `--lib` every module of that one library. It is loaded with
+`LoadOptions.BundledOnly`, so no local source root is consulted, and with the object cache disabled, so nothing is written. The whole
 library is checked whatever `--module` selects, which keeps instance lists
 independent of the selection. Inventories come from each module's resolved
 `Interface`, never from source text: a name whose canonical owner is the module

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -234,6 +235,125 @@ func (BundledProvider) Native(module string) (string, []byte, error) {
 	return "<stdlib>/" + rel, b, err
 }
 
+// LibraryProvider serves one optional library of the library root, under
+// the logical <libs>/NAME/ prefix for the same reason BundledProvider uses
+// <stdlib>/. Its modules are not bundled: they have an ordinary module's
+// native boundary and their sidecars run in the user worker.
+type LibraryProvider struct{ Name string }
+
+// LibraryPrefix is the logical directory of every library's sources.
+const LibraryPrefix = "<libs>/"
+
+func (p LibraryProvider) Source(module string) (string, []byte, error) {
+	rel := strings.ReplaceAll(module, ".", "/") + ".fango"
+	b, err := libroot.ReadLibrary(p.Name, rel)
+	return LibraryPrefix + p.Name + "/" + rel, b, err
+}
+
+func (p LibraryProvider) Native(module string) (string, []byte, error) {
+	rel := strings.ReplaceAll(module, ".", "/") + ".native.go"
+	b, err := libroot.ReadLibrary(p.Name, rel)
+	return LibraryPrefix + p.Name + "/" + rel, b, err
+}
+
+// Modules names every module the library provides, sorted.
+func (p LibraryProvider) Modules() ([]string, error) {
+	paths, err := libroot.LibrarySources(p.Name)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(paths))
+	for _, path := range paths {
+		names = append(names, strings.ReplaceAll(strings.TrimSuffix(path, ".fango"), "/", "."))
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// PhysicalPath maps a logical library path, <stdlib>/REL or <libs>/NAME/REL,
+// to the file it was read from in the library root. It reports false for a
+// path that is not logical, or when there is no library root.
+func PhysicalPath(path string) (string, bool) {
+	root, err := libroot.Root()
+	if err != nil {
+		return "", false
+	}
+	if rest, ok := strings.CutPrefix(path, "<stdlib>/"); ok {
+		return filepath.Join(root, "stdlib", filepath.FromSlash(rest)), true
+	}
+	if rest, ok := strings.CutPrefix(path, LibraryPrefix); ok {
+		return filepath.Join(root, "libs", filepath.FromSlash(rest)), true
+	}
+	return "", false
+}
+
+// LogicalPath is PhysicalPath's inverse: it names an absolute file beneath
+// the library root's stdlib/ or one of its libraries by its logical path.
+func LogicalPath(path string) (string, bool) {
+	root, err := libroot.Root()
+	if err != nil {
+		return "", false
+	}
+	if rel, ok := beneath(filepath.Join(root, "stdlib"), path); ok {
+		return "<stdlib>/" + rel, true
+	}
+	if rel, ok := beneath(filepath.Join(root, "libs"), path); ok && strings.Contains(rel, "/") {
+		return LibraryPrefix + rel, true
+	}
+	return "", false
+}
+
+func beneath(dir, path string) (string, bool) {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
+// AllLibraries names every library of the library root. Editor analysis has
+// no command line, so it enables them all.
+func AllLibraries() []string {
+	names, _ := libroot.Libraries()
+	return names
+}
+
+// CheckLibraries reports any requested library the library root does not
+// have, so a caller can diagnose one before starting a session.
+func CheckLibraries(names []string) []diag.Error {
+	_, errs := enableLibraries(names)
+	return errs
+}
+
+// enableLibraries validates the requested library names against the library
+// root, in order and without repeats.
+func enableLibraries(names []string) ([]LibraryProvider, []diag.Error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	available, err := libroot.Libraries()
+	if err != nil {
+		return nil, []diag.Error{{Title: "MISSING LIBRARY", Body: err.Error() + "."}}
+	}
+	var providers []LibraryProvider
+	seen := map[string]bool{}
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		if !slices.Contains(available, name) {
+			body := fmt.Sprintf("There is no library `%s` in the Fango library root.", name)
+			if len(available) > 0 {
+				body += fmt.Sprintf(" Available libraries: %s.", strings.Join(available, ", "))
+			}
+			return nil, []diag.Error{{Title: "MISSING LIBRARY", Body: body}}
+		}
+		providers = append(providers, LibraryProvider{Name: name})
+	}
+	return providers, nil
+}
+
 type ManifestEntry struct {
 	Module string `json:"module"`
 	Path   string `json:"path"`
@@ -384,12 +504,18 @@ type LoadOptions struct {
 	// Overlays override disk content for open local files, including entry.
 	Overlays map[string][]byte
 	// AllowBundledEntry lets editor analysis open a file at its actual bundled
-	// stdlib path without treating its module name as a local collision.
+	// stdlib or enabled-library path without treating its module name as a
+	// local collision.
 	AllowBundledEntry bool
-	// BundledOnly resolves every import from the bundled library, never
-	// from the source root. Documentation generation uses it with a
-	// synthetic headerless entry that imports library modules.
+	// BundledOnly resolves every import from the bundled library and the
+	// enabled libraries, never from the source root. Documentation
+	// generation uses it with a synthetic headerless entry that imports
+	// library modules.
 	BundledOnly bool
+	// Libraries names the optional libraries of the library root that
+	// imports may resolve to, after the bundled library and before the
+	// source root.
+	Libraries []string
 }
 
 // LoadWithOptions loads a batch graph with optional test instrumentation.
@@ -434,7 +560,12 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 	}
 	g := newGraph(provider)
 	g.observe = options.Observe
+	g.libraries, errs = enableLibraries(options.Libraries)
+	if len(errs) > 0 {
+		return nil, errs
+	}
 	bundledEntry := false
+	libraryEntry := ""
 	if !private {
 		if path, _, bundleErr := g.bundled.Source(entryName); bundleErr == nil {
 			if options.AllowBundledEntry {
@@ -445,6 +576,17 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 			if !bundledEntry {
 				return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; local modules cannot use bundled names.", entryName, path)}
 			}
+		}
+		for _, library := range g.libraries {
+			path, _, libErr := library.Source(entryName)
+			if libErr != nil {
+				continue
+			}
+			if file, ok := PhysicalPath(path); ok && options.AllowBundledEntry && filepath.Clean(abs) == file {
+				libraryEntry = path
+				break
+			}
+			return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is provided by the enabled library `%s` as `%s`; local modules cannot use its names.", entryName, library.Name, path)}
 		}
 	}
 	if bundledEntry || options.BundledOnly {
@@ -462,10 +604,16 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		rootNode.path = "<stdlib>/" + filepath.ToSlash(relEntry)
 		rootNode.bundled = true
 	}
+	if libraryEntry != "" {
+		rootNode.path = libraryEntry
+	}
 	rootNativePath := strings.TrimSuffix(relEntry, ".fango") + ".native.go"
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
 		if bundledEntry {
 			rootNativePath = "<stdlib>/" + filepath.ToSlash(rootNativePath)
+		}
+		if libraryEntry != "" {
+			rootNativePath = strings.TrimSuffix(libraryEntry, ".fango") + ".native.go"
 		}
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
 	}

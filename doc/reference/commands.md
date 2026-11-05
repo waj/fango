@@ -31,15 +31,20 @@ projects or other ignored application data.
 `build`, `run`, `check`, and `clean` accept one `.fango` source file:
 
 ```text
-fango build [-o out] [--debug | --emit-go] [verbosity] main.fango
-fango debug BINARY [--] [args...]
-fango run [verbosity] main.fango [--] [args...]
-fango check [verbosity] main.fango
+fango build [-o out] [--debug | --emit-go] [options] main.fango
+fango debug [options] SOURCE.fango|BINARY [--] [args...]
+fango run [options] main.fango [--] [args...]
+fango check [options] main.fango
 fango fmt [-w] [-l] [file...]
-fango repl [--debug] [dir]
+fango repl [--debug] [--lib name]... [dir]
 fango clean main.fango
-fango doc --stdlib [--module name]... [--strict]
+fango doc (--stdlib | --lib name) [--module name]... [--strict]
 ```
+
+The options are the [verbosity](#build-progress-and-statistics) flags and
+`--lib name`, which enables one
+[optional library](modules.md#optional-libraries) of the library root and may
+be repeated.
 
 Flags precede the source path, because everything after it belongs to the
 program `run` is about to start.
@@ -55,7 +60,8 @@ only that one — along with that directory's fallback compilation cache and the
 legacy per-entry fallback namespace when present.
 `repl` starts an interactive session whose source root is `dir`, or the
 working directory; see [REPL](repl.md). `doc` writes the
-[API reference](#api-documentation) of the bundled library as JSON.
+[API reference](#api-documentation) of the bundled library, or of one optional
+library, as JSON.
 
 Compilation results are cached per module under `.fango/cache/v1/` beside the
 entry file. Each module keeps one checked result there, and one record of what
@@ -106,7 +112,9 @@ Parsing is never cached: every command reparses the whole source graph, and
 The standard library, Go runtime, and interpreter-worker support are files the
 compiler reads, not part of the executable, so editing one takes effect on the
 next build. They live in a single root holding `stdlib/`, `runtime/`, and
-`internal/`, found in this order:
+`internal/`, and optionally `libs/` with the
+[optional libraries](modules.md#optional-libraries) a program enables with
+`--lib`, found in this order:
 
 1. `FANGO_ROOT`, when set.
 2. `lib/fango` beside the compiler, as `../lib/fango` then `lib/fango` relative
@@ -129,6 +137,7 @@ installs only the library for packagers that build the executable themselves:
 <prefix>/bin/fango
 <prefix>/lib/fango/stdlib/
 <prefix>/lib/fango/stdlib/Runtime/
+<prefix>/lib/fango/libs/web/
 <prefix>/lib/fango/runtime/
 <prefix>/lib/fango/internal/
 ```
@@ -366,12 +375,14 @@ sync and UTF-16 protocol positions.
 ## API documentation
 
 `fango doc --stdlib` writes the bundled library's public API as JSON to
-standard output, for tools such as the website to render. `--stdlib` is
-required; no other source can be documented yet. Each `--module name`
-selects one module by its exact name, and may be repeated; without one, every
-bundled module is documented, including those the prelude never reaches.
+standard output, for tools such as the website to render, and `fango doc --lib
+name` writes one [optional library](modules.md#optional-libraries)'s. Exactly
+one of the two is required; a program's own modules cannot be documented yet.
+Each `--module name` selects one module of the documented library by its exact
+name, and may be repeated; without one, every module is documented, including
+those the prelude never reaches.
 
-Every bundled module is checked, but nothing is run beyond the compile-time
+Every module of the documented library is checked, but nothing is run beyond the compile-time
 evaluation checking already does (attributes, splices, and derivers), and
 nothing is built or written. An unknown module or an invalid argument exits
 with status 2; a checking failure exits with 1. Diagnostics go to standard error and

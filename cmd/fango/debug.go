@@ -30,7 +30,7 @@ func prepareDebug(args []string, stderr io.Writer) (string, []string, int) {
 	fs.SetOutput(stderr)
 	observed := reporting(fs, stderr)
 	if fs.Parse(args) != nil || fs.NArg() < 1 {
-		fmt.Fprintln(stderr, "usage: fango debug [verbosity] SOURCE.fango|BINARY [--] [args...]")
+		fmt.Fprintln(stderr, "usage: fango debug [options] SOURCE.fango|BINARY [--] [args...]")
 		return "", nil, 2
 	}
 	binary, targetArgs := fs.Arg(0), fs.Args()[1:]

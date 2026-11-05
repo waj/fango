@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/waj/fango/internal/backend"
 	"github.com/waj/fango/internal/build"
@@ -35,6 +36,9 @@ type compilationSession struct {
 	debugSources     map[string]string
 	debugScopes      []debugger.NativeScope
 	debugTypes       map[string]debugger.NativeType
+	// libraries are the optional libraries of the library root the program
+	// enables with --lib.
+	libraries []string
 }
 
 func (s *compilationSession) debugEnabled() bool { return s != nil && s.debug }
@@ -46,6 +50,23 @@ func (s *compilationSession) buildFlags() []string {
 		return nil
 	}
 	return s.goBuildFlags
+}
+
+func (s *compilationSession) enabledLibraries() []string {
+	if s == nil {
+		return nil
+	}
+	return s.libraries
+}
+
+// libraryFlag collects repeated --lib options, in order.
+type libraryFlag []string
+
+func (f *libraryFlag) String() string { return strings.Join(*f, ",") }
+
+func (f *libraryFlag) Set(name string) error {
+	*f = append(*f, name)
+	return nil
 }
 
 func (s *compilationSession) observer() compileevent.Observer {
@@ -81,7 +102,7 @@ func compileFileGraphSession(entry string, stderr io.Writer, session *compilatio
 // checkGraph leaves cached modules' runtime Core unread; a caller that reads
 // the program's definitions beyond the entry's loads them first.
 func checkGraph(entry string, stderr io.Writer, session *compilationSession) (*compilecheck.Result, bool) {
-	result, checkErrs, internalErr := (&compilecheck.Session{Debug: session.debugEnabled(), Observe: session.observer(), DisableObjectCache: session.disableCache(), DeferRuntime: true}).Compile(entry)
+	result, checkErrs, internalErr := (&compilecheck.Session{Debug: session.debugEnabled(), Observe: session.observer(), DisableObjectCache: session.disableCache(), DeferRuntime: true, LoadOptions: modules.LoadOptions{Libraries: session.enabledLibraries()}}).Compile(entry)
 	if report(stderr, checkErrs) {
 		return nil, false
 	}
