@@ -213,7 +213,7 @@ func buildCLI(t *testing.T) string {
 
 func writeProgram(t *testing.T, path string, lit int) {
 	t.Helper()
-	src := fmt.Sprintf("main = 1 + 2 * %d\n", lit)
+	src := fmt.Sprintf("main() = print (1 + 2 * %d)\n", lit)
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func writeADTProgram(t *testing.T, path string, lit int) {
 		fmt.Fprintf(&b, " + t%d", i)
 	}
 	b.WriteString("\n\n")
-	fmt.Fprintf(&b, "main = total + %d\n", lit)
+	fmt.Fprintf(&b, "main() = print (total + %d)\n", lit)
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func writePolyProgram(t *testing.T, path string, lit int) {
 		fmt.Fprintf(&b, " + f%d + s%d", i, i)
 	}
 	b.WriteString("\n\n")
-	fmt.Fprintf(&b, "main = total + %d\n", lit)
+	fmt.Fprintf(&b, "main() = print (total + %d)\n", lit)
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
