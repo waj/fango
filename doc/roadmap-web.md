@@ -22,14 +22,12 @@ schemas; generators must not keep independent result-type tables. Codec/schema
 agreement and compatibility between separately deployed versions still need
 verification. Forms, redirects, and extensible responses remain later work.
 
-The server runs each operation inside a runner the application supplies, which
-handles the implementations' own effects once per call. Only typed values cross
-the runner, never the request or response. A request's reader row is the
-server's, and Fango has no effect subsumption, so an implementation that
-performed effects handled around the whole dispatcher could not share the
-request's row. That is also why there is no `Web.Server.respond` or `run`
-wrapping a handler that may fail: `Web.Server.recover` is the runner that turns
-an operation's `Fail Web.Server.Error` into an error response.
+The implementations' effects are the server handler's. They are handled around
+`Http.Server.serve`, once for the whole server, and every worker task inherits
+them; an operation's own `Fail Web.Server.Error` is answered by its route. A
+request's reader row is the handler's, and Fango has no effect subsumption, so
+an effect handled inside the handler, around the dispatcher, could not share
+the request's row.
 
 ## Language prerequisites
 

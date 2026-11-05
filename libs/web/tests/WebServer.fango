@@ -38,7 +38,7 @@ items =
     }
 
 app : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
-app request = dispatch users items users Web.Server.direct request
+app request = dispatch users items users request
 
 type Answer = { status : Int, allow : Maybe String, body : String }
     deriving (Eq, Show)

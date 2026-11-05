@@ -52,10 +52,10 @@ items =
     }
 
 app : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
-app request = dispatch users items admins Web.Server.direct request
+app request = dispatch users items admins request
 
--- An implementation with effects of its own: a counter, and a failure that
--- answers with its own status.
+-- An implementation with effects of its own: a counter, handled around the
+-- server, and a failure that answers with its own status.
 counting : Users {State.State Int, Fail Web.Server.Error}
 counting =
     { users |
@@ -66,9 +66,8 @@ counting =
     }
     }
 
--- Each operation call runs in its own counter, starting at 41.
-perCall : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
-perCall request = dispatch counting items admins { action -> Web.Server.recover { (State.run 41 action).value } } request
+withCounter : Request {Protocol, State.State Int, e} ->{Protocol, State.State Int, e} Response {Protocol, State.State Int, e}
+withCounter request = dispatch counting items admins request
 
 shop : Users {Client.Http, Fail Web.Client.Error}
 shop = $(Web.Client.client Shop.Api.users) "http://shop.example/"
@@ -151,19 +150,22 @@ tests = Test.describe "web round trips"
         }
         Expect.equal (Ok (Ok (User { id = 1, name = "Stub" }), 1)) result
     }
-    , Test.test "a runner handles the implementations' effects per call" {
-        result = Client.mock perCall {
-            first = attempt { shop.count (Org { org = "acme" }) }
-            second = attempt { shop.count (Org { org = "acme" }) }
-            refused = attempt { shop.clear (Org { org = "acme" }) }
-            (first, second, refused)
+    , Test.test "implementations' effects are handled around the server" {
+        result = State.run 41 {
+            Client.mock withCounter {
+                first = attempt { shop.count (Org { org = "acme" }) }
+                second = attempt { shop.count (Org { org = "acme" }) }
+                refused = attempt { shop.clear (Org { org = "acme" }) }
+                (first, second, refused)
+            }
         }
-        Expect.equal (Ok 42, Ok 42, Err (Web.Client.UnexpectedStatus 403 "{\"message\":\"Not for acme\"}")) result
+        Expect.equal (Ok 42, Ok 43, Err (Web.Client.UnexpectedStatus 403 "{\"message\":\"Not for acme\"}")) result.value
+        Expect.equal 43 result.state
     }
     , Test.test "a strict implementation answers only what a test stubs" {
         stubbed = { strictUsers | count = { _ -> 3 } }
         served : Request {Protocol, Expect.Expect, e} ->{Protocol, Expect.Expect, e} Response {Protocol, Expect.Expect, e}
-        served request = dispatch stubbed items admins Web.Server.direct request
+        served request = dispatch stubbed items admins request
         counted = attempt {
             use Client.mock served
             shop.count (Org { org = "acme" })

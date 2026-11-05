@@ -3,11 +3,11 @@
 --     fango run --lib web examples/shop.fango -- 8080
 --
 -- `GET /orgs/acme/users/1` answers a user, `POST /orgs/acme/users` with a
--- JSON user answers it back unless its name is taken, and `GET /health` is a
--- plain route served beside them.
+-- JSON user adds it unless its name is taken, and `GET /health` is a plain
+-- route served beside them. Every request shares one directory, kept in
+-- `State` handled around the server.
 import Async
 import Fail
-import Http exposing (Protocol(..))
 import Http.Server
 import IO
 import List exposing (List)
@@ -16,12 +16,10 @@ import Process
 import Result exposing (Result(..))
 import Shop.Api
 import Shop.Users exposing (GetUser(..), NewUser(..), User(..), UserError(..), Users(..))
+import State
 import String
 import Web
 import Web.Server
-
-known : List User
-known = [User { id = 1, name = "Ada" }, User { id = 2, name = "Grace" }]
 
 find : (User -> Bool) -> List User -> Maybe User
 find matches candidates =
@@ -29,26 +27,26 @@ find matches candidates =
         [] -> Nothing
         [user | rest] -> if matches user then Just user else find matches rest
 
--- The implementation is an ordinary value of the contract's type.
-directory : Users e
+-- Adds a user unless its name is taken, as one atomic update.
+add : User -> List User -> (Result UserError User, List User)
+add user known =
+    case find { other -> other.name == user.name } known of
+        Just _ -> (Err (NameTaken user.name), known)
+        Nothing -> (Ok user, [user | known])
+
+-- The implementation is an ordinary value of the contract's type. Its
+-- directory is state handled once, around the whole server.
+directory : Users {State.State (List User)}
 directory =
     { getUser = { request ->
-        case find { user -> user.id == request.id } known of
+        case find { user -> user.id == request.id } State.get() of
             Just user -> Ok user
             Nothing -> Err NoSuchUser
       }
-    , createUser = { request ->
-        case find { user -> user.name == request.user.name } known of
-            Just _ -> Err (NameTaken request.user.name)
-            Nothing -> Ok request.user
-      }
+    , createUser = { request -> State.update (add request.user) }
     }
 
 dispatch = $(Web.Server.dispatch Shop.Api.api)
-
--- The directory has no effects of its own, so each operation runs directly.
-app : Http.Server.Request {Protocol, e} ->{Protocol, e} Http.Server.Response {Protocol, e}
-app request = dispatch directory Web.Server.direct request
 
 main : () ->{IO, Console, Net.Network, Process.Environment} ()
 main() =
@@ -57,10 +55,13 @@ main() =
             case String.toInt raw of
                 Just port ->
                     print ("Serving " ++ Web.link Shop.Api.getUserEndpoint (GetUser { org = "acme", id = 1, verbose = Nothing }))
+                    initial = [User { id = 1, name = "Ada" }, User { id = 2, name = "Grace" }]
                     print (Fail.attempt {
                             Async.runOutcome {
-                                stop = Async.channel 1
-                                Http.Server.serve (Http.Server.defaultConfig port) stop app
+                                State.runAtomic initial {
+                                    stop = Async.channel 1
+                                    Http.Server.serve (Http.Server.defaultConfig port) stop { request -> dispatch directory request }
+                                }
                             }
                     })
                 Nothing -> print "usage: shop PORT"
