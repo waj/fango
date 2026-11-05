@@ -59,6 +59,7 @@ func TestCommentsTileWithTokens(t *testing.T) {
 	roots := []string{
 		filepath.Join("..", "..", "testdata"),
 		filepath.Join("..", "..", "stdlib"),
+		filepath.Join("..", "..", "libs"),
 		filepath.Join("..", "..", "examples"),
 	}
 	seen := 0

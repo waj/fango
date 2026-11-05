@@ -1,0 +1,13 @@
+import Web
+
+-- A contract field that is not an operation.
+type Bad e =
+    { #[Web.Get "/"]
+      limit : Int
+    , #[Web.Get "/x"]
+      ping : () ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

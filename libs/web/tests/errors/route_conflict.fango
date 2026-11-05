@@ -1,0 +1,17 @@
+import Http.Server exposing (Request(..), Response(..))
+import Web
+import Web.Server
+
+-- Two mounts that answer the same route.
+type Ping e =
+    { #[Web.Get "/ping"]
+      ping : () ->{e} ()
+    }
+
+first = Web.mount "first" "/" (typeOf (Ping {}))
+
+second = Web.mount "second" "/" (typeOf (Ping {}))
+
+dispatch = $(Web.Server.dispatch (Web.api [first, second]))
+
+main() = print "unreachable"

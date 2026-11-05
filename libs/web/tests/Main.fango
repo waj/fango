@@ -1,0 +1,9 @@
+module Main exposing (main)
+
+import Test
+import WebClient
+import WebParams
+import WebRoundTrip
+import WebServer
+
+main() = Test.run (Test.describe "web" [WebParams.tests, WebRoundTrip.tests, WebServer.tests, WebClient.tests])

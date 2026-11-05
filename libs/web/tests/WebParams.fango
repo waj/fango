@@ -1,0 +1,78 @@
+module WebParams exposing (tests)
+
+import Bytes
+import Expect
+import Http exposing (Header(..))
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Shop.Api
+import Shop.Catalog exposing (Search(..), Tag(..))
+import Shop.Users exposing (NewUser(..), User(..), UserError(..))
+import Test
+import Web exposing (Failure(..), Outgoing(..), Param(..), Segment(..))
+
+type UserId = UserId Int
+    deriving (Eq, Show, Web.Param)
+
+roundTrip : Param a => a -> Result String a
+roundTrip value = parseParam (printParam value)
+
+tag : String -> Result String Tag
+tag text = parseParam text
+
+int : Int -> Result String Int
+int value = roundTrip value
+
+float : Float -> Result String Float
+float value = roundTrip value
+
+integer : String -> Result String Int
+integer text = parseParam text
+
+bool : String -> Result String Bool
+bool text = parseParam text
+
+char : String -> Result String Char
+char text = parseParam text
+
+tests : Test.Test {}
+tests = Test.describe "web parameters"
+    [ Test.test "scalar parameters round trip" {
+        Expect.equal (Ok 42) (int 42)
+        Expect.equal (Ok (-3)) (int (-3))
+        Expect.equal (Ok 2.5) (float 2.5)
+        Expect.equal (Ok False) (roundTrip False)
+        Expect.equal (Ok 'x') (roundTrip 'x')
+        Expect.equal (Ok "a b/c") (roundTrip "a b/c")
+        Expect.equal "true" (printParam True)
+    }
+    , Test.test "invalid parameter text is explained" {
+        Expect.equal (Err "Expected true or false, found \"yes\".") (bool "yes")
+        Expect.equal (Err "Expected one character, found \"ab\".") (char "ab")
+        Expect.equal (Err "Expected an integer, found \"1.5\".") (integer "1.5")
+    }
+    , Test.test "derived parameters" {
+        Expect.equal (Ok (UserId 7)) (roundTrip (UserId 7))
+        Expect.equal "7" (printParam (UserId 7))
+        Expect.equal (Ok New) (tag "New")
+        Expect.equal "Sale" (printParam Sale)
+        Expect.equal (Err "Unknown value \"Old\".") (tag "Old")
+    }
+    , Test.test "derived failure statuses" {
+        Expect.equal 404 (failureStatus NoSuchUser)
+        Expect.equal 409 (failureStatus (NameTaken "x"))
+    }
+    , Test.test "templates" {
+        Expect.equal (Ok [Literal "files", Rest "path"]) (Web.parseTemplate "/files/*path")
+        Expect.equal (Err "The rest capture `*path` must be the last segment.") (Web.parseTemplate "/*path/x")
+        Expect.equal (Err "The capture name `id` is used twice.") (Web.parseTemplate "/:id/:id")
+        Expect.equal (Err "A path segment cannot be empty.") (Web.parseTemplate "/a//b")
+        Expect.equal (Err "Invalid capture name `:Id`.") (Web.parseTemplate "/:Id")
+        Expect.equal Nothing (Web.matchTemplate [Literal "files", Rest "path"] ["files"])
+    }
+    , Test.test "an endpoint writes a request" {
+        written = Web.outgoing Shop.Api.createUserEndpoint (NewUser { org = "a b", user = User { id = 1, name = "Al" } })
+        Expect.equal (Ok (Outgoing { method = "POST", target = "/orgs/a%20b/users", headers = [Header { name = "Content-Type", value = "application/json" }], body = Just (Bytes.fromString "{\"id\":1,\"name\":\"Al\"}") })) written
+        Expect.equal "/search?q=a%26b&tag=Sale&tag=New&limit=2" (Web.link Shop.Api.searchEndpoint (Search { q = "a&b", tags = [Sale, New], limit = Just 2 }))
+    }
+    ]

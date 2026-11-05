@@ -1,0 +1,13 @@
+import Web
+
+-- An operation without a route attribute.
+type Ping =
+    { #[Web.Path "id"]
+      id : Int
+    }
+
+type Bad e = { ping : Ping ->{e} () }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

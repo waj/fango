@@ -1,0 +1,74 @@
+module WebClient exposing (tests)
+
+import Bytes
+import Expect
+import Fail exposing (Fail)
+import Http exposing (Body(..), Header(..), Protocol(..))
+import Http.Client as Client
+import Http.Server exposing (Request(..), Response(..))
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Shop.Api
+import Shop.Users exposing (GetUser(..), Org(..), User(..), UserError(..), Users(..))
+import Test
+import Web
+import Web.Client
+
+shop : Users {Client.Http, Fail Web.Client.Error}
+shop = $(Web.Client.client Shop.Api.users) "http://shop.example"
+
+reply : Int -> List Header -> String -> Request e ->{e} Response e
+reply status headers text _ = Response { status = status, headers = headers, body = BytesBody (Bytes.fromString text) }
+
+json : List Header
+json = [Header { name = "Content-Type", value = "application/json" }]
+
+-- Calls getUser against a server that always answers this way.
+getUser : Int -> List Header -> String -> Result Web.Client.Error (Result UserError User)
+getUser status headers text =
+    Fail.attempt {
+        use Client.mock (reply status headers text)
+        shop.getUser (GetUser { org = "acme", id = 7, verbose = Nothing })
+    }
+
+invalidResponse : Result Web.Client.Error a -> Bool
+invalidResponse result =
+    case result of
+        Err (Web.Client.InvalidResponse _) -> True
+        _ -> False
+
+tests : Test.Test {}
+tests = Test.describe "web client"
+    [ Test.test "declared statuses decode, others are client errors" {
+        Expect.equal (Ok (Ok (User { id = 7, name = "A" }))) (getUser 200 json "{\"id\":7,\"name\":\"A\"}")
+        Expect.equal (Ok (Err NoSuchUser)) (getUser 404 json "\"NoSuchUser\"")
+        Expect.equal (Err (Web.Client.UnexpectedStatus 418 "tea")) (getUser 418 [] "tea")
+        Expect.equal (Err (Web.Client.UnexpectedStatus 500 "")) (getUser 500 json "")
+    }
+    , Test.test "a declared status with the wrong body is an invalid response" {
+        Expect.equal (Err (Web.Client.InvalidResponse "Expected a JSON response, status 200.")) (getUser 200 [] "{}")
+        Expect.equal (Err (Web.Client.InvalidResponse "The error in a 404 response declares status 409.")) (getUser 404 json "{\"NameTaken\":[\"x\"]}")
+        Expect.equal True (invalidResponse (getUser 200 json "{\"id\":\"seven\"}"))
+    }
+    , Test.test "redirects are not followed" {
+        Expect.equal (Err (Web.Client.UnexpectedStatus 303 "")) (getUser 303 [Header { name = "Location", value = "http://elsewhere.example/" }] "")
+    }
+    , Test.test "a field the endpoint cannot carry fails before sending" {
+        result = Fail.attempt {
+            use Client.mock (reply 200 json "{\"id\":7,\"name\":\"A\"}")
+            shop.getUser (GetUser { org = "a/b", id = 7, verbose = Nothing })
+        }
+        Expect.equal (Err (Web.Client.InvalidRequest "The path capture `org` contains a separator.")) result
+    }
+    , Test.test "transport failures are client errors" {
+        result = Fail.attempt {
+            use Client.stub { _ -> Err Client.Timeout }
+            shop.count (Org { org = "acme" })
+        }
+        Expect.equal (Err (Web.Client.Transport Client.Timeout)) result
+    }
+    , Test.test "links use the endpoint's path and query fields" {
+        Expect.equal "/orgs/acme/users/7?verbose=true" (Web.link Shop.Api.getUserEndpoint (GetUser { org = "acme", id = 7, verbose = Just True }))
+        Expect.equal "/orgs/a%20b/users/7" (Web.link Shop.Api.getUserEndpoint (GetUser { org = "a b", id = 7, verbose = Nothing }))
+    }
+    ]

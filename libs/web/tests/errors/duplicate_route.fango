@@ -1,0 +1,17 @@
+import Web
+
+-- An operation with two routes.
+type Ping =
+    { #[Web.Path "id"]
+      id : Int
+    }
+
+type Bad e =
+    { #[Web.Get "/:id"]
+      #[Web.Post "/:id"]
+      ping : Ping ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

@@ -358,7 +358,7 @@ async function main() {
       }
     }
   }
-  for (const dir of ["stdlib", "testdata", "examples"]) visit(path.join(root, dir));
+  for (const dir of ["stdlib", "libs", "testdata", "examples"]) visit(path.join(root, dir));
   console.log(`Tokenized ${files} Fango files; lambda, record, and pipe scopes passed.`);
   registry.dispose();
 }

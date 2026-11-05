@@ -1,0 +1,308 @@
+-- Serving a typed API with the HTTP server.
+--
+-- `dispatch` generates a request handler from an API tree. It takes one
+-- implementation of each mounted contract, in tree order, then a runner,
+-- and then the request:
+--
+-- ```text
+-- dispatch = $(Web.Server.dispatch Shop.Api.api)
+--
+-- app request = dispatch serveUsers { action -> Web.Server.recover { Db.run action } } request
+-- ```
+--
+-- The runner is where the implementations' own effects are handled, once
+-- per operation call: it receives the call as an action and answers its
+-- reply. Only typed values cross it, never the request or response, so the
+-- implementations' effects need not be the server's. `direct` is the runner
+-- for implementations without effects of their own, and `recover` answers
+-- an implementation's `Fail Error` with that error's status.
+--
+-- Each operation decodes its request through its endpoint, calls the
+-- implementation's field, and encodes the result through the same endpoint.
+-- A path that matches no route answers 404; one that matches routes of other
+-- methods answers 405 with `Allow`. Invalid input answers 400, a request body
+-- that is not JSON 415, and a result that cannot be encoded 500, each with a
+-- JSON body `{"message": …}`. A `GET` route also answers `HEAD`.
+module Web.Server exposing (Error(..), Route, direct, dispatch, recover, route, serve)
+
+import Bytes exposing (Bytes)
+import Fail exposing (Fail)
+import Http exposing (Body(..), Header(..))
+import Http.Server exposing (Request(..), Response(..))
+import Http.Server.Route
+import Json
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Meta exposing (Bound(..), BoundField(..), Code, Items(..), Lift(..))
+import Reader
+import Result exposing (Result(..))
+import String
+import Url
+import Web exposing (Endpoint(..), Incoming(..), Mounted(..), Operation(..), Rejection(..), Reply(..), Segment(..))
+import Writer
+
+-- How a route answers: through a typed endpoint, with the whole body read
+-- and the implementations' effects `x`, or as a raw handler of the streaming
+-- request, with the server's effects `e`.
+type Answer x e
+    = Typed (Incoming ->{x} Reply)
+    | Untyped (List Http.Server.Route.Param -> Request e ->{e} Response e)
+
+-- A route of a typed API: a method, a path template, and its answer.
+-- Typed routes perform `x`, raw routes `e`.
+type Route x e =
+    { method : String
+    , template : List Segment
+    , answer : Answer x e
+    }
+
+type ErrorBody = { message : String }
+    deriving (Json.Encode)
+
+-- An application failure that answers with its own status, from 400 to 599,
+-- and a JSON body `{"message": …}`. See `recover`.
+type Error =
+    {
+      -- The status to answer with; one outside 400 to 599 answers 500.
+      status : Int
+      -- The message for the client.
+    , message : String
+    }
+    deriving (Eq, Show)
+
+templateOf : String -> List Segment
+templateOf text =
+    case Web.parseTemplate text of
+        Ok segments -> segments
+        Err _ -> []
+
+errorReply : Int -> String -> Reply
+errorReply status message =
+    body =
+        case Json.stringify (ErrorBody { message = message }) of
+            Ok text -> Bytes.fromString text
+            Err _ -> Bytes.empty
+    Reply { status = status, headers = [Header { name = "Content-Type", value = "application/json" }], body = body }
+
+-- The route of one endpoint, answered by a function. The function's input
+-- and output types are the endpoint's, so they are checked here, before the
+-- route erases them.
+--
+-- ```text
+-- route Shop.Api.getUserEndpoint { request -> Db.findUser request.org request.id }
+-- ```
+route : Endpoint request response -> (request ->{x} response) -> Route x e
+route described implementation =
+    typed = { incoming ->
+        case described.readRequest incoming of
+            Err rejection -> errorReply rejection.status rejection.message
+            Ok request ->
+                case described.response.write (implementation request) of
+                    Ok reply -> reply
+                    Err message -> errorReply 500 ("The response cannot be encoded: " ++ message)
+    }
+    Route { method = described.method, template = templateOf described.template, answer = Typed typed }
+
+-- A raw route, which generated dispatchers build from `Web.raw` entries.
+rawRoute : String -> String -> (List Http.Server.Route.Param -> Request e ->{e} Response e) -> Route x e
+rawRoute method template handler = Route { method = method, template = templateOf template, answer = Untyped handler }
+
+-- An encoded `/` or `\` would change how the path splits, so it is rejected.
+decodeSegment : String -> Maybe String
+decodeSegment segment =
+    if String.contains "%2F" segment || String.contains "%2f" segment || String.contains "%5C" segment || String.contains "%5c" segment then Nothing
+    else Url.percentDecode segment
+
+decodeAll : List String -> Maybe (List String)
+decodeAll segments =
+    case segments of
+        [] -> Just []
+        [segment | rest] ->
+            case (decodeSegment segment, decodeAll rest) of
+                (Just text, Just more) -> Just [text | more]
+                _ -> Nothing
+
+pathSegments : String -> Maybe (List String)
+pathSegments target =
+    path = Http.Server.Route.path target
+    if path == "/" then Just []
+    else decodeAll (String.split "/" (String.slice 1 (String.length path) path))
+
+-- Literal segments rank before captures, and captures before a rest
+-- capture, at the first position where two templates differ.
+rank : Segment -> Int
+rank segment =
+    case segment of
+        Literal _ -> 0
+        Capture _ -> 1
+        Rest _ -> 2
+
+before : List Segment -> List Segment -> Bool
+before left right =
+    case (left, right) of
+        ([a | rest], [b | more]) -> if rank a == rank b then before rest more else rank a < rank b
+        ([], [_ | _]) -> True
+        _ -> False
+
+type Candidate x e = { route : Route x e, captures : List (String, String) }
+
+matching : List (Route x e) -> List String -> List (Candidate x e)
+matching routes actual =
+    case routes of
+        [] -> []
+        [candidate | rest] ->
+            case Web.matchTemplate candidate.template actual of
+                Just captures -> [Candidate { route = candidate, captures = captures } | matching rest actual]
+                Nothing -> matching rest actual
+
+answers : String -> Route x e -> Bool
+answers method candidate = candidate.method == method || (method == "HEAD" && candidate.method == "GET")
+
+best : List (Candidate x e) -> Maybe (Candidate x e) -> Maybe (Candidate x e)
+best candidates found =
+    case candidates of
+        [] -> found
+        [candidate | rest] ->
+            case found of
+                Nothing -> best rest (Just candidate)
+                Just current -> if before candidate.route.template current.route.template then best rest (Just candidate) else best rest found
+
+allowed : List (Candidate x e) -> List String -> List String
+allowed candidates methods =
+    case candidates of
+        [] -> List.reverse methods
+        [candidate | rest] ->
+            method = candidate.route.method
+            withMethod = if contains method methods then methods else [method | methods]
+            allowed rest (if method == "GET" && not (contains "HEAD" withMethod) then ["HEAD" | withMethod] else withMethod)
+
+not : Bool -> Bool
+not value = if value then False else True
+
+contains : String -> List String -> Bool
+contains wanted items =
+    case items of
+        [] -> False
+        [item | rest] -> item == wanted || contains wanted rest
+
+joinComma : List String -> String
+joinComma parts =
+    case parts of
+        [] -> ""
+        [part] -> part
+        [part | rest] -> part ++ ", " ++ joinComma rest
+
+toResponse : Reply -> Response e
+toResponse reply =
+    body = if Bytes.length reply.body == 0 then Empty else BytesBody reply.body
+    Response { status = reply.status, headers = reply.headers, body = body }
+
+queryOf : String -> Maybe (List (String, String))
+queryOf target =
+    case Url.parse target of
+        Just url -> Just (Url.queryParams url)
+        Nothing -> Nothing
+
+readBody : Request e ->{e} Bytes
+readBody request =
+    (_, bytes) = Writer.collecting { output -> Reader.forEachChunk request.body (Writer.write output) }
+    bytes
+
+-- Answers a request with the best route whose method and path match: a
+-- literal segment beats a capture, and a capture a rest capture, at the
+-- first position where their templates differ. A path that only routes of
+-- other methods match answers 405 with `Allow`, and one that nothing matches
+-- 404. Path segments are percent-decoded first; a malformed escape or an
+-- encoded `/` or `\` answers 400. A typed route runs inside `runner`.
+serve : List (Route x e) -> ((() ->{x} Reply) ->{e} Reply) -> Request e ->{e} Response e
+serve routes runner request =
+    case pathSegments request.target of
+        Nothing -> toResponse (errorReply 400 "The request path has an invalid escape.")
+        Just actual ->
+            candidates = matching routes actual
+            case candidates of
+                [] -> toResponse (errorReply 404 "No route matches this path.")
+                _ ->
+                    case best (List.filter { candidate -> answers request.method candidate.route } candidates) Nothing of
+                        Nothing ->
+                            reply = errorReply 405 "This path does not answer this method."
+                            toResponse { reply | headers = [Header { name = "Allow", value = joinComma (allowed candidates []) } | reply.headers] }
+                        Just chosen ->
+                            case chosen.route.answer of
+                                Untyped handler -> handler (List.map { (name, value) -> Http.Server.Route.Param { name = name, value = value } } chosen.captures) request
+                                Typed handler ->
+                                    case queryOf request.target of
+                                        Nothing -> toResponse (errorReply 400 "The request target is invalid.")
+                                        Just query ->
+                                            incoming = Incoming { captures = chosen.captures, query = query, headers = request.headers, body = readBody request }
+                                            toResponse (runner { handler incoming })
+
+-- The runner for implementations whose effects are the server's own: it
+-- runs each operation as it is.
+direct : (() ->{e} a) ->{e} a
+direct action = action()
+
+validStatus : Int -> Int
+validStatus status = if status >= 400 && status <= 599 then status else 500
+
+-- A runner that answers an operation's `Fail Error` with that error's
+-- status, from 400 to 599 (500 otherwise), and a JSON body
+-- `{"message": …}`. Put it outside the handlers of the implementations'
+-- effects, so a failure raised by one of their clauses is caught too.
+--
+-- ```text
+-- dispatch serveUsers { action -> Web.Server.recover { Db.run action } } request
+-- ```
+recover : (() ->{Fail Error, e} Reply) ->{e} Reply
+recover action =
+    case Fail.attempt action of
+        Ok reply -> reply
+        Err error -> errorReply (validStatus error.status) error.message
+
+listCode : List Code -> Code
+listCode items =
+    case items of
+        [] -> `[]`
+        [item | rest] -> `[$(item) | $(listCode rest)]`
+
+operationRoutes : List Operation -> Items BoundField -> List Code
+operationRoutes operations fields =
+    case (operations, fields) of
+        ([operation | rest], Item field more) -> [`route $(operation.endpoint) $(field.value)` | operationRoutes rest more]
+        _ -> []
+
+append : List a -> List a -> List a
+append left right =
+    case left of
+        [] -> right
+        [item | rest] -> [item | append rest right]
+
+dispatchFrom : Int -> List Web.Entry -> List Code -> Code
+dispatchFrom index entries routes =
+    case entries of
+        [] ->
+            Meta.lambda "_web_dispatch_runner" { runner ->
+                Meta.lambda "_web_dispatch_request" { request -> `serve $(listCode routes) $(runner) $(request)` }
+            }
+        [entry | rest] ->
+            case Web.rawRoute entry of
+                Just (method, template, handler) -> dispatchFrom index rest (append routes [`rawRoute $(lift method) $(lift template) $(handler)`])
+                Nothing ->
+                    case Web.mounted entry of
+                        Err message -> Meta.fail message
+                        Ok found ->
+                            Meta.lambda ("_web_dispatch_" ++ show index) { implementation ->
+                                Meta.match found.info implementation { bound ->
+                                    dispatchFrom (index + 1) rest (append routes (operationRoutes found.operations bound.fields))
+                                }
+                            }
+
+-- Generates the request handler of an API tree: a function taking one
+-- implementation of each mounted contract, in tree order, then the runner
+-- of their effects, and then the request. Conflicting routes and duplicate
+-- entry names fail here.
+dispatch : Web.Api -> Code
+dispatch tree =
+    case Web.apiRoutes tree of
+        Err message -> Meta.fail message
+        Ok _ -> dispatchFrom 0 (Web.mountEntries tree) []

@@ -7,13 +7,14 @@ build:
 	go build -o fango ./cmd/fango
 
 # The compiler reads its standard library and Go runtime support from a root
-# holding stdlib/ and runtime/, found beside the executable when FANGO_ROOT is
+# holding stdlib/ and runtime/, and the optional libraries a program enables
+# with --lib from its libs/, found beside the executable when FANGO_ROOT is
 # unset. A checkout is itself a valid root, so a locally built ./fango needs no
 # install; this is the layout a packaged one expects. See
 # doc/reference/commands.md, "The library root".
 PREFIX ?= /usr/local
 LIBDIR = $(PREFIX)/lib/fango
-FANGO_SOURCES = $(shell find stdlib examples -name '*.fango' -type f -print)
+FANGO_SOURCES = $(shell find stdlib libs examples -name '*.fango' -type f -not -path '*/.fango/*' -print)
 
 install: build install-lib
 	install -d $(PREFIX)/bin
@@ -27,6 +28,10 @@ install-lib:
 		case "$$rel" in */*) dest=$(LIBDIR)/stdlib/$${rel%/*};; *) dest=$(LIBDIR)/stdlib;; esac; \
 		install -d "$$dest"; \
 		install -m 644 "$$f" "$$dest"; \
+	done
+	find libs -path '*/.fango' -prune -o -type f \( -name '*.fango' -o -name '*.native.go' \) -print | while IFS= read -r f; do \
+		install -d "$(LIBDIR)/$${f%/*}"; \
+		install -m 644 "$$f" "$(LIBDIR)/$${f%/*}"; \
 	done
 	for pkg in fangort nativewire nativeworker; do \
 		install -d $(LIBDIR)/runtime/$$pkg; \
@@ -55,7 +60,7 @@ test-suite:
 
 # The TextMate grammar in editors/vscode/ encodes exact lexer rules, so a
 # change to the surface syntax must be re-checked against it: this tokenizes
-# every .fango file under stdlib, testdata, and examples. Node and the two
+# every .fango file under stdlib, libs, testdata, and examples. Node and the two
 # grammar packages come from the Nix development shell.
 test-grammar:
 	node editors/vscode/tests/tokenize.cjs

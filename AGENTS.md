@@ -33,6 +33,14 @@ covers the language and tooling and links to library modules by source path
 rather than restating their API. Comment conventions are in
 `doc/reference/commands.md` under "API documentation".
 
+The optional libraries in `libs/NAME/` (enabled with `--lib NAME`) are
+destined for their own repositories, and follow the same rule:
+`fango doc --lib NAME --strict` must stay clean. Each keeps its tests in
+`libs/NAME/tests/`: a `Main.fango` suite, whose case count is pinned in
+`cmd/fango/libs_test.go`, and `errors/*.fango` fixtures beside `.error`
+files naming the expected diagnostic. A library depends only on the
+standard library and on what it documents itself.
+
 Roadmap milestone IDs, numbers, and titles are stable identifiers. Do not rename,
 renumber, or repurpose existing stages unless the user explicitly requests it.
 Adding, splitting, reordering, or removing work must not change the identities of
@@ -52,7 +60,7 @@ literal forms, comment syntax, or declaration shapes (see `internal/token/`,
 `editors/vscode/syntaxes/fango.tmLanguage.json` (and, when comment or bracket
 behavior changes, `editors/vscode/language-configuration.json`) in the same
 change. Verify with `make test-grammar`, which tokenizes every `.fango` file
-under stdlib, testdata, and examples with `vscode-textmate`; add a case to
+under stdlib, libs, testdata, and examples with `vscode-textmate`; add a case to
 `editors/vscode/tests/tokenize.cjs` for the new syntax. The grammar's regexes
 encode exact lexer rules (escape set, float forms, reserved words), so keep them
 in lockstep rather than approximating.

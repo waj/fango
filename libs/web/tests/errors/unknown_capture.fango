@@ -1,0 +1,16 @@
+import Web
+
+-- A path source that names no capture.
+type Ping =
+    { #[Web.Path "nope"]
+      id : Int
+    }
+
+type Bad e =
+    { #[Web.Get "/:id"]
+      ping : Ping ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

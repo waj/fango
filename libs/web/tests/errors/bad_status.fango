@@ -1,0 +1,14 @@
+import Web
+
+-- An error status outside 400 to 599.
+type Problem = #[Web.Status 200] Fine
+    deriving (Web.Failure)
+
+type Bad e =
+    { #[Web.Get "/"]
+      ping : () ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

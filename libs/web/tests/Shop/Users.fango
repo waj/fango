@@ -1,0 +1,50 @@
+module Shop.Users exposing (GetUser(..), NewUser(..), Org(..), User(..), UserError(..), Users(..))
+
+import Json
+import Result exposing (Result(..))
+import Web
+
+-- A user of one organization.
+type User = { id : Int, name : String }
+    deriving (Eq, Show, Json.Encode, Json.Decode)
+
+type UserError
+    = #[Web.Status 404] NoSuchUser
+    | #[Web.Status 409] NameTaken String
+    deriving (Eq, Show, Json.Encode, Json.Decode, Web.Failure)
+
+-- The fields are not in path order: binding is by name.
+type GetUser =
+    { #[Web.Query "verbose"]
+      verbose : Maybe Bool
+    , #[Web.Path "id"]
+      id : Int
+    , #[Web.Path "org"]
+      org : String
+    }
+    deriving (Eq, Show)
+
+type NewUser =
+    { #[Web.Path "org"]
+      org : String
+    , #[Web.Body]
+      user : User
+    }
+    deriving (Eq, Show)
+
+type Org =
+    { #[Web.Path "org"]
+      org : String
+    }
+    deriving (Eq, Show)
+
+type Users e =
+    { #[Web.Get "/users/:id"]
+      getUser : GetUser ->{e} Result UserError User
+    , #[Web.Post "/users"]
+      createUser : NewUser ->{e} Result UserError User
+    , #[Web.Delete "/users"]
+      clear : Org ->{e} ()
+    , #[Web.Get "/users"]
+      count : Org ->{e} Int
+    }

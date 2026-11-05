@@ -1,0 +1,23 @@
+import Web
+
+-- A mount capture read as two different types.
+type ByName =
+    { #[Web.Path "org"]
+      org : String
+    }
+
+type ById =
+    { #[Web.Path "org"]
+      org : Int
+    }
+
+type Bad e =
+    { #[Web.Get "/a"]
+      a : ByName ->{e} ()
+    , #[Web.Get "/b"]
+      b : ById ->{e} ()
+    }
+
+bad = Web.mount "bad" "/orgs/:org" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "a") (ByName { org = "x" }))

@@ -1,0 +1,1340 @@
+-- Typed HTTP APIs: one contract, shared by the server, the client, links,
+-- and tests.
+--
+-- A contract is a record type indexed by an effect row. Each field is one
+-- operation, an arrow from a request record to a response, with one route
+-- attribute:
+--
+-- ```text
+-- type Users e =
+--     {
+--       #[Web.Get "/users/:id"]
+--       getUser : GetUser ->{e} Result UserError User
+--     }
+-- ```
+--
+-- A request is one record whose fields carry source attributes, or `()`
+-- when the operation has no inputs. A server implements the contract as an
+-- ordinary value of its type, and `Web.Client.client` generates a client of
+-- the same type, so a record literal that leaves out an operation does not
+-- type-check and a test overrides one operation of either with record update.
+--
+-- `mount` places a contract at a named location, written `typeOf (Users {})`
+-- to reflect it at the pure row; `api` collects mounts into a tree, and
+-- `endpoint` generates an ordinary `Endpoint` value for one operation. That
+-- value is the single description of the operation's binding and codecs:
+-- `Web.Server` dispatches with it, `Web.Client` calls with it, and `link`
+-- builds URLs with it, so the generators keep no tables of their own.
+--
+-- Every request field has one `Source`. Path captures bind by name, each
+-- exactly once, with field order meaning nothing; a mount's captures bind
+-- the same way and must have one type across its operations. A `Maybe`
+-- query or header is optional and a `List` query repeats; a scalar query
+-- given twice is invalid. The one `Body` field is JSON, accepted as
+-- `application/json` or an `application/…+json` type, on any method but
+-- `GET`. Scalars travel as text through `Param`.
+--
+-- An operation's result decides its responses. `()` answers 204 with no body,
+-- any other type 200 with its JSON, and `Result err a` answers `Ok` as `a`
+-- would and `Err` with `failureStatus` and the error's JSON. A client accepts
+-- exactly that: an undeclared status is `UnexpectedStatus`, and a declared one
+-- whose body, media type, or error status disagrees is `InvalidResponse`.
+--
+-- Requests and responses are buffered JSON. A failure of the transport or of
+-- decoding is a client error raised in the caller's context; a domain error
+-- is a `Result` value whose error type derives `Failure`.
+--
+-- An effect declaration could also describe the operations, and a handler
+-- would check coverage as a record literal does, but a client implemented as
+-- a handler fails through a handler outside its runner, so it could not share
+-- the contract's type, and stubbing one operation would need partial handlers.
+-- An application that wants ambient access to a client wraps the record in
+-- an effect of its own.
+module Web exposing
+    ( Api, Endpoint(..), Entry, Failure(..), Incoming(..), Mounted(..)
+    , Operation(..), Outgoing(..), Param(..), Rejection(..), Reply(..)
+    , ReplyError(..), Response(..), Route(..), Segment(..), Source(..)
+    , Status(..), Wire(..)
+    , api, apiRoutes, endpoint, entryName, jsonMedia, link, matchTemplate, mount
+    , mountEntries, mounted, nest, outgoing, parseTemplate, raw, rawRoute, root
+    )
+
+import Bytes exposing (Bytes)
+import Char
+import Fail exposing (Fail)
+import Http exposing (Header(..))
+import Json
+import Json.Pull
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Meta exposing (Arrow(..), ArrowInfo(..), Attached(..), Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..), Reflected(..), Shape(..), Tail(..), TypeInfo(..))
+import Reader
+import Result exposing (Result(..))
+import String
+import Url
+
+not : Bool -> Bool
+not value = if value then False else True
+
+-- The route of an operation: its method and its path relative to the mount.
+-- A `Get` also answers `HEAD`, without a body.
+type Route
+    -- Answers `GET`.
+    = Get String
+    -- Answers `POST`.
+    | Post String
+    -- Answers `PUT`.
+    | Put String
+    -- Answers `PATCH`.
+    | Patch String
+    -- Answers `DELETE`.
+    | Delete String
+
+-- Where a request field comes from. Every field has exactly one source.
+type Source
+    -- The full-path capture with this name.
+    = Path String
+    -- The query parameter with this name: required for `a`, optional for
+    -- `Maybe a`, repeated for `List a`.
+    | Query String
+    -- The header with this name, compared without ASCII case: required for
+    -- `a`, optional for `Maybe a`.
+    | Header String
+    -- The JSON request body. At most one field, on `POST`, `PUT`, `PATCH`,
+    -- or `DELETE`.
+    | Body
+
+-- The HTTP status of an error constructor, from 400 to 599, which
+-- `deriving (Web.Failure)` reads.
+type Status
+    -- The status code.
+    = Status Int
+
+-- Values that path captures, query parameters, and headers carry as text.
+-- `String`, `Int`, finite `Float`, `Bool` (`true` and `false`), and `Char`
+-- have instances; `deriving (Web.Param)` covers a single-field wrapper and a
+-- union of nullary constructors, which reads and prints the constructor's
+-- name.
+--
+-- ```fango
+-- import Result exposing (Result(..))
+-- import Web exposing (Param(..))
+--
+-- number : Result String Int
+-- number = parseParam "x"
+--
+-- printParam True == "true"
+-- parseParam "true" == Ok True
+-- number == Err "Expected an integer, found \"x\"."
+-- ```
+class Param a
+    -- Reads a value from its text, or explains why it cannot.
+    parseParam : String -> Result String a
+    -- The text of a value; `parseParam` reads it back.
+    printParam : a -> String
+
+instance Param String
+    parseParam text = Ok text
+    printParam text = text
+
+instance Param Int
+    parseParam text =
+        case String.toInt text of
+            Just value -> Ok value
+            Nothing -> Err ("Expected an integer, found \"" ++ text ++ "\".")
+    printParam value = show value
+
+instance Param Float
+    parseParam text =
+        case String.toFloat text of
+            Just value -> if value - value == 0.0 then Ok value else Err ("Expected a finite number, found \"" ++ text ++ "\".")
+            Nothing -> Err ("Expected a number, found \"" ++ text ++ "\".")
+    printParam value = show value
+
+instance Param Bool
+    parseParam text =
+        if text == "true" then Ok True
+        else if text == "false" then Ok False
+        else Err ("Expected true or false, found \"" ++ text ++ "\".")
+    printParam value = if value then "true" else "false"
+
+instance Param Char
+    parseParam text =
+        case String.uncons text of
+            Just split -> if split.rest == "" then Ok split.first else Err ("Expected one character, found \"" ++ text ++ "\".")
+            Nothing -> Err "Expected one character, found nothing."
+    printParam value = String.fromChar value
+
+wrapperCtor : TypeInfo -> Maybe Ctor
+wrapperCtor subject =
+    case Meta.ctorsIn subject of
+        Item ctor NoItems ->
+            case ctor.fields of
+                Item _ NoItems -> Just ctor
+                _ -> Nothing
+        _ -> Nothing
+
+allNullary : Items Ctor -> Bool
+allNullary ctors =
+    case ctors of
+        NoItems -> True
+        Item ctor rest ->
+            case ctor.fields of
+                NoItems -> allNullary rest
+                _ -> False
+
+paramShapeError : String
+paramShapeError = "`deriving (Web.Param)` needs a single-field wrapper or a union of nullary constructors."
+
+nullaryParse : Code -> Code -> Ctor -> Code
+nullaryParse text fallback ctor = `if $(text) == $(lift ctor.name) then Ok $(Meta.construct ctor NoItems) else $(fallback)`
+
+paramPrint : Bound -> Code
+paramPrint bound =
+    case bound.fields of
+        NoItems -> lift bound.ctor.name
+        Item field NoItems -> `printParam $(field.value)`
+        _ -> Meta.fail paramShapeError
+
+deriver Param
+    parseParam subject text =
+        case wrapperCtor subject of
+            Just ctor -> `Result.map $(Meta.lambda "_web_param" { value -> Meta.construct ctor (Item value NoItems) }) (parseParam $(text))`
+            Nothing ->
+                ctors = Meta.ctorsIn subject
+                if allNullary ctors then
+                    Meta.foldItems (nullaryParse text) `Err ("Unknown value \"" ++ $(text) ++ "\".")` ctors
+                else Meta.fail paramShapeError
+    printParam subject value =
+        case wrapperCtor subject of
+            Just _ -> Meta.match subject value paramPrint
+            Nothing -> if allNullary (Meta.ctorsIn subject) then Meta.match subject value paramPrint else Meta.fail paramShapeError
+
+-- Error values that answer with their own HTTP status. `deriving
+-- (Web.Failure)` reads one `#[Web.Status n]`, from 400 to 599, on every
+-- constructor; several constructors may share a status, because the JSON
+-- body names the constructor.
+--
+-- ```text
+-- type Problem =
+--     #[Web.Status 404] Missing
+--     | #[Web.Status 409] Taken String
+--     deriving (Json.Encode, Json.Decode, Web.Failure)
+--
+-- failureStatus (Taken "x") == 409
+-- ```
+class Failure a
+    -- The status the error answers with.
+    failureStatus : a -> Int
+
+-- The `#[Web.Status n]` of a constructor, checked.
+ctorStatus : Ctor -> Result String Int
+ctorStatus ctor =
+    case Meta.attributes @Status ctor.attributes of
+        NoItems -> Err ("The constructor `" ++ ctor.name ++ "` has no #[Web.Status n] attribute.")
+        Item attached rest ->
+            case rest of
+                Item again _ -> Meta.failAt again.site "This constructor already has a status."
+                NoItems ->
+                    case attached.value of
+                        Status code ->
+                            if code >= 400 && code <= 599 then Ok code
+                            else Meta.failAt attached.site "An error status must be from 400 to 599."
+
+statusBranch : Bound -> Code
+statusBranch bound =
+    case ctorStatus bound.ctor of
+        Ok code -> lift code
+        Err message -> Meta.fail message
+
+deriver Failure
+    failureStatus subject value = Meta.match subject value statusBranch
+
+-- One segment of a path template.
+type Segment
+    -- Text that must match exactly.
+    = Literal String
+    -- `:name`, one segment.
+    | Capture String
+    -- `*name`, the remaining segments, which must be the last.
+    | Rest String
+    deriving (Eq, Show)
+
+isNameStart : Char -> Bool
+isNameStart c = Char.toCode c >= 97 && Char.toCode c <= 122
+
+isNameChar : Char -> Bool
+isNameChar c =
+    code = Char.toCode c
+    isNameStart c || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95
+
+validName : String -> Bool
+validName name =
+    case String.uncons name of
+        Nothing -> False
+        Just split -> isNameStart split.first && allChars isNameChar split.rest
+
+allChars : (Char -> Bool) -> String -> Bool
+allChars ok text =
+    case String.uncons text of
+        Nothing -> True
+        Just split -> ok split.first && allChars ok split.rest
+
+anyChar : (Char -> Bool) -> String -> Bool
+anyChar ok text =
+    case String.uncons text of
+        Nothing -> False
+        Just split -> ok split.first || anyChar ok split.rest
+
+reservedChar : Char -> Bool
+reservedChar c = c == ':' || c == '*' || c == '?' || c == '#'
+
+parseSegment : String -> Result String Segment
+parseSegment text =
+    case String.uncons text of
+        Nothing -> Err "A path segment cannot be empty."
+        Just split ->
+            if split.first == ':' then
+                if validName split.rest then Ok (Capture split.rest) else Err ("Invalid capture name `" ++ text ++ "`.")
+            else if split.first == '*' then
+                if validName split.rest then Ok (Rest split.rest) else Err ("Invalid rest capture name `" ++ text ++ "`.")
+            else if anyChar reservedChar text then Err ("The literal segment `" ++ text ++ "` uses `:`, `*`, `?`, or `#`.")
+            else Ok (Literal text)
+
+segmentName : Segment -> Maybe String
+segmentName segment =
+    case segment of
+        Literal _ -> Nothing
+        Capture name -> Just name
+        Rest name -> Just name
+
+checkSegments : List Segment -> List String -> Result String (List Segment)
+checkSegments segments seen =
+    case segments of
+        [] -> Ok []
+        [segment | rest] ->
+            case segment of
+                Rest name ->
+                    if rest /= [] then Err ("The rest capture `*" ++ name ++ "` must be the last segment.")
+                    else if contains name seen then Err ("The capture name `" ++ name ++ "` is used twice.")
+                    else Ok [segment]
+                _ ->
+                    case segmentName segment of
+                        Just name ->
+                            if contains name seen then Err ("The capture name `" ++ name ++ "` is used twice.")
+                            else Result.map { more -> [segment | more] } (checkSegments rest [name | seen])
+                        Nothing -> Result.map { more -> [segment | more] } (checkSegments rest seen)
+
+-- Reads a path template: `/`, or `/` followed by segments separated by `/`.
+-- A segment is literal text, a `:name` capture, or a final `*name` rest
+-- capture; names start with a lower-case letter and are unique.
+--
+-- ```fango
+-- import Result exposing (Result(..))
+-- import Web exposing (Segment(..))
+--
+-- Web.parseTemplate "/users/:id" == Ok [Literal "users", Capture "id"]
+-- Web.parseTemplate "/" == Ok []
+-- Web.parseTemplate "users" == Err "A path must start with `/`."
+-- ```
+parseTemplate : String -> Result String (List Segment)
+parseTemplate text =
+    if text == "/" then Ok []
+    else if not (String.startsWith "/" text) then Err "A path must start with `/`."
+    else
+        parts = String.split "/" (String.slice 1 (String.length text) text)
+        Result.andThen { segments -> checkSegments segments [] } (traverse parseSegment parts)
+
+traverse : (a -> Result String b) -> List a -> Result String (List b)
+traverse step items =
+    case items of
+        [] -> Ok []
+        [item | rest] ->
+            case step item of
+                Err message -> Err message
+                Ok value -> Result.map { more -> [value | more] } (traverse step rest)
+
+contains : String -> List String -> Bool
+contains wanted items =
+    case items of
+        [] -> False
+        [item | rest] -> item == wanted || contains wanted rest
+
+append : List a -> List a -> List a
+append left right =
+    case left of
+        [] -> right
+        [item | rest] -> [item | append rest right]
+
+joinWith : String -> List String -> String
+joinWith separator parts =
+    case parts of
+        [] -> ""
+        [part] -> part
+        [part | rest] -> part ++ separator ++ joinWith separator rest
+
+-- A mount prefix and an operation path joined; a path of `/` adds nothing.
+joinPath : String -> String -> String
+joinPath prefix path =
+    if path == "/" then prefix
+    else if prefix == "/" then path
+    else prefix ++ path
+
+-- Matches decoded path segments against a template, answering the captures.
+-- A rest capture takes one or more remaining segments, joined by `/`.
+--
+-- ```fango
+-- import Maybe exposing (Maybe(..))
+-- import Web exposing (Segment(..))
+--
+-- Web.matchTemplate [Literal "users", Capture "id"] ["users", "7"] == Just [("id", "7")]
+-- Web.matchTemplate [Literal "files", Rest "path"] ["files", "a", "b"] == Just [("path", "a/b")]
+-- Web.matchTemplate [Literal "users"] ["teams"] == Nothing
+-- ```
+matchTemplate : List Segment -> List String -> Maybe (List (String, String))
+matchTemplate template actual =
+    case (template, actual) of
+        ([], []) -> Just []
+        ([Rest name], [_ | _]) -> Just [(name, joinWith "/" actual)]
+        ([Literal text | rest], [value | values]) -> if text == value then matchTemplate rest values else Nothing
+        ([Capture name | rest], [value | values]) ->
+            case matchTemplate rest values of
+                Just more -> Just [(name, value) | more]
+                Nothing -> Nothing
+        _ -> Nothing
+
+-- A request as an endpoint reads it on the server: the template's captures,
+-- the query parameters, the headers, and the whole body.
+type Incoming =
+    {
+      -- Each capture's decoded value, by name.
+      captures : List (String, String)
+      -- The decoded query parameters, in order.
+    , query : List (String, String)
+      -- The request headers.
+    , headers : List Header
+      -- The request body.
+    , body : Bytes
+    }
+    deriving (Eq, Show)
+
+-- A request as an endpoint writes it for the client.
+type Outgoing =
+    {
+      -- The method.
+      method : String
+      -- The path and query, encoded.
+    , target : String
+      -- The headers the request's fields set.
+    , headers : List Header
+      -- The encoded body, if the request has one.
+    , body : Maybe Bytes
+    }
+    deriving (Eq, Show)
+
+-- A buffered response.
+type Reply =
+    {
+      -- The status code.
+      status : Int
+      -- The response headers.
+    , headers : List Header
+      -- The body.
+    , body : Bytes
+    }
+    deriving (Eq, Show)
+
+-- Why a server rejected a request before an operation ran.
+type Rejection =
+    {
+      -- The status to answer with: 400 for invalid input, 415 for a body
+      -- that is not JSON.
+      status : Int
+      -- What was wrong.
+    , message : String
+    }
+    deriving (Eq, Show)
+
+-- Why a client could not accept a reply.
+type ReplyError
+    -- A status the endpoint does not declare, with the reply's body text.
+    = UnexpectedStatus Int String
+    -- A declared status whose body or media type does not match.
+    | InvalidResponse String
+    deriving (Eq, Show)
+
+-- One encoded part of a request, as an endpoint writes its fields.
+type Wire
+    -- A path capture's encoded text.
+    = WirePath String String
+    -- A query parameter and its value.
+    | WireQuery String String
+    -- A header and its value.
+    | WireHeader String String
+    -- The encoded JSON body.
+    | WireBody Bytes
+    -- A field value the endpoint cannot carry, and why.
+    | WireInvalid String
+
+-- How an operation's result travels: the server writes it, and the client
+-- reads it back through the same description.
+type Response a =
+    {
+      -- The reply for a result, or why it cannot be encoded.
+      write : a -> Result String Reply
+      -- The result in a reply.
+    , read : Reply -> Result ReplyError a
+    }
+
+-- One operation of a mounted contract, with everything its server, client,
+-- and links need. Generate one with `endpoint`.
+type Endpoint request response =
+    {
+      -- The mount and operation names, as `users.getUser`.
+      name : String
+      -- The method, such as `"GET"`.
+    , method : String
+      -- The full path template, mount prefix included.
+    , template : String
+      -- The request in an incoming request, or why it is invalid.
+    , readRequest : Incoming -> Result Rejection request
+      -- The parts of a request value.
+    , writeRequest : request -> List Wire
+      -- How the result travels.
+    , response : Response response
+    }
+
+-- Binding helpers called from generated endpoint code.
+
+reject : String ->{Fail Rejection} a
+reject message = Fail.fail (Rejection { status = 400, message = message })
+
+parsed : Param a => String -> String ->{Fail Rejection} a
+parsed what text =
+    case parseParam text of
+        Ok value -> value
+        Err message -> reject (what ++ ": " ++ message)
+
+lookupAll : String -> List (String, String) -> List String
+lookupAll name pairs =
+    case pairs of
+        [] -> []
+        [(key, value) | rest] -> if key == name then [value | lookupAll name rest] else lookupAll name rest
+
+pathValue : Param a => String -> Incoming ->{Fail Rejection} a
+pathValue name incoming =
+    case lookupAll name incoming.captures of
+        [text | _] -> parsed ("The path capture `" ++ name ++ "`") text
+        [] -> reject ("The path capture `" ++ name ++ "` is missing.")
+
+restText : String -> Incoming ->{Fail Rejection} String
+restText name incoming = pathValue name incoming
+
+restList : String -> Incoming ->{Fail Rejection} List String
+restList name incoming = String.split "/" (restText name incoming)
+
+queryValue : Param a => String -> Incoming ->{Fail Rejection} a
+queryValue name incoming =
+    case lookupAll name incoming.query of
+        [text] -> parsed ("The query parameter `" ++ name ++ "`") text
+        [] -> reject ("The query parameter `" ++ name ++ "` is missing.")
+        _ -> reject ("The query parameter `" ++ name ++ "` is repeated.")
+
+queryOptional : Param a => String -> Incoming ->{Fail Rejection} Maybe a
+queryOptional name incoming =
+    case lookupAll name incoming.query of
+        [text] -> Just (parsed ("The query parameter `" ++ name ++ "`") text)
+        [] -> Nothing
+        _ -> reject ("The query parameter `" ++ name ++ "` is repeated.")
+
+queryList : Param a => String -> Incoming ->{Fail Rejection} List a
+queryList name incoming = List.map { text -> parsed ("The query parameter `" ++ name ++ "`") text } (lookupAll name incoming.query)
+
+headerValue : Param a => String -> Incoming ->{Fail Rejection} a
+headerValue name incoming =
+    case Http.getHeaders name incoming.headers of
+        [text] -> parsed ("The header `" ++ name ++ "`") text
+        [] -> reject ("The header `" ++ name ++ "` is missing.")
+        _ -> reject ("The header `" ++ name ++ "` is repeated.")
+
+headerOptional : Param a => String -> Incoming ->{Fail Rejection} Maybe a
+headerOptional name incoming =
+    case Http.getHeaders name incoming.headers of
+        [text] -> Just (parsed ("The header `" ++ name ++ "`") text)
+        [] -> Nothing
+        _ -> reject ("The header `" ++ name ++ "` is repeated.")
+
+-- Whether a `Content-Type` names JSON: `application/json`, or an
+-- `application/` subtype ending in `+json`, with any parameters.
+--
+-- ```fango
+-- import Http exposing (Header(..))
+--
+-- Web.jsonMedia [Header { name = "content-type", value = "Application/JSON; charset=utf-8" }]
+-- Web.jsonMedia [Header { name = "Content-Type", value = "application/problem+json" }]
+-- Web.jsonMedia [Header { name = "Content-Type", value = "text/plain" }] == False
+-- ```
+jsonMedia : List Header -> Bool
+jsonMedia headers =
+    case Http.getHeader "Content-Type" headers of
+        Nothing -> False
+        Just value ->
+            media =
+                case String.split ";" value of
+                    [first | _] -> String.trim first
+                    [] -> ""
+            size = String.length media
+            Http.equalAscii media "application/json"
+                || (size > 17 && Http.equalAscii (String.slice 0 12 media) "application/" && Http.equalAscii (String.slice (size - 5) size media) "+json")
+
+decodeJson : Json.Decode a => Bytes -> Result Json.Error a
+decodeJson input =
+    Reader.withBytes input { reader ->
+        Json.Pull.withReader reader {
+            value = Json.Pull.decodeValue()
+            case Json.Pull.next() of
+                Json.Pull.EndInput -> value
+                _ -> Json.Pull.fail "Trailing JSON input"
+        }
+    }
+
+encodeJson : Json.Encode a => a -> Result String Bytes
+encodeJson value =
+    case Json.stringify value of
+        Ok text -> Ok (Bytes.fromString text)
+        Err error -> Err error.message
+
+bodyValue : Json.Decode a => Incoming ->{Fail Rejection} a
+bodyValue incoming =
+    if not (jsonMedia incoming.headers) then Fail.fail (Rejection { status = 415, message = "The request body must be JSON." })
+    else
+        case decodeJson incoming.body of
+            Ok value -> value
+            Err error -> reject ("The request body is invalid: " ++ error.message)
+
+readWith : (() ->{Fail Rejection} a) -> Result Rejection a
+readWith action = Fail.attempt action
+
+-- Writing helpers called from generated endpoint code.
+
+-- An encoded `/` or `\` would split differently on the server, and an empty
+-- segment would not match, so neither can be written.
+pathText : String -> String -> List Wire
+pathText name text =
+    encoded = WirePath name (Url.percentEncode Url.PathSegment text)
+    if text == "" then [encoded, WireInvalid ("The path capture `" ++ name ++ "` is empty.")]
+    else if String.contains "/" text || String.contains "\\" text then [encoded, WireInvalid ("The path capture `" ++ name ++ "` contains a separator.")]
+    else [encoded]
+
+pathPart : Param a => String -> a -> List Wire
+pathPart name value = pathText name (printParam value)
+
+restSegments : String -> List String -> List Wire
+restSegments name segments =
+    encoded = WirePath name (joinWith "/" (List.map { text -> Url.percentEncode Url.PathSegment text } segments))
+    if segments == [] || contains "" segments then [encoded, WireInvalid ("The rest capture `" ++ name ++ "` has an empty segment.")]
+    else if anyText { text -> String.contains "\\" text } segments then [encoded, WireInvalid ("The rest capture `" ++ name ++ "` contains a separator.")]
+    else [encoded]
+
+anyText : (String -> Bool) -> List String -> Bool
+anyText ok texts =
+    case texts of
+        [] -> False
+        [text | rest] -> ok text || anyText ok rest
+
+restPartText : String -> String -> List Wire
+restPartText name text = restSegments name (String.split "/" text)
+
+restPartList : String -> List String -> List Wire
+restPartList name segments = restSegments name segments
+
+queryPart : Param a => String -> a -> List Wire
+queryPart name value = [WireQuery name (printParam value)]
+
+queryPartOptional : Param a => String -> Maybe a -> List Wire
+queryPartOptional name value =
+    case value of
+        Just present -> queryPart name present
+        Nothing -> []
+
+queryPartList : Param a => String -> List a -> List Wire
+queryPartList name values = List.map { value -> WireQuery name (printParam value) } values
+
+headerPart : Param a => String -> a -> List Wire
+headerPart name value = [WireHeader name (printParam value)]
+
+headerPartOptional : Param a => String -> Maybe a -> List Wire
+headerPartOptional name value =
+    case value of
+        Just present -> headerPart name present
+        Nothing -> []
+
+bodyPart : Json.Encode a => a -> List Wire
+bodyPart value =
+    case encodeJson value of
+        Ok bytes -> [WireBody bytes]
+        Err message -> [WireInvalid ("The request body cannot be encoded: " ++ message)]
+
+-- Response descriptions chosen by the generator from an operation's result.
+
+jsonHeaders : List Header
+jsonHeaders = [Header { name = "Content-Type", value = "application/json" }]
+
+bodyText : Reply -> String
+bodyText reply = Bytes.toStringLossy reply.body
+
+unexpected : Reply -> Result ReplyError a
+unexpected reply = Err (UnexpectedStatus reply.status (bodyText reply))
+
+unitResponse : Response ()
+unitResponse =
+    { write = { _ -> Ok (Reply { status = 204, headers = [], body = Bytes.empty }) }
+    , read = { reply -> if reply.status == 204 then Ok () else unexpected reply }
+    }
+
+readJson : Json.Decode a => Reply -> Result ReplyError a
+readJson reply =
+    if not (jsonMedia reply.headers) then Err (InvalidResponse ("Expected a JSON response, status " ++ show reply.status ++ "."))
+    else
+        case decodeJson reply.body of
+            Ok value -> Ok value
+            Err error -> Err (InvalidResponse ("Invalid JSON response: " ++ error.message))
+
+jsonResponse : (Json.Encode a, Json.Decode a) => () -> Response a
+jsonResponse() =
+    { write = { value -> Result.map { bytes -> Reply { status = 200, headers = jsonHeaders, body = bytes } } (encodeJson value) }
+    , read = { reply -> if reply.status == 200 then readJson reply else unexpected reply }
+    }
+
+containsInt : Int -> List Int -> Bool
+containsInt wanted items =
+    case items of
+        [] -> False
+        [item | rest] -> item == wanted || containsInt wanted rest
+
+readFailure : (Json.Decode err, Failure err) => List Int -> Reply -> Result ReplyError err
+readFailure statuses reply =
+    if not (containsInt reply.status statuses) then unexpected reply
+    else
+        case readJson reply of
+            Err error -> Err error
+            Ok error ->
+                if failureStatus error == reply.status then Ok error
+                else Err (InvalidResponse ("The error in a " ++ show reply.status ++ " response declares status " ++ show (failureStatus error) ++ "."))
+
+resultResponse : (Json.Encode err, Json.Decode err, Failure err) => List Int -> Response a -> Response (Result err a)
+resultResponse statuses success =
+    { write = { result ->
+        case result of
+            Ok value -> success.write value
+            Err error -> Result.map { bytes -> Reply { status = failureStatus error, headers = jsonHeaders, body = bytes } } (encodeJson error)
+      }
+    , read = { reply ->
+        if reply.status >= 200 && reply.status <= 299 then Result.map Ok (success.read reply)
+        else Result.map Err (readFailure statuses reply)
+      }
+    }
+
+-- Builds the request a value of `endpoint`'s request type stands for, or
+-- explains why one of its fields cannot be written.
+outgoing : Endpoint request response -> request -> Result String Outgoing
+outgoing described request =
+    parts = described.writeRequest request
+    case firstInvalid parts of
+        Just message -> Err message
+        Nothing ->
+            case wireBody parts of
+                Nothing -> Ok (Outgoing { method = described.method, target = targetOf described.template parts, headers = wireHeaders parts, body = Nothing })
+                Just bytes -> Ok (Outgoing { method = described.method, target = targetOf described.template parts, headers = append jsonHeaders (wireHeaders parts), body = Just bytes })
+
+-- The URL path and query of a request value, from its path and query fields
+-- only. Optional query values that are absent are left out, and repeated
+-- ones keep their order. A field the endpoint cannot carry still encodes:
+-- `Web.Client.call` checks the request before sending it.
+--
+-- ```text
+-- Web.link getUserEndpoint (GetUser { org = "acme", id = 7, verbose = Just True })
+--     == "/orgs/acme/users/7?verbose=true"
+-- ```
+link : Endpoint request response -> request -> String
+link described request = targetOf described.template (described.writeRequest request)
+
+firstInvalid : List Wire -> Maybe String
+firstInvalid parts =
+    case parts of
+        [] -> Nothing
+        [WireInvalid message | _] -> Just message
+        [_ | rest] -> firstInvalid rest
+
+wireBody : List Wire -> Maybe Bytes
+wireBody parts =
+    case parts of
+        [] -> Nothing
+        [WireBody bytes | _] -> Just bytes
+        [_ | rest] -> wireBody rest
+
+wireHeaders : List Wire -> List Header
+wireHeaders parts =
+    case parts of
+        [] -> []
+        [WireHeader name value | rest] -> [Header { name = name, value = value } | wireHeaders rest]
+        [_ | rest] -> wireHeaders rest
+
+wirePath : String -> List Wire -> String
+wirePath name parts =
+    case parts of
+        [] -> ""
+        [WirePath key value | rest] -> if key == name then value else wirePath name rest
+        [_ | rest] -> wirePath name rest
+
+wireQuery : List Wire -> List String
+wireQuery parts =
+    case parts of
+        [] -> []
+        [WireQuery name value | rest] -> [Url.percentEncode Url.QueryPart name ++ "=" ++ Url.percentEncode Url.QueryPart value | wireQuery rest]
+        [_ | rest] -> wireQuery rest
+
+segmentText : List Wire -> Segment -> String
+segmentText parts segment =
+    case segment of
+        Literal text -> text
+        Capture name -> wirePath name parts
+        Rest name -> wirePath name parts
+
+targetOf : String -> List Wire -> String
+targetOf template parts =
+    path =
+        case parseTemplate template of
+            Ok segments -> "/" ++ joinWith "/" (List.map (segmentText parts) segments)
+            Err _ -> template
+    case wireQuery parts of
+        [] -> path
+        query -> path ++ "?" ++ joinWith "&" query
+
+-- The compile-time API tree.
+
+-- One named location of an API: a mounted contract or a raw route. Entries
+-- exist only while the compiler runs.
+type Entry
+    -- A contract mounted under a prefix.
+    = Mount MountSpec
+    -- An untyped route with its handler.
+    | Raw RawSpec
+
+type MountSpec = { name : String, prefix : String, contract : Meta.TypeRepr }
+
+type RawSpec = { name : String, method : String, template : String, handler : Code }
+
+-- A tree of entries, which `Web.Server.dispatch` serves.
+type Api = Api (List Entry)
+
+-- Mounts a contract under a prefix. The name identifies the mount in the API
+-- tree and in endpoint names; the contract is reflected at the pure row, as
+-- `typeOf (Users {})`. The prefix may hold captures but no rest capture.
+mount : String -> String -> Meta.TypeRepr -> Entry
+mount name prefix contract = Mount (MountSpec { name = name, prefix = prefix, contract = contract })
+
+-- Mounts a contract at `/`.
+root : String -> Meta.TypeRepr -> Entry
+root name contract = mount name "/" contract
+
+-- A raw route: its name, `"METHOD /template"`, and a quoted handler of type
+-- `List Http.Server.Route.Param -> Http.Server.Request e ->{e} Http.Server.Response e`.
+-- It takes part in matching and 405 answers, but has no endpoint, client, or
+-- link.
+raw : String -> String -> Code -> Entry
+raw name route handler =
+    case String.split " " route of
+        [method, template] -> Raw (RawSpec { name = name, method = method, template = template, handler = handler })
+        _ -> Raw (RawSpec { name = name, method = "", template = route, handler = handler })
+
+-- The entries under a further prefix.
+nest : String -> List Entry -> List Entry
+nest prefix entries =
+    List.map { entry ->
+        case entry of
+            Mount found -> Mount { found | prefix = joinPath prefix found.prefix }
+            Raw found -> Raw { found | template = joinPath prefix found.template }
+    } entries
+
+-- Collects entries into an API tree.
+api : List Entry -> Api
+api entries = Api entries
+
+-- The entries of an API, in order.
+mountEntries : Api -> List Entry
+mountEntries (Api entries) = entries
+
+-- A raw route's method, template, and quoted handler, or `Nothing` for a
+-- mounted contract.
+rawRoute : Entry -> Maybe (String, String, Code)
+rawRoute entry =
+    case entry of
+        Raw found -> Just (found.method, found.template, found.handler)
+        Mount _ -> Nothing
+
+-- An entry's name.
+entryName : Entry -> String
+entryName entry =
+    case entry of
+        Mount found -> found.name
+        Raw found -> found.name
+
+-- How a request field binds a source: once, optionally (`Maybe a`), or
+-- repeatedly (`List a`).
+type Form = Single | Optional | Repeated
+
+type Binding =
+    { source : Source
+    , form : Form
+    -- Whether a path field binds a rest capture.
+    , rest : Bool
+    }
+
+-- One operation of a mounted contract, as the generators see it.
+type Operation =
+    {
+      -- The contract field's name.
+      name : String
+      -- The method, such as `"GET"`.
+    , method : String
+      -- The full path template, mount prefix included.
+    , template : String
+      -- Code for the operation's `Endpoint`.
+    , endpoint : Code
+      -- The type each path capture binds, by name.
+    , captures : List (String, Meta.TypeRepr)
+    }
+
+-- A mounted contract, analyzed.
+type Mounted =
+    {
+      -- The mount's name.
+      name : String
+      -- The contract's schema.
+    , info : TypeInfo
+      -- The contract's record constructor.
+    , ctor : Ctor
+      -- Its operations, in field order.
+    , operations : List Operation
+    }
+
+isUnit : Meta.TypeRepr -> Bool
+isUnit ty = Meta.sameType ty (typeOf ())
+
+headIs : Meta.TypeRepr -> Meta.TypeRepr -> Bool
+headIs ty example = Meta.sameType (Meta.head ty) (Meta.head example)
+
+firstArg : Meta.TypeRepr -> Meta.TypeRepr
+firstArg ty =
+    case Meta.args ty of
+        Item arg _ -> arg
+        NoItems -> ty
+
+routeParts : Route -> (String, String)
+routeParts route =
+    case route of
+        Get path -> ("GET", path)
+        Post path -> ("POST", path)
+        Put path -> ("PUT", path)
+        Patch path -> ("PATCH", path)
+        Delete path -> ("DELETE", path)
+
+itemsToList : Items a -> List a
+itemsToList items =
+    case items of
+        NoItems -> []
+        Item value rest -> [value | itemsToList rest]
+
+captureNames : List Segment -> List String
+captureNames segments =
+    case segments of
+        [] -> []
+        [segment | rest] ->
+            case segmentName segment of
+                Just name -> [name | captureNames rest]
+                Nothing -> captureNames rest
+
+isRestCapture : String -> List Segment -> Bool
+isRestCapture name segments =
+    case segments of
+        [] -> False
+        [Rest found | rest] -> found == name || isRestCapture name rest
+        [_ | rest] -> isRestCapture name rest
+
+-- The binding of one request field, checked against the operation's path.
+bindingOf : String -> List Segment -> Meta.Site -> Field -> Result String Binding
+bindingOf method segments routeSite field =
+    case Meta.attributes @Source field.attributes of
+        NoItems -> Err ("The request field `" ++ field.name ++ "` has no source attribute such as #[Web.Path \"name\"] or #[Web.Query \"name\"].")
+        Item attached more ->
+            case more of
+                Item again _ -> Meta.failAt again.site "This field already has a source."
+                NoItems ->
+                    optional = headIs field.ty (typeOf (Maybe ()))
+                    repeated = headIs field.ty (typeOf (List ()))
+                    form = if optional then Optional else if repeated then Repeated else Single
+                    case attached.value of
+                        Path name ->
+                            if not (contains name (captureNames segments)) then Meta.failAt attached.site ("The path has no capture named `" ++ name ++ "`.")
+                            else if isRestCapture name segments then
+                                if Meta.sameType field.ty (typeOf String) || Meta.sameType field.ty (typeOf (List String)) then
+                                    Ok (Binding { source = attached.value, form = form, rest = True })
+                                else Meta.failAt attached.site "A rest capture binds a `String` or a `List String`."
+                            else if optional || repeated then Meta.failAt attached.site "A path capture is always present; it cannot bind a `Maybe` or a `List`."
+                            else Ok (Binding { source = attached.value, form = Single, rest = False })
+                        Header _ ->
+                            if repeated then Meta.failAt attached.site "A header binds a value or a `Maybe`, not a `List`."
+                            else Ok (Binding { source = attached.value, form = form, rest = False })
+                        Body ->
+                            if method == "GET" then Meta.failAt attached.site "A GET request has no body."
+                            else Ok (Binding { source = Body, form = Single, rest = False })
+                        Query _ -> Ok (Binding { source = attached.value, form = form, rest = False })
+
+pathBindingNames : List Binding -> List String
+pathBindingNames bindings =
+    case bindings of
+        [] -> []
+        [binding | rest] ->
+            case binding.source of
+                Path name -> [name | pathBindingNames rest]
+                _ -> pathBindingNames rest
+
+bodyCount : List Binding -> Int
+bodyCount bindings =
+    case bindings of
+        [] -> 0
+        [binding | rest] ->
+            case binding.source of
+                Body -> 1 + bodyCount rest
+                _ -> bodyCount rest
+
+countOf : String -> List String -> Int
+countOf wanted items =
+    case items of
+        [] -> 0
+        [item | rest] -> (if item == wanted then 1 else 0) + countOf wanted rest
+
+-- Every capture is bound exactly once, and at most one field is the body.
+checkBindings : String -> String -> Meta.Site -> List Segment -> List Binding -> Result String (List Binding)
+checkBindings operation requestName routeSite segments bindings =
+    bound = pathBindingNames bindings
+    case List.filter { name -> countOf name bound /= 1 } (captureNames segments) of
+        [name | _] ->
+            if countOf name bound == 0 then Meta.failAt routeSite ("No field of `" ++ requestName ++ "` binds the capture `" ++ name ++ "`.")
+            else Meta.failAt routeSite ("Several fields of `" ++ requestName ++ "` bind the capture `" ++ name ++ "`.")
+        [] ->
+            if bodyCount bindings > 1 then Err ("The request of `" ++ operation ++ "` has more than one body field.")
+            else Ok bindings
+
+-- The request side of one operation: its binding table and request schema.
+requestOf : String -> String -> Meta.Site -> List Segment -> Meta.TypeRepr -> Result String (Maybe (TypeInfo, Ctor, List Binding))
+requestOf operation method routeSite segments request =
+    if isUnit request then
+        case captureNames segments of
+            [] -> Ok Nothing
+            [name | _] -> Meta.failAt routeSite ("The capture `" ++ name ++ "` needs a request record that binds it, not `()`.")
+    else
+        case Meta.info request of
+            Opaque -> Err ("The request of `" ++ operation ++ "` must be a record type whose fields are visible here, or `()`.")
+            Visible info ->
+                case info.shape of
+                    Union _ -> Err ("The request of `" ++ operation ++ "` must be a record type, not the union `" ++ info.name ++ "`.")
+                    Record ctor ->
+                        Result.andThen { bindings -> Result.map { checked -> Just (info, ctor, checked) } (checkBindings operation info.name routeSite segments bindings) }
+                            (traverse (bindingOf method segments routeSite) (itemsToList ctor.fields))
+
+operationOf : String -> String -> Field -> Result String Operation
+operationOf mountName prefix field =
+    case Meta.attributes @Route field.attributes of
+        NoItems -> Err ("The operation `" ++ field.name ++ "` has no route attribute such as #[Web.Get \"/path\"].")
+        Item route more ->
+            case more of
+                Item again _ -> Meta.failAt again.site "This operation already has a route."
+                NoItems ->
+                    (method, path) = routeParts route.value
+                    template = joinPath prefix path
+                    segments =
+                        case parseTemplate path of
+                            Err message -> Meta.failAt route.site message
+                            Ok _ ->
+                                case parseTemplate template of
+                                    Err message -> Meta.failAt route.site message
+                                    Ok found -> found
+                    case Meta.arrow field.ty of
+                        NotArrow -> Err ("The operation `" ++ field.name ++ "` must be a function from its request to its response.")
+                        Arrow parts ->
+                            case Meta.arrow parts.result of
+                                Arrow _ -> Err ("The operation `" ++ field.name ++ "` must take one request; a curried operation is not supported.")
+                                NotArrow ->
+                                    case (parts.effects, parts.tail) of
+                                        (NoItems, Closed) ->
+                                            Result.andThen { request ->
+                                                Result.map { response ->
+                                                    Operation
+                                                        { name = field.name
+                                                        , method = method
+                                                        , template = template
+                                                        , endpoint = endpointCode (mountName ++ "." ++ field.name) method template request response
+                                                        , captures = captureTypes request
+                                                        }
+                                                } (responseCode parts.result)
+                                            } (requestOf field.name method route.site segments parts.param)
+                                        _ -> Err ("The operation `" ++ field.name ++ "` may perform only the contract's own effect row.")
+
+captureTypes : Maybe (TypeInfo, Ctor, List Binding) -> List (String, Meta.TypeRepr)
+captureTypes request =
+    case request of
+        Nothing -> []
+        Just (_, ctor, bindings) ->
+            concatRoutes (List.map { (field, binding) ->
+                    case binding.source of
+                        Path name -> [(name, field.ty)]
+                        _ -> []
+            } (zipFields ctor.fields bindings)
+            )
+
+lookupType : String -> List (String, Meta.TypeRepr) -> Maybe Meta.TypeRepr
+lookupType name pairs =
+    case pairs of
+        [] -> Nothing
+        [(key, ty) | rest] -> if key == name then Just ty else lookupType name rest
+
+-- A mount capture binds a field of every operation, and all of them must
+-- read it as the same type.
+checkMountCaptures : String -> List String -> List Operation -> Result String (List Operation)
+checkMountCaptures mountName names operations =
+    case names of
+        [] -> Ok operations
+        [name | rest] ->
+            types = concatRoutes (List.map { operation ->
+                    case lookupType name operation.captures of
+                        Just ty -> [(operation.name, ty)]
+                        Nothing -> []
+            } operations
+            )
+            case types of
+                [(first, ty) | others] ->
+                    case List.filter { (_, other) -> not (Meta.sameType ty other) } others of
+                        [(second, other) | _] -> Err ("The mount `" ++ mountName ++ "` capture `" ++ name ++ "` is a `" ++ Meta.typeName ty ++ "` in `" ++ first ++ "` but a `" ++ Meta.typeName other ++ "` in `" ++ second ++ "`.")
+                        [] -> checkMountCaptures mountName rest operations
+                [] -> checkMountCaptures mountName rest operations
+
+prefixSegments : String -> Result String (List Segment)
+prefixSegments prefix =
+    case parseTemplate prefix of
+        Err message -> Err ("The mount prefix `" ++ prefix ++ "` is invalid: " ++ message)
+        Ok segments -> if isRestAnywhere segments then Err ("The mount prefix `" ++ prefix ++ "` cannot have a rest capture.") else Ok segments
+
+isRestAnywhere : List Segment -> Bool
+isRestAnywhere segments =
+    case segments of
+        [] -> False
+        [Rest _ | _] -> True
+        [_ | rest] -> isRestAnywhere rest
+
+-- Analyzes a mount: the contract's shape and every operation's route,
+-- request, and response. Problems at an attribute fail there; the others are
+-- answered as `Err`, for the generator to report at its splice.
+mounted : Entry -> Result String Mounted
+mounted entry =
+    case entry of
+        Raw found -> Err ("The entry `" ++ found.name ++ "` is a raw route, not a mounted contract.")
+        Mount found ->
+            Result.andThen { prefix ->
+                case Meta.info found.contract of
+                    Opaque -> Err ("The contract `" ++ Meta.typeName found.contract ++ "` must be a record type whose fields are visible here; import it with `(..)`.")
+                    Visible info ->
+                        case info.shape of
+                            Union _ -> Err ("The contract `" ++ info.name ++ "` must be a record type, not a union.")
+                            Record ctor ->
+                                if Meta.lengthItems info.params /= 1 then Err ("The contract `" ++ info.name ++ "` must take exactly one type parameter, its effect row.")
+                                else
+                                    Result.map { operations -> Mounted { name = found.name, info = info, ctor = ctor, operations = operations } }
+                                        (Result.andThen (checkMountCaptures found.name (captureNames prefix)) (traverse (operationOf found.name found.prefix) (itemsToList ctor.fields)))
+            } (prefixSegments found.prefix)
+
+findOperation : String -> List Operation -> Maybe Operation
+findOperation name operations =
+    case operations of
+        [] -> Nothing
+        [operation | rest] -> if operation.name == name then Just operation else findOperation name rest
+
+-- Generates the `Endpoint` of one operation of a mount: an ordinary value,
+-- which a module binds under a name of its own choosing.
+--
+-- ```text
+-- getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
+-- getUserEndpoint = $(Web.endpoint users "getUser")
+-- ```
+endpoint : Entry -> String -> Code
+endpoint entry name =
+    case mounted entry of
+        Err message -> Meta.fail message
+        Ok found ->
+            case findOperation name found.operations of
+                Just operation -> operation.endpoint
+                Nothing -> Meta.fail ("The contract mounted as `" ++ found.name ++ "` has no operation `" ++ name ++ "`.")
+
+-- Code generation for one operation.
+
+listCode : List Code -> Code
+listCode items =
+    case items of
+        [] -> `[]`
+        [item | rest] -> `[$(item) | $(listCode rest)]`
+
+statusList : Items Ctor -> Result String (List Int)
+statusList ctors = traverse ctorStatus (itemsToList ctors)
+
+responseCode : Meta.TypeRepr -> Result String Code
+responseCode ty =
+    if isUnit ty then Ok `unitResponse`
+    else if headIs ty (typeOf (Result () ())) then
+        case Meta.args ty of
+            Item err (Item success NoItems) ->
+                case Meta.info err of
+                    Opaque -> Err ("The error type `" ++ Meta.typeName err ++ "` must be visible here, so its `#[Web.Status n]` attributes can be read.")
+                    Visible info ->
+                        Result.andThen { statuses ->
+                            Result.map { inner -> `resultResponse $(listCode (List.map lift statuses)) $(inner)` } (responseCode success)
+                        } (statusList (Meta.ctorsIn info))
+            _ -> Err "A `Result` takes an error type and a success type."
+    else Ok `jsonResponse()`
+
+readSlot : Code -> (Field, Binding) -> Code
+readSlot incoming (field, binding) =
+    case binding.source of
+        Path name ->
+            if not binding.rest then `pathValue $(lift name) $(incoming)`
+            else if Meta.sameType field.ty (typeOf String) then `restText $(lift name) $(incoming)`
+            else `restList $(lift name) $(incoming)`
+        Query name ->
+            case binding.form of
+                Single -> `queryValue $(lift name) $(incoming)`
+                Optional -> `queryOptional $(lift name) $(incoming)`
+                Repeated -> `queryList $(lift name) $(incoming)`
+        Header name ->
+            case binding.form of
+                Optional -> `headerOptional $(lift name) $(incoming)`
+                _ -> `headerValue $(lift name) $(incoming)`
+        Body -> `bodyValue $(incoming)`
+
+writePart : Binding -> BoundField -> Code
+writePart binding field =
+    value = field.value
+    case binding.source of
+        Path name ->
+            if not binding.rest then `pathPart $(lift name) $(value)`
+            else if Meta.sameType field.ty (typeOf String) then `restPartText $(lift name) $(value)`
+            else `restPartList $(lift name) $(value)`
+        Query name ->
+            case binding.form of
+                Single -> `queryPart $(lift name) $(value)`
+                Optional -> `queryPartOptional $(lift name) $(value)`
+                Repeated -> `queryPartList $(lift name) $(value)`
+        Header name ->
+            case binding.form of
+                Optional -> `headerPartOptional $(lift name) $(value)`
+                _ -> `headerPart $(lift name) $(value)`
+        Body -> `bodyPart $(value)`
+
+writeParts : List Binding -> Items BoundField -> Code
+writeParts bindings fields =
+    case (bindings, fields) of
+        ([binding | rest], Item field more) -> `append $(writePart binding field) $(writeParts rest more)`
+        _ -> `[]`
+
+zipFields : Items Field -> List Binding -> List (Field, Binding)
+zipFields fields bindings =
+    case (fields, bindings) of
+        (Item field more, [binding | rest]) -> [(field, binding) | zipFields more rest]
+        _ -> []
+
+endpointCode : String -> String -> String -> Maybe (TypeInfo, Ctor, List Binding) -> Code -> Code
+endpointCode name method template request response =
+    (reader, writer) =
+        case request of
+            Nothing -> (`{ _ -> Ok () }`, `{ _ -> [] }`)
+            Just (info, ctor, bindings) ->
+                readCode = Meta.lambda "_web_incoming" { incoming ->
+                    slots = List.map (readSlot incoming) (zipFields ctor.fields bindings)
+                    `readWith { $(Meta.construct ctor (listToItems slots)) }`
+                }
+                writeCode = Meta.lambda "_web_request" { value -> Meta.match info value { bound -> writeParts bindings bound.fields } }
+                (readCode, writeCode)
+    `Endpoint
+        { name = $(lift name)
+        , method = $(lift method)
+        , template = $(lift template)
+        , readRequest = $(reader)
+        , writeRequest = $(writer)
+        , response = $(response)
+        }`
+
+listToItems : List a -> Items a
+listToItems items =
+    case items of
+        [] -> NoItems
+        [item | rest] -> Item item (listToItems rest)
+
+-- The routes of an API, checked: entry names are unique, and no two routes
+-- answer the same method on the same path shape. A `GET` also answers
+-- `HEAD`. Each route is its method, template, and the name of the entry it
+-- belongs to.
+apiRoutes : Api -> Result String (List (String, String, String))
+apiRoutes (Api entries) =
+    Result.andThen { routes -> Result.map { _ -> routes } (checkConflicts routes) }
+        (Result.andThen { _ -> Result.map concatRoutes (traverse entryRoutes entries) } (checkNames entries []))
+
+concatRoutes : List (List a) -> List a
+concatRoutes groups =
+    case groups of
+        [] -> []
+        [group | rest] -> append group (concatRoutes rest)
+
+checkNames : List Entry -> List String -> Result String ()
+checkNames entries seen =
+    case entries of
+        [] -> Ok ()
+        [entry | rest] ->
+            name = entryName entry
+            if contains name seen then Err ("Two entries of the API are named `" ++ name ++ "`.")
+            else checkNames rest [name | seen]
+
+entryRoutes : Entry -> Result String (List (String, String, String))
+entryRoutes entry =
+    case entry of
+        Raw found ->
+            case parseTemplate found.template of
+                Err message -> Err ("The raw route `" ++ found.name ++ "` has an invalid path: " ++ message)
+                Ok _ ->
+                    if found.method == "" then Err ("The raw route `" ++ found.name ++ "` must be written as \"METHOD /path\".")
+                    else Ok (withHead found.method found.template found.name)
+        Mount _ ->
+            Result.map { found -> concatRoutes (List.map { operation -> withHead operation.method operation.template (found.name ++ "." ++ operation.name) } found.operations) } (mounted entry)
+
+withHead : String -> String -> String -> List (String, String, String)
+withHead method template name =
+    if method == "GET" then [(method, template, name), ("HEAD", template, name)] else [(method, template, name)]
+
+shapeOf : String -> String
+shapeOf template =
+    case parseTemplate template of
+        Ok segments -> joinWith "/" (List.map { segment ->
+                case segment of
+                    Literal text -> "=" ++ text
+                    Capture _ -> ":"
+                    Rest _ -> "*"
+        } segments
+        )
+        Err _ -> template
+
+checkConflicts : List (String, String, String) -> Result String ()
+checkConflicts routes =
+    case routes of
+        [] -> Ok ()
+        [(method, template, name) | rest] ->
+            case List.filter { (otherMethod, otherTemplate, _) -> otherMethod == method && shapeOf otherTemplate == shapeOf template } rest of
+                [(_, otherTemplate, other) | _] -> Err ("The routes `" ++ name ++ "` and `" ++ other ++ "` both answer " ++ method ++ " " ++ template ++ (if otherTemplate == template then "" else " and " ++ otherTemplate) ++ ".")
+                [] -> checkConflicts rest

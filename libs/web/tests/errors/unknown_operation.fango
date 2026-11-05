@@ -1,0 +1,11 @@
+import Web
+
+-- An endpoint for an operation the contract does not have.
+type Bad e =
+    { #[Web.Get "/"]
+      ping : () ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "pong") ())

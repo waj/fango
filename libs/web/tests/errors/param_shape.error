@@ -1,0 +1,1 @@
+`deriving (Web.Param)` needs a single-field wrapper or a union of nullary constructors.

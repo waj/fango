@@ -1,0 +1,181 @@
+module WebRoundTrip exposing (tests)
+
+import Bytes
+import Expect
+import Fail exposing (Fail)
+import Http exposing (Body(..), Protocol(..))
+import Http.Client as Client
+import Http.Server exposing (Request(..), Response(..))
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Shop.Api
+import Shop.Catalog exposing (Catalog(..), FilePath(..), Item(..), Lookup(..), Ratio(..), Search(..), Tag(..), Traced(..))
+import Shop.Users exposing (GetUser(..), NewUser(..), Org(..), User(..), UserError(..), Users(..))
+import State
+import String
+import Test
+import Web
+import Web.Client
+import Web.Server
+import Web.Testing
+
+dispatch = $(Web.Server.dispatch Shop.Api.api)
+
+alice = User { id = 7, name = "Alice" }
+
+users : Users e
+users =
+    { getUser = { query -> if query.org == "acme" && query.id == 7 then Ok alice else Err NoSuchUser }
+    , createUser = { request -> if request.user.name == "Alice" then Err (NameTaken "Alice") else Ok request.user }
+    , clear = { _ -> () }
+    , count = { org -> if org.org == "acme" then 1 else 0 }
+    }
+
+admins : Users e
+admins = { users | count = { _ -> 100 } }
+
+joinSlash : List String -> String
+joinSlash parts =
+    case parts of
+        [] -> ""
+        [part] -> part
+        [part | rest] -> part ++ "|" ++ joinSlash rest
+
+items : Catalog e
+items =
+    { item = { lookup -> Item { id = lookup.id, title = "item " ++ show lookup.id } }
+    , newest = { _ -> Item { id = 0, title = "newest" } }
+    , search = { query -> [Item { id = Maybe.withDefault 0 query.limit, title = query.q ++ " " ++ show query.tags }] }
+    , file = { found -> joinSlash found.path }
+    , trace = { traced -> traced.trace ++ " " ++ Maybe.withDefault "-" traced.note }
+    , ratio = { _ -> Ratio { value = 1.0 / 0.0 } }
+    }
+
+app : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
+app request = dispatch users items admins Web.Server.direct request
+
+-- An implementation with effects of its own: a counter, and a failure that
+-- answers with its own status.
+counting : Users {State.State Int, Fail Web.Server.Error}
+counting =
+    { users |
+      clear = { org -> Fail.fail (Web.Server.Error { status = 403, message = "Not for " ++ org.org }) }
+    , count = { _ ->
+        State.put (State.get() + 1)
+        State.get()
+    }
+    }
+
+-- Each operation call runs in its own counter, starting at 41.
+perCall : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
+perCall request = dispatch counting items admins { action -> Web.Server.recover { (State.run 41 action).value } } request
+
+shop : Users {Client.Http, Fail Web.Client.Error}
+shop = $(Web.Client.client Shop.Api.users) "http://shop.example/"
+
+admin : Users {Client.Http, Fail Web.Client.Error}
+admin = $(Web.Client.client Shop.Api.admin) "http://shop.example"
+
+catalog : Catalog {Client.Http, Fail Web.Client.Error}
+catalog = $(Web.Client.client Shop.Api.catalog) "http://shop.example"
+
+strictUsers : Users {Expect.Expect}
+strictUsers = $(Web.Testing.strict Shop.Api.users)
+
+attempt : (() ->{Fail Web.Client.Error, e} a) ->{e} Result Web.Client.Error a
+attempt action = Fail.attempt action
+
+teapot : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
+teapot request =
+    if String.contains "teapot" request.target then Response { status = 418, headers = [], body = BytesBody (Bytes.fromString "short and stout") }
+    else app request
+
+failureMessage : (() ->{Expect.Expect} ()) -> Maybe String
+failureMessage body =
+    handle body() on
+        Expect.fail error -> Just error.message
+        return _ -> Nothing
+
+tests : Test.Test {}
+tests = Test.describe "web round trips"
+    [ Test.test "GET and POST through the generated client and dispatcher" {
+        result = attempt {
+            use Client.mock app
+            found = shop.getUser (GetUser { org = "acme", id = 7, verbose = Nothing })
+            missing = shop.getUser (GetUser { org = "acme", id = 8, verbose = Just True })
+            created = shop.createUser (NewUser { org = "acme", user = User { id = 9, name = "Bo" } })
+            taken = shop.createUser (NewUser { org = "acme", user = alice })
+            ((found, missing), (created, taken), (shop.clear (Org { org = "acme" }), shop.count (Org { org = "acme" })))
+        }
+        Expect.equal (Ok ((Ok alice, Err NoSuchUser), (Ok (User { id = 9, name = "Bo" }), Err (NameTaken "Alice")), ((), 1))) result
+    }
+    , Test.test "a failed call leaves later calls working" {
+        result = Client.mock teapot {
+            first = attempt { shop.count (Org { org = "teapot" }) }
+            second = attempt { shop.count (Org { org = "acme" }) }
+            (first, second)
+        }
+        Expect.equal (Err (Web.Client.UnexpectedStatus 418 "short and stout"), Ok 1) result
+    }
+    , Test.test "each mount of one contract is served by its own implementation" {
+        result = attempt {
+            use Client.mock app
+            (shop.count (Org { org = "acme" }), admin.count (Org { org = "acme" }))
+        }
+        Expect.equal (Ok (1, 100)) result
+    }
+    , Test.test "query lists, optional values, rest captures, and headers" {
+        result = attempt {
+            use Client.mock app
+            searched = catalog.search (Search { q = "lamp", tags = [Sale, New], limit = Just 3 })
+            plain = catalog.search (Search { q = "desk", tags = [], limit = Nothing })
+            file = catalog.file (FilePath { path = ["docs", "a b"] })
+            traced = catalog.trace (Traced { trace = "t-1", note = Nothing })
+            noted = catalog.trace (Traced { trace = "t-2", note = Just "n" })
+            (searched, plain, (file, traced, noted))
+        }
+        Expect.equal (Ok ([Item { id = 3, title = "lamp [Sale, New]" }], [Item { id = 0, title = "desk []" }], ("docs|a b", "t-1 -", "t-2 n"))) result
+    }
+    , Test.test "a literal segment wins over a capture" {
+        result = attempt {
+            use Client.mock app
+            (catalog.newest(), catalog.item (Lookup { id = 5 }))
+        }
+        Expect.equal (Ok (Item { id = 0, title = "newest" }, Item { id = 5, title = "item 5" })) result
+    }
+    , Test.test "record update stubs one operation of a generated client" {
+        stubbed = { shop | getUser = { _ -> Ok (User { id = 1, name = "Stub" }) } }
+        result = attempt {
+            use Client.mock teapot
+            (stubbed.getUser (GetUser { org = "teapot", id = 1, verbose = Nothing }), stubbed.count (Org { org = "acme" }))
+        }
+        Expect.equal (Ok (Ok (User { id = 1, name = "Stub" }), 1)) result
+    }
+    , Test.test "a runner handles the implementations' effects per call" {
+        result = Client.mock perCall {
+            first = attempt { shop.count (Org { org = "acme" }) }
+            second = attempt { shop.count (Org { org = "acme" }) }
+            refused = attempt { shop.clear (Org { org = "acme" }) }
+            (first, second, refused)
+        }
+        Expect.equal (Ok 42, Ok 42, Err (Web.Client.UnexpectedStatus 403 "{\"message\":\"Not for acme\"}")) result
+    }
+    , Test.test "a strict implementation answers only what a test stubs" {
+        stubbed = { strictUsers | count = { _ -> 3 } }
+        served : Request {Protocol, Expect.Expect, e} ->{Protocol, Expect.Expect, e} Response {Protocol, Expect.Expect, e}
+        served request = dispatch stubbed items admins Web.Server.direct request
+        counted = attempt {
+            use Client.mock served
+            shop.count (Org { org = "acme" })
+        }
+        Expect.equal (Ok 3) counted
+        message = failureMessage {
+            _ = attempt {
+                use Client.mock served
+                shop.getUser (GetUser { org = "acme", id = 2, verbose = Nothing })
+            }
+            ()
+        }
+        Expect.equal (Just "Unexpected call to users.getUser: GetUser { verbose = Nothing, id = 2, org = \"acme\" }") message
+    }
+    ]

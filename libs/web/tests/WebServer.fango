@@ -1,0 +1,121 @@
+module WebServer exposing (tests)
+
+import Bytes exposing (Bytes)
+import Expect
+import Fail exposing (Fail)
+import Http exposing (Body(..), Header(..), Protocol(..))
+import Http.Client as Client
+import Http.Server as Server exposing (Request(..), Response(..))
+import Maybe exposing (Maybe(..))
+import Reader
+import Result exposing (Result(..))
+import Shop.Api
+import Shop.Catalog exposing (Catalog(..), Item(..), Ratio(..))
+import Shop.Users exposing (User(..), UserError(..), Users(..))
+import String
+import Test
+import Web.Server
+import Writer
+
+dispatch = $(Web.Server.dispatch Shop.Api.api)
+
+users : Users e
+users =
+    { getUser = { query -> if query.id == 7 then Ok (User { id = 7, name = query.org }) else Err NoSuchUser }
+    , createUser = { request -> Ok request.user }
+    , clear = { _ -> () }
+    , count = { _ -> 1 }
+    }
+
+items : Catalog e
+items =
+    { item = { lookup -> Item { id = lookup.id, title = "item" } }
+    , newest = { _ -> Item { id = 0, title = "newest" } }
+    , search = { _ -> [] }
+    , file = { _ -> "" }
+    , trace = { traced -> traced.trace }
+    , ratio = { _ -> Ratio { value = 1.0 / 0.0 } }
+    }
+
+app : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
+app request = dispatch users items users Web.Server.direct request
+
+type Answer = { status : Int, allow : Maybe String, body : String }
+    deriving (Eq, Show)
+
+-- Sends one request through the in-memory transport and keeps what the
+-- server answered.
+exchange : String -> String -> List (String, String) -> Maybe String -> Result Client.Error Answer
+exchange method target headers body =
+    Fail.attempt {
+        use Client.mock app
+        plain = Client.request method ("http://shop.example" ++ target)
+        withHeaders = List.foldl { (name, value) outgoing -> Client.withHeader name value outgoing } plain headers
+        sent =
+            case body of
+                Just text -> Client.withBody (BytesBody (Bytes.fromString text)) withHeaders
+                Nothing -> withHeaders
+        reply = Client.fetch sent
+        Answer { status = reply.status, allow = Http.getHeader "Allow" reply.headers, body = Bytes.toStringLossy reply.body }
+    }
+
+json : List (String, String)
+json = [("Content-Type", "application/json")]
+
+statusOf : Result Client.Error Answer -> Int
+statusOf result =
+    case result of
+        Ok answer -> answer.status
+        Err _ -> 0
+
+-- The status the server writes for raw request bytes, with a body limit.
+statusLine : Int -> String -> String
+statusLine bodyLimit text =
+    (_, rendered) = Writer.collecting { output ->
+        Reader.withBytes (Bytes.fromString text) { input ->
+            Server.serveRequest 8192 65536 bodyLimit input output app
+        }
+    }
+    case String.split " " (Bytes.toStringLossy rendered) of
+        [_, status | _] -> status
+        _ -> ""
+
+tests : Test.Test {}
+tests = Test.describe "web server"
+    [ Test.test "a typed route answers with its endpoint's encoding" {
+        Expect.equal (Ok (Answer { status = 200, allow = Nothing, body = "{\"id\":7,\"name\":\"acme\"}" })) (exchange "GET" "/orgs/acme/users/7" [] Nothing)
+        Expect.equal (Ok (Answer { status = 404, allow = Nothing, body = "\"NoSuchUser\"" })) (exchange "GET" "/orgs/acme/users/8" [] Nothing)
+        Expect.equal (Ok (Answer { status = 204, allow = Nothing, body = "" })) (exchange "DELETE" "/orgs/acme/users" [] Nothing)
+    }
+    , Test.test "unmatched paths, other methods, and HEAD" {
+        Expect.equal (Ok (Answer { status = 404, allow = Nothing, body = "{\"message\":\"No route matches this path.\"}" })) (exchange "GET" "/nowhere" [] Nothing)
+        Expect.equal (Just "POST, DELETE, GET, HEAD") (Result.withDefault Nothing (Result.map { answer -> answer.allow } (exchange "PUT" "/orgs/acme/users" [] Nothing)))
+        Expect.equal 405 (statusOf (exchange "PUT" "/orgs/acme/users" [] Nothing))
+        Expect.equal (Ok (Answer { status = 200, allow = Nothing, body = "" })) (exchange "HEAD" "/orgs/acme/users" [] Nothing)
+    }
+    , Test.test "raw routes share matching with typed ones" {
+        Expect.equal (Ok (Answer { status = 200, allow = Nothing, body = "ok" })) (exchange "GET" "/health" [] Nothing)
+        Expect.equal 405 (statusOf (exchange "POST" "/health" [] Nothing))
+    }
+    , Test.test "invalid input answers 400 before the operation runs" {
+        Expect.equal 400 (statusOf (exchange "GET" "/orgs/acme/users/seven" [] Nothing))
+        Expect.equal 400 (statusOf (exchange "GET" "/orgs/acme/users/7?verbose=maybe" [] Nothing))
+        Expect.equal 400 (statusOf (exchange "GET" "/orgs/acme/users/7?verbose=true&verbose=false" [] Nothing))
+        Expect.equal 400 (statusOf (exchange "GET" "/search" [] Nothing))
+        Expect.equal 400 (statusOf (exchange "GET" "/trace" [] Nothing))
+        Expect.equal 400 (statusOf (exchange "GET" "/orgs/a%2Fb/users/7" [] Nothing))
+        Expect.equal 400 (statusOf (exchange "POST" "/orgs/acme/users" json (Just "{\"id\":1}")))
+    }
+    , Test.test "a body must be JSON" {
+        Expect.equal 415 (statusOf (exchange "POST" "/orgs/acme/users" [("Content-Type", "text/plain")] (Just "{\"id\":1,\"name\":\"x\"}")))
+        Expect.equal 200 (statusOf (exchange "POST" "/orgs/acme/users" [("Content-Type", "application/vnd.shop+json; charset=utf-8")] (Just "{\"id\":1,\"name\":\"x\"}")))
+    }
+    , Test.test "a result that cannot be encoded answers 500" {
+        Expect.equal 500 (statusOf (exchange "GET" "/ratio" [] Nothing))
+    }
+    , Test.test "the server's body limit applies" {
+        request = "POST /orgs/acme/users HTTP/1.1\r\nHost: shop\r\nContent-Type: application/json\r\nContent-Length: 22\r\n\r\n{\"id\":1,\"name\":\"long\"}"
+        Expect.equal "413" (statusLine 10 request)
+        Expect.equal "200" (statusLine 100 request)
+    }
+    ]

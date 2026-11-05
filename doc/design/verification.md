@@ -11,7 +11,7 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 | make test | Go unit tests and compiled Fango integration tests |
 | make test-suite | Combined Test framework suite and library documentation examples in one compiled executable |
 | make test-short | Short-mode Go tests and interpreter integration legs without compiled legs |
-| make test-grammar | TextMate tokenization of every .fango file under stdlib, testdata, and examples |
+| make test-grammar | TextMate tokenization of every .fango file under stdlib, libs, testdata, and examples |
 | make test-debug-native | Opt-in native source-stepping integration with Delve; requires host debugger access |
 | make check-files | Reject executable or oversized files in the Git index |
 | make ci | Indexed-file check, Go/Fango formatting, go vet, Go unit tests, and full interpreter/compiler differential checks |
@@ -53,6 +53,12 @@ match the complete passing summary byte-for-byte.
 The harness checks that every test module is imported and pins the case count so
 omitting a case cannot silently pass. Each module also has its own `main`, so
 `fango run testdata/suite/NAME.fango` runs just that module.
+[Optional libraries](../reference/modules.md#optional-libraries) get the same
+treatment from the [library harness](../../cmd/fango/libs_test.go), with the
+library enabled: each `libs/NAME/tests/Main.fango` suite runs with that
+library's documentation examples spliced in and a pinned case count, its
+`errors/` fixtures must fail with their `.error` diagnostic, and `fango doc
+--lib NAME --strict` must be clean.
 
 Computation, collection, parsing, and memory-reader checks compare returned values
 with `Expect.equal`, `Expect.notEqual`, and the unwrapping expectations. Rendering

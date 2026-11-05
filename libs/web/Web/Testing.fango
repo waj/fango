@@ -1,0 +1,36 @@
+-- Contract values for tests.
+--
+-- `strict` generates a value of a mounted contract's type whose every
+-- operation fails the test, naming the operation and its request. Record
+-- update then stubs only what a test expects:
+--
+-- ```text
+-- users = { $(Web.Testing.strict Shop.Api.users) | getUser = { _ -> Ok alice } }
+-- ```
+module Web.Testing exposing (strict)
+
+import Expect exposing (Inspect(..))
+import List exposing (List(..))
+import Meta exposing (Code, Items(..), Lift(..))
+import Result exposing (Result(..))
+import Web exposing (Mounted(..), Operation(..))
+
+listToItems : List a -> Items a
+listToItems items =
+    case items of
+        [] -> NoItems
+        [item | rest] -> Item item (listToItems rest)
+
+-- Generates a value of a mounted contract whose every operation fails
+-- through `Expect.failWith`, reporting the operation and `inspect` of its
+-- request.
+strict : Web.Entry -> Code
+strict entry =
+    case Web.mounted entry of
+        Err message -> Meta.fail message
+        Ok found ->
+            fields = List.map { operation ->
+                label = "Unexpected call to " ++ found.name ++ "." ++ operation.name ++ ": "
+                Meta.lambda ("_web_" ++ operation.name) { request -> `Expect.failWith ($(lift label) ++ inspect $(request))` }
+            } found.operations
+            Meta.construct found.ctor (listToItems fields)

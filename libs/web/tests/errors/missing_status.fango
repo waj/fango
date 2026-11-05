@@ -1,0 +1,14 @@
+import Web
+
+-- An error constructor without a status.
+type Problem = #[Web.Status 404] Missing | Broken
+    deriving (Web.Failure)
+
+type Bad e =
+    { #[Web.Get "/"]
+      ping : () ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

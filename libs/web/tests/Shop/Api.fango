@@ -1,0 +1,32 @@
+module Shop.Api exposing (admin, api, catalog, createUserEndpoint, getUserEndpoint, health, searchEndpoint, users)
+
+import Bytes
+import Http exposing (Body(..))
+import Http.Server exposing (Request(..), Response(..))
+import Http.Server.Route
+import Result exposing (Result(..))
+import Shop.Catalog exposing (Catalog(..), Search(..))
+import Shop.Users exposing (GetUser(..), NewUser(..), User(..), UserError(..), Users(..))
+import Web
+
+-- An untyped route, served beside the typed ones.
+health : List Http.Server.Route.Param -> Request e ->{e} Response e
+health _ _ = Response { status = 200, headers = [], body = BytesBody (Bytes.fromString "ok") }
+
+users = Web.mount "users" "/orgs/:org" (typeOf (Users {}))
+
+-- The same contract, mounted a second time.
+admin = Web.mount "admin" "/admin/orgs/:org" (typeOf (Users {}))
+
+catalog = Web.root "catalog" (typeOf (Catalog {}))
+
+api = Web.api [users, catalog, Web.raw "health" "GET /health" `health`, admin]
+
+getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
+getUserEndpoint = $(Web.endpoint users "getUser")
+
+createUserEndpoint : Web.Endpoint NewUser (Result UserError User)
+createUserEndpoint = $(Web.endpoint users "createUser")
+
+searchEndpoint : Web.Endpoint Search (List Shop.Catalog.Item)
+searchEndpoint = $(Web.endpoint catalog "search")

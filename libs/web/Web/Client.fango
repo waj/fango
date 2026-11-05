@@ -1,0 +1,90 @@
+-- Calling a typed API over HTTP.
+--
+-- `client` generates a value of a mounted contract's own type, given the
+-- server's base URL. Each field calls its operation with `call`:
+--
+-- ```text
+-- shop : Users {Http.Client.Http, Fail Web.Client.Error}
+-- shop = $(Web.Client.client Shop.Api.users) "https://shop.example"
+-- ```
+--
+-- Every failure is raised in the caller's context, so `Fail.attempt`
+-- around one call recovers that call's failure and later calls proceed. A
+-- domain error is not a failure: it is the operation's `Result`.
+module Web.Client exposing (Error(..), call, client)
+
+import Fail exposing (Fail)
+import Http exposing (Body(..), Header(..))
+import Http.Client
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Meta exposing (Code, Items(..))
+import Result exposing (Result(..))
+import String
+import Web exposing (Endpoint(..), Mounted(..), Operation(..), Outgoing(..), Reply(..))
+
+-- Why a call failed.
+type Error
+    -- The HTTP client failed: no connection, a timeout, or a reply larger
+    -- than its limit.
+    = Transport Http.Client.Error
+    -- The reply's status is not one the endpoint declares; with its body.
+    | UnexpectedStatus Int String
+    -- A declared status whose body or media type does not match.
+    | InvalidResponse String
+    -- A request field the endpoint cannot carry.
+    | InvalidRequest String
+    deriving (Eq, Show)
+
+trimSlash : String -> String
+trimSlash base =
+    size = String.length base
+    if size > 0 && String.slice (size - 1) size base == "/" then trimSlash (String.slice 0 (size - 1) base) else base
+
+withHeaders : List Header -> Http.Client.Request e -> Http.Client.Request e
+withHeaders headers outgoing =
+    case headers of
+        [] -> outgoing
+        [header | rest] -> withHeaders rest (Http.Client.withHeader header.name header.value outgoing)
+
+-- Calls one endpoint of the server at `base`, such as
+-- `"https://shop.example"`. Redirects are not followed, so the endpoint's
+-- own response is what is checked.
+call : Endpoint request response -> String -> request ->{Http.Client.Http, Fail Error} response
+call described base request =
+    sent =
+        case Web.outgoing described request of
+            Ok found -> found
+            Err message -> Fail.fail (InvalidRequest message)
+    plain = withHeaders sent.headers (Http.Client.request sent.method (trimSlash base ++ sent.target))
+    message =
+        case sent.body of
+            Just bytes -> Http.Client.withBody (BytesBody bytes) plain
+            Nothing -> plain
+    received =
+        case Fail.attempt { Http.Client.configure { config -> { config | maxRedirects = 0 } } { Http.Client.fetch message } } of
+            Ok found -> found
+            Err problem -> Fail.fail (Transport problem)
+    case described.response.read (Reply { status = received.status, headers = received.headers, body = received.body }) of
+        Ok value -> value
+        Err (Web.UnexpectedStatus status text) -> Fail.fail (UnexpectedStatus status text)
+        Err (Web.InvalidResponse problem) -> Fail.fail (InvalidResponse problem)
+
+listToItems : List a -> Items a
+listToItems items =
+    case items of
+        [] -> NoItems
+        [item | rest] -> Item item (listToItems rest)
+
+-- Generates a client of a mounted contract: a function from the server's
+-- base URL to a value of the contract's type whose fields `call` their
+-- endpoints.
+client : Web.Entry -> Code
+client entry =
+    case Web.mounted entry of
+        Err message -> Meta.fail message
+        Ok found ->
+            Meta.lambda "_web_base" { base ->
+                fields = List.map { operation -> Meta.lambda ("_web_" ++ operation.name) { request -> `call $(operation.endpoint) $(base) $(request)` } } found.operations
+                Meta.construct found.ctor (listToItems fields)
+            }

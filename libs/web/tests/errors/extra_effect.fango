@@ -1,0 +1,11 @@
+import Web
+
+-- An operation that performs an effect beyond the contract's row.
+type Bad e =
+    { #[Web.Get "/"]
+      ping : () ->{Console, e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

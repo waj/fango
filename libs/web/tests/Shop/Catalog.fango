@@ -1,0 +1,60 @@
+module Shop.Catalog exposing (Catalog(..), FilePath(..), Item(..), Lookup(..), Ratio(..), Search(..), Tag(..), Traced(..))
+
+import Json
+import Result exposing (Result(..))
+import Web
+
+type Tag = Sale | New
+    deriving (Eq, Show, Web.Param)
+
+type Item = { id : Int, title : String }
+    deriving (Eq, Show, Json.Encode, Json.Decode)
+
+type Lookup =
+    { #[Web.Path "id"]
+      id : Int
+    }
+    deriving (Eq, Show)
+
+type Search =
+    { #[Web.Query "q"]
+      q : String
+    , #[Web.Query "tag"]
+      tags : List Tag
+    , #[Web.Query "limit"]
+      limit : Maybe Int
+    }
+    deriving (Eq, Show)
+
+type FilePath =
+    { #[Web.Path "path"]
+      path : List String
+    }
+    deriving (Eq, Show)
+
+type Traced =
+    { #[Web.Header "X-Trace"]
+      trace : String
+    , #[Web.Header "X-Note"]
+      note : Maybe String
+    }
+    deriving (Eq, Show)
+
+type Ratio = { value : Float }
+    deriving (Eq, Show, Json.Encode, Json.Decode)
+
+-- Routes that exercise matching, query forms, headers, and encoding.
+type Catalog e =
+    { #[Web.Get "/items/:id"]
+      item : Lookup ->{e} Item
+    , #[Web.Get "/items/new"]
+      newest : () ->{e} Item
+    , #[Web.Get "/search"]
+      search : Search ->{e} List Item
+    , #[Web.Get "/files/*path"]
+      file : FilePath ->{e} String
+    , #[Web.Get "/trace"]
+      trace : Traced ->{e} String
+    , #[Web.Get "/ratio"]
+      ratio : () ->{e} Ratio
+    }

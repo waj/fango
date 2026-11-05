@@ -92,6 +92,7 @@ func TestDeclSpanCoversDeclaration(t *testing.T) {
 func TestDeclSpansAreOrderedAndDisjoint(t *testing.T) {
 	roots := []string{
 		filepath.Join("..", "..", "stdlib"),
+		filepath.Join("..", "..", "libs"),
 		filepath.Join("..", "..", "examples"),
 		filepath.Join("..", "..", "testdata", "parse"),
 	}

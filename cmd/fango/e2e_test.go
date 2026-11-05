@@ -100,7 +100,7 @@ func cliCompiledBinary(t *testing.T, source string) string {
 	return buildCLIBinary(t, source, absSource, b)
 }
 
-func buildCLIBinary(t *testing.T, source, absSource string, b *cliBuild) string {
+func buildCLIBinary(t *testing.T, source, absSource string, b *cliBuild, libraries ...string) string {
 	t.Helper()
 	b.once.Do(func() {
 		dir, err := os.MkdirTemp(filepath.Dir(cliBinary(t)), "program-")
@@ -109,7 +109,11 @@ func buildCLIBinary(t *testing.T, source, absSource string, b *cliBuild) string 
 			return
 		}
 		b.binary = filepath.Join(dir, "program")
-		cmd := exec.Command(cliBinary(t), "build", "-o", b.binary, absSource)
+		args := []string{"build", "-o", b.binary}
+		for _, library := range libraries {
+			args = append(args, "--lib", library)
+		}
+		cmd := exec.Command(cliBinary(t), append(args, absSource)...)
 		cmd.Env = append(os.Environ(),
 			"FANGO_INTERNAL_STRICT_DIRECTIVES=1",
 			"FANGO_BUILD_DIR="+filepath.Join(dir, "build"))
@@ -556,6 +560,13 @@ func runDifferentialCase(t *testing.T, path string, compiled compiledRunner) {
 // A compiled-only run avoids the interpreter's graph compilation and worker.
 func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner, in fixtureInputs, expected string) {
 	t.Helper()
+	runDifferentialCaseIn(t, path, nil, compiled, in, expected)
+}
+
+// runDifferentialCaseIn is runDifferentialCaseWith compiling the interpreted
+// leg in session, which may enable libraries; compiled must match it.
+func runDifferentialCaseIn(t *testing.T, path string, session *compilationSession, compiled compiledRunner, in fixtureInputs, expected string) {
+	t.Helper()
 	if !interpreterTestsEnabled() {
 		runCompiledCaseWith(t, compiled, in, expected)
 		return
@@ -565,7 +576,7 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 	// status. A fixture with a sibling sidecar gets its own worker, exactly as a user
 	// module would in an interpreter session.
 	var stderr bytes.Buffer
-	prog, _, _, _, sources, ok := compileFileGraph(path, &stderr)
+	prog, _, _, _, sources, ok := compileFileGraphSession(path, &stderr, session)
 	if !ok {
 		t.Fatalf("compile failed:\n%s", stderr.String())
 	}

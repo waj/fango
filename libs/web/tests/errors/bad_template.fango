@@ -1,0 +1,16 @@
+import Web
+
+-- A rest capture that is not last.
+type Ping =
+    { #[Web.Path "rest"]
+      rest : String
+    }
+
+type Bad e =
+    { #[Web.Get "/*rest/x"]
+      ping : Ping ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

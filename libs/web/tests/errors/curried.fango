@@ -1,0 +1,11 @@
+import Web
+
+-- An operation with two arguments.
+type Bad e =
+    { #[Web.Get "/"]
+      ping : () -> () ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

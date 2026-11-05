@@ -90,14 +90,14 @@ func batchRunner(path string) compiledRunner {
 // the runner, rather than in a path-global cache, isolates tests that rewrite a
 // temporary source at the same path. Dedicated command tests cover the Fango
 // run wrapper itself.
-func cliRunner(path string) compiledRunner {
+func cliRunner(path string, libraries ...string) compiledRunner {
 	b := new(cliBuild)
 	return func(t *testing.T, in fixtureInputs, dir string) (string, int) {
 		absPath, err := filepath.Abs(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return runCompiled(t, exec.Command(buildCLIBinary(t, path, absPath, b), in.args...), in, dir)
+		return runCompiled(t, exec.Command(buildCLIBinary(t, path, absPath, b, libraries...), in.args...), in, dir)
 	}
 }
 

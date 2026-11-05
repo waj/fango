@@ -1,0 +1,18 @@
+import Web
+
+-- A request with two body fields.
+type Ping =
+    { #[Web.Body]
+      a : Int
+    , #[Web.Body]
+      b : Int
+    }
+
+type Bad e =
+    { #[Web.Post "/"]
+      ping : Ping ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())

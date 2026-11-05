@@ -1,0 +1,14 @@
+import Web
+
+-- A parameter type that is neither a wrapper nor a nullary union.
+type Pair = Pair Int Int
+    deriving (Web.Param)
+
+type Bad e =
+    { #[Web.Get "/"]
+      ping : () ->{e} ()
+    }
+
+bad = Web.mount "bad" "/" (typeOf (Bad {}))
+
+main() = print (Web.link $(Web.endpoint bad "ping") ())
