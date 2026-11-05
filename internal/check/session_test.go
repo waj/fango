@@ -1060,3 +1060,42 @@ main() = print "ok"
 	}
 
 }
+
+// A splice inside a module, here its own `deriving (Show)`, installs the
+// stage groups completed before it. They belong to the module's cached stage
+// Core all the same: a consumer checked from source later runs the deriver
+// declared above that splice.
+func TestCachedStageCoreKeepsGroupsInstalledBySplicesInside(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	write("Encode.fango", `module Encode exposing (Encode(..), Pair(..))
+
+import Meta exposing (Bound(..), Code, Ctor(..), TypeInfo(..))
+
+class Encode a
+    encode : a -> String
+
+body : Bound -> Code
+body bound = Meta.lift bound.ctor.name
+
+deriver Encode
+    encode subject valueCode = Meta.match subject valueCode body
+
+type Pair = Pair Int Int deriving (Show)
+`)
+	write("Types.fango", "module Types exposing (Shape(..))\n\nimport Encode exposing (Encode(..))\n\ntype Shape = Circle | Square deriving (Encode)\n")
+	entry := write("Main.fango", "module Main exposing (main)\n\nimport Encode exposing (Encode(..))\nimport Types exposing (Shape(..))\n\nmain() = print (encode Circle)\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, entry, cache)
+	write("Types.fango", "module Types exposing (Shape(..))\n\nimport Encode exposing (Encode(..))\n\ntype Shape = Circle | Square | Triangle deriving (Encode)\n")
+	_, events := compileEvents(t, entry, cache)
+	if events["checked-cache-hit"]["Encode"] != 1 || events["check"]["Types"] != 1 {
+		t.Fatalf("expected a cached Encode and a checked Types: %#v", events)
+	}
+}

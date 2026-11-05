@@ -115,7 +115,10 @@ module's declarative stage Core for its installable module object; this includes
 compile-time-only definitions and ordinary functions a later splice may call.
 Pending prompt groups are completed before an imported module starts, so its
 persistent stage section contains only that module's definitions and never
-prompt source provenance. The snapshot runs after runtime elaboration and runs
+prompt source provenance. The section spans everything installed since the
+module started, including the groups a splice inside the module installed
+before it ran, so a deriver declared above the module's own `deriving` is
+part of it. The snapshot runs after runtime elaboration and runs
 the same `decl`. The
 runtime Core differs only by scalar specialization, which erases values the
 analysis already treats as scalars. So the snapshot solves every definition's

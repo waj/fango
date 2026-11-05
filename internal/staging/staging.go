@@ -196,6 +196,7 @@ func ReadAll(reads []func()) []time.Duration {
 func (s *Session) BeginModule(names ...string) {
 	s.ev.currentOwner = ownerSet(names)
 	s.ev.stageDependencies = map[string]bool{}
+	s.ev.snapshotDefs, s.ev.snapshotGroups = len(s.ev.defs), len(s.ev.groups)
 }
 
 func ownerSet(names []string) map[string]bool {
@@ -269,13 +270,16 @@ func (s *Session) StageReferences(defs []core.Def, names ...string) []string {
 }
 
 // Snapshot completes and returns the stage Core added since the prior
-// snapshot. It is declarative Core; evaluator closures and memo cells are not
-// exposed to module objects.
+// snapshot or the start of the module, whichever is later. A splice inside the
+// module installs the groups completed before it, so those belong to the
+// module's snapshot too, not only what completing it adds. It is declarative
+// Core; evaluator closures and memo cells are not exposed to module objects.
 func (s *Session) Snapshot() (SnapshotObject, []diag.Error) {
-	beforeDefs, beforeGroups := len(s.ev.defs), len(s.ev.groups)
 	if errs := s.ev.sync(); len(errs) != 0 {
 		return SnapshotObject{}, errs
 	}
+	beforeDefs, beforeGroups := min(s.ev.snapshotDefs, len(s.ev.defs)), min(s.ev.snapshotGroups, len(s.ev.groups))
+	s.ev.snapshotDefs, s.ev.snapshotGroups = len(s.ev.defs), len(s.ev.groups)
 	groups := append([]Group(nil), s.ev.groups[beforeGroups:]...)
 	for i := range groups {
 		groups[i].End -= beforeDefs
@@ -365,12 +369,16 @@ type evaluator struct {
 	stageDependencies   map[string]bool
 	pending             []deferred
 	observe             Observer
+	// snapshotDefs and snapshotGroups mark where the next snapshot starts:
+	// the end of the prior snapshot, or the start of the current module.
+	snapshotDefs, snapshotGroups int
 }
 
 func (ev *evaluator) resetToBase() {
 	ev.env = stageEnv(ev.ck)
 	ev.defs = append([]core.Def(nil), ev.baseDefs...)
 	ev.groups = append([]Group(nil), ev.baseGroups...)
+	ev.snapshotDefs, ev.snapshotGroups = min(ev.snapshotDefs, len(ev.defs)), min(ev.snapshotGroups, len(ev.groups))
 	if len(ev.baseDefs) != 0 {
 		ev.env.DefineProg(&core.Prog{ADTs: ev.ck.ADTOrder, Defs: ev.baseDefs, Natives: ev.ck.Natives})
 	}
