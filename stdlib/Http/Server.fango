@@ -285,7 +285,7 @@ serveConnection config connection handler =
 -- Each worker installs its own connection, buffer, protocol, and Fail
 -- handlers. Only a fatal accept error leaves this runner; its task captures
 -- that error and reports it through the server's shutdown channel.
-worker : Config -> Net.Listener -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{Async, Net.Network, Fail Net.Error} ()
+worker : Config -> Net.Listener -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{Async, Net.Network, Fail Net.Error, e} ()
 worker config listener handler =
     loop() =
         outcome = attempt {
@@ -330,7 +330,7 @@ listenerResult stopped first =
                 Just (Just error) -> Err error
                 _ -> Ok ()
 
-runListener : Config -> Channel () -> Net.Listener -> (Channel (Maybe Net.Error) ->{Async, Net.Network} List (Task ())) ->{Async, Net.Network, Fail Net.Error} ()
+runListener : Config -> Channel () -> Net.Listener -> (Channel (Maybe Net.Error) ->{Async, Net.Network, e} List (Task ())) ->{Async, Net.Network, Fail Net.Error, e} ()
 runListener config stop listener startWorkers =
     result = Async.scope {
         events = Async.channel (config.workers + 1)
@@ -358,14 +358,21 @@ runListener config stop listener startWorkers =
 -- error's status, and afterwards it closes the connection, so
 -- `Http.Server.Route.dispatch` and `Http.abortBody` need no handler of their
 -- own. A handler of type `Request e ->{e} Response e` also fits. Handle
--- application errors inside the handler. Connection failures are recovered
+-- application errors inside the handler. The handler may perform the
+-- resumptive effects handled around `serve`: every worker task inherits
+-- those handlers and their state, which is how one handler, such as a
+-- connection pool, serves the whole server. Abort effects such as `Fail` are
+-- not inherited, so the handler handles its own. A handler that reads the
+-- request body under effects it handles itself is best a named, annotated
+-- function: inline, those effects would widen the row `serve` is called
+-- with. Connection failures are recovered
 -- inside workers and do not stop unrelated connections. Fatal accept errors
 -- trigger coordinated shutdown through the server's event channel; `serve`
 -- raises the selected Net error in the caller after its workers are joined.
-serve : Config -> Channel () -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{Async, Net.Network, Fail Net.Error} ()
+serve : Config -> Channel () -> (Request {Protocol, #s} ->{Protocol, #s} Response {Protocol, #s}) ->{Async, Net.Network, Fail Net.Error, e} ()
 serve config stop handler =
     Net.withListener config.port { listener ->
-        startWorkers : Channel (Maybe Net.Error) ->{Async, Net.Network} List (Task ())
+        startWorkers : Channel (Maybe Net.Error) ->{Async, Net.Network, e} List (Task ())
         startWorkers events =
             loop remaining =
                 if remaining <= 0 then []

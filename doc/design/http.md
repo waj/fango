@@ -50,8 +50,12 @@ completion carries no server failure policy; see [tasks](tasks.md#async-runtime-
 
 `Http.Server.Route` and `Http.GZip` are ordinary handlers over `Request` and
 `Response`. They do not change the server's application error contract. The
-application's handler must discharge its own effects, apart from the network
-and protocol effects that the server provides.
+application's handler discharges its own abort effects. Its resumptive effects
+may instead be handled around `serve`: `serve`'s row is open, and the worker
+tasks inherit those handlers, so one handler, a connection pool for instance,
+serves every connection. Effects handled inside the handler would also have to
+appear in the request's reader row, which is the server's, so they cannot be
+handled per request around a library dispatcher.
 
 ## Message types per direction
 

@@ -1,4 +1,3 @@
-import Process
 import Async
 import Bytes
 import Fail exposing (Fail)
@@ -6,6 +5,8 @@ import Http exposing (Body(..))
 import Http.Client as Client
 import Http.Server
 import IO
+import Net
+import Process
 import Result exposing (Result(..))
 import String
 import Url
@@ -16,27 +17,33 @@ attemptClient : (() ->{Fail Client.Error, e} a) ->{e} Result Client.Error a
 attemptClient action = Fail.attempt action
 
 -- Forwards each request body to the upstream URL as it arrives, and answers
--- with the upstream reply.
+-- with the upstream reply. Annotated, it is generalized over the server's
+-- row: as an inline lambda, the client effects its streamed body runs under
+-- would widen the row `serve` is called with.
+proxy : String -> Http.Server.Request {Http.Protocol, Net.Network, e} ->{Http.Protocol, Net.Network, e} Http.Server.Response {Http.Protocol, Net.Network, e}
+proxy upstream request =
+    outcome = attemptClient {
+        Client.run {
+            Client.configure { config -> { config | baseUrl = Url.parse upstream } } {
+                forwarded = StreamBody { w -> Writer.copy request.body w }
+                Client.post request.target forwarded
+            }
+        }
+    }
+    case outcome of
+        Ok reply -> Http.Server.Response { status = reply.status, headers = [], body = BytesBody reply.body }
+        Err error -> Http.Server.Response { status = 502, headers = [], body = BytesBody (Bytes.fromString (show error)) }
+
 main() =
     case Process.args() of
         [raw, upstream] ->
             case String.toInt raw of
                 Just port ->
-                    print (Fail.attempt { Async.runOutcome {
-                            stop = Async.channel 1
-                            Http.Server.serve (Http.Server.defaultConfig port) stop { request ->
-                                outcome = attemptClient {
-                                    Client.run {
-                                        Client.configure { config -> { config | baseUrl = Url.parse upstream } } {
-                                            forwarded = StreamBody { w -> Writer.copy request.body w }
-                                            Client.post request.target forwarded
-                                        }
-                                    }
-                                }
-                                case outcome of
-                                    Ok reply -> Http.Server.Response { status = reply.status, headers = [], body = BytesBody reply.body }
-                                    Err error -> Http.Server.Response { status = 502, headers = [], body = BytesBody (Bytes.fromString (show error)) }
+                    print (Fail.attempt {
+                            Async.runOutcome {
+                                stop = Async.channel 1
+                                Http.Server.serve (Http.Server.defaultConfig port) stop (proxy upstream)
                             }
-                    } })
+                    })
                 Nothing -> Process.exit (Process.status 2)
         _ -> Process.exit (Process.status 2)
