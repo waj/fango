@@ -2,7 +2,7 @@ module MetaReflect exposing (tests)
 
 import Expect
 import List exposing (List(..))
-import Meta exposing (Code, Ctor(..), Field(..), Items(..), Reflected(..), TypeInfo(..))
+import Meta exposing (Arrow(..), ArrowInfo(..), Code, Ctor(..), Effect(..), Field(..), Items(..), Reflected(..), Tail(..), TypeInfo(..))
 import Test
 
 type Point = { x : Int, y : Int }
@@ -47,6 +47,33 @@ fieldNames repr =
                 Item ctor _ ->
                     Meta.lift (Meta.foldItems { text field -> text ++ field.name ++ ":" ++ Meta.typeName field.ty ++ " " } "" ctor.fields)
 
+-- A type indexed by an effect row reflects at a closed row. Its fields are
+-- instantiated there, so each arrow is closed, with exactly that row's
+-- effects.
+type Service e = { call : Int ->{e} String, log : String ->{e} () }
+
+arrowShape : Meta.TypeRepr -> String
+arrowShape ty =
+    case Meta.arrow ty of
+        NotArrow -> "value"
+        Arrow arrow ->
+            tail =
+                case arrow.tail of
+                    Closed -> "closed"
+                    Open _ -> "open"
+            effects = Meta.foldItems { text label -> text ++ label.name ++ " " } "" arrow.effects
+            Meta.typeName arrow.param ++ " {" ++ effects ++ tail ++ "}"
+
+rowShape : Meta.TypeRepr -> Code
+rowShape repr =
+    case Meta.info repr of
+        Opaque -> Meta.lift "opaque"
+        Visible schema ->
+            case Meta.ctorsIn schema of
+                NoItems -> Meta.lift "none"
+                Item ctor _ ->
+                    Meta.lift (Meta.foldItems { text field -> text ++ field.name ++ ": " ++ arrowShape field.ty ++ "; " } "" ctor.fields)
+
 tests : Test.Test {}
 tests = Test.test "meta_reflect" {
     Expect.equal True $(sameInt)
@@ -59,6 +86,9 @@ tests = Test.test "meta_reflect" {
     Expect.equal "x:Int y:Int " $(fieldNames (typeOf Point))
     Expect.equal "opaque List" $(summary (Meta.head (typeOf (List Int))))
     Expect.equal False $(Meta.lift (Meta.isVar (typeOf Int)))
+    Expect.equal 1 $(Meta.lift (Meta.lengthItems (Meta.args (typeOf (Service {})))))
+    Expect.equal "call: Int {closed}; log: String {closed}; " $(rowShape (typeOf (Service {})))
+    Expect.equal "call: Int {Console closed}; log: String {Console closed}; " $(rowShape (typeOf (Service {Console})))
 }
 
 main() = Test.run tests

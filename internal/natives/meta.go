@@ -137,7 +137,7 @@ func installMeta(t map[string]Spec) {
 		if adt == nil || c == nil || n < 0 || n >= len(c.Fields) {
 			return r
 		}
-		return r.Derive(types.SubstRigid(c.Fields[n], adt.ParamSubst(argsOf(r))))
+		return r.Derive(flattenRows(types.SubstRigid(c.Fields[n], adt.ParamSubst(argsOf(r)))))
 	})
 	collection := func(r *meta.TypeRepr, entries []types.AttributeInfo) (any, error) {
 		if adt := r.ADT(); adt != nil && adt.AttributesPending {
@@ -432,6 +432,51 @@ func installMeta(t map[string]Spec) {
 }
 
 func repr(v any) *meta.TypeRepr { return v.(*meta.TypeRepr) }
+
+// flattenRows splices a row that instantiation left as another row's tail
+// into that row. A field `A ->{e} B` of a type reflected at `e := {}` is then
+// a closed arrow, rather than one whose tail is the empty row.
+func flattenRows(t types.Type) types.Type {
+	switch t := t.(type) {
+	case *types.TCon:
+		if len(t.Args) == 0 {
+			return t
+		}
+		args := make([]types.Type, len(t.Args))
+		for i, a := range t.Args {
+			args[i] = flattenRows(a)
+		}
+		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
+	case *types.TFun:
+		return &types.TFun{Arg: flattenRows(t.Arg), Eff: flattenRow(t.Eff), Ret: flattenRows(t.Ret), Control: t.Control, OpenRow: t.OpenRow}
+	case types.Row:
+		return flattenRow(t)
+	default:
+		return t
+	}
+}
+
+func flattenRow(r types.Row) types.Row {
+	labels := make([]types.EffLabel, len(r.Labels))
+	for i, l := range r.Labels {
+		args := make([]types.Type, len(l.Args))
+		for j, a := range l.Args {
+			args[j] = flattenRows(a)
+		}
+		l.Args = args
+		labels[i] = l
+	}
+	tail := r.Tail
+	for {
+		extra, ok := tail.(types.Row)
+		if !ok {
+			break
+		}
+		labels = append(labels, flattenRow(extra).Labels...)
+		tail = extra.Tail
+	}
+	return types.SortedRow(types.Row{Labels: labels, Tail: tail})
+}
 
 func moduleOf(canonical string) string {
 	if i := strings.LastIndexByte(canonical, '.'); i >= 0 {

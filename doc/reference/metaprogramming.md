@@ -17,6 +17,12 @@ function arrows compare structurally, including the effects on each arrow.
 `Meta.sameType`, `Meta.head`, `Meta.args`, `Meta.isVar`, and `Meta.typeName`
 inspect this representation; display text never determines identity.
 
+A type indexed by an effect row is closed at a closed row: `typeOf (Service {})`
+and `typeOf (Service {Console})` reflect, while a row with a variable, such as
+`{Console, e}`, is a `REFLECTION ERROR`. The row is one of `Meta.args`, and the
+fields of `Meta.info` are instantiated at it, so a field `Int ->{e} String`
+reflects as a closed arrow whose effects are exactly that row's.
+
 `Meta.Lift` provides `lift : a -> Code` for `Int`, `Float`, `String`, `Char`,
 `Bool`, and `()`. The generated literal retains its scalar type. `Meta.fail`
 stops expansion and reports `COMPILE-TIME FAILURE` at the splice site.

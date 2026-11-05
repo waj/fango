@@ -181,6 +181,20 @@ func (ck *Checker) reflectionClosed(t types.Type) bool {
 			}
 		}
 		return true
+	case types.Row:
+		// A row argument, as in `Users {}` for a type indexed by an effect
+		// row, is closed when it has no tail and closed label arguments.
+		if t.Tail != nil {
+			return false
+		}
+		for _, label := range t.Labels {
+			for _, arg := range label.Args {
+				if !ck.reflectionClosed(arg) {
+					return false
+				}
+			}
+		}
+		return true
 	default:
 		return false
 	}

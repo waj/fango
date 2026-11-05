@@ -1,0 +1,9 @@
+import Meta
+
+type Service e = { call : Int ->{e} String }
+
+-- A row argument is reflectable only when it is closed.
+shape : Meta.TypeRepr
+shape = typeOf (Service {Console, e})
+
+main() = print "unreachable"
