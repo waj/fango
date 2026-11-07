@@ -1,11 +1,13 @@
 -- Calling a typed API over HTTP.
 --
--- `client` generates a value of a mounted contract's own type, given the
--- server's base URL. Each field calls its operation with `call`:
+-- `client` generates a value of a contract's own type, given the server's
+-- base URL. It takes an API and the dotted location of a contract in it,
+-- `""` for the API itself. Each operation calls its endpoint with `call`, and
+-- each mounted field is a client of its own contract:
 --
 -- ```text
 -- shop : Users {Http.Client.Http, Fail Web.Client.Error}
--- shop = $(Web.Client.client Shop.Api.users) "https://shop.example"
+-- shop = $(Web.Client.client (typeOf (Shop {})) "users") "https://shop.example"
 -- ```
 --
 -- Every failure is raised in the caller's context, so `Fail.attempt`
@@ -21,7 +23,7 @@ import Maybe exposing (Maybe(..))
 import Meta exposing (Code, Items(..))
 import Result exposing (Result(..))
 import String
-import Web exposing (Endpoint(..), Mounted(..), Operation(..), Outgoing(..), Reply(..))
+import Web exposing (Contract(..), Endpoint(..), Operation(..), Outgoing(..), Part(..), Reply(..))
 
 -- Why a call failed.
 type Error
@@ -76,15 +78,21 @@ listToItems items =
         [] -> NoItems
         [item | rest] -> Item item (listToItems rest)
 
--- Generates a client of a mounted contract: a function from the server's
--- base URL to a value of the contract's type whose fields `call` their
--- endpoints.
-client : Web.Entry -> Code
-client entry =
-    case Web.mounted entry of
+clientOf : Code -> Contract -> Code
+clientOf base contract =
+    fields = List.map { part ->
+        case part of
+            OperationPart operation -> Meta.lambda ("_web_" ++ operation.name) { request -> `call $(operation.endpoint) $(base) $(request)` }
+            MountPart inner -> clientOf base inner
+            RawPart _ location _ _ -> Meta.fail ("The raw route `" ++ location ++ "` has no client; generate one for a mounted contract without raw routes.")
+    } contract.parts
+    Meta.construct contract.ctor (listToItems fields)
+
+-- Generates a client of the contract at a dotted location of an API: a
+-- function from the server's base URL to a value of the contract's type. A
+-- raw route has no client, so the contract must have none.
+client : Meta.TypeRepr -> String -> Code
+client api location =
+    case Web.contractAt api location of
         Err message -> Meta.fail message
-        Ok found ->
-            Meta.lambda "_web_base" { base ->
-                fields = List.map { operation -> Meta.lambda ("_web_" ++ operation.name) { request -> `call $(operation.endpoint) $(base) $(request)` } } found.operations
-                Meta.construct found.ctor (listToItems fields)
-            }
+        Ok found -> Meta.lambda "_web_base" { base -> clientOf base found }

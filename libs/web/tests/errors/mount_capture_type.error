@@ -1,1 +1,1 @@
-The mount `bad` capture `org` is a `String` in `a` but a `Int` in `b`.
+The mount `bad` capture `org` is a `String` in `bad.a` but a `Int` in `bad.b`.

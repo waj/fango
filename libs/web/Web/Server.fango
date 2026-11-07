@@ -1,13 +1,13 @@
 -- Serving a typed API with the HTTP server.
 --
--- `dispatch` generates a request handler from an API tree. It takes one
--- implementation of each mounted contract, in tree order, and then the
--- request:
+-- `dispatch` generates a request handler from an API. It takes the API's
+-- implementation, one record whose mounted fields implement their contracts
+-- and whose raw fields are their handlers, and then the request:
 --
 -- ```text
--- dispatch = $(Web.Server.dispatch Shop.Api.api)
+-- dispatch = $(Web.Server.dispatch (typeOf (Shop {})))
 --
--- main() = Db.run { Http.Server.serve config stop { request -> dispatch serveUsers request } }
+-- main() = Db.run { Http.Server.serve config stop { request -> dispatch { users = serveUsers, health = health } request } }
 -- ```
 --
 -- The implementations' own effects are those of the server's handler, so
@@ -36,7 +36,7 @@ import Reader
 import Result exposing (Result(..))
 import String
 import Url
-import Web exposing (Endpoint(..), Incoming(..), Mounted(..), Operation(..), Rejection(..), Reply(..), Segment(..))
+import Web exposing (Contract(..), Endpoint(..), Incoming(..), Operation(..), Part(..), Rejection(..), Reply(..), Segment(..))
 import Writer
 
 -- How a route answers: through a typed endpoint, with the whole body read,
@@ -103,7 +103,7 @@ route described implementation =
     }
     Route { method = described.method, template = templateOf described.template, answer = Typed typed }
 
--- A raw route, which generated dispatchers build from `Web.raw` entries.
+-- A raw route, which generated dispatchers build from `#[Web.Raw]` fields.
 rawRoute : String -> String -> (List Http.Server.Route.Param -> Request e ->{e} Response e) -> Route e
 rawRoute method template handler = Route { method = method, template = templateOf template, answer = Untyped handler }
 
@@ -246,40 +246,35 @@ listCode items =
         [] -> `[]`
         [item | rest] -> `[$(item) | $(listCode rest)]`
 
-operationRoutes : List Operation -> Items BoundField -> List Code
-operationRoutes operations fields =
-    case (operations, fields) of
-        ([operation | rest], Item field more) -> [`route $(operation.endpoint) $(field.value)` | operationRoutes rest more]
-        _ -> []
-
 append : List a -> List a -> List a
 append left right =
     case left of
         [] -> right
         [item | rest] -> [item | append rest right]
 
-dispatchFrom : Int -> List Web.Entry -> List Code -> Code
-dispatchFrom index entries routes =
-    case entries of
-        [] -> Meta.lambda "_web_dispatch_request" { request -> `serve $(listCode routes) $(request)` }
-        [entry | rest] ->
-            case Web.rawRoute entry of
-                Just (method, template, handler) -> dispatchFrom index rest (append routes [`rawRoute $(lift method) $(lift template) $(handler)`])
-                Nothing ->
-                    case Web.mounted entry of
-                        Err message -> Meta.fail message
-                        Ok found ->
-                            Meta.lambda ("_web_dispatch_" ++ show index) { implementation ->
-                                Meta.match found.info implementation { bound ->
-                                    dispatchFrom (index + 1) rest (append routes (operationRoutes found.operations bound.fields))
-                                }
-                            }
+-- The routes of an implementation, bound field by field, handed to `finish`.
+contractRoutes : Contract -> Code -> (List Code -> Code) -> Code
+contractRoutes contract implementation finish =
+    Meta.match contract.info implementation { bound -> partRoutes contract.parts bound.fields [] finish }
 
--- Generates the request handler of an API tree: a function taking one
--- implementation of each mounted contract, in tree order, and then the
--- request. Conflicting routes and duplicate entry names fail here.
-dispatch : Web.Api -> Code
-dispatch tree =
-    case Web.apiRoutes tree of
+partRoutes : List Part -> Items BoundField -> List Code -> (List Code -> Code) -> Code
+partRoutes parts fields routes finish =
+    case (parts, fields) of
+        ([part | rest], Item field more) ->
+            case part of
+                OperationPart operation -> partRoutes rest more (append routes [`route $(operation.endpoint) $(field.value)`]) finish
+                RawPart _ _ method template -> partRoutes rest more (append routes [`rawRoute $(lift method) $(lift template) $(field.value)`]) finish
+                MountPart inner -> contractRoutes inner field.value { found -> partRoutes rest more (append routes found) finish }
+        _ -> finish routes
+
+-- Generates the request handler of an API reflected at the pure row, as
+-- `typeOf (Shop {})`: a function taking the API's implementation and then
+-- the request. Conflicting routes fail here.
+dispatch : Meta.TypeRepr -> Code
+dispatch api =
+    case Result.andThen { root -> Result.map { _ -> root } (Web.apiRoutes root) } (Web.contractAt api "") of
         Err message -> Meta.fail message
-        Ok _ -> dispatchFrom 0 (Web.mountEntries tree) []
+        Ok root ->
+            Meta.lambda "_web_implementation" { implementation ->
+                contractRoutes root implementation { routes -> Meta.lambda "_web_dispatch_request" { request -> `serve $(listCode routes) $(request)` } }
+            }

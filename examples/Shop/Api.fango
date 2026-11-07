@@ -1,5 +1,5 @@
--- Where the shop's contracts are served, and its named endpoints.
-module Shop.Api exposing (api, getUserEndpoint, users)
+-- The shop's API, and its named endpoints.
+module Shop.Api exposing (Shop(..), getUserEndpoint, health)
 
 import Bytes
 import Http exposing (Body(..))
@@ -13,9 +13,13 @@ import Web
 health : List Http.Server.Route.Param -> Request e ->{e} Response e
 health _ _ = Response { status = 200, headers = [], body = BytesBody (Bytes.fromString "ok") }
 
-users = Web.mount "users" "/orgs/:org" (typeOf (Users {}))
-
-api = Web.api [users, Web.raw "health" "GET /health" `health`]
+-- The whole API: the users of one organization, and a health check.
+type Shop e =
+    { #[Web.Mount "/orgs/:org"]
+      users : Users e
+    , #[Web.Raw "GET /health"]
+      health : List Http.Server.Route.Param -> Request e ->{e} Response e
+    }
 
 getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
-getUserEndpoint = $(Web.endpoint users "getUser")
+getUserEndpoint = $(Web.endpoint (typeOf (Shop {})) "users.getUser")

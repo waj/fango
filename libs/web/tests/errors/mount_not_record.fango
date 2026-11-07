@@ -1,0 +1,11 @@
+import Web
+
+-- A mounted field whose type is not a contract.
+type Api e =
+    { #[Web.Mount "/x"]
+      count : Int
+    , #[Web.Get "/ping"]
+      ping : () ->{e} ()
+    }
+
+main() = print (Web.link $(Web.endpoint (typeOf (Api {})) "ping") ())

@@ -6,6 +6,4 @@ type Bad e =
       ping : () ->{e} ()
     }
 
-bad = Web.mount "bad" "/" (typeOf (Bad {}))
-
-main() = print (Web.link $(Web.endpoint bad "pong") ())
+main() = print (Web.link $(Web.endpoint (typeOf (Bad {})) "pong") ())

@@ -14,7 +14,7 @@ import List exposing (List)
 import Net
 import Process
 import Result exposing (Result(..))
-import Shop.Api
+import Shop.Api exposing (Shop(..))
 import Shop.Users exposing (GetUser(..), NewUser(..), User(..), UserError(..), Users(..))
 import State
 import String
@@ -46,7 +46,7 @@ directory =
     , createUser = { request -> State.update (add request.user) }
     }
 
-dispatch = $(Web.Server.dispatch Shop.Api.api)
+dispatch = $(Web.Server.dispatch (typeOf (Shop {})))
 
 main : () ->{IO, Console, Net.Network, Process.Environment} ()
 main() =
@@ -60,7 +60,7 @@ main() =
                             Async.runOutcome {
                                 State.runAtomic initial {
                                     stop = Async.channel 1
-                                    Http.Server.serve (Http.Server.defaultConfig port) stop { request -> dispatch directory request }
+                                    Http.Server.serve (Http.Server.defaultConfig port) stop { request -> dispatch (Shop { users = directory, health = Shop.Api.health }) request }
                                 }
                             }
                     })

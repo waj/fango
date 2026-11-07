@@ -1,0 +1,21 @@
+import Http.Server exposing (Request(..), Response(..))
+import Http.Server.Route
+import Web
+import Web.Client
+
+-- A client of an API with a raw route.
+type Ping e =
+    { #[Web.Get "/ping"]
+      ping : () ->{e} ()
+    }
+
+type Api e =
+    { #[Web.Mount "/"]
+      ping : Ping e
+    , #[Web.Raw "GET /health"]
+      health : List Http.Server.Route.Param -> Request e ->{e} Response e
+    }
+
+client = $(Web.Client.client (typeOf (Api {})) "") "http://example"
+
+main() = print "unreachable"

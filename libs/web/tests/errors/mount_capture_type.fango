@@ -18,6 +18,9 @@ type Bad e =
       b : ById ->{e} ()
     }
 
-bad = Web.mount "bad" "/orgs/:org" (typeOf (Bad {}))
+type Api e =
+    { #[Web.Mount "/orgs/:org"]
+      bad : Bad e
+    }
 
-main() = print (Web.link $(Web.endpoint bad "a") (ByName { org = "x" }))
+main() = print (Web.link $(Web.endpoint (typeOf (Api {})) "bad.a") (ByName { org = "x" }))

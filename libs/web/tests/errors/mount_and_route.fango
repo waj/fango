@@ -1,0 +1,15 @@
+import Web
+
+-- A mounted field that also has a route.
+type Ping e =
+    { #[Web.Get "/ping"]
+      ping : () ->{e} ()
+    }
+
+type Api e =
+    { #[Web.Mount "/x"]
+      #[Web.Get "/y"]
+      inner : Ping e
+    }
+
+main() = print (Web.link $(Web.endpoint (typeOf (Api {})) "inner.ping") ())

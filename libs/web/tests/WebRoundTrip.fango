@@ -8,7 +8,7 @@ import Http.Client as Client
 import Http.Server exposing (Request(..), Response(..))
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
-import Shop.Api
+import Shop.Api exposing (Shop(..))
 import Shop.Catalog exposing (Catalog(..), FilePath(..), Item(..), Lookup(..), Ratio(..), Search(..), Tag(..), Traced(..))
 import Shop.Users exposing (GetUser(..), NewUser(..), Org(..), User(..), UserError(..), Users(..))
 import State
@@ -19,7 +19,7 @@ import Web.Client
 import Web.Server
 import Web.Testing
 
-dispatch = $(Web.Server.dispatch Shop.Api.api)
+dispatch = $(Web.Server.dispatch (typeOf (Shop {})))
 
 alice = User { id = 7, name = "Alice" }
 
@@ -52,7 +52,21 @@ items =
     }
 
 app : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
-app request = dispatch users items admins request
+app request = dispatch (Shop { users = users, catalog = items, health = Shop.Api.health, admin = admins }) request
+
+-- An API whose operations fail with their own status. An implementation
+-- has one row, and a raw route reads the server's own request, so this API
+-- has no raw route.
+type Counted e =
+    { #[Web.Mount "/orgs/:org"]
+      users : Users e
+    , #[Web.Mount "/"]
+      catalog : Catalog e
+    , #[Web.Mount "/admin/orgs/:org"]
+      admin : Users e
+    }
+
+dispatchCounted = $(Web.Server.dispatch (typeOf (Counted {})))
 
 -- An implementation with effects of its own: a counter, handled around the
 -- server, and a failure that answers with its own status.
@@ -67,19 +81,22 @@ counting =
     }
 
 withCounter : Request {Protocol, State.State Int, e} ->{Protocol, State.State Int, e} Response {Protocol, State.State Int, e}
-withCounter request = dispatch counting items admins request
+withCounter request = dispatchCounted (Counted { users = counting, catalog = items, admin = admins }) request
 
 shop : Users {Client.Http, Fail Web.Client.Error}
-shop = $(Web.Client.client Shop.Api.users) "http://shop.example/"
+shop = $(Web.Client.client (typeOf (Shop {})) "users") "http://shop.example/"
 
 admin : Users {Client.Http, Fail Web.Client.Error}
-admin = $(Web.Client.client Shop.Api.admin) "http://shop.example"
+admin = $(Web.Client.client (typeOf (Shop {})) "admin") "http://shop.example"
 
 catalog : Catalog {Client.Http, Fail Web.Client.Error}
-catalog = $(Web.Client.client Shop.Api.catalog) "http://shop.example"
+catalog = $(Web.Client.client (typeOf (Shop {})) "catalog") "http://shop.example"
 
-strictUsers : Users {Expect.Expect}
-strictUsers = $(Web.Testing.strict Shop.Api.users)
+strictShop : Shop {Expect.Expect, e}
+strictShop = $(Web.Testing.strict (typeOf (Shop {})) "")
+
+stubbedShop : Shop {Expect.Expect, e}
+stubbedShop = { strictShop | users = { strictShop.users | count = { _ -> 3 } } }
 
 attempt : (() ->{Fail Web.Client.Error, e} a) ->{e} Result Web.Client.Error a
 attempt action = Fail.attempt action
@@ -163,9 +180,8 @@ tests = Test.describe "web round trips"
         Expect.equal 43 result.state
     }
     , Test.test "a strict implementation answers only what a test stubs" {
-        stubbed = { strictUsers | count = { _ -> 3 } }
         served : Request {Protocol, Expect.Expect, e} ->{Protocol, Expect.Expect, e} Response {Protocol, Expect.Expect, e}
-        served request = dispatch stubbed items admins request
+        served request = dispatch stubbedShop request
         counted = attempt {
             use Client.mock served
             shop.count (Org { org = "acme" })
@@ -179,5 +195,10 @@ tests = Test.describe "web round trips"
             ()
         }
         Expect.equal (Just "Unexpected call to users.getUser: GetUser { verbose = Nothing, id = 2, org = \"acme\" }") message
+        health = failureMessage {
+            _ = Fail.attempt { Client.mock served { Client.get "http://shop.example/health" } }
+            ()
+        }
+        Expect.equal (Just "Unexpected request to health") health
     }
     ]

@@ -1,4 +1,3 @@
-import Http.Server exposing (Request(..), Response(..))
 import Web
 import Web.Server
 
@@ -8,10 +7,13 @@ type Ping e =
       ping : () ->{e} ()
     }
 
-first = Web.mount "first" "/" (typeOf (Ping {}))
+type Api e =
+    { #[Web.Mount "/"]
+      first : Ping e
+    , #[Web.Mount "/"]
+      second : Ping e
+    }
 
-second = Web.mount "second" "/" (typeOf (Ping {}))
-
-dispatch = $(Web.Server.dispatch (Web.api [first, second]))
+dispatch = $(Web.Server.dispatch (typeOf (Api {})))
 
 main() = print "unreachable"

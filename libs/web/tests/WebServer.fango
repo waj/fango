@@ -9,7 +9,7 @@ import Http.Server as Server exposing (Request(..), Response(..))
 import Maybe exposing (Maybe(..))
 import Reader
 import Result exposing (Result(..))
-import Shop.Api
+import Shop.Api exposing (Shop(..))
 import Shop.Catalog exposing (Catalog(..), Item(..), Ratio(..))
 import Shop.Users exposing (User(..), UserError(..), Users(..))
 import String
@@ -17,7 +17,7 @@ import Test
 import Web.Server
 import Writer
 
-dispatch = $(Web.Server.dispatch Shop.Api.api)
+dispatch = $(Web.Server.dispatch (typeOf (Shop {})))
 
 users : Users e
 users =
@@ -38,7 +38,7 @@ items =
     }
 
 app : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
-app request = dispatch users items users request
+app request = dispatch (Shop { users = users, catalog = items, health = Shop.Api.health, admin = users }) request
 
 type Answer = { status : Int, allow : Maybe String, body : String }
     deriving (Eq, Show)

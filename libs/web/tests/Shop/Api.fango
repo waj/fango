@@ -1,4 +1,4 @@
-module Shop.Api exposing (admin, api, catalog, createUserEndpoint, getUserEndpoint, health, searchEndpoint, users)
+module Shop.Api exposing (Shop(..), createUserEndpoint, getUserEndpoint, health, searchEndpoint)
 
 import Bytes
 import Http exposing (Body(..))
@@ -13,20 +13,23 @@ import Web
 health : List Http.Server.Route.Param -> Request e ->{e} Response e
 health _ _ = Response { status = 200, headers = [], body = BytesBody (Bytes.fromString "ok") }
 
-users = Web.mount "users" "/orgs/:org" (typeOf (Users {}))
-
--- The same contract, mounted a second time.
-admin = Web.mount "admin" "/admin/orgs/:org" (typeOf (Users {}))
-
-catalog = Web.root "catalog" (typeOf (Catalog {}))
-
-api = Web.api [users, catalog, Web.raw "health" "GET /health" `health`, admin]
+-- The whole API. `admin` mounts the same contract a second time.
+type Shop e =
+    { #[Web.Mount "/orgs/:org"]
+      users : Users e
+    , #[Web.Mount "/"]
+      catalog : Catalog e
+    , #[Web.Raw "GET /health"]
+      health : List Http.Server.Route.Param -> Request e ->{e} Response e
+    , #[Web.Mount "/admin/orgs/:org"]
+      admin : Users e
+    }
 
 getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
-getUserEndpoint = $(Web.endpoint users "getUser")
+getUserEndpoint = $(Web.endpoint (typeOf (Shop {})) "users.getUser")
 
 createUserEndpoint : Web.Endpoint NewUser (Result UserError User)
-createUserEndpoint = $(Web.endpoint users "createUser")
+createUserEndpoint = $(Web.endpoint (typeOf (Shop {})) "users.createUser")
 
 searchEndpoint : Web.Endpoint Search (List Shop.Catalog.Item)
-searchEndpoint = $(Web.endpoint catalog "search")
+searchEndpoint = $(Web.endpoint (typeOf (Shop {})) "catalog.search")

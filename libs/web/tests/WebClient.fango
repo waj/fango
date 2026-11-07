@@ -8,14 +8,14 @@ import Http.Client as Client
 import Http.Server exposing (Request(..), Response(..))
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
-import Shop.Api
+import Shop.Api exposing (Shop(..))
 import Shop.Users exposing (GetUser(..), Org(..), User(..), UserError(..), Users(..))
 import Test
 import Web
 import Web.Client
 
 shop : Users {Client.Http, Fail Web.Client.Error}
-shop = $(Web.Client.client Shop.Api.users) "http://shop.example"
+shop = $(Web.Client.client (typeOf (Shop {})) "users") "http://shop.example"
 
 reply : Int -> List Header -> String -> Request e ->{e} Response e
 reply status headers text _ = Response { status = status, headers = headers, body = BytesBody (Bytes.fromString text) }
