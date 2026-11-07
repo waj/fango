@@ -1,0 +1,21 @@
+import Web
+
+-- A mount parameter read from the query.
+type Org =
+    { #[Web.Path "org"]
+      org : String
+    , #[Web.Query "lang"]
+      lang : String
+    }
+
+type Ping e =
+    { #[Web.Get "/ping"]
+      ping : () ->{e} ()
+    }
+
+type Api e =
+    { #[Web.Mount "/orgs/:org"]
+      orgs : Org -> Ping e
+    }
+
+main() = print (Web.link $(Web.endpoint (typeOf (Api {})) "orgs.ping") ())

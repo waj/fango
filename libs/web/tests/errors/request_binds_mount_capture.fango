@@ -1,0 +1,24 @@
+import Web
+
+-- A request that binds a capture of the mount above it.
+type Org =
+    { #[Web.Path "org"]
+      org : String
+    }
+
+type Ping =
+    { #[Web.Path "org"]
+      org : String
+    }
+
+type Pings e =
+    { #[Web.Get "/ping"]
+      ping : Ping ->{e} ()
+    }
+
+type Api e =
+    { #[Web.Mount "/orgs/:org"]
+      orgs : Org -> Pings e
+    }
+
+main() = print (Web.link $(Web.endpoint (typeOf (Api {})) "orgs.ping") (Ping { org = "x" }))

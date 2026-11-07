@@ -1,10 +1,11 @@
-module Shop.Users exposing (GetUser(..), NewUser(..), Org(..), User(..), UserError(..), Users(..))
+module Shop.Users exposing (GetUser(..), NewUser(..), User(..), UserError(..), Users(..))
 
 import Json
 import Result exposing (Result(..))
 import Web
 
--- A user of one organization.
+-- A user. The contract does not know where it is mounted, so nothing here
+-- names an organization.
 type User = { id : Int, name : String }
     deriving (Eq, Show, Json.Encode, Json.Decode)
 
@@ -19,22 +20,12 @@ type GetUser =
       verbose : Maybe Bool
     , #[Web.Path "id"]
       id : Int
-    , #[Web.Path "org"]
-      org : String
     }
     deriving (Eq, Show)
 
 type NewUser =
-    { #[Web.Path "org"]
-      org : String
-    , #[Web.Body]
+    { #[Web.Body]
       user : User
-    }
-    deriving (Eq, Show)
-
-type Org =
-    { #[Web.Path "org"]
-      org : String
     }
     deriving (Eq, Show)
 
@@ -44,7 +35,7 @@ type Users e =
     , #[Web.Post "/users"]
       createUser : NewUser ->{e} Result UserError User
     , #[Web.Delete "/users"]
-      clear : Org ->{e} ()
+      clear : () ->{e} ()
     , #[Web.Get "/users"]
-      count : Org ->{e} Int
+      count : () ->{e} Int
     }

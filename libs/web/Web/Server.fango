@@ -7,8 +7,11 @@
 -- ```text
 -- dispatch = $(Web.Server.dispatch (typeOf (Shop {})))
 --
--- main() = Db.run { Http.Server.serve config stop { request -> dispatch { users = serveUsers, health = health } request } }
+-- main() = Db.run { Http.Server.serve config stop { request -> dispatch (Shop { users = serveUsers, health = health }) request } }
 -- ```
+--
+-- A mount with parameters is implemented by a function of them, here
+-- `serveUsers : Org -> Users e`, called for each request it answers.
 --
 -- The implementations' own effects are those of the server's handler, so
 -- they are handled around `Http.Server.serve`, once for the whole server, as
@@ -36,7 +39,7 @@ import Reader
 import Result exposing (Result(..))
 import String
 import Url
-import Web exposing (Contract(..), Endpoint(..), Incoming(..), Operation(..), Part(..), Rejection(..), Reply(..), Segment(..))
+import Web exposing (Contract(..), Endpoint(..), Incoming(..), Operation(..), Part(..), Prefix(..), Rejection(..), Reply(..), Segment(..))
 import Writer
 
 -- How a route answers: through a typed endpoint, with the whole body read,
@@ -89,19 +92,57 @@ errorReply status message =
 -- route Shop.Api.getUserEndpoint { request -> Db.findUser request.org request.id }
 -- ```
 route : Endpoint request response -> (request ->{Fail Error, e} response) -> Route e
-route described implementation =
+route described implementation = Route { method = described.method, template = templateOf described.template, answer = Typed (answerWith described implementation) }
+
+answerWith : Endpoint request response -> (request ->{Fail Error, e} response) -> Incoming ->{e} Reply
+answerWith described implementation incoming =
+    case described.readRequest incoming of
+        Err rejection -> errorReply rejection.status rejection.message
+        Ok request ->
+            case Fail.attempt { implementation request } of
+                Err error -> errorReply (validStatus error.status) error.message
+                Ok result ->
+                    case described.response.write result of
+                        Ok reply -> reply
+                        Err message -> errorReply 500 ("The response cannot be encoded: " ++ message)
+
+-- Routes below mounts with parameters, which generated dispatchers build.
+-- `read` decodes the parameters of every such mount on the way, and the
+-- route's full template is given, because the endpoint's starts at the
+-- nearest mount.
+routeUnder : (Incoming -> Result Rejection params) -> String -> Endpoint request response -> (params -> request ->{Fail Error, e} response) -> Route e
+routeUnder read template described implementation =
     typed = { incoming ->
-        case described.readRequest incoming of
+        case read incoming of
             Err rejection -> errorReply rejection.status rejection.message
-            Ok request ->
-                case Fail.attempt { implementation request } of
-                    Err error -> errorReply (validStatus error.status) error.message
-                    Ok result ->
-                        case described.response.write result of
-                            Ok reply -> reply
-                            Err message -> errorReply 500 ("The response cannot be encoded: " ++ message)
+            Ok params -> answerWith described (implementation params) incoming
     }
-    Route { method = described.method, template = templateOf described.template, answer = Typed typed }
+    Route { method = described.method, template = templateOf template, answer = Typed typed }
+
+rawRouteUnder : (Incoming -> Result Rejection params) -> String -> String -> (params -> List Http.Server.Route.Param -> Request e ->{e} Response e) -> Route e
+rawRouteUnder read method template handler =
+    untyped = { captured request ->
+        found = Incoming { captures = List.map { param -> (param.name, param.value) } captured, query = [], headers = request.headers, body = Bytes.empty }
+        case read found of
+            Err rejection -> toResponse (errorReply rejection.status rejection.message)
+            Ok params -> handler params captured request
+    }
+    Route { method = method, template = templateOf template, answer = Untyped untyped }
+
+readOf : Prefix params -> Incoming -> Result Rejection params
+readOf mount incoming = mount.readPrefix incoming
+
+readBoth : (Incoming -> Result Rejection a) -> (Incoming -> Result Rejection b) -> Incoming -> Result Rejection (a, b)
+readBoth outer inner incoming =
+    case outer incoming of
+        Err rejection -> Err rejection
+        Ok first -> Result.map { second -> (first, second) } (inner incoming)
+
+pairFirst : (a, b) -> a
+pairFirst (first, _) = first
+
+pairSecond : (a, b) -> b
+pairSecond (_, second) = second
 
 -- A raw route, which generated dispatchers build from `#[Web.Raw]` fields.
 rawRoute : String -> String -> (List Http.Server.Route.Param -> Request e ->{e} Response e) -> Route e
@@ -264,15 +305,47 @@ partRoutes parts fields routes finish =
             case part of
                 OperationPart operation -> partRoutes rest more (append routes [`route $(operation.endpoint) $(field.value)`]) finish
                 RawPart _ _ method template -> partRoutes rest more (append routes [`rawRoute $(lift method) $(lift template) $(field.value)`]) finish
-                MountPart inner -> contractRoutes inner field.value { found -> partRoutes rest more (append routes found) finish }
+                MountPart Nothing inner -> contractRoutes inner field.value { found -> partRoutes rest more (append routes found) finish }
+                MountPart (Just code) inner -> partRoutes rest more (append routes (chainRoutes inner `readOf $(code)` { params -> `$(field.value) $(params)` })) finish
         _ -> finish routes
+
+-- The routes of a contract below a mount with parameters. `read` decodes
+-- the parameters of every such mount on the way, and `access` builds the
+-- contract's implementation from the code of their value.
+chainRoutes : Contract -> Code -> (Code -> Code) -> List Code
+chainRoutes contract read access = chainParts contract read access 0 contract.parts
+
+chainParts : Contract -> Code -> (Code -> Code) -> Int -> List Part -> List Code
+chainParts contract read access index parts =
+    case parts of
+        [] -> []
+        [part | rest] ->
+            field = { params -> fieldAt contract index (access params) }
+            here =
+                case part of
+                    OperationPart operation -> [`routeUnder $(read) $(lift operation.template) $(operation.endpoint) $(Meta.lambda "_web_params" field)`]
+                    RawPart _ _ method template -> [`rawRouteUnder $(read) $(lift method) $(lift template) $(Meta.lambda "_web_params" field)`]
+                    MountPart Nothing inner -> chainRoutes inner read field
+                    MountPart (Just code) inner ->
+                        chainRoutes inner `readBoth $(read) (readOf $(code))` { params -> `$(fieldAt contract index (access `pairFirst $(params)`)) (pairSecond $(params))` }
+            append here (chainParts contract read access (index + 1) rest)
+
+-- The field at a position of an implementation's code.
+fieldAt : Contract -> Int -> Code -> Code
+fieldAt contract index implementation = Meta.match contract.info implementation { bound -> nthValue index bound.fields }
+
+nthValue : Int -> Items BoundField -> Code
+nthValue index fields =
+    case fields of
+        Item field rest -> if index == 0 then field.value else nthValue (index - 1) rest
+        NoItems -> Meta.fail "A contract field is missing."
 
 -- Generates the request handler of an API reflected at the pure row, as
 -- `typeOf (Shop {})`: a function taking the API's implementation and then
 -- the request. Conflicting routes fail here.
 dispatch : Meta.TypeRepr -> Code
 dispatch api =
-    case Result.andThen { root -> Result.map { _ -> root } (Web.apiRoutes root) } (Web.contractAt api "") of
+    case Result.andThen { (_, root) -> Result.map { _ -> root } (Web.apiRoutes root) } (Web.contractAt api "") of
         Err message -> Meta.fail message
         Ok root ->
             Meta.lambda "_web_implementation" { implementation ->

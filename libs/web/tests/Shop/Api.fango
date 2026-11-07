@@ -1,4 +1,4 @@
-module Shop.Api exposing (Shop(..), createUserEndpoint, getUserEndpoint, health, searchEndpoint)
+module Shop.Api exposing (Org(..), Shop(..), createUserEndpoint, getUserEndpoint, health, orgPrefix, searchEndpoint)
 
 import Bytes
 import Http exposing (Body(..))
@@ -13,17 +13,27 @@ import Web
 health : List Http.Server.Route.Param -> Request e ->{e} Response e
 health _ _ = Response { status = 200, headers = [], body = BytesBody (Bytes.fromString "ok") }
 
+-- The parameters of a mount under an organization.
+type Org =
+    { #[Web.Path "org"]
+      org : String
+    }
+    deriving (Eq, Show)
+
 -- The whole API. `admin` mounts the same contract a second time.
 type Shop e =
     { #[Web.Mount "/orgs/:org"]
-      users : Users e
+      users : Org -> Users e
     , #[Web.Mount "/"]
       catalog : Catalog e
     , #[Web.Raw "GET /health"]
       health : List Http.Server.Route.Param -> Request e ->{e} Response e
     , #[Web.Mount "/admin/orgs/:org"]
-      admin : Users e
+      admin : Org -> Users e
     }
+
+orgPrefix : Web.Prefix Org
+orgPrefix = $(Web.prefix (typeOf (Shop {})) "users")
 
 getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
 getUserEndpoint = $(Web.endpoint (typeOf (Shop {})) "users.getUser")

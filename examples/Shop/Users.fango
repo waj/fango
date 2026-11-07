@@ -16,22 +16,20 @@ type UserError
 -- `GetUser` reads its inputs from the path and the query, so it needs no
 -- JSON instance.
 type GetUser =
-    { #[Web.Path "org"]
-      org : String
-    , #[Web.Path "id"]
+    { #[Web.Path "id"]
       id : Int
     , #[Web.Query "verbose"]
       verbose : Maybe Bool
     }
 
 type NewUser =
-    { #[Web.Path "org"]
-      org : String
-    , #[Web.Body]
+    { #[Web.Body]
       user : User
     }
 
--- Users of one organization. Operations perform `e`.
+-- Users of one organization. The contract does not know where it is
+-- mounted: the organization is a parameter of its mount. Operations
+-- perform `e`.
 type Users e =
     { #[Web.Get "/users/:id"]
       getUser : GetUser ->{e} Result UserError User

@@ -71,7 +71,7 @@ tests = Test.describe "web parameters"
         Expect.equal Nothing (Web.matchTemplate [Literal "files", Rest "path"] ["files"])
     }
     , Test.test "an endpoint writes a request" {
-        written = Web.outgoing Shop.Api.createUserEndpoint (NewUser { org = "a b", user = User { id = 1, name = "Al" } })
+        written = Web.outgoing (Web.under Shop.Api.orgPrefix (Shop.Api.Org { org = "a b" }) Shop.Api.createUserEndpoint) (NewUser { user = User { id = 1, name = "Al" } })
         Expect.equal (Ok (Outgoing { method = "POST", target = "/orgs/a%20b/users", headers = [Header { name = "Content-Type", value = "application/json" }], body = Just (Bytes.fromString "{\"id\":1,\"name\":\"Al\"}") })) written
         Expect.equal "/search?q=a%26b&tag=Sale&tag=New&limit=2" (Web.link Shop.Api.searchEndpoint (Search { q = "a&b", tags = [Sale, New], limit = Just 2 }))
     }

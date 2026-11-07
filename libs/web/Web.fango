@@ -28,11 +28,18 @@
 -- type Shop e =
 --     {
 --       #[Web.Mount "/orgs/:org"]
---       users : Users e
+--       users : Org -> Users e
 --     , #[Web.Raw "GET /health"]
 --       health : List Http.Server.Route.Param -> Request e ->{e} Response e
 --     }
 -- ```
+--
+-- A mount whose prefix has captures takes them as a parameter record, here
+-- `Org`, whose every field is a `#[Web.Path]` binding one of them, and the
+-- implementation of the mounted contract is a function of it. So a contract
+-- knows only its own paths: `Users` reads `/users/:id`, and its requests
+-- bind only their own inputs. A mount without captures is the contract
+-- itself, `catalog : Catalog e`.
 --
 -- The generators take an API reflected at the pure row, as
 -- `typeOf (Shop {})`, and address a part of it by its dotted field location,
@@ -43,9 +50,15 @@
 -- `Web.Client` calls with it, and `link` builds URLs with it, so the
 -- generators keep no tables of their own.
 --
+-- An endpoint's template starts at its nearest mount with parameters, or at
+-- the root, and mounts without parameters on the way add their prefixes.
+-- `prefix` generates a mount's `Prefix`, and `under` gives an endpoint the
+-- parameters of the mount above it, so links and clients write the whole
+-- path.
+--
 -- Every request field has one `Source`. Path captures bind by name, each
--- exactly once, with field order meaning nothing; a mount's captures bind
--- the same way and must have one type across the operations below it. A `Maybe`
+-- exactly once, with field order meaning nothing; a mount's parameters bind
+-- its captures the same way. A `Maybe`
 -- query or header is optional and a `List` query repeats; a scalar query
 -- given twice is invalid. The one `Body` field is JSON, accepted as
 -- `application/json` or an `application/…+json` type, on any method but
@@ -72,8 +85,9 @@ module Web exposing
     , Operation(..), Outgoing(..), Param(..), Part(..), Raw(..), Rejection(..)
     , Reply(..), ReplyError(..), Response(..), Route(..), Segment(..)
     , Source(..), Status(..), Wire(..)
+    , Prefix(..)
     , apiRoutes, contractAt, endpoint, jsonMedia, link, matchTemplate
-    , outgoing, parseTemplate
+    , outgoing, parseTemplate, prefix, under
     )
 
 import Bytes exposing (Bytes)
@@ -123,7 +137,9 @@ type Source
 
 -- Mounts a contract field under a prefix, relative to its parent's own
 -- location. The prefix may hold captures but no rest capture; `/` mounts the
--- contract at its parent's location.
+-- contract at its parent's location. A prefix with captures needs a field of
+-- type `Params -> Contract e`, whose record of `#[Web.Path]` fields binds
+-- each capture once; one without is a field of type `Contract e`.
 type Mount
     -- The prefix.
     = Mount String
@@ -408,10 +424,10 @@ joinWith separator parts =
 
 -- A mount prefix and an operation path joined; a path of `/` adds nothing.
 joinPath : String -> String -> String
-joinPath prefix path =
-    if path == "/" then prefix
-    else if prefix == "/" then path
-    else prefix ++ path
+joinPath base path =
+    if path == "/" then base
+    else if base == "/" then path
+    else base ++ path
 
 -- Matches decoded path segments against a template, answering the captures.
 -- A rest capture takes one or more remaining segments, joined by `/`.
@@ -519,15 +535,16 @@ type Response a =
     , read : Reply -> Result ReplyError a
     }
 
--- One operation of a mounted contract, with everything its server, client,
--- and links need. Generate one with `endpoint`.
+-- One operation of a contract, with everything its server, client, and
+-- links need. Generate one with `endpoint`.
 type Endpoint request response =
     {
-      -- The mount and operation names, as `users.getUser`.
+      -- The operation's location in the API, as `users.getUser`.
       name : String
       -- The method, such as `"GET"`.
     , method : String
-      -- The full path template, mount prefix included.
+      -- The path template from the operation's nearest mount with
+      -- parameters, or from the root; `under` adds the mount's prefix.
     , template : String
       -- The request in an incoming request, or why it is invalid.
     , readRequest : Incoming -> Result Rejection request
@@ -535,6 +552,35 @@ type Endpoint request response =
     , writeRequest : request -> List Wire
       -- How the result travels.
     , response : Response response
+    }
+
+-- The parameters of a mount, which bind the captures of its prefix. Generate
+-- one with `prefix`.
+type Prefix params =
+    {
+      -- The prefix's path template, from its nearest mount with parameters
+      -- above it, or from the root.
+      template : String
+      -- The parameters in an incoming request, or why they are invalid.
+    , readPrefix : Incoming -> Result Rejection params
+      -- The path parts of a parameters value.
+    , writePrefix : params -> List Wire
+    }
+
+-- An endpoint below a mount with parameters, with those parameters given:
+-- its template starts at the mount's own prefix, so `link` and
+-- `Web.Client.call` write the mount's captures too. Mounts nested inside
+-- each other apply from the outermost.
+--
+-- ```text
+-- Web.link (Web.under usersPrefix (Org { org = "acme" }) getUserEndpoint) (GetUser { id = 7, verbose = Nothing })
+--     == "/orgs/acme/users/7"
+-- ```
+under : Prefix params -> params -> Endpoint request response -> Endpoint request response
+under mount params described =
+    { described |
+      template = joinPath mount.template described.template
+    , writeRequest = { request -> append (mount.writePrefix params) (described.writeRequest request) }
     }
 
 -- Binding helpers called from generated endpoint code.
@@ -870,8 +916,6 @@ type Operation =
     , template : String
       -- Code for the operation's `Endpoint`.
     , endpoint : Code
-      -- The type each path capture binds, by name.
-    , captures : List (String, Meta.TypeRepr)
     }
 
 -- An analyzed contract: an API, or a contract mounted inside one.
@@ -891,8 +935,9 @@ type Contract =
 type Part
     -- An operation.
     = OperationPart Operation
-    -- A contract mounted under a prefix.
-    | MountPart Contract
+    -- A contract mounted under a prefix, with the code of its `Prefix` when
+    -- the mount takes parameters.
+    | MountPart (Maybe Code) Contract
     -- A raw route: its field name, its location, its method, and its full
     -- template.
     | RawPart String String String String
@@ -1022,8 +1067,11 @@ requestOf operation method routeSite segments request =
                         Result.andThen { bindings -> Result.map { checked -> Just (info, ctor, checked) } (checkBindings operation info.name routeSite segments bindings) }
                             (traverse (bindingOf method segments routeSite) (itemsToList ctor.fields))
 
-operationOf : String -> String -> Field -> Result String Operation
-operationOf parent prefix field =
+-- One operation, under the full prefix and the prefix since its nearest
+-- mount with parameters. Its request binds the captures of the relative
+-- template; the full one is checked as a whole.
+operationOf : String -> String -> String -> Field -> Result String Operation
+operationOf parent full relative field =
     case Meta.attributes @Route field.attributes of
         NoItems -> Err ("The field `" ++ field.name ++ "` has no route attribute such as #[Web.Get \"/path\"], nor #[Web.Mount \"/prefix\"] or #[Web.Raw \"GET /path\"].")
         Item route more ->
@@ -1031,14 +1079,16 @@ operationOf parent prefix field =
                 Item again _ -> Meta.failAt again.site "This operation already has a route."
                 NoItems ->
                     (method, path) = routeParts route.value
-                    template = joinPath prefix path
+                    template = joinPath full path
+                    local = joinPath relative path
                     segments =
                         case parseTemplate path of
                             Err message -> Meta.failAt route.site message
                             Ok _ ->
-                                case parseTemplate template of
-                                    Err message -> Meta.failAt route.site message
-                                    Ok found -> found
+                                case (parseTemplate template, parseTemplate local) of
+                                    (Err message, _) -> Meta.failAt route.site message
+                                    (_, Err message) -> Meta.failAt route.site message
+                                    (Ok _, Ok found) -> found
                     case Meta.arrow field.ty of
                         NotArrow -> Err ("The operation `" ++ field.name ++ "` must be a function from its request to its response.")
                         Arrow parts ->
@@ -1054,56 +1104,17 @@ operationOf parent prefix field =
                                                         , location = qualify parent field.name
                                                         , method = method
                                                         , template = template
-                                                        , endpoint = endpointCode (qualify parent field.name) method template request response
-                                                        , captures = captureTypes request
+                                                        , endpoint = endpointCode (qualify parent field.name) method local request response
                                                         }
                                                 } (responseCode parts.result)
                                             } (requestOf field.name method route.site segments parts.param)
                                         _ -> Err ("The operation `" ++ field.name ++ "` may perform only the contract's own effect row.")
 
-captureTypes : Maybe (TypeInfo, Ctor, List Binding) -> List (String, Meta.TypeRepr)
-captureTypes request =
-    case request of
-        Nothing -> []
-        Just (_, ctor, bindings) ->
-            concatRoutes (List.map { (field, binding) ->
-                    case binding.source of
-                        Path name -> [(name, field.ty)]
-                        _ -> []
-            } (zipFields ctor.fields bindings)
-            )
-
-lookupType : String -> List (String, Meta.TypeRepr) -> Maybe Meta.TypeRepr
-lookupType name pairs =
-    case pairs of
-        [] -> Nothing
-        [(key, ty) | rest] -> if key == name then Just ty else lookupType name rest
-
--- A mount capture binds a field of every operation below the mount, and all
--- of them must read it as the same type.
-checkMountCaptures : String -> List String -> List Operation -> Result String (List Operation)
-checkMountCaptures mountName names operations =
-    case names of
-        [] -> Ok operations
-        [name | rest] ->
-            types = concatRoutes (List.map { operation ->
-                    case lookupType name operation.captures of
-                        Just ty -> [(operation.location, ty)]
-                        Nothing -> []
-            } operations
-            )
-            case types of
-                [(first, ty) | others] ->
-                    case List.filter { (_, other) -> not (Meta.sameType ty other) } others of
-                        [(second, other) | _] -> Err ("The mount `" ++ mountName ++ "` capture `" ++ name ++ "` is a `" ++ Meta.typeName ty ++ "` in `" ++ first ++ "` but a `" ++ Meta.typeName other ++ "` in `" ++ second ++ "`.")
-                        [] -> checkMountCaptures mountName rest operations
-                [] -> checkMountCaptures mountName rest operations
-
 prefixSegments : String -> Result String (List Segment)
-prefixSegments prefix =
-    case parseTemplate prefix of
-        Err message -> Err ("The mount prefix `" ++ prefix ++ "` is invalid: " ++ message)
-        Ok segments -> if isRestAnywhere segments then Err ("The mount prefix `" ++ prefix ++ "` cannot have a rest capture.") else Ok segments
+prefixSegments path =
+    case parseTemplate path of
+        Err message -> Err ("The mount prefix `" ++ path ++ "` is invalid: " ++ message)
+        Ok segments -> if isRestAnywhere segments then Err ("The mount prefix `" ++ path ++ "` cannot have a rest capture.") else Ok segments
 
 isRestAnywhere : List Segment -> Bool
 isRestAnywhere segments =
@@ -1131,34 +1142,90 @@ onlyMounted field =
         NoItems -> noRoute "mounted field" field
 
 -- What one field of a contract is, from its attributes.
-partOf : String -> String -> Field -> Result String Part
-partOf parent prefix field =
+partOf : String -> String -> String -> Field -> Result String Part
+partOf parent full relative field =
     case (Meta.attributes @Mount field.attributes, Meta.attributes @Raw field.attributes) of
         (Item mount more, _) ->
             case more of
                 Item again _ -> Meta.failAt again.site "This field is already mounted."
-                NoItems -> Result.andThen { _ -> mountOf parent prefix field mount } (onlyMounted field)
+                NoItems ->
+                    Result.andThen { target ->
+                        Result.map (MountPart target.params) (contractOf (qualify parent field.name) target.full target.relative target.contract)
+                    } (mountTarget full relative field mount)
         (NoItems, Item raw more) ->
             case more of
                 Item again _ -> Meta.failAt again.site "This field already has a raw route."
-                NoItems -> Result.andThen { _ -> rawOf parent prefix field raw } (noRoute "raw route" field)
-        (NoItems, NoItems) -> Result.map OperationPart (operationOf parent prefix field)
+                NoItems -> Result.andThen { _ -> rawOf parent full field raw } (noRoute "raw route" field)
+        (NoItems, NoItems) -> Result.map OperationPart (operationOf parent full relative field)
 
-mountOf : String -> String -> Field -> Attached Mount -> Result String Part
-mountOf parent prefix field mount =
+-- Where a mount leads. A prefix with captures makes the field's parameter,
+-- `Params -> Contract e`, and the relative prefix starts over inside it.
+type Target =
+    { full : String
+    -- The prefix since the nearest mount with parameters.
+    , relative : String
+    , contract : Meta.TypeRepr
+    -- The code of the mount's `Prefix`, when it takes parameters.
+    , params : Maybe Code
+    }
+
+mountTarget : String -> String -> Field -> Attached Mount -> Result String Target
+mountTarget full relative field mount =
     case mount.value of
         Mount path ->
-            case prefixSegments path of
-                Err message -> Meta.failAt mount.site message
-                Ok segments -> Result.map MountPart (contractOf (qualify parent field.name) (joinPath prefix path) (captureNames segments) field.ty)
+            inner = joinPath full path
+            local = joinPath relative path
+            case (prefixSegments path, parseTemplate inner) of
+                (Err message, _) -> Meta.failAt mount.site message
+                (_, Err message) -> Meta.failAt mount.site message
+                (Ok segments, Ok _) ->
+                    Result.andThen { _ ->
+                        case (captureNames segments, Meta.arrow field.ty) of
+                            ([], NotArrow) -> Ok (Target { full = inner, relative = local, contract = field.ty, params = Nothing })
+                            ([], Arrow _) -> Meta.failAt mount.site ("The mount prefix `" ++ path ++ "` has no captures, so the field `" ++ field.name ++ "` is the contract itself, not a function.")
+                            ([name | _], NotArrow) -> Meta.failAt mount.site ("The mount prefix `" ++ path ++ "` captures `" ++ name ++ "`, so the field `" ++ field.name ++ "` takes its parameters first, as `Params -> Contract e`.")
+                            (_, Arrow parts) ->
+                                case (Meta.arrow parts.result, parts.effects, parts.tail) of
+                                    (NotArrow, NoItems, Closed) ->
+                                        Result.map { code -> Target { full = inner, relative = "/", contract = parts.result, params = Just code } } (prefixOf field.name mount.site local parts.param)
+                                    _ -> Err ("The mounted field `" ++ field.name ++ "` must be a pure function from its parameters to its contract.")
+                    } (onlyMounted field)
+
+-- The `Prefix` of a mount with parameters: a record whose every field binds
+-- one capture of the prefix, read and written through `template`.
+prefixOf : String -> Meta.Site -> String -> Meta.TypeRepr -> Result String Code
+prefixOf name site template params =
+    segments =
+        case parseTemplate template of
+            Ok found -> found
+            Err message -> Meta.failAt site message
+    case Meta.info params of
+        Opaque -> Err ("The parameters of `" ++ name ++ "` must be a record type whose fields are visible here.")
+        Visible info ->
+            case info.shape of
+                Union _ -> Err ("The parameters of `" ++ name ++ "` must be a record type, not the union `" ++ info.name ++ "`.")
+                Record ctor ->
+                    fields = itemsToList ctor.fields
+                    Result.andThen { bindings ->
+                        Result.map { checked -> prefixCode template info ctor checked } (checkBindings name info.name site segments bindings)
+                    } (traverse { field -> Result.andThen { _ -> bindingOf "GET" segments site field } (pathOnly field) } fields)
+
+pathOnly : Field -> Result String ()
+pathOnly field =
+    case Meta.attributes @Source field.attributes of
+        Item attached _ ->
+            case attached.value of
+                Path _ -> Ok ()
+                _ -> Meta.failAt attached.site "A mount parameter binds only path captures."
+        NoItems -> Ok ()
 
 rawOf : String -> String -> Field -> Attached Raw -> Result String Part
-rawOf parent prefix field raw =
+rawOf parent full field raw =
     case raw.value of
         Raw route ->
             case String.split " " route of
                 [method, path] ->
-                    template = joinPath prefix path
+                    template = joinPath full path
                     if method == "" then Meta.failAt raw.site "A raw route is written as \"METHOD /path\"."
                     else
                         case parseTemplate path of
@@ -1169,27 +1236,14 @@ rawOf parent prefix field raw =
                                     Ok _ -> Ok (RawPart field.name (qualify parent field.name) method template)
                 _ -> Meta.failAt raw.site "A raw route is written as \"METHOD /path\"."
 
--- The operations of a contract and of every contract mounted in it.
-operationsBelow : List Part -> List Operation
-operationsBelow parts =
-    concatRoutes (List.map { part ->
-            case part of
-                OperationPart operation -> [operation]
-                MountPart inner -> operationsBelow inner.parts
-                RawPart _ _ _ _ -> []
-    } parts
-    )
-
--- Analyzes a contract at a location, under its full prefix: its shape and
--- every field's route, request, and response, mounted contracts included.
--- `captures` are the ones its own mount prefix adds.
-contractOf : String -> String -> List String -> Meta.TypeRepr -> Result String Contract
-contractOf location prefix captures contract =
+-- Analyzes a contract at a location, under its full prefix and the prefix
+-- since its nearest mount with parameters: its shape and every field's
+-- route, request, and response, mounted contracts included.
+contractOf : String -> String -> String -> Meta.TypeRepr -> Result String Contract
+contractOf location full relative contract =
     Result.andThen { (info, ctor) ->
-        Result.andThen { parts ->
-            Result.map { _ -> Contract { location = location, info = info, ctor = ctor, parts = parts } }
-                (checkMountCaptures location captures (operationsBelow parts))
-        } (traverse (partOf location prefix) (itemsToList ctor.fields))
+        Result.map { parts -> Contract { location = location, info = info, ctor = ctor, parts = parts } }
+            (traverse (partOf location full relative) (itemsToList ctor.fields))
     } (contractShape contract)
 
 -- A contract's schema and record constructor: a visible record type with one
@@ -1225,11 +1279,12 @@ findField name fields =
         Item field rest -> if field.name == name then Just field else findField name rest
 
 -- Follows mounted fields down to a location and analyzes only the contract
--- there, so the contracts beside the path need not be visible.
-locate : String -> String -> List String -> Meta.TypeRepr -> List String -> Result String Contract
-locate location prefix captures contract names =
+-- there, so the contracts beside the path need not be visible. Answers the
+-- `Prefix` code of every mount with parameters on the way, outermost first.
+locate : String -> String -> String -> Meta.TypeRepr -> List String -> Result String (List Code, Contract)
+locate location full relative contract names =
     case names of
-        [] -> contractOf location prefix captures contract
+        [] -> Result.map { found -> ([], found) } (contractOf location full relative contract)
         [name | rest] ->
             Result.andThen { (info, ctor) ->
                 case findField name ctor.fields of
@@ -1238,25 +1293,35 @@ locate location prefix captures contract names =
                         case Meta.attributes @Mount field.attributes of
                             NoItems -> Err ("`" ++ qualify location name ++ "` is not a mounted contract.")
                             Item mount _ ->
-                                case mount.value of
-                                    Mount path ->
-                                        case prefixSegments path of
-                                            Err message -> Meta.failAt mount.site message
-                                            Ok segments ->
-                                                Result.andThen { _ -> locate (qualify location name) (joinPath prefix path) (captureNames segments) field.ty rest }
-                                                    (onlyMounted field)
+                                Result.andThen { target ->
+                                    Result.map { (prefixes, found) ->
+                                        case target.params of
+                                            Just code -> ([code | prefixes], found)
+                                            Nothing -> (prefixes, found)
+                                    } (locate (qualify location name) target.full target.relative target.contract rest)
+                                } (mountTarget full relative field mount)
             } (contractShape contract)
+
+-- The contract at a location and the field named last in it.
+splitLocation : String -> (List String, String)
+splitLocation location =
+    case List.reverse (String.split "." location) of
+        [last | rest] -> (List.reverse rest, last)
+        [] -> ([], location)
 
 -- Analyzes the contract at a dotted location of an API reflected at the pure
 -- row, as `typeOf (Shop {})`; `""` is the API itself. Only the contracts
--- along the location need be visible. Problems at an attribute fail there;
--- the others are answered as `Err`, for the generator to report at its
--- splice.
-contractAt : Meta.TypeRepr -> String -> Result String Contract
-contractAt api location = locate "" "/" [] api (if location == "" then [] else String.split "." location)
+-- along the location need be visible. Answers the code of the `Prefix` of
+-- every mount with parameters on the way, outermost first, with the
+-- contract. Problems at an attribute fail there; the others are answered as
+-- `Err`, for the generator to report at its splice.
+contractAt : Meta.TypeRepr -> String -> Result String (List Code, Contract)
+contractAt api location = locate "" "/" "/" api (if location == "" then [] else String.split "." location)
 
 -- Generates the `Endpoint` of the operation at a dotted location of an API:
 -- an ordinary value, which a module binds under a name of its own choosing.
+-- Its template starts at its nearest mount with parameters, which `under`
+-- adds.
 --
 -- ```text
 -- getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
@@ -1264,16 +1329,46 @@ contractAt api location = locate "" "/" [] api (if location == "" then [] else S
 -- ```
 endpoint : Meta.TypeRepr -> String -> Code
 endpoint api location =
-    (parents, name) =
-        case List.reverse (String.split "." location) of
-            [last | rest] -> (List.reverse rest, last)
-            [] -> ([], location)
-    case locate "" "/" [] api parents of
+    (parents, name) = splitLocation location
+    case locate "" "/" "/" api parents of
         Err message -> Meta.fail message
-        Ok found ->
+        Ok (_, found) ->
             case findPart name found.parts of
                 Just (OperationPart operation) -> operation.endpoint
                 _ -> Meta.fail (describeContract found ++ " has no operation `" ++ name ++ "`.")
+
+-- Generates the `Prefix` of the mount with parameters at a dotted location
+-- of an API, for `under`.
+--
+-- ```text
+-- usersPrefix : Web.Prefix Org
+-- usersPrefix = $(Web.prefix (typeOf (Shop {})) "users")
+-- ```
+prefix : Meta.TypeRepr -> String -> Code
+prefix api location =
+    (parents, name) = splitLocation location
+    case locate "" "/" "/" api parents of
+        Err message -> Meta.fail message
+        Ok (_, found) ->
+            case findMount name found.parts of
+                Just (Just code) -> code
+                Just Nothing -> Meta.fail ("The mount `" ++ location ++ "` takes no parameters, so its endpoints need no prefix.")
+                Nothing -> Meta.fail (describeContract found ++ " has no mount `" ++ name ++ "`.")
+
+findMount : String -> List Part -> Maybe (Maybe Code)
+findMount name parts =
+    case parts of
+        [] -> Nothing
+        [part | rest] ->
+            case part of
+                MountPart code inner -> if lastName inner.location == name then Just code else findMount name rest
+                _ -> findMount name rest
+
+lastName : String -> String
+lastName location =
+    case List.reverse (String.split "." location) of
+        [name | _] -> name
+        [] -> location
 
 -- Code generation for one operation.
 
@@ -1371,6 +1466,15 @@ endpointCode name method template request response =
         , response = $(response)
         }`
 
+prefixCode : String -> TypeInfo -> Ctor -> List Binding -> Code
+prefixCode template info ctor bindings =
+    reader = Meta.lambda "_web_incoming" { incoming ->
+        slots = List.map (readSlot incoming) (zipFields ctor.fields bindings)
+        `readWith { $(Meta.construct ctor (listToItems slots)) }`
+    }
+    writer = Meta.lambda "_web_params" { value -> Meta.match info value { bound -> writeParts bindings bound.fields } }
+    `Prefix { template = $(lift template), readPrefix = $(reader), writePrefix = $(writer) }`
+
 listToItems : List a -> Items a
 listToItems items =
     case items of
@@ -1396,7 +1500,7 @@ contractRoutes contract =
     concatRoutes (List.map { part ->
             case part of
                 OperationPart operation -> withHead operation.method operation.template operation.location
-                MountPart inner -> contractRoutes inner
+                MountPart _ inner -> contractRoutes inner
                 RawPart _ location method template -> withHead method template location
     } contract.parts
     )

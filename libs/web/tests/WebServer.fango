@@ -9,7 +9,7 @@ import Http.Server as Server exposing (Request(..), Response(..))
 import Maybe exposing (Maybe(..))
 import Reader
 import Result exposing (Result(..))
-import Shop.Api exposing (Shop(..))
+import Shop.Api exposing (Org(..), Shop(..))
 import Shop.Catalog exposing (Catalog(..), Item(..), Ratio(..))
 import Shop.Users exposing (User(..), UserError(..), Users(..))
 import String
@@ -19,9 +19,9 @@ import Writer
 
 dispatch = $(Web.Server.dispatch (typeOf (Shop {})))
 
-users : Users e
-users =
-    { getUser = { query -> if query.id == 7 then Ok (User { id = 7, name = query.org }) else Err NoSuchUser }
+users : Org -> Users e
+users org =
+    { getUser = { query -> if query.id == 7 then Ok (User { id = 7, name = org.org }) else Err NoSuchUser }
     , createUser = { request -> Ok request.user }
     , clear = { _ -> () }
     , count = { _ -> 1 }

@@ -6,8 +6,8 @@
 -- each mounted field is a client of its own contract:
 --
 -- ```text
--- shop : Users {Http.Client.Http, Fail Web.Client.Error}
--- shop = $(Web.Client.client (typeOf (Shop {})) "users") "https://shop.example"
+-- catalog : Catalog {Http.Client.Http, Fail Web.Client.Error}
+-- catalog = $(Web.Client.client (typeOf (Shop {})) "catalog") "https://shop.example"
 -- ```
 --
 -- Every failure is raised in the caller's context, so `Fail.attempt`
@@ -78,21 +78,38 @@ listToItems items =
         [] -> NoItems
         [item | rest] -> Item item (listToItems rest)
 
-clientOf : Code -> Contract -> Code
-clientOf base contract =
+-- `wrap` gives an endpoint the parameters of the mounts above it.
+clientOf : Code -> (Code -> Code) -> Int -> Contract -> Code
+clientOf base wrap depth contract =
     fields = List.map { part ->
         case part of
-            OperationPart operation -> Meta.lambda ("_web_" ++ operation.name) { request -> `call $(operation.endpoint) $(base) $(request)` }
-            MountPart inner -> clientOf base inner
+            OperationPart operation -> Meta.lambda ("_web_" ++ operation.name) { request -> `call $(wrap operation.endpoint) $(base) $(request)` }
+            MountPart Nothing inner -> clientOf base wrap depth inner
+            MountPart (Just code) inner ->
+                Meta.lambda ("_web_params_" ++ show depth) { params -> clientOf base { described -> wrap `Web.under $(code) $(params) $(described)` } (depth + 1) inner }
             RawPart _ location _ _ -> Meta.fail ("The raw route `" ++ location ++ "` has no client; generate one for a mounted contract without raw routes.")
     } contract.parts
     Meta.construct contract.ctor (listToItems fields)
 
 -- Generates a client of the contract at a dotted location of an API: a
 -- function from the server's base URL to a value of the contract's type. A
--- raw route has no client, so the contract must have none.
+-- mounted field with parameters is a function from them to its client. A
+-- raw route has no client, so the contract must have none. A location below
+-- mounts with parameters takes theirs first, outermost first:
+--
+-- ```text
+-- acme : Users {Http.Client.Http, Fail Web.Client.Error}
+-- acme = $(Web.Client.client (typeOf (Shop {})) "users") "https://shop.example" (Org { org = "acme" })
+-- ```
 client : Meta.TypeRepr -> String -> Code
 client api location =
     case Web.contractAt api location of
         Err message -> Meta.fail message
-        Ok found -> Meta.lambda "_web_base" { base -> clientOf base found }
+        Ok (prefixes, found) -> Meta.lambda "_web_base" { base -> clientUnder base { described -> described } 0 prefixes found }
+
+-- Takes the parameters of each mount above the contract, outermost first.
+clientUnder : Code -> (Code -> Code) -> Int -> List Code -> Contract -> Code
+clientUnder base wrap depth prefixes contract =
+    case prefixes of
+        [] -> clientOf base wrap depth contract
+        [code | rest] -> Meta.lambda ("_web_params_" ++ show depth) { params -> clientUnder base { described -> wrap `Web.under $(code) $(params) $(described)` } (depth + 1) rest contract }

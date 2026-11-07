@@ -1,0 +1,19 @@
+import Web
+
+-- Mount parameters that leave a capture unbound.
+type Org =
+    { #[Web.Path "org"]
+      org : String
+    }
+
+type Ping e =
+    { #[Web.Get "/ping"]
+      ping : () ->{e} ()
+    }
+
+type Api e =
+    { #[Web.Mount "/orgs/:org/teams/:team"]
+      teams : Org -> Ping e
+    }
+
+main() = print (Web.link $(Web.endpoint (typeOf (Api {})) "teams.ping") ())

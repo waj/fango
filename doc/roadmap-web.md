@@ -148,16 +148,11 @@ decisions. Content negotiation waits for a consumer.
 
 ## Open decisions
 
-- **Mount captures in every request.** A mount capture such as `org` must be a
-  field of every mounted request record. A mount-level record merged into each
-  request, named on the `#[Web.Mount]` field, or a second parameter on the
-  contract's fields, would remove the repetition; decide after the first
-  multi-operation application.
 - **One row per API.** An API's implementation is one record, so all of its
   fields share one effect row. A raw route reads the server's own request,
   so an API whose operations fail with `Fail Web.Server.Error` cannot also
   have raw routes. Reflecting the rows of type arguments would let a mount
-  declare extra effects, as `users : Users {Fail Web.Server.Error, e}`.
+  declare extra effects, as `users : Org -> Users {Fail Web.Server.Error, e}`.
 - **URL-only request projection.** `Web.link` takes the whole request, so a
   link to a `POST` needs a body value. Choose between a generated `Link` record
   per endpoint, a request builder that leaves body/header fields unset, or

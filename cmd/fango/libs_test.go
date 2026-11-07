@@ -13,7 +13,7 @@ import (
 // libraryCases pins each optional library's own regression cases, as
 // TestSuite pins the standard suite's: silently dropping one must not leave
 // the gate green. Documentation cases are counted when they are generated.
-var libraryCases = map[string]int{"web": 27}
+var libraryCases = map[string]int{"web": 28}
 
 // TestLibraries checks every optional library of libs/ with it enabled: its
 // API documentation is complete, its suite and documentation examples pass

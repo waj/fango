@@ -8,9 +8,9 @@ import Http.Client as Client
 import Http.Server exposing (Request(..), Response(..))
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
-import Shop.Api exposing (Shop(..))
+import Shop.Api exposing (Org(..), Shop(..))
 import Shop.Catalog exposing (Catalog(..), FilePath(..), Item(..), Lookup(..), Ratio(..), Search(..), Tag(..), Traced(..))
-import Shop.Users exposing (GetUser(..), NewUser(..), Org(..), User(..), UserError(..), Users(..))
+import Shop.Users exposing (GetUser(..), NewUser(..), User(..), UserError(..), Users(..))
 import State
 import String
 import Test
@@ -23,16 +23,18 @@ dispatch = $(Web.Server.dispatch (typeOf (Shop {})))
 
 alice = User { id = 7, name = "Alice" }
 
-users : Users e
-users =
-    { getUser = { query -> if query.org == "acme" && query.id == 7 then Ok alice else Err NoSuchUser }
+-- The users of one organization: the mount's parameters reach the
+-- implementation, not the requests.
+users : Org -> Users e
+users org =
+    { getUser = { query -> if org.org == "acme" && query.id == 7 then Ok alice else Err NoSuchUser }
     , createUser = { request -> if request.user.name == "Alice" then Err (NameTaken "Alice") else Ok request.user }
     , clear = { _ -> () }
-    , count = { org -> if org.org == "acme" then 1 else 0 }
+    , count = { _ -> if org.org == "acme" then 1 else 0 }
     }
 
-admins : Users e
-admins = { users | count = { _ -> 100 } }
+admins : Org -> Users e
+admins org = { users org | count = { _ -> 100 } }
 
 joinSlash : List String -> String
 joinSlash parts =
@@ -59,21 +61,21 @@ app request = dispatch (Shop { users = users, catalog = items, health = Shop.Api
 -- has no raw route.
 type Counted e =
     { #[Web.Mount "/orgs/:org"]
-      users : Users e
+      users : Org -> Users e
     , #[Web.Mount "/"]
       catalog : Catalog e
     , #[Web.Mount "/admin/orgs/:org"]
-      admin : Users e
+      admin : Org -> Users e
     }
 
 dispatchCounted = $(Web.Server.dispatch (typeOf (Counted {})))
 
 -- An implementation with effects of its own: a counter, handled around the
 -- server, and a failure that answers with its own status.
-counting : Users {State.State Int, Fail Web.Server.Error}
-counting =
-    { users |
-      clear = { org -> Fail.fail (Web.Server.Error { status = 403, message = "Not for " ++ org.org }) }
+counting : Org -> Users {State.State Int, Fail Web.Server.Error}
+counting org =
+    { users org |
+      clear = { _ -> Fail.fail (Web.Server.Error { status = 403, message = "Not for " ++ org.org }) }
     , count = { _ ->
         State.put (State.get() + 1)
         State.get()
@@ -83,20 +85,66 @@ counting =
 withCounter : Request {Protocol, State.State Int, e} ->{Protocol, State.State Int, e} Response {Protocol, State.State Int, e}
 withCounter request = dispatchCounted (Counted { users = counting, catalog = items, admin = admins }) request
 
+shopIn : Org -> Users {Client.Http, Fail Web.Client.Error}
+shopIn = $(Web.Client.client (typeOf (Shop {})) "users") "http://shop.example/"
+
+acme : Org
+acme = Org { org = "acme" }
+
 shop : Users {Client.Http, Fail Web.Client.Error}
-shop = $(Web.Client.client (typeOf (Shop {})) "users") "http://shop.example/"
+shop = shopIn acme
 
 admin : Users {Client.Http, Fail Web.Client.Error}
-admin = $(Web.Client.client (typeOf (Shop {})) "admin") "http://shop.example"
+admin = $(Web.Client.client (typeOf (Shop {})) "admin") "http://shop.example" acme
 
 catalog : Catalog {Client.Http, Fail Web.Client.Error}
 catalog = $(Web.Client.client (typeOf (Shop {})) "catalog") "http://shop.example"
+
+-- Mounts with parameters inside each other: each level reads its own.
+type Team =
+    { #[Web.Path "team"]
+      team : String
+    }
+    deriving (Eq, Show)
+
+type Teams e =
+    { #[Web.Mount "/teams/:team"]
+      team : Team -> Users e
+    }
+
+type Nested e =
+    { #[Web.Mount "/orgs/:org"]
+      org : Org -> Teams e
+    }
+
+dispatchNested = $(Web.Server.dispatch (typeOf (Nested {})))
+
+teamUsers : Org -> Team -> Users e
+teamUsers org team = { users org | getUser = { query -> Ok (User { id = query.id, name = org.org ++ "/" ++ team.team }) } }
+
+nestedApp : Request {Protocol, e} ->{Protocol, e} Response {Protocol, e}
+nestedApp request = dispatchNested (Nested { org = { org -> Teams { team = teamUsers org } } }) request
+
+nested : Nested {Client.Http, Fail Web.Client.Error}
+nested = $(Web.Client.client (typeOf (Nested {})) "") "http://shop.example"
+
+nestedUsers : Org -> Team -> Users {Client.Http, Fail Web.Client.Error}
+nestedUsers = $(Web.Client.client (typeOf (Nested {})) "org.team") "http://shop.example"
+
+orgOfNested : Web.Prefix Org
+orgOfNested = $(Web.prefix (typeOf (Nested {})) "org")
+
+teamOfNested : Web.Prefix Team
+teamOfNested = $(Web.prefix (typeOf (Nested {})) "org.team")
+
+nestedGetUser : Web.Endpoint GetUser (Result UserError User)
+nestedGetUser = $(Web.endpoint (typeOf (Nested {})) "org.team.getUser")
 
 strictShop : Shop {Expect.Expect, e}
 strictShop = $(Web.Testing.strict (typeOf (Shop {})) "")
 
 stubbedShop : Shop {Expect.Expect, e}
-stubbedShop = { strictShop | users = { strictShop.users | count = { _ -> 3 } } }
+stubbedShop = { strictShop | users = { org -> { strictShop.users org | count = { _ -> 3 } } } }
 
 attempt : (() ->{Fail Web.Client.Error, e} a) ->{e} Result Web.Client.Error a
 attempt action = Fail.attempt action
@@ -117,18 +165,18 @@ tests = Test.describe "web round trips"
     [ Test.test "GET and POST through the generated client and dispatcher" {
         result = attempt {
             use Client.mock app
-            found = shop.getUser (GetUser { org = "acme", id = 7, verbose = Nothing })
-            missing = shop.getUser (GetUser { org = "acme", id = 8, verbose = Just True })
-            created = shop.createUser (NewUser { org = "acme", user = User { id = 9, name = "Bo" } })
-            taken = shop.createUser (NewUser { org = "acme", user = alice })
-            ((found, missing), (created, taken), (shop.clear (Org { org = "acme" }), shop.count (Org { org = "acme" })))
+            found = shop.getUser (GetUser { id = 7, verbose = Nothing })
+            missing = shop.getUser (GetUser { id = 8, verbose = Just True })
+            created = shop.createUser (NewUser { user = User { id = 9, name = "Bo" } })
+            taken = shop.createUser (NewUser { user = alice })
+            ((found, missing), (created, taken), (shop.clear(), shop.count()))
         }
         Expect.equal (Ok ((Ok alice, Err NoSuchUser), (Ok (User { id = 9, name = "Bo" }), Err (NameTaken "Alice")), ((), 1))) result
     }
     , Test.test "a failed call leaves later calls working" {
         result = Client.mock teapot {
-            first = attempt { shop.count (Org { org = "teapot" }) }
-            second = attempt { shop.count (Org { org = "acme" }) }
+            first = attempt { (shopIn (Org { org = "teapot" })).count() }
+            second = attempt { shop.count() }
             (first, second)
         }
         Expect.equal (Err (Web.Client.UnexpectedStatus 418 "short and stout"), Ok 1) result
@@ -136,7 +184,7 @@ tests = Test.describe "web round trips"
     , Test.test "each mount of one contract is served by its own implementation" {
         result = attempt {
             use Client.mock app
-            (shop.count (Org { org = "acme" }), admin.count (Org { org = "acme" }))
+            (shop.count(), admin.count())
         }
         Expect.equal (Ok (1, 100)) result
     }
@@ -152,6 +200,16 @@ tests = Test.describe "web round trips"
         }
         Expect.equal (Ok ([Item { id = 3, title = "lamp [Sale, New]" }], [Item { id = 0, title = "desk []" }], ("docs|a b", "t-1 -", "t-2 n"))) result
     }
+    , Test.test "nested mounts with parameters pass each its own" {
+        result = attempt {
+            use Client.mock nestedApp
+            whole = ((nested.org acme).team (Team { team = "web" })).getUser (GetUser { id = 3, verbose = Nothing })
+            located = (nestedUsers (Org { org = "zed" }) (Team { team = "ops" })).getUser (GetUser { id = 4, verbose = Nothing })
+            (whole, located)
+        }
+        Expect.equal (Ok (Ok (User { id = 3, name = "acme/web" }), Ok (User { id = 4, name = "zed/ops" }))) result
+        Expect.equal "/orgs/acme/teams/web/users/3" (Web.link (Web.under orgOfNested acme (Web.under teamOfNested (Team { team = "web" }) nestedGetUser)) (GetUser { id = 3, verbose = Nothing }))
+    }
     , Test.test "a literal segment wins over a capture" {
         result = attempt {
             use Client.mock app
@@ -163,16 +221,16 @@ tests = Test.describe "web round trips"
         stubbed = { shop | getUser = { _ -> Ok (User { id = 1, name = "Stub" }) } }
         result = attempt {
             use Client.mock teapot
-            (stubbed.getUser (GetUser { org = "teapot", id = 1, verbose = Nothing }), stubbed.count (Org { org = "acme" }))
+            (stubbed.getUser (GetUser { id = 1, verbose = Nothing }), stubbed.count())
         }
         Expect.equal (Ok (Ok (User { id = 1, name = "Stub" }), 1)) result
     }
     , Test.test "implementations' effects are handled around the server" {
         result = State.run 41 {
             Client.mock withCounter {
-                first = attempt { shop.count (Org { org = "acme" }) }
-                second = attempt { shop.count (Org { org = "acme" }) }
-                refused = attempt { shop.clear (Org { org = "acme" }) }
+                first = attempt { shop.count() }
+                second = attempt { shop.count() }
+                refused = attempt { shop.clear() }
                 (first, second, refused)
             }
         }
@@ -184,17 +242,17 @@ tests = Test.describe "web round trips"
         served request = dispatch stubbedShop request
         counted = attempt {
             use Client.mock served
-            shop.count (Org { org = "acme" })
+            shop.count()
         }
         Expect.equal (Ok 3) counted
         message = failureMessage {
             _ = attempt {
                 use Client.mock served
-                shop.getUser (GetUser { org = "acme", id = 2, verbose = Nothing })
+                shop.getUser (GetUser { id = 2, verbose = Nothing })
             }
             ()
         }
-        Expect.equal (Just "Unexpected call to users.getUser: GetUser { verbose = Nothing, id = 2, org = \"acme\" }") message
+        Expect.equal (Just "Unexpected call to users.getUser: GetUser { verbose = Nothing, id = 2 }") message
         health = failureMessage {
             _ = Fail.attempt { Client.mock served { Client.get "http://shop.example/health" } }
             ()

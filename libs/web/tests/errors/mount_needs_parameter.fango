@@ -1,0 +1,14 @@
+import Web
+
+-- A mount whose prefix has a capture, on a field that does not take it.
+type Ping e =
+    { #[Web.Get "/ping"]
+      ping : () ->{e} ()
+    }
+
+type Api e =
+    { #[Web.Mount "/orgs/:org"]
+      orgs : Ping e
+    }
+
+main() = print (Web.link $(Web.endpoint (typeOf (Api {})) "orgs.ping") ())

@@ -1,5 +1,5 @@
 -- The shop's API, and its named endpoints.
-module Shop.Api exposing (Shop(..), getUserEndpoint, health)
+module Shop.Api exposing (Org(..), Shop(..), getUserEndpoint, health, orgPrefix)
 
 import Bytes
 import Http exposing (Body(..))
@@ -13,13 +13,22 @@ import Web
 health : List Http.Server.Route.Param -> Request e ->{e} Response e
 health _ _ = Response { status = 200, headers = [], body = BytesBody (Bytes.fromString "ok") }
 
--- The whole API: the users of one organization, and a health check.
+-- The organization a request is for, read from the mount's prefix.
+type Org =
+    { #[Web.Path "org"]
+      org : String
+    }
+
+-- The whole API: the users of each organization, and a health check.
 type Shop e =
     { #[Web.Mount "/orgs/:org"]
-      users : Users e
+      users : Org -> Users e
     , #[Web.Raw "GET /health"]
       health : List Http.Server.Route.Param -> Request e ->{e} Response e
     }
+
+orgPrefix : Web.Prefix Org
+orgPrefix = $(Web.prefix (typeOf (Shop {})) "users")
 
 getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
 getUserEndpoint = $(Web.endpoint (typeOf (Shop {})) "users.getUser")

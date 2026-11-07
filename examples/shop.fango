@@ -4,8 +4,8 @@
 --
 -- `GET /orgs/acme/users/1` answers a user, `POST /orgs/acme/users` with a
 -- JSON user adds it unless its name is taken, and `GET /health` is a plain
--- route served beside them. Every request shares one directory, kept in
--- `State` handled around the server.
+-- route served beside them. Every organization shares one directory, kept
+-- in `State` handled around the server.
 import Async
 import Fail
 import Http.Server
@@ -14,7 +14,7 @@ import List exposing (List)
 import Net
 import Process
 import Result exposing (Result(..))
-import Shop.Api exposing (Shop(..))
+import Shop.Api exposing (Org(..), Shop(..))
 import Shop.Users exposing (GetUser(..), NewUser(..), User(..), UserError(..), Users(..))
 import State
 import String
@@ -35,7 +35,8 @@ add user known =
         Nothing -> (Ok user, [user | known])
 
 -- The implementation is an ordinary value of the contract's type. Its
--- directory is state handled once, around the whole server.
+-- directory is state handled once, around the whole server, and the API
+-- serves it for every organization.
 directory : Users {State.State (List User)}
 directory =
     { getUser = { request ->
@@ -54,13 +55,13 @@ main() =
         [raw] ->
             case String.toInt raw of
                 Just port ->
-                    print ("Serving " ++ Web.link Shop.Api.getUserEndpoint (GetUser { org = "acme", id = 1, verbose = Nothing }))
+                    print ("Serving " ++ Web.link (Web.under Shop.Api.orgPrefix (Org { org = "acme" }) Shop.Api.getUserEndpoint) (GetUser { id = 1, verbose = Nothing }))
                     initial = [User { id = 1, name = "Ada" }, User { id = 2, name = "Grace" }]
                     print (Fail.attempt {
                             Async.runOutcome {
                                 State.runAtomic initial {
                                     stop = Async.channel 1
-                                    Http.Server.serve (Http.Server.defaultConfig port) stop { request -> dispatch (Shop { users = directory, health = Shop.Api.health }) request }
+                                    Http.Server.serve (Http.Server.defaultConfig port) stop { request -> dispatch (Shop { users = { _ -> directory }, health = Shop.Api.health }) request }
                                 }
                             }
                     })

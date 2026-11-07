@@ -8,14 +8,27 @@ import Http.Client as Client
 import Http.Server exposing (Request(..), Response(..))
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
-import Shop.Api exposing (Shop(..))
-import Shop.Users exposing (GetUser(..), Org(..), User(..), UserError(..), Users(..))
+import Shop.Api exposing (Org(..), Shop(..))
+import Shop.Catalog exposing (Catalog(..), Item(..), Search(..))
+import Shop.Users exposing (GetUser(..), User(..), UserError(..), Users(..))
 import Test
 import Web
 import Web.Client
 
+shopIn : Org -> Users {Client.Http, Fail Web.Client.Error}
+shopIn = $(Web.Client.client (typeOf (Shop {})) "users") "http://shop.example"
+
 shop : Users {Client.Http, Fail Web.Client.Error}
-shop = $(Web.Client.client (typeOf (Shop {})) "users") "http://shop.example"
+shop = shopIn (Org { org = "acme" })
+
+-- A mount without parameters still adds its prefix to its endpoints.
+type Versioned e =
+    { #[Web.Mount "/v2"]
+      catalog : Catalog e
+    }
+
+versionedSearch : Web.Endpoint Search (List Item)
+versionedSearch = $(Web.endpoint (typeOf (Versioned {})) "catalog.search")
 
 reply : Int -> List Header -> String -> Request e ->{e} Response e
 reply status headers text _ = Response { status = status, headers = headers, body = BytesBody (Bytes.fromString text) }
@@ -28,7 +41,7 @@ getUser : Int -> List Header -> String -> Result Web.Client.Error (Result UserEr
 getUser status headers text =
     Fail.attempt {
         use Client.mock (reply status headers text)
-        shop.getUser (GetUser { org = "acme", id = 7, verbose = Nothing })
+        shop.getUser (GetUser { id = 7, verbose = Nothing })
     }
 
 invalidResponse : Result Web.Client.Error a -> Bool
@@ -56,19 +69,21 @@ tests = Test.describe "web client"
     , Test.test "a field the endpoint cannot carry fails before sending" {
         result = Fail.attempt {
             use Client.mock (reply 200 json "{\"id\":7,\"name\":\"A\"}")
-            shop.getUser (GetUser { org = "a/b", id = 7, verbose = Nothing })
+            (shopIn (Org { org = "a/b" })).getUser (GetUser { id = 7, verbose = Nothing })
         }
         Expect.equal (Err (Web.Client.InvalidRequest "The path capture `org` contains a separator.")) result
     }
     , Test.test "transport failures are client errors" {
         result = Fail.attempt {
             use Client.stub { _ -> Err Client.Timeout }
-            shop.count (Org { org = "acme" })
+            shop.count()
         }
         Expect.equal (Err (Web.Client.Transport Client.Timeout)) result
     }
     , Test.test "links use the endpoint's path and query fields" {
-        Expect.equal "/orgs/acme/users/7?verbose=true" (Web.link Shop.Api.getUserEndpoint (GetUser { org = "acme", id = 7, verbose = Just True }))
-        Expect.equal "/orgs/a%20b/users/7" (Web.link Shop.Api.getUserEndpoint (GetUser { org = "a b", id = 7, verbose = Nothing }))
+        Expect.equal "/orgs/acme/users/7?verbose=true" (Web.link (Web.under Shop.Api.orgPrefix (Org { org = "acme" }) Shop.Api.getUserEndpoint) (GetUser { id = 7, verbose = Just True }))
+        Expect.equal "/orgs/a%20b/users/7" (Web.link (Web.under Shop.Api.orgPrefix (Org { org = "a b" }) Shop.Api.getUserEndpoint) (GetUser { id = 7, verbose = Nothing }))
+        Expect.equal "/users/7" (Web.link Shop.Api.getUserEndpoint (GetUser { id = 7, verbose = Nothing }))
+        Expect.equal "/v2/search?q=x" (Web.link versionedSearch (Search { q = "x", tags = [], limit = Nothing }))
     }
     ]

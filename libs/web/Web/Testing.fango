@@ -22,14 +22,15 @@ listToItems items =
         [] -> NoItems
         [item | rest] -> Item item (listToItems rest)
 
-strictOf : Contract -> Code
-strictOf contract =
+strictOf : Int -> Contract -> Code
+strictOf depth contract =
     fields = List.map { part ->
         case part of
             OperationPart operation ->
                 label = "Unexpected call to " ++ operation.location ++ ": "
                 Meta.lambda ("_web_" ++ operation.name) { request -> `Expect.failWith ($(lift label) ++ inspect $(request))` }
-            MountPart inner -> strictOf inner
+            MountPart Nothing inner -> strictOf depth inner
+            MountPart (Just _) inner -> Meta.lambda ("_web_params_" ++ show depth) { _ -> strictOf (depth + 1) inner }
             RawPart name location _ _ ->
                 label = "Unexpected request to " ++ location
                 Meta.lambda ("_web_" ++ name) { _ -> Meta.lambda "_web_request" { _ -> `Expect.failWith $(lift label)` } }
@@ -44,4 +45,4 @@ strict : Meta.TypeRepr -> String -> Code
 strict api location =
     case Web.contractAt api location of
         Err message -> Meta.fail message
-        Ok found -> strictOf found
+        Ok (_, found) -> strictOf 0 found
