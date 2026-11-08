@@ -1,0 +1,12 @@
+import Web
+import Web.Client
+
+-- A client of a location the API does not have.
+type Bad e =
+    { #[Web.Get "/"]
+      ping : () ->{e} ()
+    }
+
+client = $(Web.Client.client (typeOf (Bad {})) "pong") "http://example"
+
+main() = print "unreachable"

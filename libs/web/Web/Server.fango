@@ -24,7 +24,7 @@
 -- methods answers 405 with `Allow`. Invalid input answers 400, a request body
 -- that is not JSON 415, and a result that cannot be encoded 500, each with a
 -- JSON body `{"message": …}`. A `GET` route also answers `HEAD`.
-module Web.Server exposing (Error(..), Route, dispatch, route, serve)
+module Web.Server exposing (Error(..), dispatch)
 
 import Bytes exposing (Bytes)
 import Fail exposing (Fail)
@@ -87,10 +87,6 @@ errorReply status message =
 -- The route of one endpoint, answered by a function. The function's input
 -- and output types are the endpoint's, so they are checked here, before the
 -- route erases them. A `Fail Error` it raises answers that error.
---
--- ```text
--- route Shop.Api.getUserEndpoint { request -> Db.findUser request.org request.id }
--- ```
 route : Endpoint request response -> (request ->{Fail Error, e} response) -> Route e
 route described implementation = Route { method = described.method, template = templateOf described.template, answer = Typed (answerWith described implementation) }
 

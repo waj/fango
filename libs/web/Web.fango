@@ -41,19 +41,18 @@
 -- bind only their own inputs. A mount without captures is the contract
 -- itself, `catalog : Catalog e`.
 --
--- The generators take an API reflected at the pure row, as
--- `typeOf (Shop {})`, and address a part of it by its dotted field location,
--- as `"users.getUser"`; `""` is the API itself. A field's name is its
--- location, so locations are unique. `endpoint` generates an ordinary
--- `Endpoint` value for one operation. That value is the single description
--- of the operation's binding and codecs: `Web.Server` dispatches with it,
--- `Web.Client` calls with it, and links build URLs with it, so the
--- generators keep no tables of their own.
+-- An API is used only through generators, which take it reflected at the
+-- pure row, as `typeOf (Shop {})`: `Web.Server.dispatch` serves it,
+-- `Web.Client.client` calls it, `links` builds its URLs, and
+-- `Web.Testing.strict` stubs it. Those taking a part of it address it by its
+-- dotted field location, as `"users"`; `""` is the API itself. A field's
+-- name is its location, so locations are unique.
 --
--- An endpoint's template starts at its nearest mount with parameters, or at
--- the root, and mounts without parameters on the way add their prefixes.
--- `prefix` generates a mount's `Prefix`, and `under` gives an endpoint the
--- parameters of the mount above it, so clients write the whole path.
+-- Each operation's binding and codecs have one description, an `Endpoint`
+-- value that the generated code shares, so the generators keep no tables of
+-- their own. `Endpoint`, `Prefix`, `Response`, and the analysis types
+-- `Contract`, `Part`, and `Operation` are what generated code and the
+-- generator modules use; an application does not handle them.
 --
 -- `links` generates a link view of an API, a value of the API's own type
 -- whose operations answer the target of their call, and `linkTo` reads it.
@@ -99,8 +98,8 @@ module Web exposing
     , Source(..), Status(..), Wire(..)
     , Prefix(..)
     , Linking
-    , apiRoutes, contractAt, endpoint, jsonMedia, linkTo, links, matchTemplate
-    , outgoing, parseTemplate, prefix, under
+    , apiRoutes, contractAt, linkTo, links, matchTemplate, outgoing
+    , parseTemplate
     )
 
 import Bytes exposing (Bytes)
@@ -550,7 +549,7 @@ type Response a =
     }
 
 -- One operation of a contract, with everything its server, client, and
--- links need. Generate one with `endpoint`.
+-- links need. The generators build it from the contract.
 type Endpoint request response =
     {
       -- The operation's location in the API, as `users.getUser`.
@@ -558,7 +557,7 @@ type Endpoint request response =
       -- The method, such as `"GET"`.
     , method : String
       -- The path template from the operation's nearest mount with
-      -- parameters, or from the root; `under` adds the mount's prefix.
+      -- parameters, or from the root.
     , template : String
       -- The request in an incoming request, or why it is invalid.
     , readRequest : Incoming -> Result Rejection request
@@ -568,8 +567,8 @@ type Endpoint request response =
     , response : Response response
     }
 
--- The parameters of a mount, which bind the captures of its prefix. Generate
--- one with `prefix`.
+-- The parameters of a mount, which bind the captures of its prefix. The
+-- generators build it from the mount's field.
 type Prefix params =
     {
       -- The prefix's path template, from its nearest mount with parameters
@@ -579,21 +578,6 @@ type Prefix params =
     , readPrefix : Incoming -> Result Rejection params
       -- The path parts of a parameters value.
     , writePrefix : params -> List Wire
-    }
-
--- An endpoint below a mount with parameters, with those parameters given:
--- its template starts at the mount's own prefix, so `outgoing` and
--- `Web.Client.call` write the mount's captures too. Mounts nested inside
--- each other apply from the outermost.
---
--- ```text
--- Web.outgoing (Web.under usersPrefix (Org { org = "acme" }) getUserEndpoint) (GetUser { id = 7, verbose = Nothing })
--- ```
-under : Prefix params -> params -> Endpoint request response -> Endpoint request response
-under mount params described =
-    { described |
-      template = joinPath mount.template described.template
-    , writeRequest = { request -> append (mount.writePrefix params) (described.writeRequest request) }
     }
 
 -- Binding helpers called from generated endpoint code.
@@ -658,14 +642,6 @@ headerOptional name incoming =
 
 -- Whether a `Content-Type` names JSON: `application/json`, or an
 -- `application/` subtype ending in `+json`, with any parameters.
---
--- ```fango
--- import Http exposing (Header(..))
---
--- Web.jsonMedia [Header { name = "content-type", value = "Application/JSON; charset=utf-8" }]
--- Web.jsonMedia [Header { name = "Content-Type", value = "application/problem+json" }]
--- Web.jsonMedia [Header { name = "Content-Type", value = "text/plain" }] == False
--- ```
 jsonMedia : List Header -> Bool
 jsonMedia headers =
     case Http.getHeader "Content-Type" headers of
@@ -827,7 +803,7 @@ resultResponse statuses success =
       }
     }
 
--- Builds the request a value of `endpoint`'s request type stands for, or
+-- Builds the request a value of an endpoint's request type stands for, or
 -- explains why one of its fields cannot be written.
 outgoing : Endpoint request response -> request -> Result String Outgoing
 outgoing described request =
@@ -849,7 +825,7 @@ effect Linking
 -- and query, from the request's path and query fields and the parameters
 -- of the mounts on the way. Optional query values that are absent are left
 -- out, and repeated ones keep their order. A field the endpoint cannot
--- carry still encodes: `Web.Client.call` checks the request before sending
+-- carry still encodes: a generated client checks the request before sending
 -- it. A body that calls no operation answers `""`.
 --
 -- ```text
@@ -1295,19 +1271,6 @@ contractShape contract =
                     if Meta.lengthItems info.params /= 1 then Err ("The contract `" ++ info.name ++ "` must take exactly one type parameter, its effect row.")
                     else Ok (info, ctor)
 
-describeContract : Contract -> String
-describeContract contract =
-    if contract.location == "" then "The API `" ++ contract.info.name ++ "`" else "The mount `" ++ contract.location ++ "`"
-
-findPart : String -> List Part -> Maybe Part
-findPart name parts =
-    case parts of
-        [] -> Nothing
-        [part | rest] ->
-            case part of
-                OperationPart operation -> if operation.name == name then Just part else findPart name rest
-                _ -> findPart name rest
-
 findField : String -> Items Field -> Maybe Field
 findField name fields =
     case fields of
@@ -1338,13 +1301,6 @@ locate location full relative contract names =
                                 } (mountTarget full relative field mount)
             } (contractShape contract)
 
--- The contract at a location and the field named last in it.
-splitLocation : String -> (List String, String)
-splitLocation location =
-    case List.reverse (String.split "." location) of
-        [last | rest] -> (List.reverse rest, last)
-        [] -> ([], location)
-
 -- Analyzes the contract at a dotted location of an API reflected at the pure
 -- row, as `typeOf (Shop {})`; `""` is the API itself. Only the contracts
 -- along the location need be visible. Answers the code of the `Prefix` of
@@ -1353,25 +1309,6 @@ splitLocation location =
 -- `Err`, for the generator to report at its splice.
 contractAt : Meta.TypeRepr -> String -> Result String (List Code, Contract)
 contractAt api location = locate "" "/" "/" api (if location == "" then [] else String.split "." location)
-
--- Generates the `Endpoint` of the operation at a dotted location of an API:
--- an ordinary value, which a module binds under a name of its own choosing.
--- Its template starts at its nearest mount with parameters, which `under`
--- adds.
---
--- ```text
--- getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
--- getUserEndpoint = $(Web.endpoint (typeOf (Shop {})) "users.getUser")
--- ```
-endpoint : Meta.TypeRepr -> String -> Code
-endpoint api location =
-    (parents, name) = splitLocation location
-    case locate "" "/" "/" api parents of
-        Err message -> Meta.fail message
-        Ok (_, found) ->
-            case findPart name found.parts of
-                Just (OperationPart operation) -> operation.endpoint
-                _ -> Meta.fail (describeContract found ++ " has no operation `" ++ name ++ "`.")
 
 -- Generates the link view of an API reflected at the pure row: a value of
 -- the API's own type whose every operation aborts with the target of its
@@ -1405,39 +1342,6 @@ linksOf wires depth contract =
                 Meta.lambda ("_web_" ++ name) { captured -> Meta.lambda "_web_request" { _ -> `linked (targetOf $(lift template) (append $(wires) (wiresOf $(captured))))` } }
     } contract.parts
     Meta.construct contract.ctor (listToItems fields)
-
--- Generates the `Prefix` of the mount with parameters at a dotted location
--- of an API, for `under`.
---
--- ```text
--- usersPrefix : Web.Prefix Org
--- usersPrefix = $(Web.prefix (typeOf (Shop {})) "users")
--- ```
-prefix : Meta.TypeRepr -> String -> Code
-prefix api location =
-    (parents, name) = splitLocation location
-    case locate "" "/" "/" api parents of
-        Err message -> Meta.fail message
-        Ok (_, found) ->
-            case findMount name found.parts of
-                Just (Just code) -> code
-                Just Nothing -> Meta.fail ("The mount `" ++ location ++ "` takes no parameters, so its endpoints need no prefix.")
-                Nothing -> Meta.fail (describeContract found ++ " has no mount `" ++ name ++ "`.")
-
-findMount : String -> List Part -> Maybe (Maybe Code)
-findMount name parts =
-    case parts of
-        [] -> Nothing
-        [part | rest] ->
-            case part of
-                MountPart code inner -> if lastName inner.location == name then Just code else findMount name rest
-                _ -> findMount name rest
-
-lastName : String -> String
-lastName location =
-    case List.reverse (String.split "." location) of
-        [name | _] -> name
-        [] -> location
 
 -- Code generation for one operation.
 

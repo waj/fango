@@ -1,12 +1,11 @@
-module Shop.Api exposing (Org(..), Shop(..), createUserEndpoint, getUserEndpoint, health, links, orgPrefix, searchEndpoint)
+module Shop.Api exposing (Org(..), Shop(..), health, links)
 
 import Bytes
 import Http exposing (Body(..))
 import Http.Server exposing (Request(..), Response(..))
 import Http.Server.Route
-import Result exposing (Result(..))
-import Shop.Catalog exposing (Catalog(..), Search(..))
-import Shop.Users exposing (GetUser(..), NewUser(..), User(..), UserError(..), Users(..))
+import Shop.Catalog exposing (Catalog(..))
+import Shop.Users exposing (Users(..))
 import Web
 
 -- An untyped route, served beside the typed ones.
@@ -34,15 +33,3 @@ type Shop e =
 
 links : Shop {Web.Linking}
 links = $(Web.links (typeOf (Shop {})))
-
-orgPrefix : Web.Prefix Org
-orgPrefix = $(Web.prefix (typeOf (Shop {})) "users")
-
-getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
-getUserEndpoint = $(Web.endpoint (typeOf (Shop {})) "users.getUser")
-
-createUserEndpoint : Web.Endpoint NewUser (Result UserError User)
-createUserEndpoint = $(Web.endpoint (typeOf (Shop {})) "users.createUser")
-
-searchEndpoint : Web.Endpoint Search (List Shop.Catalog.Item)
-searchEndpoint = $(Web.endpoint (typeOf (Shop {})) "catalog.search")

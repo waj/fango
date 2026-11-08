@@ -2,8 +2,9 @@
 --
 -- `client` generates a value of a contract's own type, given the server's
 -- base URL. It takes an API and the dotted location of a contract in it,
--- `""` for the API itself. Each operation calls its endpoint with `call`, and
--- each mounted field is a client of its own contract:
+-- `""` for the API itself. Each operation sends its request and checks the
+-- reply against its own statuses and codecs, and each mounted field is a
+-- client of its own contract:
 --
 -- ```text
 -- catalog : Catalog {Http.Client.Http, Fail Web.Client.Error}
@@ -12,8 +13,9 @@
 --
 -- Every failure is raised in the caller's context, so `Fail.attempt`
 -- around one call recovers that call's failure and later calls proceed. A
--- domain error is not a failure: it is the operation's `Result`.
-module Web.Client exposing (Error(..), call, client)
+-- domain error is not a failure: it is the operation's `Result`. Redirects
+-- are not followed, so an operation's own response is what is checked.
+module Web.Client exposing (Error(..), client)
 
 import Fail exposing (Fail)
 import Http exposing (Body(..), Header(..))
@@ -23,7 +25,7 @@ import Maybe exposing (Maybe(..))
 import Meta exposing (Code, Items(..))
 import Result exposing (Result(..))
 import String
-import Web exposing (Contract(..), Endpoint(..), Operation(..), Outgoing(..), Part(..), Reply(..))
+import Web exposing (Contract(..), Endpoint(..), Operation(..), Outgoing(..), Part(..), Prefix(..), Reply(..))
 
 -- Why a call failed.
 type Error
@@ -51,7 +53,7 @@ withHeaders headers outgoing =
 
 -- Calls one endpoint of the server at `base`, such as
 -- `"https://shop.example"`. Redirects are not followed, so the endpoint's
--- own response is what is checked.
+-- own response is what is checked. Generated clients call it.
 call : Endpoint request response -> String -> request ->{Http.Client.Http, Fail Error} response
 call described base request =
     sent =
@@ -72,6 +74,27 @@ call described base request =
         Err (Web.UnexpectedStatus status text) -> Fail.fail (UnexpectedStatus status text)
         Err (Web.InvalidResponse problem) -> Fail.fail (InvalidResponse problem)
 
+-- An endpoint below a mount with parameters, with them given: its template
+-- starts at the mount's own prefix, and it writes the mount's captures too.
+under : Prefix params -> params -> Endpoint request response -> Endpoint request response
+under mount params described =
+    { described |
+      template = joinPath mount.template described.template
+    , writeRequest = { request -> append (mount.writePrefix params) (described.writeRequest request) }
+    }
+
+joinPath : String -> String -> String
+joinPath base path =
+    if path == "/" then base
+    else if base == "/" then path
+    else base ++ path
+
+append : List a -> List a -> List a
+append left right =
+    case left of
+        [] -> right
+        [item | rest] -> [item | append rest right]
+
 listToItems : List a -> Items a
 listToItems items =
     case items of
@@ -86,7 +109,7 @@ clientOf base wrap depth contract =
             OperationPart operation -> Meta.lambda ("_web_" ++ operation.name) { request -> `call $(wrap operation.endpoint) $(base) $(request)` }
             MountPart Nothing inner -> clientOf base wrap depth inner
             MountPart (Just code) inner ->
-                Meta.lambda ("_web_params_" ++ show depth) { params -> clientOf base { described -> wrap `Web.under $(code) $(params) $(described)` } (depth + 1) inner }
+                Meta.lambda ("_web_params_" ++ show depth) { params -> clientOf base { described -> wrap `under $(code) $(params) $(described)` } (depth + 1) inner }
             RawPart _ location _ _ -> Meta.fail ("The raw route `" ++ location ++ "` has no client; generate one for a mounted contract without raw routes.")
     } contract.parts
     Meta.construct contract.ctor (listToItems fields)
@@ -112,4 +135,4 @@ clientUnder : Code -> (Code -> Code) -> Int -> List Code -> Contract -> Code
 clientUnder base wrap depth prefixes contract =
     case prefixes of
         [] -> clientOf base wrap depth contract
-        [code | rest] -> Meta.lambda ("_web_params_" ++ show depth) { params -> clientUnder base { described -> wrap `Web.under $(code) $(params) $(described)` } (depth + 1) rest contract }
+        [code | rest] -> Meta.lambda ("_web_params_" ++ show depth) { params -> clientUnder base { described -> wrap `under $(code) $(params) $(described)` } (depth + 1) rest contract }

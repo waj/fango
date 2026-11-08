@@ -2,14 +2,29 @@ module WebParams exposing (tests)
 
 import Bytes
 import Expect
-import Http exposing (Header(..))
+import Fail exposing (Fail)
+import Http exposing (Body(..), Header(..))
+import Http.Client as Client
+import Http.Server exposing (Request(..), Response(..))
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
-import Shop.Api
+import Shop.Api exposing (Org(..), Shop(..))
 import Shop.Catalog exposing (Search(..), Tag(..))
-import Shop.Users exposing (NewUser(..), User(..), UserError(..))
+import Shop.Users exposing (NewUser(..), User(..), UserError(..), Users(..))
 import Test
-import Web exposing (Failure(..), Outgoing(..), Param(..), Segment(..))
+import Web exposing (Failure(..), Param(..), Segment(..))
+import Web.Client
+
+usersAt : Org -> Users {Client.Http, Fail Web.Client.Error}
+usersAt = $(Web.Client.client (typeOf (Shop {})) "users") "http://shop.example"
+
+-- Answers the created user only to the request a client should write.
+expectCreate : Request e ->{e} Response e
+expectCreate request =
+    json = Http.getHeader "Content-Type" request.headers == Just "application/json"
+    if request.method == "POST" && request.target == "/orgs/a%20b/users" && json then
+        Response { status = 200, headers = [Header { name = "Content-Type", value = "application/json" }], body = BytesBody (Bytes.fromString "{\"id\":1,\"name\":\"Al\"}") }
+    else Response { status = 418, headers = [], body = BytesBody (Bytes.fromString (request.method ++ " " ++ request.target)) }
 
 type UserId = UserId Int
     deriving (Eq, Show, Web.Param)
@@ -71,8 +86,11 @@ tests = Test.describe "web parameters"
         Expect.equal Nothing (Web.matchTemplate [Literal "files", Rest "path"] ["files"])
     }
     , Test.test "an endpoint writes a request" {
-        written = Web.outgoing (Web.under Shop.Api.orgPrefix (Shop.Api.Org { org = "a b" }) Shop.Api.createUserEndpoint) (NewUser { user = User { id = 1, name = "Al" } })
-        Expect.equal (Ok (Outgoing { method = "POST", target = "/orgs/a%20b/users", headers = [Header { name = "Content-Type", value = "application/json" }], body = Just (Bytes.fromString "{\"id\":1,\"name\":\"Al\"}") })) written
+        written = Fail.attempt {
+            use Client.mock expectCreate
+            (usersAt (Org { org = "a b" })).createUser (NewUser { user = User { id = 1, name = "Al" } })
+        }
+        Expect.equal (Ok (Ok (User { id = 1, name = "Al" }))) written
         Expect.equal "/search?q=a%26b&tag=Sale&tag=New&limit=2" (Web.linkTo { Shop.Api.links.catalog.search (Search { q = "a&b", tags = [Sale, New], limit = Just 2 }) })
     }
     ]

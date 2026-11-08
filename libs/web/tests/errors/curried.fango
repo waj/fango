@@ -6,4 +6,6 @@ type Bad e =
       ping : () -> () ->{e} ()
     }
 
-main() = print (Web.outgoing $(Web.endpoint (typeOf (Bad {})) "ping") ())
+links = $(Web.links (typeOf (Bad {})))
+
+main() = print "unreachable"

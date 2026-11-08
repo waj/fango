@@ -16,4 +16,6 @@ type Api e =
       teams : Org -> Ping e
     }
 
-main() = print (Web.outgoing $(Web.endpoint (typeOf (Api {})) "teams.ping") ())
+links = $(Web.links (typeOf (Api {})))
+
+main() = print "unreachable"

@@ -1,9 +1,0 @@
-import Web
-
--- An endpoint for an operation the contract does not have.
-type Bad e =
-    { #[Web.Get "/"]
-      ping : () ->{e} ()
-    }
-
-main() = print (Web.outgoing $(Web.endpoint (typeOf (Bad {})) "pong") ())
