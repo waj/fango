@@ -43,8 +43,11 @@ type Graph struct {
 	observe  StageObserver
 
 	// reads holds the modules read ahead of the current walk; reading counts
-	// the ones still running.
+	// the ones still running. loaded is the walk's starting snapshot of nodes,
+	// so read-ahead goroutines skip installed modules without touching nodes,
+	// which the walk's owner goes on to change.
 	reads   map[string]*moduleRead
+	loaded  map[string]bool
 	readMu  sync.Mutex
 	reading sync.WaitGroup
 }
@@ -236,7 +239,9 @@ type moduleRead struct {
 }
 
 // readAhead starts reading module name unless a read of it already exists.
-// Each read goes on to its own dependencies. discovered ends them.
+// Each read goes on to its own dependencies. discovered ends them. The first
+// call of a walk comes from the walk's own goroutine and snapshots the loaded
+// modules; a module in that snapshot is not read, and yields nil.
 func (g *Graph) readAhead(name string) *moduleRead {
 	g.readMu.Lock()
 	defer g.readMu.Unlock()
@@ -245,6 +250,13 @@ func (g *Graph) readAhead(name string) *moduleRead {
 	}
 	if g.reads == nil {
 		g.reads = map[string]*moduleRead{}
+		g.loaded = make(map[string]bool, len(g.nodes))
+		for loaded := range g.nodes {
+			g.loaded[loaded] = true
+		}
+	}
+	if g.loaded[name] {
+		return nil
 	}
 	read := &moduleRead{done: make(chan struct{})}
 	g.reads[name] = read
@@ -262,23 +274,19 @@ func (g *Graph) readAhead(name string) *moduleRead {
 
 func (g *Graph) readDependencies(m *ast.Module, deps []string) {
 	for _, im := range m.Imports {
-		if g.nodes[im.Module] == nil {
-			g.readAhead(im.Module)
-		}
+		g.readAhead(im.Module)
 	}
 	for _, dep := range deps {
-		if g.nodes[dep] == nil {
-			g.readAhead(dep)
-		}
+		g.readAhead(dep)
 	}
 }
 
 // discovered waits out the reads a walk started and forgets them, so a later
-// import sees the files as they are then. It must run before the graph's nodes
-// change, because the reads consult them.
+// import sees the files as they are then. Every walk must end with it, so
+// that no read outlives the walk and the next walk snapshots nodes afresh.
 func (g *Graph) discovered() {
 	g.reading.Wait()
-	g.reads = nil
+	g.reads, g.loaded = nil, nil
 }
 
 func (g *Graph) readModule(name string, read *moduleRead) {

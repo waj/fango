@@ -16,6 +16,7 @@ import (
 func (g *Graph) Refresh(ctx context.Context, imports []ast.Import, promptFixities []ast.Decl) (*Graph, *Increment, []string, []diag.Error) {
 	next := newGraph(g.local)
 	next.bundled, next.libraries, next.observe = g.bundled, g.libraries, g.observe
+	defer next.discovered()
 	pending := map[string]*node{}
 	for name, n := range g.nodes {
 		if n.bundled {
@@ -40,6 +41,7 @@ func (g *Graph) Refresh(ctx context.Context, imports []ast.Import, promptFixitie
 			return nil, nil, nil, errs
 		}
 	}
+	next.discovered()
 	reachable := map[string]bool{}
 	var visit func(string)
 	visit = func(name string) {
