@@ -7,8 +7,12 @@
 -- ```text
 -- dispatch = $(Web.Server.dispatch (typeOf (Shop {})))
 --
--- main() = Db.run { Http.Server.serve config stop { request -> dispatch (Shop { users = serveUsers, health = health }) request } }
+-- main() = Db.run { Http.Server.serve config stop (dispatch (Shop { users = serveUsers, health = health })) }
 -- ```
+--
+-- Applying `dispatch` to the implementation builds the routing table once,
+-- so the server is handed that application rather than a function that
+-- repeats it for every request.
 --
 -- A mount with parameters is implemented by a function of them, here
 -- `serveUsers : Org -> Users e`, called for each request it answers.
@@ -338,12 +342,13 @@ nthValue index fields =
 
 -- Generates the request handler of an API reflected at the pure row, as
 -- `typeOf (Shop {})`: a function taking the API's implementation and then
--- the request. Conflicting routes fail here.
+-- the request. Applying it to the implementation builds the routing table,
+-- which every request then shares. Conflicting routes fail here.
 dispatch : Meta.TypeRepr -> Code
 dispatch api =
     case Result.andThen { (_, root) -> Result.map { _ -> root } (Web.apiRoutes root) } (Web.contractAt api "") of
         Err message -> Meta.fail message
         Ok root ->
             Meta.lambda "_web_implementation" { implementation ->
-                contractRoutes root implementation { routes -> Meta.lambda "_web_dispatch_request" { request -> `serve $(listCode routes) $(request)` } }
+                contractRoutes root implementation { routes -> `serve $(listCode routes)` }
             }

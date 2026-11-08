@@ -61,7 +61,14 @@ main() =
                             Async.runOutcome {
                                 State.runAtomic initial {
                                     stop = Async.channel 1
-                                    Http.Server.serve (Http.Server.defaultConfig port) stop { request -> dispatch (Shop { users = { _ -> directory }, health = Shop.Api.health }) request }
+                                    Http.Server.serve
+                                        (Http.Server.defaultConfig port)
+                                        stop
+                                        (dispatch
+                                            { users = { _ -> directory }
+                                            , health = Shop.Api.health
+                                            }
+                                        )
                                 }
                             }
                     })
