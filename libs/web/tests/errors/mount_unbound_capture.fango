@@ -16,4 +16,4 @@ type Api e =
       teams : Org -> Ping e
     }
 
-main() = print (Web.link $(Web.endpoint (typeOf (Api {})) "teams.ping") ())
+main() = print (Web.outgoing $(Web.endpoint (typeOf (Api {})) "teams.ping") ())

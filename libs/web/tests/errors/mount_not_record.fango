@@ -8,4 +8,4 @@ type Api e =
       ping : () ->{e} ()
     }
 
-main() = print (Web.link $(Web.endpoint (typeOf (Api {})) "ping") ())
+main() = print (Web.outgoing $(Web.endpoint (typeOf (Api {})) "ping") ())

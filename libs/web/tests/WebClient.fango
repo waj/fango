@@ -27,8 +27,8 @@ type Versioned e =
       catalog : Catalog e
     }
 
-versionedSearch : Web.Endpoint Search (List Item)
-versionedSearch = $(Web.endpoint (typeOf (Versioned {})) "catalog.search")
+versioned : Versioned {Web.Linking}
+versioned = $(Web.links (typeOf (Versioned {})))
 
 reply : Int -> List Header -> String -> Request e ->{e} Response e
 reply status headers text _ = Response { status = status, headers = headers, body = BytesBody (Bytes.fromString text) }
@@ -81,9 +81,10 @@ tests = Test.describe "web client"
         Expect.equal (Err (Web.Client.Transport Client.Timeout)) result
     }
     , Test.test "links use the endpoint's path and query fields" {
-        Expect.equal "/orgs/acme/users/7?verbose=true" (Web.link (Web.under Shop.Api.orgPrefix (Org { org = "acme" }) Shop.Api.getUserEndpoint) (GetUser { id = 7, verbose = Just True }))
-        Expect.equal "/orgs/a%20b/users/7" (Web.link (Web.under Shop.Api.orgPrefix (Org { org = "a b" }) Shop.Api.getUserEndpoint) (GetUser { id = 7, verbose = Nothing }))
-        Expect.equal "/users/7" (Web.link Shop.Api.getUserEndpoint (GetUser { id = 7, verbose = Nothing }))
-        Expect.equal "/v2/search?q=x" (Web.link versionedSearch (Search { q = "x", tags = [], limit = Nothing }))
+        links = Shop.Api.links
+        Expect.equal "/orgs/acme/users/7?verbose=true" (Web.linkTo { (links.users (Org { org = "acme" })).getUser (GetUser { id = 7, verbose = Just True }) })
+        Expect.equal "/orgs/a%20b/users/7" (Web.linkTo { (links.users (Org { org = "a b" })).getUser (GetUser { id = 7, verbose = Nothing }) })
+        Expect.equal "/admin/orgs/acme/users" (Web.linkTo { (links.admin (Org { org = "acme" })).count() })
+        Expect.equal "/v2/search?q=x" (Web.linkTo { versioned.catalog.search (Search { q = "x", tags = [], limit = Nothing }) })
     }
     ]

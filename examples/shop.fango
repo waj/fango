@@ -55,7 +55,7 @@ main() =
         [raw] ->
             case String.toInt raw of
                 Just port ->
-                    print ("Serving " ++ Web.link (Web.under Shop.Api.orgPrefix (Org { org = "acme" }) Shop.Api.getUserEndpoint) (GetUser { id = 1, verbose = Nothing }))
+                    print ("Serving " ++ Web.linkTo { (Shop.Api.links.users (Org { org = "acme" })).getUser (GetUser { id = 1, verbose = Nothing }) })
                     initial = [User { id = 1, name = "Ada" }, User { id = 2, name = "Grace" }]
                     print (Fail.attempt {
                             Async.runOutcome {

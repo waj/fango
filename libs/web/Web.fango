@@ -47,14 +47,26 @@
 -- location, so locations are unique. `endpoint` generates an ordinary
 -- `Endpoint` value for one operation. That value is the single description
 -- of the operation's binding and codecs: `Web.Server` dispatches with it,
--- `Web.Client` calls with it, and `link` builds URLs with it, so the
+-- `Web.Client` calls with it, and links build URLs with it, so the
 -- generators keep no tables of their own.
 --
 -- An endpoint's template starts at its nearest mount with parameters, or at
 -- the root, and mounts without parameters on the way add their prefixes.
 -- `prefix` generates a mount's `Prefix`, and `under` gives an endpoint the
--- parameters of the mount above it, so links and clients write the whole
--- path.
+-- parameters of the mount above it, so clients write the whole path.
+--
+-- `links` generates a link view of an API, a value of the API's own type
+-- whose operations answer the target of their call, and `linkTo` reads it.
+-- A link reaches its operation the way a client call does, with the mount
+-- parameters applied on the way:
+--
+-- ```text
+-- links : Shop {Web.Linking}
+-- links = $(Web.links (typeOf (Shop {})))
+--
+-- Web.linkTo { (links.users (Org { org = "acme" })).getUser (GetUser { id = 1, verbose = Nothing }) }
+--     == "/orgs/acme/users/1"
+-- ```
 --
 -- Every request field has one `Source`. Path captures bind by name, each
 -- exactly once, with field order meaning nothing; a mount's parameters bind
@@ -86,7 +98,8 @@ module Web exposing
     , Reply(..), ReplyError(..), Response(..), Route(..), Segment(..)
     , Source(..), Status(..), Wire(..)
     , Prefix(..)
-    , apiRoutes, contractAt, endpoint, jsonMedia, link, matchTemplate
+    , Linking
+    , apiRoutes, contractAt, endpoint, jsonMedia, linkTo, links, matchTemplate
     , outgoing, parseTemplate, prefix, under
     )
 
@@ -94,6 +107,7 @@ import Bytes exposing (Bytes)
 import Char
 import Fail exposing (Fail)
 import Http exposing (Header(..))
+import Http.Server.Route
 import Json
 import Json.Pull
 import List exposing (List(..))
@@ -147,8 +161,8 @@ type Mount
 -- Serves a field as an untyped route, written `"METHOD /path"` relative to
 -- its contract's location. The field's type is
 -- `List Http.Server.Route.Param -> Http.Server.Request e ->{e} Http.Server.Response e`.
--- It takes part in matching and 405 answers, but has no endpoint, client, or
--- link.
+-- It takes part in matching and 405 answers, and has a link, but no
+-- endpoint or client.
 type Raw
     -- The method and path.
     = Raw String
@@ -568,13 +582,12 @@ type Prefix params =
     }
 
 -- An endpoint below a mount with parameters, with those parameters given:
--- its template starts at the mount's own prefix, so `link` and
+-- its template starts at the mount's own prefix, so `outgoing` and
 -- `Web.Client.call` write the mount's captures too. Mounts nested inside
 -- each other apply from the outermost.
 --
 -- ```text
--- Web.link (Web.under usersPrefix (Org { org = "acme" }) getUserEndpoint) (GetUser { id = 7, verbose = Nothing })
---     == "/orgs/acme/users/7"
+-- Web.outgoing (Web.under usersPrefix (Org { org = "acme" }) getUserEndpoint) (GetUser { id = 7, verbose = Nothing })
 -- ```
 under : Prefix params -> params -> Endpoint request response -> Endpoint request response
 under mount params described =
@@ -826,17 +839,40 @@ outgoing described request =
                 Nothing -> Ok (Outgoing { method = described.method, target = targetOf described.template parts, headers = wireHeaders parts, body = Nothing })
                 Just bytes -> Ok (Outgoing { method = described.method, target = targetOf described.template parts, headers = append jsonHeaders (wireHeaders parts), body = Just bytes })
 
--- The URL path and query of a request value, from its path and query fields
--- only. Optional query values that are absent are left out, and repeated
--- ones keep their order. A field the endpoint cannot carry still encodes:
--- `Web.Client.call` checks the request before sending it.
+-- What the operations of a link view perform: each aborts with the URL
+-- path and query of its call, which `linkTo` answers.
+effect Linking
+    -- Ends a link's body with its target.
+    abort linked : String -> value
+
+-- The target of the operation of a link view that `body` calls: its path
+-- and query, from the request's path and query fields and the parameters
+-- of the mounts on the way. Optional query values that are absent are left
+-- out, and repeated ones keep their order. A field the endpoint cannot
+-- carry still encodes: `Web.Client.call` checks the request before sending
+-- it. A body that calls no operation answers `""`.
 --
 -- ```text
--- Web.link getUserEndpoint (GetUser { org = "acme", id = 7, verbose = Just True })
+-- Web.linkTo { (links.users (Org { org = "acme" })).getUser (GetUser { id = 7, verbose = Just True }) }
 --     == "/orgs/acme/users/7?verbose=true"
 -- ```
-link : Endpoint request response -> request -> String
-link described request = targetOf described.template (described.writeRequest request)
+linkTo : (() ->{Linking} a) -> String
+linkTo body =
+    handle body() on
+        linked target -> target
+        return _ -> ""
+
+-- An operation of a link view. Its result is the operation's, which fixes
+-- the endpoint's type.
+linkOperation : String -> List Wire -> Endpoint request response -> request ->{Linking} response
+linkOperation template wires described request = linked (targetOf template (append wires (described.writeRequest request)))
+
+writePrefixOf : Prefix params -> params -> List Wire
+writePrefixOf mount params = mount.writePrefix params
+
+-- A raw route's own captures, as its link writes them.
+wiresOf : List Http.Server.Route.Param -> List Wire
+wiresOf captured = concatRoutes (List.map { param -> pathText param.name param.value } captured)
 
 firstInvalid : List Wire -> Maybe String
 firstInvalid parts =
@@ -1336,6 +1372,39 @@ endpoint api location =
             case findPart name found.parts of
                 Just (OperationPart operation) -> operation.endpoint
                 _ -> Meta.fail (describeContract found ++ " has no operation `" ++ name ++ "`.")
+
+-- Generates the link view of an API reflected at the pure row: a value of
+-- the API's own type whose every operation aborts with the target of its
+-- call through `Linking`, for `linkTo`. A mounted field with parameters is a
+-- function from them, as in the API. A raw route links to its template,
+-- with its own captures filled from its `List Http.Server.Route.Param`
+-- argument; its request argument is ignored.
+--
+-- ```text
+-- links : Shop {Web.Linking}
+-- links = $(Web.links (typeOf (Shop {})))
+-- ```
+links : Meta.TypeRepr -> Code
+links api =
+    case contractAt api "" of
+        Err message -> Meta.fail message
+        Ok (_, found) -> linksOf `[]` 0 found
+
+-- `wires` are the path parts that the mounts with parameters on the way
+-- write.
+linksOf : Code -> Int -> Contract -> Code
+linksOf wires depth contract =
+    fields = List.map { part ->
+        case part of
+            OperationPart operation ->
+                Meta.lambda ("_web_" ++ operation.name) { request -> `linkOperation $(lift operation.template) $(wires) $(operation.endpoint) $(request)` }
+            MountPart Nothing inner -> linksOf wires depth inner
+            MountPart (Just code) inner ->
+                Meta.lambda ("_web_params_" ++ show depth) { params -> linksOf `append $(wires) (writePrefixOf $(code) $(params))` (depth + 1) inner }
+            RawPart name _ _ template ->
+                Meta.lambda ("_web_" ++ name) { captured -> Meta.lambda "_web_request" { _ -> `linked (targetOf $(lift template) (append $(wires) (wiresOf $(captured))))` } }
+    } contract.parts
+    Meta.construct contract.ctor (listToItems fields)
 
 -- Generates the `Prefix` of the mount with parameters at a dotted location
 -- of an API, for `under`.

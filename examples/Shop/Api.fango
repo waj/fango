@@ -1,12 +1,11 @@
--- The shop's API, and its named endpoints.
-module Shop.Api exposing (Org(..), Shop(..), getUserEndpoint, health, orgPrefix)
+-- The shop's API, and its links.
+module Shop.Api exposing (Org(..), Shop(..), health, links)
 
 import Bytes
 import Http exposing (Body(..))
 import Http.Server exposing (Request(..), Response(..))
 import Http.Server.Route
-import Result exposing (Result(..))
-import Shop.Users exposing (GetUser(..), User(..), UserError(..), Users(..))
+import Shop.Users exposing (Users(..))
 import Web
 
 -- A plain route beside the typed ones.
@@ -27,8 +26,6 @@ type Shop e =
       health : List Http.Server.Route.Param -> Request e ->{e} Response e
     }
 
-orgPrefix : Web.Prefix Org
-orgPrefix = $(Web.prefix (typeOf (Shop {})) "users")
-
-getUserEndpoint : Web.Endpoint GetUser (Result UserError User)
-getUserEndpoint = $(Web.endpoint (typeOf (Shop {})) "users.getUser")
+-- The URLs of the API, reached as its implementation is.
+links : Shop {Web.Linking}
+links = $(Web.links (typeOf (Shop {})))

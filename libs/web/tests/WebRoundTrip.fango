@@ -131,14 +131,8 @@ nested = $(Web.Client.client (typeOf (Nested {})) "") "http://shop.example"
 nestedUsers : Org -> Team -> Users {Client.Http, Fail Web.Client.Error}
 nestedUsers = $(Web.Client.client (typeOf (Nested {})) "org.team") "http://shop.example"
 
-orgOfNested : Web.Prefix Org
-orgOfNested = $(Web.prefix (typeOf (Nested {})) "org")
-
-teamOfNested : Web.Prefix Team
-teamOfNested = $(Web.prefix (typeOf (Nested {})) "org.team")
-
-nestedGetUser : Web.Endpoint GetUser (Result UserError User)
-nestedGetUser = $(Web.endpoint (typeOf (Nested {})) "org.team.getUser")
+nestedLinks : Nested {Web.Linking}
+nestedLinks = $(Web.links (typeOf (Nested {})))
 
 strictShop : Shop {Expect.Expect, e}
 strictShop = $(Web.Testing.strict (typeOf (Shop {})) "")
@@ -208,7 +202,7 @@ tests = Test.describe "web round trips"
             (whole, located)
         }
         Expect.equal (Ok (Ok (User { id = 3, name = "acme/web" }), Ok (User { id = 4, name = "zed/ops" }))) result
-        Expect.equal "/orgs/acme/teams/web/users/3" (Web.link (Web.under orgOfNested acme (Web.under teamOfNested (Team { team = "web" }) nestedGetUser)) (GetUser { id = 3, verbose = Nothing }))
+        Expect.equal "/orgs/acme/teams/web/users/3" (Web.linkTo { ((nestedLinks.org acme).team (Team { team = "web" })).getUser (GetUser { id = 3, verbose = Nothing }) })
     }
     , Test.test "a literal segment wins over a capture" {
         result = attempt {

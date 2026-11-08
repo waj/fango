@@ -1,4 +1,4 @@
-module Shop.Api exposing (Org(..), Shop(..), createUserEndpoint, getUserEndpoint, health, orgPrefix, searchEndpoint)
+module Shop.Api exposing (Org(..), Shop(..), createUserEndpoint, getUserEndpoint, health, links, orgPrefix, searchEndpoint)
 
 import Bytes
 import Http exposing (Body(..))
@@ -31,6 +31,9 @@ type Shop e =
     , #[Web.Mount "/admin/orgs/:org"]
       admin : Org -> Users e
     }
+
+links : Shop {Web.Linking}
+links = $(Web.links (typeOf (Shop {})))
 
 orgPrefix : Web.Prefix Org
 orgPrefix = $(Web.prefix (typeOf (Shop {})) "users")

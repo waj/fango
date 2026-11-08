@@ -6,4 +6,4 @@ type Bad e =
       ping : () ->{e} ()
     }
 
-main() = print (Web.link $(Web.endpoint (typeOf (Bad {})) "pong") ())
+main() = print (Web.outgoing $(Web.endpoint (typeOf (Bad {})) "pong") ())

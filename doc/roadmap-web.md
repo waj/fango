@@ -78,7 +78,7 @@ DONE: [`Web.Server`](../libs/web/Web/Server.fango), served by the
 ### W10 Client runner and links
 
 DONE: [`Web.Client`](../libs/web/Web/Client.fango),
-[`Web.link`](../libs/web/Web.fango), and
+[`Web.links`](../libs/web/Web.fango), and
 [`Web.Testing`](../libs/web/Web/Testing.fango).
 
 ### W11 OpenAPI
@@ -153,8 +153,9 @@ decisions. Content negotiation waits for a consumer.
   so an API whose operations fail with `Fail Web.Server.Error` cannot also
   have raw routes. Reflecting the rows of type arguments would let a mount
   declare extra effects, as `users : Org -> Users {Fail Web.Server.Error, e}`.
-- **URL-only request projection.** `Web.link` takes the whole request, so a
-  link to a `POST` needs a body value. Choose between a generated `Link` record
+- **URL-only request projection.** A link view's operations take the whole
+  request, so a link to a `POST` needs a body value, and a raw route's link
+  needs a request it ignores. Choose between a generated `Link` record
   per endpoint, a request builder that leaves body/header fields unset, or
   keeping the whole request; a checked link helper or validated path types
   remain open before promising every generated URL is accepted.
